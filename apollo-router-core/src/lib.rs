@@ -1,3 +1,5 @@
+//! A library for processing GraphQL requests.
+
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 
 macro_rules! failfast_debug {
@@ -25,11 +27,10 @@ macro_rules! failfast_error {
 mod cache;
 mod context;
 mod error;
+mod introspection;
 mod json_ext;
-mod layers;
-mod naive_introspection;
+pub mod layers;
 pub mod plugin;
-pub mod plugin_utils;
 pub mod plugins;
 mod query_cache;
 mod query_planner;
@@ -43,11 +44,10 @@ mod traits;
 pub use cache::*;
 pub use context::*;
 pub use error::*;
+pub use introspection::*;
 pub use json_ext::*;
 pub use layers::*;
-pub use naive_introspection::*;
 pub use plugin::*;
-pub use plugins::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
@@ -57,6 +57,7 @@ pub use services::*;
 pub use spec::*;
 pub use traits::*;
 
+/// Useful traits.
 pub mod prelude {
     // NOTE: only traits can be added here! Everything else should be scoped under the module
     //       graphql so the user can use, for example:
@@ -74,7 +75,9 @@ pub mod prelude {
     }
 }
 
+/// Useful reexports.
 pub mod reexports {
+    pub use router_bridge;
     pub use serde_json;
     pub use startup;
 }

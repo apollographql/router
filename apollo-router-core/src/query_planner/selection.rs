@@ -80,14 +80,13 @@ fn select_field(
     field: &Field,
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    match (content.get(field.name.as_str()), &field.selections) {
-        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
-        (Some(value), None) => Ok(Some(value.to_owned())),
+    let res = match (content.get(field.name.as_str()), &field.selections) {
+        (Some(v), _) => select_value(v, field, schema),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
         }),
-        _ => Ok(None),
-    }
+    };
+    res
 }
 
 fn select_inline_fragment(
@@ -111,6 +110,22 @@ fn select_inline_fragment(
     }
 }
 
+fn select_value(
+    content: &Value,
+    field: &Field,
+    schema: &Schema,
+) -> Result<Option<Value>, FetchError> {
+    match (content, &field.selections) {
+        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
+        (Value::Array(elements), Some(_)) => elements
+            .iter()
+            .map(|element| select_value(element, field, schema))
+            .collect(),
+        (value, None) => Ok(Some(value.to_owned())),
+        _ => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Selection;
@@ -125,9 +140,13 @@ mod tests {
         schema: &Schema,
     ) -> Result<Value, FetchError> {
         let mut values = Vec::new();
-        response.data.select_values_and_paths(path, |_path, value| {
-            values.push(value);
-        });
+        response
+            .data
+            .as_ref()
+            .unwrap()
+            .select_values_and_paths(path, |_path, value| {
+                values.push(value);
+            });
 
         Ok(Value::Array(
             values
@@ -208,8 +227,10 @@ mod tests {
     fn test_selection_subtype() {
         assert_eq!(
             select!(
-                "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
-                union User = Author | Reviewer",
+                with_supergraph_boilerplate(
+                    "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
+                    union User = Author | Reviewer"
+                ),
                 bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
@@ -233,5 +254,97 @@ mod tests {
                 .unwrap_err(),
             FetchError::ExecutionFieldNotFound { field } if field == "id"
         ));
+    }
+
+    #[test]
+    fn test_array() {
+        let schema: Schema = with_supergraph_boilerplate(
+            "type Query { me: String }
+            type MainObject { mainObjectList: [SubObject] }
+            type SubObject { key: String name: String }",
+        )
+        .parse()
+        .unwrap();
+
+        let response = bjson!({
+            "__typename": "MainObject",
+            "mainObjectList": [
+                {
+                    "key": "a",
+                    "name": "A"
+                },
+                {
+                    "key": "b",
+                    "name": "B"
+                }
+            ]
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "MainObject",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "mainObjectList",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "key",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        println!(
+            "response\n{}\nand selection\n{:?}\n returns:\n{}",
+            serde_json::to_string_pretty(&response).unwrap(),
+            selection,
+            serde_json::to_string_pretty(&value).unwrap()
+        );
+
+        assert_eq!(
+            value.unwrap().unwrap(),
+            bjson!({
+                "__typename": "MainObject",
+                "mainObjectList": [
+                    {
+                        "key": "a"
+                    },
+                    {
+                        "key": "b"
+                    }
+                ]
+            })
+        );
+    }
+
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
     }
 }

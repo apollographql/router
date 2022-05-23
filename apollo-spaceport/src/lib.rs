@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 pub mod report {
     tonic::include_proto!("report");
 }
@@ -10,11 +11,10 @@ mod agent {
 pub mod server;
 
 use agent::reporter_client::ReporterClient;
-pub use agent::ReporterGraph;
-use agent::{ReporterResponse, ReporterStats, ReporterTrace};
+pub use agent::*;
+pub use prost_types::Timestamp;
 pub use report::*;
 use std::error::Error;
-use std::hash::{Hash, Hasher};
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
@@ -85,20 +85,6 @@ impl std::fmt::Display for ReporterError {
     }
 }
 
-impl Eq for ReporterGraph {}
-
-// PartialEq is derived in the generated code, but Hash isn't and we need
-// it to use this as key in a HashMap. We have to make sure this
-// implementation always matches the derived PartialEq in the generated
-// code.
-#[allow(clippy::derive_hash_xor_eq)]
-impl Hash for ReporterGraph {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.reference.hash(state);
-        self.key.hash(state);
-    }
-}
-
 impl Report {
     /// Try to create a new Report.
     ///
@@ -116,9 +102,9 @@ impl Report {
 #[cfg(target_os = "windows")]
 fn get_uname() -> Result<String, std::io::Error> {
     // Best we can do on windows right now
-    let sysname = sys_info::os_type().unwrap_or("Windows".to_string());
-    let nodename = sys_info::hostname().unwrap_or("unknown".to_string());
-    let release = sys_info::os_release().unwrap_or("unknown".to_string());
+    let sysname = sys_info::os_type().unwrap_or_else(|_| "Windows".to_owned());
+    let nodename = sys_info::hostname().unwrap_or_else(|_| "unknown".to_owned());
+    let release = sys_info::os_release().unwrap_or_else(|_| "unknown".to_owned());
     let version = "unknown";
     let machine = "unknown";
     Ok(format!(
@@ -190,39 +176,13 @@ impl Reporter {
         Ok(Self { client })
     }
 
-    /// Submit these stats onto the spaceport for eventual processing.
+    /// Submit a report onto the spaceport for eventual processing.
     ///
-    /// The spaceport will buffer traces and stats, transferring them when convenient.
-    pub async fn submit_stats(
+    /// The spaceport will buffer reports, transferring them when convenient.
+    pub async fn submit(
         &mut self,
-        graph: ReporterGraph,
-        key: String,
-        stats: ContextualizedStats,
+        request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
-        self.client
-            .add_stats(Request::new(ReporterStats {
-                graph: Some(graph),
-                key,
-                stats: Some(stats),
-            }))
-            .await
-    }
-
-    /// Submit this trace onto the spaceport for eventual processing.
-    ///
-    /// The spaceport will buffer traces and stats, transferring them when convenient.
-    pub async fn submit_trace(
-        &mut self,
-        graph: ReporterGraph,
-        key: String,
-        trace: Trace,
-    ) -> Result<Response<ReporterResponse>, Status> {
-        self.client
-            .add_trace(Request::new(ReporterTrace {
-                graph: Some(graph),
-                key,
-                trace: Some(trace),
-            }))
-            .await
+        self.client.add(Request::new(request)).await
     }
 }

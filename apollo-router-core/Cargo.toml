@@ -1,9 +1,9 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-preview.1"
+version = "0.9.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
-license-file = "./LICENSE"
+license = "Elastic-2.0"
 publish = false
 
 [features]
@@ -13,31 +13,37 @@ publish = false
 failfast = []
 
 [dependencies]
-apollo-parser = "0.2.4"
+apollo-parser = {git="https://github.com/apollographql/apollo-rs.git", tag="hotfix_227"}
 async-trait = "0.1.53"
 atty = "0.2.14"
+axum = { version = "0.5.4" }
+buildstructor = "0.1.12"
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }
 derivative = "2.2.0"
 displaydoc = "0.2"
 futures = "0.3.21"
 hex = "0.4.3"
-http = "0.2.6"
+http = "0.2.7"
+http-body = "0.4.4"
+hyper = { version = "0.14.18", features = ["client"] }
+hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
 include_dir = "0.7.2"
+indexmap = "1.8.1"
 itertools = "0.10.3"
 lazy_static = "1.4.0"
-lru = "0.7.3"
+lru = "0.7.5"
 miette = { version = "4.2.1", features = ["fancy"] }
 mockall = "0.11.0"
+multimap = "0.8.3"
 moka = { version = "0.7.2", features = ["future", "futures-util"] }
 once_cell = "1.9.0"
+opentelemetry = "0.17.0"
+opentelemetry-http = "0.6.0"
 paste = "1.0.6"
 regex = "1.5.5"
-reqwest = { version = "0.11.10" }
-reqwest-middleware = "0.1.5"
-reqwest-tracing = { version = "0.2.1", features = ["opentelemetry_0_17"] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "645ef8b66b14ee6d13e8e24ddd4aba29389031a1" }
-schemars = { version = "0.8.8", features = ["url"] }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "46fdeb35aa3d3f3289ff0dbbccf63c1234da92a8" }
+schemars = { version = "=0.8.8", features = ["url"] } # https://github.com/apollographql/router/issues/1074
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
@@ -45,23 +51,25 @@ serde_urlencoded = "0.7.1"
 sha2 = "0.10.2"
 startup = "0.1.1"
 static_assertions = "1.1.0"
-task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt", "sync"] }
 tower = { version = "0.4.12", features = ["full"] }
 tower-service = "0.3.1"
 tower-test = "0.4.0"
-tracing = "0.1.32"
+tracing = "0.1.34"
+tracing-opentelemetry = "0.17.2"
 typed-builder = "0.10.0"
-url = "2.2.2"
 urlencoding = "2.1.0"
+mime = "0.3.16"
 
 [dev-dependencies]
 insta = "1.12.0"
 mockall = "0.11.0"
-serde_yaml = "0.8.23"
+serde_yaml = "0.8.24"
 static_assertions = "1"
-test-log = { version = "0.2.10", default-features = false, features = ["trace"] }
+test-log = { version = "0.2.10", default-features = false, features = [
+    "trace",
+] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
-use apollo_router_core::{plugin_utils, PluggableRouterServiceBuilder};
+use apollo_router_core::{PluggableRouterServiceBuilder, RouterRequest};
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
@@ -22,19 +22,19 @@ async fn main() -> Result<()> {
 
     // ... except the SubgraphServices, so we'll let it know Requests against the `accounts` service
     // can be performed with an http client against the `https://accounts.demo.starstuff.dev` url
-    let subgraph_service = BoxService::new(apollo_router_core::ReqwestSubgraphService::new(
+    let subgraph_service = BoxService::new(apollo_router_core::TowerSubgraphService::new(
         "accounts".to_string(),
     ));
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
 
     // We can now build our service stack...
-    let (router_service, _) = router_builder.build().await;
+    let (router_service, _) = router_builder.build().await?;
 
     // ...then create a GraphQL request...
-    let request = plugin_utils::RouterRequest::builder()
-        .query(r#"query Query { me { name } }"#.to_string())
+    let request = RouterRequest::fake_builder()
+        .query(r#"query Query { me { name } }"#)
         .build()
-        .into();
+        .expect("expecting valid request");
 
     // ... and run it against the router service!
     let res = router_service

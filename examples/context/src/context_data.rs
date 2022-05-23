@@ -28,11 +28,12 @@ struct ContextData {}
 // 3. For each subgraph response merge some information into the `Context`. (response_count)
 // 4. Pick up and print it out at router response. (response_count)
 //
+#[async_trait::async_trait]
 impl Plugin for ContextData {
     // Config is a unit, and `ContextData` derives default.
     type Config = ();
 
-    fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
@@ -84,7 +85,7 @@ impl Plugin for ContextData {
                 // A single context is created for the entire request.
                 // We use upsert because there may be multiple downstream subgraph requests.
                 // Upserts are guaranteed to be applied serially.
-                match &resp.context.upsert("response_count", |v| v + 1, || 0) {
+                match &resp.context.upsert("response_count", |v: usize| v + 1) {
                     Ok(_) => (),
                     Err(_) => {
                         // This code will never be executed because we know that an integer can be

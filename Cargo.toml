@@ -5,6 +5,7 @@ members = [
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
+    "examples/add-timestamp-header",
     "examples/async-auth",
     "examples/cookies-to-headers",
     "examples/embedded",
@@ -12,6 +13,10 @@ members = [
     "examples/forbid-anonymous-operations",
     "examples/hello-world",
     "examples/status-code-propagation",
+    "examples/op-name-to-header",
+    "examples/rhai-logging",
+    "examples/rhai-data-response-mutate",
+    "examples/rhai-error-response-mutate",
     "examples/jwt-auth",
     "fuzz",
     "uplink",
@@ -20,6 +25,7 @@ members = [
 
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
-debug = false
+# If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
+# debug = false
 strip = "debuginfo"
 incremental = false

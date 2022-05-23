@@ -6,7 +6,8 @@
       "serviceName": "product",
       "variableUsages": [],
       "operation": "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
-      "operationKind": "query"
+      "operationKind": "query",
+      "operationName": "topProducts_product_0"
     },
     {
       "kind": "Parallel",

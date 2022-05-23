@@ -1,6 +1,19 @@
 version: "3.9"
 services:
 
+  gateway:
+    container_name: apollo-gateway
+    build: dockerfiles/federation2-demo/gateway
+    environment:
+      - APOLLO_OTEL_EXPORTER_TYPE=collector
+      - APOLLO_OTEL_EXPORTER_HOST=collector
+      - APOLLO_OTEL_EXPORTER_PORT=4318
+      - APOLLO_SCHEMA_CONFIG_EMBEDDED=true
+    volumes:
+      - ./dockerfiles/federation2-demo/supergraph.graphql:/etc/config/supergraph.graphql
+    ports:
+      - "4100:4000"
+
   users:
     container_name: users
     build: dockerfiles/federation2-demo/subgraphs/users
@@ -58,7 +71,7 @@ services:
       - "9411:9411"
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:v2.34.0
+    image: prom/prometheus:v2.35.0
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:

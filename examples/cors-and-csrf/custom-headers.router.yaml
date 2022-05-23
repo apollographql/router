@@ -1,0 +1,25 @@
+server:
+  cors:
+    # adding the headers in the CSRF section
+    # and not here would fail the OPTIONS preflight
+    # you can:
+    # - either add them here to be explicit
+    # - or not set the `allow_headers` key at all.
+    # the default behavior is `mirror_request`,
+    # which mirrors the received
+    # `access-control-request-headers` preflight has sent
+    allow_headers:
+      - x-my-custom-required-header
+      - x-and-an-other-required-header
+      - content-type # and many more!
+csrf:
+  # you could set unsafe_disabled: true, but That wouldn't be safe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
+
+  # pick required headers that are custom enough
+  # to make sure browsers would need to have added them with javascript,
+  # which would trigger a preflight https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#what_requests_use_cors
+  # `content-type` is not a safe idea for example.
+  required_headers:
+    - x-my-custom-required-header # we will look for presence of this header...
+    - x-and-an-other-required-header # ...or that one if a request was made with a `simple` content type https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests
+

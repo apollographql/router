@@ -1,21 +1,27 @@
+//! GraphQL schema.
+
 use crate::*;
 use apollo_parser::ast;
+use http::Uri;
 use itertools::Itertools;
-use reqwest::Url;
 use router_bridge::api_schema;
+use sha2::Digest;
+use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug)]
+/// A GraphQL schema.
+#[derive(Debug, Default)]
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
-    subgraphs: HashMap<String, Url>,
+    subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) input_types: HashMap<String, InputObjectType>,
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
+    pub schema_id: Option<String>,
 }
 
 impl std::str::FromStr for Schema {
@@ -27,11 +33,14 @@ impl std::str::FromStr for Schema {
         return Ok(schema);
 
         fn api_schema(schema: &str) -> Result<Schema, SchemaError> {
-            let api_schema = api_schema::api_schema(schema)
-                .map_err(|e| SchemaError::Api(e.to_string()))?
-                .map_err(|e| {
-                    SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
-                })?;
+            let api_schema = format!(
+                "{}\n",
+                api_schema::api_schema(schema)
+                    .map_err(|e| SchemaError::Api(e.to_string()))?
+                    .map_err(|e| {
+                        SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
+                    })?
+            );
 
             parse(&api_schema)
         }
@@ -178,7 +187,7 @@ impl std::str::FromStr for Schema {
                                                     if subgraphs
                                                         .insert(
                                                             name.clone(),
-                                                            Url::parse(&url).map_err(|err| {
+                                                            Uri::from_str(&url).map_err(|err| {
                                                                 SchemaError::UrlParse(
                                                                     name.clone(),
                                                                     err,
@@ -363,6 +372,10 @@ impl std::str::FromStr for Schema {
                 })
                 .collect();
 
+            let mut hasher = Sha256::new();
+            hasher.update(schema.as_bytes());
+            let schema_id = Some(format!("{:x}", hasher.finalize()));
+
             Ok(Schema {
                 subtype_map,
                 string: schema.to_owned(),
@@ -373,6 +386,7 @@ impl std::str::FromStr for Schema {
                 custom_scalars,
                 enums,
                 api_schema: None,
+                schema_id,
             })
         }
     }
@@ -397,7 +411,7 @@ impl Schema {
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
-    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Url)> {
+    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()
     }
 
@@ -405,20 +419,6 @@ impl Schema {
         match &self.api_schema {
             Some(schema) => schema,
             None => self,
-        }
-    }
-
-    pub fn empty() -> Schema {
-        Schema {
-            string: "".to_string(),
-            subtype_map: Default::default(),
-            subgraphs: Default::default(),
-            object_types: Default::default(),
-            interfaces: Default::default(),
-            input_types: Default::default(),
-            custom_scalars: Default::default(),
-            enums: Default::default(),
-            api_schema: None,
         }
     }
 
@@ -434,7 +434,7 @@ macro_rules! implement_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
         #[derive(Debug)]
         $visibility struct $name {
-            name: String,
+            pub(crate) name: String,
             fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
         }
@@ -580,10 +580,31 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
+    }
+
     #[test]
     fn is_subtype() {
         fn gen_schema_types(schema: &str) -> Schema {
-            let base_schema = r#"
+            let base_schema = with_supergraph_boilerplate(
+                r#"
             type Query {
               me: String
             }
@@ -598,12 +619,14 @@ mod tests {
             }
             
             union UnionType2 = Foo | Bar
-            "#;
+            "#,
+            );
             format!("{}\n{}", base_schema, schema).parse().unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
-            let base_schema = r#"
+            let base_schema = with_supergraph_boilerplate(
+                r#"
             type Query {
               me: String
             }
@@ -619,7 +642,8 @@ mod tests {
 
             type ObjectType2 implements Foo & Bar { me: String }
             interface InterfaceType2 implements Foo & Bar { me: String }
-            "#;
+            "#,
+            );
             format!("{}\n{}", base_schema, schema).parse().unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
@@ -679,28 +703,43 @@ mod tests {
         .parse()
         .unwrap();
 
-        println!("subgraphs: {:?}", schema.subgraphs);
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
-            schema.subgraphs.get("accounts").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("accounts")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4001/graphql"),
             "Incorrect url for accounts"
         );
 
         assert_eq!(
-            schema.subgraphs.get("inventory").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("inventory")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4004/graphql"),
             "Incorrect url for inventory"
         );
 
         assert_eq!(
-            schema.subgraphs.get("products").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("products")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4003/graphql"),
             "Incorrect url for products"
         );
 
         assert_eq!(
-            schema.subgraphs.get("reviews").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("reviews")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4002/graphql"),
             "Incorrect url for reviews"
         );
@@ -719,5 +758,42 @@ mod tests {
             .fields
             .get("inStock")
             .is_none());
+    }
+
+    #[test]
+    fn schema_id() {
+        #[cfg(not(windows))]
+        {
+            let schema =
+                Schema::from_str(include_str!("../testdata/starstuff@current.graphql")).unwrap();
+
+            assert_eq!(
+                schema.schema_id,
+                Some(
+                    "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
+                )
+            );
+
+            assert_eq!(
+                schema.api_schema().schema_id,
+                Some(
+                    "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909".to_string()
+                )
+            );
+        }
+    }
+
+    // test for https://github.com/apollographql/federation/pull/1769
+    #[test]
+    fn inaccessible_on_non_core() {
+        match Schema::from_str(include_str!("../testdata/inaccessible_on_non_core.graphql")) {
+            Err(SchemaError::Api(s)) => {
+                assert_eq!(
+                    s,
+                    "The supergraph schema failed to produce a valid API schema"
+                );
+            }
+            other => panic!("unexpected schema result: {:?}", other),
+        };
     }
 }

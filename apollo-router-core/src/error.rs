@@ -1,7 +1,8 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::plan::PlanningErrors;
+pub use router_bridge::planner::{PlanError, PlannerError};
+use router_bridge::planner::{PlanErrors, UsageReporting};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -123,7 +124,6 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
-    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
@@ -146,7 +146,7 @@ impl Error {
                     reason: err.to_string(),
                 })?
                 .unwrap_or_default();
-        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: err.to_string(),
@@ -200,7 +200,7 @@ impl From<QueryPlannerError> for FetchError {
 /// Error types for CacheResolver
 #[derive(Error, Debug, Display, Clone)]
 pub enum CacheResolverError {
-    /// Value retrieval failed: {0}
+    /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
 }
 
@@ -219,31 +219,64 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+/// Error types for service building.
+#[derive(Error, Debug, Display, Clone)]
+pub enum ServiceBuildError {
+    /// couldn't build Router Service: {0}
+    QueryPlannerError(QueryPlannerError),
+}
+
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// Query planning had errors: {0}
-    PlanningErrors(Arc<PlanningErrors>),
+    /// couldn't instantiate query planner; invalid schema: {0}
+    SchemaValidationErrors(PlannerErrors),
 
-    /// Query planning panicked: {0}
+    /// couldn't plan query: {0}
+    PlanningErrors(PlanErrors),
+
+    /// query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
-    /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
-    EmptyPlan,
+    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    EmptyPlan(UsageReporting), // usage_reporting_signature
 
-    /// Unhandled planner result.
+    /// unhandled planner result
     UnhandledPlannerResult,
 
-    /// Router Bridge error: {0}
+    /// router bridge error: {0}
     RouterBridgeError(router_bridge::error::Error),
 }
 
-impl From<PlanningErrors> for QueryPlannerError {
-    fn from(err: PlanningErrors) -> Self {
-        QueryPlannerError::PlanningErrors(Arc::new(err))
+#[derive(Clone, Debug, Error)]
+/// Container for planner setup errors
+pub struct PlannerErrors(Arc<Vec<PlannerError>>);
+
+impl std::fmt::Display for PlannerErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "schema validation errors: {}",
+            self.0
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
+    }
+}
+
+impl From<Vec<PlannerError>> for QueryPlannerError {
+    fn from(errors: Vec<PlannerError>) -> Self {
+        QueryPlannerError::SchemaValidationErrors(PlannerErrors(Arc::new(errors)))
+    }
+}
+
+impl From<PlanErrors> for QueryPlannerError {
+    fn from(errors: PlanErrors) -> Self {
+        QueryPlannerError::PlanningErrors(errors)
     }
 }
 
@@ -271,7 +304,7 @@ pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
     /// URL parse error for subgraph {0}: {1}
-    UrlParse(String, url::ParseError),
+    UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
     /// Parsing error(s).
@@ -280,6 +313,7 @@ pub enum SchemaError {
     Api(String),
 }
 
+/// Collection of schema parsing errors.
 #[derive(Debug)]
 pub struct ParseErrors {
     pub(crate) raw_schema: String,

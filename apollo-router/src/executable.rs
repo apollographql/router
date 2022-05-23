@@ -1,15 +1,15 @@
 //! Main entry point for CLI command to start server.
 
+use crate::configuration::generate_config_schema;
 use crate::{
     configuration::Configuration,
     subscriber::{set_global_subscriber, RouterSubscriber},
     ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
-use clap::{CommandFactory, Parser};
+use clap::{AppSettings, CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
-use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,48 +21,66 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(Parser, Debug)]
-#[structopt(name = "router", about = "Apollo federation router")]
+#[clap(
+    name = "router",
+    about = "Apollo federation router",
+    global_setting(AppSettings::NoAutoVersion)
+)]
 pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
-        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info,reqwest_tracing=info",
+        default_value = "info",
         alias = "log-level",
-        env = "RUST_LOG"
+        env = "APOLLO_ROUTER_LOG"
     )]
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(short, long)]
-    watch: bool,
+    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
+    hot_reload: bool,
 
     /// Configuration location relative to the project directory.
-    #[clap(short, long = "config", parse(from_os_str), env)]
-    configuration_path: Option<PathBuf>,
+    #[clap(
+        short,
+        long = "config",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_CONFIG_PATH"
+    )]
+    config_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
-    #[clap(short, long = "supergraph", parse(from_os_str), env)]
+    #[clap(
+        short,
+        long = "supergraph",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
+    )]
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
     #[clap(long)]
     schema: bool,
 
-    /// Your Apollo key
-    #[clap(long, env)]
+    /// Your Apollo key.
+    #[clap(skip = std::env::var("APOLLO_KEY").ok())]
     apollo_key: Option<String>,
 
-    /// Your Apollo graph reference
-    #[clap(long, env)]
+    /// Your Apollo graph reference.
+    #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
 
     /// The endpoint polled to fetch the latest supergraph schema.
     #[clap(long, env)]
-    apollo_schema_config_delivery_endpoint: Option<Url>,
+    apollo_uplink_endpoints: Option<Url>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
-    apollo_schema_poll_interval: Duration,
+    apollo_uplink_poll_interval: Duration,
+
+    /// Display version and exit.
+    #[clap(parse(from_flag), long, short = 'V')]
+    pub version: bool,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -110,7 +128,7 @@ impl fmt::Display for ProjectDir {
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("ROUTER_NUM_CORES")
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
@@ -131,16 +149,15 @@ pub fn main() -> Result<()> {
 pub async fn rt_main() -> Result<()> {
     let opt = Opt::parse();
 
+    if opt.version {
+        println!("{}", std::env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     copy_args_to_env();
 
     if opt.schema {
-        let settings = SchemaSettings::draft2019_09().with(|s| {
-            s.option_nullable = true;
-            s.option_add_null_type = false;
-            s.inline_subschemas = true;
-        });
-        let gen = settings.into_generator();
-        let schema = gen.into_root_schema_for::<Configuration>();
+        let schema = generate_config_schema();
         println!("{}", serde_json::to_string_pretty(&schema)?);
         return Ok(());
     }
@@ -149,8 +166,9 @@ pub async fn rt_main() -> Result<()> {
     // a FmtSubscriber to set_global_subscriber(), but we can't because of the
     // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
     // for more details.
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.log_level).context("could not parse log")?);
+    let builder = tracing_subscriber::fmt::fmt().with_env_filter(
+        EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
+    );
 
     let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
         RouterSubscriber::TextSubscriber(builder.finish())
@@ -162,16 +180,10 @@ pub async fn rt_main() -> Result<()> {
 
     GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
 
-    tracing::info!(
-        "{}@{}",
-        std::env!("CARGO_PKG_NAME"),
-        std::env!("CARGO_PKG_VERSION")
-    );
-
     let current_directory = std::env::current_dir()?;
 
     let configuration = opt
-        .configuration_path
+        .config_path
         .as_ref()
         .map(|path| {
             let path = if path.is_relative() {
@@ -182,14 +194,17 @@ pub async fn rt_main() -> Result<()> {
 
             ConfigurationKind::File {
                 path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
-
+    let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
+            tracing::info!("{apollo_router_msg}");
+            setup_panic_handler();
+
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -197,67 +212,58 @@ pub async fn rt_main() -> Result<()> {
             };
             SchemaKind::File {
                 path: supergraph_path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         }
         (None, Some(apollo_key)) => {
+            tracing::info!("{apollo_router_msg}");
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-            if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
+            if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
             }
 
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_schema_config_delivery_endpoint,
-                poll_interval: opt.apollo_schema_poll_interval,
+                url: opt.apollo_uplink_endpoints,
+                poll_interval: opt.apollo_uplink_poll_interval,
             }
         }
         _ => {
             return Err(anyhow!(
-                r#"
-    💫 Apollo Router requires a supergraph to be set using '--supergraph':
+                r#"{apollo_router_msg}
 
-        $ ./router --supergraph <file>`
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-        Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
-        and APOLLO_GRAPH_REF environment variables to your graph's settings.
-        
-          $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-          
-        For more on Apollo Studio and Managed Federation, see our documentation:
-        
-          https://www.apollographql.com/docs/router/managed-federation/
+👉 DO ONE:
 
-    🪐 The supergraph can be built or downloaded from the Apollo Registry
-       using the Rover CLI. To find out how, see:
+  * Pass a local schema file with the '--supergraph' option:
 
-        https://www.apollographql.com/docs/rover/supergraphs/.
+      $ ./router --supergraph <file_path>
 
-    🧪 If you're just experimenting, you can download and use an example
-       supergraph with pre-deployed subgraphs:
+  * Fetch a registered schema from Apollo Studio by setting
+    these environment variables:
 
-        $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
-       Then run the Apollo Router with that supergraph:
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/router/managed-federation/setup
 
-        $ ./router --supergraph starstuff.graphql
+🔬 TESTING THINGS OUT?
 
-    "#,
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the Apollo Router with the supergraph schema:
+
+    $ ./router --supergraph starstuff.graphql
+
+    "#
             ));
         }
     };
-
-    // Create your text map propagator & assign it as the global propagator.
-    //
-    // This is required in order to create the header traceparent used in http_subgraph to
-    // propagate the trace id to the subgraph services.
-    //
-    // /!\ If this is not called, there will be no warning and no header will be sent to the
-    //     subgraphs!
-    let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
-    opentelemetry::global::set_text_map_propagator(propagator);
 
     let server = ApolloRouterBuilder::default()
         .configuration(configuration)
@@ -273,6 +279,24 @@ pub async fn rt_main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn setup_panic_handler() {
+    // Redirect panics to the logs.
+    let backtrace_env = std::env::var("RUST_BACKTRACE");
+    let show_backtraces =
+        backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
+    if show_backtraces {
+        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+    }
+    std::panic::set_hook(Box::new(move |e| {
+        if show_backtraces {
+            let backtrace = backtrace::Backtrace::new();
+            tracing::error!("{}\n{:?}", e, backtrace)
+        } else {
+            tracing::error!("{}", e)
+        }
+    }));
 }
 
 fn copy_args_to_env() {

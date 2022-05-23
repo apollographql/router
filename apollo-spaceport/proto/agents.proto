@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 syntax = "proto3";
 
 import "proto/reports.proto";
@@ -5,27 +6,16 @@ import "proto/reports.proto";
 package Agent;
 
 service Reporter {
-    rpc AddStats(ReporterStats) returns (ReporterResponse) {}
-    rpc AddTrace(ReporterTrace) returns (ReporterResponse) {}
+    rpc Add(ReporterRequest) returns (ReporterResponse) {}
 }
 
 message ReporterResponse {
     string message = 1;
 }
-
-message ReporterGraph {
-    string reference = 1;
-    string key = 2;
+// This is just a wrapper around Report that supplies the Apollo key.
+// Spaceport will use this when sending data to Apollo.
+message ReporterRequest {
+    string apollo_key = 1;
+    Report.Report report = 2;
 }
 
-message ReporterStats {
-    ReporterGraph graph = 1;
-    string key = 2;
-    Report.ContextualizedStats stats = 3;
-}
-
-message ReporterTrace {
-    ReporterGraph graph = 1;
-    string key = 2;
-    Report.Trace trace = 3;
-}

@@ -1,73 +1,130 @@
-//! wrapper typpes for Request and Response from the http crate to improve their usability
+//! Wrapper types for [`http::Request`] and [`http::Response`] from the http crate.
+//!
+//! To improve their usability.
 
+use axum::{body::boxed, response::IntoResponse};
+use bytes::Bytes;
+use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method};
+use multimap::MultiMap;
 use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
 };
 
-use http::{header::HeaderName, request::Builder, HeaderMap, HeaderValue, Method, Version};
-use url::{ParseError, Url};
+use crate::ResponseBody;
+
+/// Temporary holder of header name while for use while building requests and responses. Required
+/// because header name creation is faillable.
+#[derive(Eq, Hash, PartialEq)]
+pub enum IntoHeaderName {
+    String(String),
+    HeaderName(HeaderName),
+}
+
+/// Temporary holder of header value while for use while building requests and responses. Required
+/// because header value creation is faillable.
+#[derive(Eq, Hash, PartialEq)]
+pub enum IntoHeaderValue {
+    String(String),
+    HeaderValue(HeaderValue),
+}
+impl<T> From<T> for IntoHeaderName
+where
+    T: std::fmt::Display,
+{
+    fn from(name: T) -> Self {
+        IntoHeaderName::String(name.to_string())
+    }
+}
+
+impl<T> From<T> for IntoHeaderValue
+where
+    T: std::fmt::Display,
+{
+    fn from(name: T) -> Self {
+        IntoHeaderValue::String(name.to_string())
+    }
+}
+
+impl TryFrom<IntoHeaderName> for HeaderName {
+    type Error = http::Error;
+
+    fn try_from(value: IntoHeaderName) -> Result<Self, Self::Error> {
+        Ok(match value {
+            IntoHeaderName::String(name) => HeaderName::try_from(name)?,
+            IntoHeaderName::HeaderName(name) => name,
+        })
+    }
+}
+
+impl TryFrom<IntoHeaderValue> for HeaderValue {
+    type Error = http::Error;
+
+    fn try_from(value: IntoHeaderValue) -> Result<Self, Self::Error> {
+        Ok(match value {
+            IntoHeaderValue::String(value) => HeaderValue::try_from(value)?,
+            IntoHeaderValue::HeaderValue(value) => value,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct Request<T> {
-    // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
-    // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
-    pub(super) url: Url,
     inner: http::Request<T>,
 }
 
+// Most of the required functionality is provided by our Deref and DerefMut implementations.
+#[buildstructor::builder]
 impl<T> Request<T> {
+    /// This is the constructor (or builder) to use when constructing a real Request.
+    ///
+    /// Required parameters are required in non-testing code to create a Request.
+    pub fn new(
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        uri: http::Uri,
+        method: http::Method,
+        body: T,
+    ) -> http::Result<Request<T>> {
+        let mut builder = http::request::Builder::new().method(method).uri(uri);
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
+        }
+        let req = builder.body(body)?;
+
+        Ok(Self { inner: req })
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" Request.
+    ///
+    /// This does not enforce the provision of the uri and method that is required for a fully functional
+    /// Request. It's usually enough for testing, when a fully constructed Request is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
+    pub fn fake_new(
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        uri: Option<http::Uri>,
+        method: Option<http::Method>,
+        body: T,
+    ) -> http::Result<Request<T>> {
+        Self::new(
+            headers,
+            uri.unwrap_or_default(),
+            method.unwrap_or(Method::GET),
+            body,
+        )
+    }
+
     /// Update the associated URL
-    pub fn set_url(&mut self, url: url::Url) -> Result<(), http::Error> {
-        *self.inner.uri_mut() = http::Uri::try_from(url.as_str())?;
-        self.url = url;
-        Ok(())
-    }
-
-    /// Returns a reference to the associated URL.
-    pub fn url(&self) -> &url::Url {
-        &self.url
-    }
-
-    /// Returns a reference to the associated HTTP method.
-    pub fn method(&self) -> &Method {
-        self.inner.method()
-    }
-
-    /// Returns a mutable reference to the associated HTTP method.
-    pub fn method_mut(&mut self) -> &mut Method {
-        self.inner.method_mut()
-    }
-
-    /// Returns the associated version.
-    pub fn version(&self) -> Version {
-        self.inner.version()
-    }
-
-    /// Returns a mutable reference to the associated version.
-    pub fn version_mut(&mut self) -> &mut Version {
-        self.inner.version_mut()
-    }
-
-    /// Returns a reference to the associated header field map.
-    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
-        self.inner.headers()
-    }
-
-    /// Returns a mutable reference to the associated header field map.
-    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
-        self.inner.headers_mut()
-    }
-
-    /// Returns a reference to the associated HTTP body.
-    pub fn body(&self) -> &T {
-        self.inner.body()
-    }
-
-    /// Returns a mutable reference to the associated HTTP body.
-    pub fn body_mut(&mut self) -> &mut T {
-        self.inner.body_mut()
+    pub fn from_parts(head: Parts, body: T) -> Request<T> {
+        Request {
+            inner: http::Request::from_parts(head, body),
+        }
     }
 
     /// Consumes the request, returning just the body.
@@ -81,14 +138,12 @@ impl<T> Request<T> {
     }
 
     /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
-    pub fn map<F, U>(self, f: F) -> Result<Request<U>, ParseError>
+    pub fn map<F, U>(self, f: F) -> Result<Request<U>, InvalidUri>
     where
         F: FnOnce(T) -> U,
     {
-        let new_req = self.inner.map(f);
         Ok(Request {
-            url: Url::parse(&new_req.uri().to_string())?,
-            inner: new_req,
+            inner: self.inner.map(f),
         })
     }
 }
@@ -97,12 +152,25 @@ impl<T> Request<T>
 where
     T: Default,
 {
-    // Only used for plugin_utils and tests
+    // Only used for plugin::utils and tests
     pub fn mock() -> Request<T> {
         Request {
-            url: Url::parse("http://default").unwrap(),
             inner: http::Request::default(),
         }
+    }
+}
+
+impl<T> Deref for Request<T> {
+    type Target = http::Request<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for Request<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -124,10 +192,7 @@ impl<T: Clone> Clone for Request<T> {
         let req = req
             .body(self.inner.body().clone())
             .expect("cloning a valid request creates a valid request");
-        Self {
-            inner: req,
-            url: self.url.clone(),
-        }
+        Self { inner: req }
     }
 }
 
@@ -176,63 +241,6 @@ impl<T: PartialEq> PartialEq for Request<T> {
 }
 
 impl<T: PartialEq> Eq for Request<T> {}
-
-impl<T> From<Request<T>> for http::Request<T> {
-    fn from(request: Request<T>) -> Self {
-        request.inner
-    }
-}
-
-#[derive(Debug)]
-pub struct RequestBuilder {
-    url: Url,
-    inner: Builder,
-}
-
-impl RequestBuilder {
-    pub fn new(method: reqwest::Method, url: Url) -> Self {
-        // Enforce the need for a method and an url
-        let builder = Builder::new().method(method).uri(
-            http::Uri::try_from(url.as_str())
-                .expect("Url has already been parsed without errors; qed"),
-        );
-        Self {
-            url,
-            inner: builder,
-        }
-    }
-
-    /// Set the HTTP version for this request.
-    pub fn version(self, version: Version) -> Self {
-        Self {
-            url: self.url,
-            inner: self.inner.version(version),
-        }
-    }
-
-    /// Appends a header to this request builder.
-    pub fn header<K, V>(self, key: K, value: V) -> Self
-    where
-        HeaderName: TryFrom<K>,
-        <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
-        HeaderValue: TryFrom<V>,
-        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
-    {
-        Self {
-            url: self.url,
-            inner: self.inner.header(key, value),
-        }
-    }
-
-    /// "Consumes" this builder, using the provided `body` to return a
-    /// constructed `Request`.
-    pub fn body<T>(self, body: T) -> http::Result<Request<T>> {
-        Ok(Request {
-            url: self.url,
-            inner: self.inner.body(body)?,
-        })
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct Response<T> {
@@ -303,6 +311,51 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
-    url::Url::parse(&uri.to_string())
+impl IntoResponse for Response<ResponseBody> {
+    fn into_response(self) -> axum::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+        let json_body_bytes =
+            Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
+
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+    }
+}
+
+impl IntoResponse for Response<Bytes> {
+    fn into_response(self) -> axum::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::http_compat::Request;
+    use http::{HeaderValue, Method, Uri};
+
+    #[test]
+    fn builder() {
+        let request = Request::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .uri(Uri::from_static("http://example.com"))
+            .method(Method::POST)
+            .body("test")
+            .build()
+            .unwrap();
+        assert_eq!(
+            request
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        assert_eq!(request.uri(), &Uri::from_static("http://example.com"));
+        assert_eq!(request.method(), Method::POST);
+        assert_eq!(request.body(), &"test");
+    }
 }

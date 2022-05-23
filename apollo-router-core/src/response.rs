@@ -15,9 +15,9 @@ pub struct Response {
     pub label: Option<String>,
 
     /// The response data.
-    #[serde(skip_serializing_if = "skip_data_if", default)]
-    #[builder(default = Value::Object(Default::default()))]
-    pub data: Value,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[builder(default, setter(strip_option))]
+    pub data: Option<Value>,
 
     /// The path that the data should be merged at.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -35,15 +35,8 @@ pub struct Response {
     pub extensions: Object,
 }
 
-fn skip_data_if(value: &Value) -> bool {
-    match value {
-        Value::Object(o) => o.is_empty(),
-        Value::Null => true,
-        _ => false,
-    }
-}
-
 impl Response {
+    /// If path is None, this is a primary query.
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
     }
@@ -53,6 +46,9 @@ impl Response {
         self.errors.append(errors)
     }
 
+    /// Create a [`Response`] from the supplied [`Bytes`].
+    ///
+    /// This will return an error (identifying the faulty service) if the input is invalid.
     pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
@@ -65,7 +61,7 @@ impl Response {
                 reason: error.to_string(),
             })?;
 
-        let data = extract_key_value_from_object!(object, "data").unwrap_or_default();
+        let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),

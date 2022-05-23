@@ -189,8 +189,7 @@ impl ValueExt for Value {
         for p in path.iter() {
             match p {
                 PathElement::Flatten => {
-                    let a = Vec::new();
-                    *current_node = Value::Array(a);
+                    return res_value;
                 }
 
                 &PathElement::Index(index) => match current_node {
@@ -467,7 +466,7 @@ impl Path {
         if self.is_empty() {
             None
         } else {
-            Some(Path(self.iter().cloned().take(self.len() - 1).collect()))
+            Some(Path(self.iter().take(self.len() - 1).cloned().collect()))
         }
     }
 
@@ -660,7 +659,7 @@ mod tests {
     #[test]
     fn test_from_path() {
         let json = json!([{"prop1":1},{"prop1":2}]);
-        let path = Path::from("obj/arr/@");
+        let path = Path::from("obj/arr");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
     }
@@ -671,5 +670,13 @@ mod tests {
         let path = Path::from("obj/arr/1");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":[null, {"prop1":1}]}}));
+    }
+
+    #[test]
+    fn test_from_path_flatten() {
+        let json = json!({"prop1":1});
+        let path = Path::from("obj/arr/@/obj2");
+        let result = Value::from_path(&path, json);
+        assert_eq!(result, json!({"obj":{"arr":null}}));
     }
 }

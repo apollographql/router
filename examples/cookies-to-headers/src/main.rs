@@ -33,14 +33,16 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::{plugin_utils, Plugin, SubgraphRequest};
-    use http::StatusCode;
+    use apollo_router_core::{
+        http_compat, plugin::utils, Plugin, SubgraphRequest, SubgraphResponse,
+    };
+    use http::{header::HeaderName, HeaderValue, StatusCode};
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
         // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockSubgraphService::new();
+        let mut mock = utils::test::MockSubgraphService::new();
 
         // The expected reply is going to be JSON returned in the SubgraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -51,23 +53,22 @@ mod tests {
             .returning(move |req: SubgraphRequest| {
                 // Let's make sure our request contains our new headers
                 assert_eq!(
-                    req.http_request
+                    req.subgraph_request
                         .headers()
                         .get("yummy_cookie")
                         .expect("yummy_cookie is present"),
                     "choco"
                 );
                 assert_eq!(
-                    req.http_request
+                    req.subgraph_request
                         .headers()
                         .get("tasty_cookie")
                         .expect("tasty_cookie is present"),
                     "strawberry"
                 );
-                Ok(plugin_utils::SubgraphResponse::builder()
-                    .data(expected_mock_response_data.into())
-                    .build()
-                    .into())
+                Ok(SubgraphResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -78,19 +79,33 @@ mod tests {
         }))
         .expect("json must be valid");
 
-        // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut rhai = Rhai::new(conf).expect("valid configuration should succeed");
+        // Build a rhai plugin instance from our conf
+        let mut rhai = Rhai::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
 
+        let mut sub_request = http_compat::Request::mock();
+        let mut originating_request = http_compat::Request::mock();
+
+        let headers = vec![(
+            HeaderName::from_static("cookie"),
+            HeaderValue::from_static("yummy_cookie=choco;tasty_cookie=strawberry"),
+        )];
+
+        for (name, value) in headers {
+            sub_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+            originating_request.headers_mut().insert(name, value);
+        }
+
         // Let's create a request with our cookies
-        let request_with_appropriate_cookies = plugin_utils::SubgraphRequest::builder()
-            .headers(vec![(
-                "Cookie".to_string(),
-                "yummy_cookie=choco;tasty_cookie=strawberry".to_string(),
-            )])
-            .build()
-            .into();
+        let request_with_appropriate_cookies = SubgraphRequest::fake_builder()
+            .originating_request(std::sync::Arc::new(originating_request))
+            .subgraph_request(sub_request)
+            .build();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -105,6 +120,6 @@ mod tests {
         let graphql_response: apollo_router_core::Response = service_response.response.into_body();
 
         assert!(graphql_response.errors.is_empty());
-        assert_eq!(expected_mock_response_data, graphql_response.data)
+        assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())
     }
 }

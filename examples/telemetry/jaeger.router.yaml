@@ -1,4 +1,0 @@
-telemetry:
-  opentelemetry:
-    jaeger:
-      service_name: router

@@ -1,3 +1,7 @@
+//! A cache for queries.
+use opentelemetry::trace::SpanKind;
+use tracing::{info_span, Instrument};
+
 use crate::prelude::graphql::*;
 use crate::CacheResolver;
 use std::sync::Arc;
@@ -17,7 +21,8 @@ struct QueryCacheResolver {
 impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
     async fn retrieve(&self, key: String) -> Result<Option<Arc<Query>>, CacheResolverError> {
         let schema = self.schema.clone();
-        let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key, &schema));
+        let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key, &schema))
+            .instrument(info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
         let parsed_query = match query_parsing_future.await {
             Ok(res) => res.map(Arc::new),
             // Silently ignore cancelled tasks (never happen for blocking tasks).
@@ -40,8 +45,7 @@ impl QueryCache {
     }
 
     /// Attempt to parse a string to a [`Query`] using cache if possible.
-    #[tracing::instrument(skip_all, level = "info" name = "get_query")]
-    pub async fn get_query(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
+    pub async fn get(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
         let key = query.as_ref().to_string();
 
         match self.cm.get(key).await {

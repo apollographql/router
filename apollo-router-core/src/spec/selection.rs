@@ -6,6 +6,7 @@ use serde_json_bytes::ByteString;
 pub(crate) enum Selection {
     Field {
         name: ByteString,
+        alias: Option<ByteString>,
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
         skip: Skip,
@@ -28,7 +29,17 @@ impl Selection {
         selection: ast::Selection,
         current_type: &FieldType,
         schema: &Schema,
+        mut count: usize,
     ) -> Option<Self> {
+        // The RECURSION_LIMIT is chosen to be:
+        //   < # expected to cause stack overflow &&
+        //   > # expected in a legitimate query
+        const RECURSION_LIMIT: usize = 512;
+        if count > RECURSION_LIMIT {
+            tracing::error!("selection processing recursion limit({RECURSION_LIMIT}) exceeded");
+            return None;
+        }
+        count += 1;
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
@@ -40,6 +51,8 @@ impl Selection {
 
                 let field_type = if field_name.as_str() == "__typename" {
                     FieldType::String
+                } else if field_name.starts_with("__") {
+                    FieldType::Introspection(field_name.clone())
                 } else {
                     current_type
                         .inner_type_name()
@@ -61,7 +74,6 @@ impl Selection {
                 };
 
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                let name = alias.unwrap_or(field_name);
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
@@ -69,7 +81,9 @@ impl Selection {
                     field.selection_set().and_then(|x| {
                         x.selections()
                             .into_iter()
-                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .map(|selection| {
+                                Selection::from_ast(selection, &field_type, schema, count)
+                            })
                             .collect()
                     })
                 };
@@ -98,7 +112,8 @@ impl Selection {
                     .unwrap_or(Include::Yes);
 
                 Some(Self::Field {
-                    name: name.into(),
+                    alias: alias.map(|alias| alias.into()),
+                    name: field_name.into(),
                     selection_set,
                     field_type,
                     skip,
@@ -129,7 +144,7 @@ impl Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                     .into_iter()
-                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema))
+                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
                     .collect::<Option<_>>()?;
 
                 let skip = inline_fragment

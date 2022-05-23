@@ -1,7 +1,3 @@
-server:
-  cors:
-    origins:
-      - "https://studio.apollographql.com/"
 plugins:
   # this plugin takes a path
   # and will read from it everytime a request comes in

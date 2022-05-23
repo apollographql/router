@@ -1,11 +1,13 @@
+mod bridge_query_planner;
 mod caching_query_planner;
-mod router_bridge_query_planner;
 mod selection;
 use crate::prelude::graphql::*;
+pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;
-pub use router_bridge_query_planner::*;
+use opentelemetry::trace::SpanKind;
+use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use std::collections::HashSet;
 use tracing::Instrument;
@@ -13,17 +15,27 @@ use tracing::Instrument;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}
 
+/// A plan for a [`crate::Query`]
 #[derive(Debug)]
 pub struct QueryPlan {
+    pub usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
 }
 
-/// This default impl is useful for plugin_utils users
+/// This default impl is useful for plugin::utils users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
-impl Default for QueryPlan {
-    fn default() -> Self {
+#[buildstructor::builder]
+impl QueryPlan {
+    pub(crate) fn fake_new(
+        root: Option<PlanNode>,
+        usage_reporting: Option<UsageReporting>,
+    ) -> Self {
         Self {
-            root: PlanNode::Sequence { nodes: Vec::new() },
+            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            }),
+            root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
         }
     }
 }
@@ -83,13 +95,23 @@ impl QueryPlan {
         &'a self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
+        originating_request: http_compat::Request<Request>,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
 
+        log::trace_query_plan(&self.root);
+
         let (value, errors) = self
             .root
-            .execute_recursively(&root, context, service_registry, schema, &Value::default())
+            .execute_recursively(
+                &root,
+                context,
+                service_registry,
+                schema,
+                originating_request,
+                &Value::default(),
+            )
             .await;
 
         Response::builder().data(value).errors(errors).build()
@@ -107,6 +129,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
+        originating_request: http_compat::Request<Request>,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
@@ -126,6 +149,7 @@ impl PlanNode {
                                 context,
                                 service_registry,
                                 schema,
+                                originating_request.clone(),
                                 &value,
                             )
                             .instrument(span.clone())
@@ -148,6 +172,7 @@ impl PlanNode {
                                 context,
                                 service_registry,
                                 schema,
+                                originating_request.clone(),
                                 parent_value,
                             )
                             .instrument(span.clone())
@@ -172,6 +197,7 @@ impl PlanNode {
                             context,
                             service_registry,
                             schema,
+                            originating_request,
                             parent_value,
                         )
                         .instrument(tracing::trace_span!("flatten"))
@@ -182,8 +208,18 @@ impl PlanNode {
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(parent_value, current_dir, context, service_registry, schema)
-                        .instrument(tracing::info_span!("fetch"))
+                        .fetch_node(
+                            parent_value,
+                            current_dir,
+                            context,
+                            service_registry,
+                            originating_request,
+                            schema,
+                        )
+                        .instrument(tracing::info_span!(
+                            "fetch",
+                            "otel.kind" = %SpanKind::Internal
+                        ))
                         .await
                     {
                         Ok((v, e)) => {
@@ -244,9 +280,27 @@ pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
     use serde::Deserialize;
-    use std::sync::Arc;
+    use std::{fmt::Display, sync::Arc};
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
+
+    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum OperationKind {
+        Query,
+        Mutation,
+        Subscription,
+    }
+
+    impl Display for OperationKind {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                OperationKind::Query => write!(f, "Query"),
+                OperationKind::Mutation => write!(f, "Mutation"),
+                OperationKind::Subscription => write!(f, "Subscription"),
+            }
+        }
+    }
 
     /// A fetch node.
     #[derive(Debug, PartialEq, Deserialize)]
@@ -266,16 +320,11 @@ pub(crate) mod fetch {
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
 
+        /// The GraphQL subquery operation name.
+        operation_name: Option<String>,
+
         /// The GraphQL operation kind that is used for the fetch.
         operation_kind: OperationKind,
-    }
-
-    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub enum OperationKind {
-        Query,
-        Mutation,
-        Subscription,
     }
 
     struct Variables {
@@ -290,10 +339,10 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            context: &Context,
+            request: http_compat::Request<crate::Request>,
             schema: &Schema,
         ) -> Option<Variables> {
-            let body = context.request.body();
+            let body = request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -344,11 +393,13 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
+            originating_request: http_compat::Request<Request>,
             schema: &'a Schema,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
                 operation,
                 operation_kind,
+                operation_name,
                 service_name,
                 ..
             } = self;
@@ -358,7 +409,8 @@ pub(crate) mod fetch {
                 self.variable_usages.as_ref(),
                 data,
                 current_dir,
-                context,
+                // Needs the original request here
+                originating_request.clone(),
                 schema,
             )
             .await
@@ -369,25 +421,38 @@ pub(crate) mod fetch {
                 }
             };
 
-            let subgraph_request = SubgraphRequest {
-                http_request: http_compat::RequestBuilder::new(
-                    http::Method::POST,
-                    schema
-                        .subgraphs()
-                        .find_map(|(name, url)| (name == service_name).then(|| url))
-                        .expect("we can unwrap here because we already checked the subgraph url")
-                        .clone(),
+            let subgraph_request = SubgraphRequest::builder()
+                .originating_request(Arc::new(originating_request))
+                .subgraph_request(
+                    http_compat::Request::builder()
+                        .method(http::Method::POST)
+                        .uri(
+                            schema
+                                .subgraphs()
+                                .find_map(|(name, url)| (name == service_name).then(|| url))
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                    "schema uri for subgraph '{}' should already have been checked",
+                                    service_name
+                                )
+                                })
+                                .clone(),
+                        )
+                        .body(
+                            Request::builder()
+                                .query(Some(operation.to_string()))
+                                .operation_name(operation_name.clone())
+                                .variables(Arc::new(variables.clone()))
+                                .build(),
+                        )
+                        .build()
+                        .expect(
+                            "it won't fail because the url is correct and already checked; qed",
+                        ),
                 )
-                .body(
-                    Request::builder()
-                        .query(operation)
-                        .variables(Arc::new(variables.clone()))
-                        .build(),
-                )
-                .expect("it won't fail because the url is correct and already checked; qed"),
-                context: context.clone(),
-                operation_kind: *operation_kind,
-            };
+                .operation_kind(*operation_kind)
+                .context(context.clone())
+                .build();
 
             let service = service_registry
                 .get(service_name)
@@ -405,6 +470,8 @@ pub(crate) mod fetch {
                 .response
                 .into_parts();
 
+            super::log::trace_subfetch(service_name, operation, &variables, &response);
+
             if !response.is_primary() {
                 return Err(FetchError::SubrequestUnexpectedPatchResponse {
                     service: service_name.to_owned(),
@@ -419,12 +486,12 @@ pub(crate) mod fetch {
                 .map(|error| Error {
                     locations: error.locations,
                     path: error.path.map(|path| current_dir.join(path)),
-                    message: String::new(),
-                    extensions: Object::default(),
+                    message: error.message,
+                    extensions: error.extensions,
                 })
                 .collect();
 
-            self.response_at_path(current_dir, paths, response.data)
+            self.response_at_path(current_dir, paths, response.data.unwrap_or_default())
                 .map(|value| (value, errors))
         }
 
@@ -486,13 +553,51 @@ pub(crate) struct FlattenNode {
     node: Box<PlanNode>,
 }
 
+// The code resides in a separate submodule to allow writing a log filter activating it
+// separately from the query planner logs, as follows:
+// `router -s supergraph.graphql --log info,apollo_router_core::query_planner::log=trace`
+mod log {
+    use crate::PlanNode;
+    use serde_json_bytes::{ByteString, Map, Value};
+
+    pub(crate) fn trace_query_plan(plan: &PlanNode) {
+        tracing::trace!("query plan\n{:?}", plan);
+    }
+
+    pub(crate) fn trace_subfetch(
+        service_name: &str,
+        operation: &str,
+        variables: &Map<ByteString, Value>,
+        response: &crate::prelude::graphql::Response,
+    ) {
+        tracing::trace!(
+            "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
+            service_name,
+            operation,
+            variables,
+            serde_json::to_string_pretty(&response).unwrap()
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use http::Method;
+    use std::str::FromStr;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::{collections::HashMap, sync::atomic::AtomicBool};
+    use tower::{ServiceBuilder, ServiceExt};
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
+        };
+    }
+
+    macro_rules! test_schema {
+        () => {
+            include_str!("testdata/schema.graphql")
         };
     }
 
@@ -510,6 +615,134 @@ mod tests {
                 .service_usage()
                 .collect::<Vec<_>>(),
             vec!["product", "books", "product", "books", "product"]
+        );
+    }
+
+    /// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
+    /// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
+    /// with a closed service.
+    ///
+    /// See: https://github.com/tower-rs/tower/issues/455
+    ///
+    /// The query planner reports the failed subgraph fetch as an error with a reason of "service
+    /// closed", which is what this test expects.
+    #[tokio::test]
+    async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+        };
+
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        mock_products_service.expect_call().times(1).withf(|_| {
+            panic!("this panic should be propagated to the test harness");
+        });
+
+        let result = query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+        assert_eq!(result.errors.len(), 1);
+        let reason: String = serde_json_bytes::from_value(
+            result.errors[0].extensions.get("reason").unwrap().clone(),
+        )
+        .unwrap();
+        assert_eq!(reason, "service closed".to_string());
+    }
+
+    #[tokio::test]
+    async fn fetch_includes_operation_name() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+        };
+
+        let succeeded: Arc<AtomicBool> = Default::default();
+        let inner_succeeded = Arc::clone(&succeeded);
+
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        mock_products_service
+            .expect_call()
+            .times(1)
+            .withf(move |request| {
+                let matches = request.subgraph_request.body().operation_name
+                    == Some("topProducts_product_0".into());
+                inner_succeeded.store(matches, Ordering::SeqCst);
+                matches
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+
+        assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
+    }
+
+    #[tokio::test]
+    async fn fetch_makes_post_requests() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+        };
+
+        let succeeded: Arc<AtomicBool> = Default::default();
+        let inner_succeeded = Arc::clone(&succeeded);
+
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        mock_products_service
+            .expect_call()
+            .times(1)
+            .withf(move |request| {
+                let matches = request.subgraph_request.method() == Method::POST;
+                inner_succeeded.store(matches, Ordering::SeqCst);
+                matches
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+
+        assert!(
+            succeeded.load(Ordering::SeqCst),
+            "subgraph requests must be http post"
         );
     }
 }

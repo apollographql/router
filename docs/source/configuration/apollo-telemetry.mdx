@@ -1,0 +1,39 @@
+---
+title: Sending Apollo Router usage data to Apollo Studio
+---
+
+The Apollo Router can transmit usage data to Apollo Studio via a reporting agent called **Spaceport**. By default, Spaceport runs automatically as a component _within_ the Apollo Router. Additional details on its modes of operation are provided below.
+
+## Enabling usage reporting
+
+You can enable usage reporting in the Apollo Router by setting the following environment variables:
+
+```bash
+export APOLLO_KEY=<YOUR_GRAPH_API_KEY>
+export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT>
+```
+
+More information on usage reporting is available in the [Studio documentation](/studio/metrics/usage-reporting/).
+
+## Advanced configuration (not recommended)
+
+Spaceport can run either as an internal component of a single Apollo Router instance, or as an external resource shared by _multiple_ router instances.
+
+For the majority of users an internal Spaceport instance is sufficient.
+
+To connect the Apollo Router to an external spaceport specify the endpoint in the config.
+
+```yaml title="router.yaml"
+telemetry:
+  # Optional Apollo telemetry configuration.
+  apollo:
+
+    # Optional external Spaceport URL.
+    # If not specified an in-process spaceport is used.
+    endpoint: "https://my-spaceport"
+
+```
+
+## Running Spaceport externally (not recommended)
+
+Running spaceport as a separate process currently requires building from [source](https://github.com/apollographql/router/tree/main/apollo-spaceport).

@@ -1,0 +1,14 @@
+---
+source: apollo-router-core/src/query_planner/bridge_query_planner.rs
+expression: result.root
+---
+Fetch(
+    FetchNode {
+        service_name: "accounts",
+        requires: [],
+        variable_usages: [],
+        operation: "{me{name{first last}}}",
+        operation_name: None,
+        operation_kind: Query,
+    },
+)

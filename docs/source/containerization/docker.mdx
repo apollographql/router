@@ -1,0 +1,101 @@
+---
+title: Docker and the router
+description: Using docker to run router images
+---
+
+import { Link } from 'gatsby';
+
+The default behaviour of the router images is suitable for a quickstart or development scenario. You'll need to know how to customize this default behaviour if you wish to do any of the following.
+
+> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+
+Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
+
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v0.9.2`
+
+## Override the configuration
+
+If you wish to override the default configuration, then you need to provide the new configuration:
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --mount "type=bind,source=/router.yaml,target=/dist/config/router.yaml" \
+  --rm \
+  ghcr.io/apollographql/router:<image version>
+```
+
+In this case we are mounting a file from our local system's root directory (Note: that path must be absolute) over the top of the default configuration in the image. 
+
+If, for whatever reason, we wish to specify a different location for our configuration, we can:
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --mount "type=bind,source=/router.yaml,target=/tmp/router.yaml" \
+  --rm \
+  ghcr.io/apollographql/router:<image version> -c /tmp/router.yaml
+```
+
+Here, we are mounting our configuration into the /tmp directory and changing the router startup to let it know that it can find configuration in /tmp/router.yaml.
+
+## Debugging your container
+
+If you run the debug image, then it's easy to debug your container:
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --mount "type=bind,source=/router.yaml,target=/dist/config/router.yaml" \
+  --rm \
+  --interactive \
+  --tty \
+  --entrypoint=sh
+  ghcr.io/apollographql/router:<image version>-debug
+/dist # pwd
+/dist
+/dist # ls
+LICENSE        config         router
+README.md      licenses.html  schema
+/dist # exit
+```
+
+In this case, we've added interactive and tty flags and changed the entrypoint of the image to be a shell.
+
+## Specifying the Supergraph
+
+If we don't want to use uplink to retrieve our subgraph, we can manually specify the details.
+
+```bash
+docker run -p 4000:4000 \
+  --mount "type=bind,source=/docker.graphql,target=/dist/schema/local.graphql" \
+  --rm \
+  ghcr.io/apollographql/router:<image version> -c config/router.yaml -s schema/local.graphql
+```
+
+Note: In this example we have to mount the local definition of the supergraph into our image AND specify the location of the file. It doesn't have to be mounted in the /dist/schema directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
+
+## Building your own container
+
+> This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
+
+In the `dockerfiles/diy` directory, we now provide a script, `build_docker_image.sh` which illustrates how to build your own docker images from either our released tarballs or from a git commit hash or tag. Here's how to use it:
+
+```bash
+% ./build_docker_image.sh -h
+Usage: build_docker_image.sh [-b] [<release>]
+	-b build docker image from a repo, if not present build from a released tarball
+	<release> a valid release. If [-b] is specified, this is optional
+	Example 1: Building HEAD from the repo
+		build_docker_image.sh -b
+	Example 2: Building tag from the repo
+		build_docker_image.sh -b v0.9.2
+	Example 3: Building commit hash from the repo
+		build_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5
+	Example 4: Building tag v0.9.2 from the released tarball
+		build_docker_image.sh v0.9.2
+```
+Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [distroless images](https://github.com/GoogleContainerTools/distroless) for the final image build. Feel free to modify the script to use images which better suit your own needs.

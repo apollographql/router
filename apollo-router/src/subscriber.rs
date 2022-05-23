@@ -77,6 +77,7 @@ pub(crate) type BoxedLayer = Box<dyn Layer<RouterSubscriber> + Send + Sync>;
 type FmtSubscriberTextEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 type FmtSubscriberJsonEnv = FmtSubscriber<JsonFields, Format<Json>, EnvFilter>;
 
+/// Choice of JSON or Text output.
 pub enum RouterSubscriber {
     JsonSubscriber(FmtSubscriberJsonEnv),
     TextSubscriber(FmtSubscriberTextEnv),
@@ -216,10 +217,15 @@ impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span
 
 static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
 
+/// Check if the router reloading global subscriber is set.
 pub fn is_global_subscriber_set() -> bool {
     matches!(RELOAD_HANDLE.get(), Some(_))
 }
 
+/// Set the router reloading global subscriber.
+///
+/// The provided subscriber is composed with a reloadable layer so that the default
+/// global subscriber is now reloadable.
 pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {
@@ -245,6 +251,9 @@ pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), Federat
     Ok(())
 }
 
+/// Replace the tracing layer.
+///
+/// Reload the current tracing layer with new_layer.
 pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
     match RELOAD_HANDLE.get() {
         Some(hdl) => {

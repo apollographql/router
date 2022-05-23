@@ -39,6 +39,36 @@ impl Compliance {
         Ok(())
     }
 
+    pub fn run_local(&self) -> Result<()> {
+        eprintln!("Checking generated licenses.html file...");
+
+        cargo!(["deny", "-L", "error", "check"]);
+
+        let licenses_html_before = Self::digest_for_license_file()?;
+
+        cargo!([
+            "about",
+            "-L",
+            "error",
+            "generate",
+            "--workspace",
+            "-o",
+            "licenses.html",
+            "about.hbs",
+        ]);
+
+        let licences_html_after = Self::digest_for_license_file()?;
+
+        (licenses_html_before == licences_html_after).then(|| {
+            eprintln!(
+                "💅 licenses.html is now up to date. 💅\n\
+                Commit the changes and you should be good to go!"
+            );
+        });
+
+        Ok(())
+    }
+
     fn digest_for_license_file() -> Result<Vec<u8>> {
         let mut digest = Sha256::default();
         io::copy(&mut File::open(LICENSES_HTML_PATH)?, &mut digest)?;
