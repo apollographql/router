@@ -914,13 +914,18 @@ impl Rhai {
             // Register Context.upsert()
             .register_result_fn(
                 "upsert",
-                |x: &mut Context, key: &str, value: Dynamic| -> Result<(), Box<EvalAltResult>> {
-                    x.upsert(key, |_v: Dynamic| {
-                        // Note: We are always ignoring the existing value in the map
-                        // I'm not sure if this is the right thing to do, but seems difficult
-                        // to imagine doing anything else from rhai (although, I suppose we
-                        // could provide a callback to rhai...)
-                        value.clone()
+                |context: NativeCallContext,
+                 x: &mut Context,
+                 key: &str,
+                 callback: FnPtr|
+                 -> Result<(), Box<EvalAltResult>> {
+                    x.upsert(key, |v: Dynamic| -> Dynamic {
+                        // Note: Context::upsert() does not allow the callback to fail, although it
+                        // can. If call_within_context() fails, return the original provided
+                        // value.
+                        callback
+                            .call_within_context(&context, (v.clone(),))
+                            .unwrap_or(v)
                     })
                     .map_err(|e: BoxError| e.to_string().into())
                 },
