@@ -4,7 +4,12 @@
 
 use axum::{body::boxed, response::IntoResponse};
 use bytes::Bytes;
-use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method};
+use http::{
+    header::{self, HeaderName},
+    request::Parts,
+    uri::InvalidUri,
+    HeaderValue, Method,
+};
 use multimap::MultiMap;
 use std::{
     cmp::PartialEq,
@@ -314,9 +319,13 @@ impl<T: Clone> Clone for Response<T> {
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
-        let (parts, body) = self.into_parts();
+        let (mut parts, body) = self.into_parts();
         let json_body_bytes =
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
+        parts.headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
     }
