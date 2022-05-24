@@ -484,6 +484,9 @@ impl Telemetry {
             .unwrap_or_default()
         {
             let operation_count = operation_count(&usage_reporting.stats_report_key);
+            let persisted_query_hit = context
+                .get::<_, bool>("persisted_query_hit")
+                .unwrap_or_default();
 
             if context
                 .get(STUDIO_EXCLUDE)
@@ -525,6 +528,7 @@ impl Telemetry {
                                         }
                                         Err(_) => true,
                                     },
+                                    persisted_query_hit,
                                     ..Default::default()
                                 },
                                 ..Default::default()
