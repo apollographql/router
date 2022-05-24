@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 135
+assertion_line: 154
 expression: get_spans()
 ---
 {
@@ -192,6 +192,30 @@ expression: get_spans()
                           [
                             "otel.kind",
                             "client"
+                          ],
+                          [
+                            "otel.status_code",
+                            ""
+                          ],
+                          [
+                            "net.transport",
+                            "ip_tcp"
+                          ],
+                          [
+                            "net.peer.name",
+                            "localhost"
+                          ],
+                          [
+                            "net.peer.port",
+                            4003
+                          ],
+                          [
+                            "http.route",
+                            "/graphql"
+                          ],
+                          [
+                            "otel.status_code",
+                            "OK"
                           ]
                         ],
                         "metadata": {
@@ -202,7 +226,12 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
-                              "otel.kind"
+                              "otel.kind",
+                              "otel.status_code",
+                              "net.peer.name",
+                              "net.peer.port",
+                              "http.route",
+                              "net.transport"
                             ]
                           }
                         }
@@ -309,6 +338,30 @@ expression: get_spans()
                           [
                             "otel.kind",
                             "client"
+                          ],
+                          [
+                            "otel.status_code",
+                            ""
+                          ],
+                          [
+                            "net.transport",
+                            "ip_tcp"
+                          ],
+                          [
+                            "net.peer.name",
+                            "localhost"
+                          ],
+                          [
+                            "net.peer.port",
+                            4002
+                          ],
+                          [
+                            "http.route",
+                            "/graphql"
+                          ],
+                          [
+                            "otel.status_code",
+                            "OK"
                           ]
                         ],
                         "metadata": {
@@ -319,7 +372,12 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
-                              "otel.kind"
+                              "otel.kind",
+                              "otel.status_code",
+                              "net.peer.name",
+                              "net.peer.port",
+                              "http.route",
+                              "net.transport"
                             ]
                           }
                         }
@@ -441,6 +499,30 @@ expression: get_spans()
                               [
                                 "otel.kind",
                                 "client"
+                              ],
+                              [
+                                "otel.status_code",
+                                ""
+                              ],
+                              [
+                                "net.transport",
+                                "ip_tcp"
+                              ],
+                              [
+                                "net.peer.name",
+                                "localhost"
+                              ],
+                              [
+                                "net.peer.port",
+                                4003
+                              ],
+                              [
+                                "http.route",
+                                "/graphql"
+                              ],
+                              [
+                                "otel.status_code",
+                                "OK"
                               ]
                             ],
                             "metadata": {
@@ -451,7 +533,12 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
-                                  "otel.kind"
+                                  "otel.kind",
+                                  "otel.status_code",
+                                  "net.peer.name",
+                                  "net.peer.port",
+                                  "http.route",
+                                  "net.transport"
                                 ]
                               }
                             }
@@ -558,6 +645,30 @@ expression: get_spans()
                               [
                                 "otel.kind",
                                 "client"
+                              ],
+                              [
+                                "otel.status_code",
+                                ""
+                              ],
+                              [
+                                "net.transport",
+                                "ip_tcp"
+                              ],
+                              [
+                                "net.peer.name",
+                                "localhost"
+                              ],
+                              [
+                                "net.peer.port",
+                                4001
+                              ],
+                              [
+                                "http.route",
+                                "/graphql"
+                              ],
+                              [
+                                "otel.status_code",
+                                "OK"
                               ]
                             ],
                             "metadata": {
@@ -568,7 +679,12 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
-                                  "otel.kind"
+                                  "otel.kind",
+                                  "otel.status_code",
+                                  "net.peer.name",
+                                  "net.peer.port",
+                                  "http.route",
+                                  "net.transport"
                                 ]
                               }
                             }
