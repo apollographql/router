@@ -2,10 +2,22 @@ mod common;
 
 use crate::common::TracingTest;
 use crate::common::ValueExt;
+use http::{Request, Response, StatusCode};
+use hyper::{
+    server::Server,
+    service::{make_service_fn, service_fn},
+    Body,
+};
+use opentelemetry::{
+    propagation::TextMapPropagator,
+    trace::{Span, Tracer, TracerProvider},
+};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tower::BoxError;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -19,6 +31,8 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
         opentelemetry_jaeger::Propagator::new(),
         Path::new("jaeger.router.yaml"),
     );
+
+    tokio::task::spawn(subgraph());
 
     for _ in 0..10 {
         let id = router.run_query().await;
@@ -65,7 +79,7 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
     verify_trace_participants(&trace)?;
 
     // Verify that we got the expected span operation names
-    verify_spans_pesent(&trace)?;
+    verify_spans_present(&trace)?;
 
     // Verify that all spans have a path to the root 'client_request' span
     verify_span_parenting(&trace)?;
@@ -125,7 +139,7 @@ fn verify_trace_participants(trace: &Value) -> Result<(), BoxError> {
     Ok(())
 }
 
-fn verify_spans_pesent(trace: &Value) -> Result<(), BoxError> {
+fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
     let operation_names: HashSet<String> = trace
         .select_path("$..operationName")?
         .into_iter()
@@ -199,4 +213,60 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
                 .next()
         })
         .next()
+}
+
+// starts a local server emulating the products subgraph
+async fn subgraph() {
+    async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
+        // create the opentelemetry-jaeger tracing infrastructure
+        let tracer_provider = opentelemetry_jaeger::new_pipeline()
+            .with_service_name("products")
+            .build_simple()
+            .unwrap();
+        let tracer = tracer_provider.tracer("products");
+
+        //extract the trace id from headers and create a child span from it
+        println!("headers: {:?}", request.headers());
+        assert!(
+            request.headers().get("uber-trace-id").is_some(),
+            "the uber-trace-id is absent, trace propagation is broken"
+        );
+
+        let headers: HashMap<String, String> = request
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let context = opentelemetry_jaeger::Propagator::new().extract(&headers);
+        let mut span = tracer.start_with_context("HTTP POST", &context);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        span.end_with_timestamp(SystemTime::now());
+        println!("flush result: {:?}", tracer_provider.force_flush());
+
+        // send the response
+        let body_bytes = hyper::body::to_bytes(request.into_body()).await.unwrap();
+        assert_eq!(
+            r#"{"query":"{topProducts{name}}"}"#,
+            std::str::from_utf8(&body_bytes).unwrap()
+        );
+        Ok(Response::builder()
+            .header("Content-Type", "application/json")
+            .status(StatusCode::OK)
+            .body(
+                r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
+                    .into(),
+            )
+            .unwrap())
+    }
+
+    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+    let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
+    if let Err(e) = server.await {
+        eprintln!("server error: {}", e);
+    }
 }
