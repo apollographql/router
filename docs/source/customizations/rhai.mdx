@@ -41,6 +41,11 @@ The main source of information about Rhai is the book (see above). That's where 
 
 This section covers functionality that the router explicitly exposes to Rhai.
 
+> **Deadlocks** The router requires that its rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within rhai could cause a deadlock. This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this a local copy of the required data is obtained and used in the closure.
+
+
+
+
 ### Global State
 
 The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
