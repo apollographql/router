@@ -1,4 +1,4 @@
-//! garypen@Garys-MBP router % curl -v \
+//! % curl -v \
 //!    --header 'content-type: application/json' \
 //!    --cookie 'yummy_cookie=choco' \
 //!    --cookie 'tasty_cookie=strawberry' \
