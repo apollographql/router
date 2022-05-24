@@ -57,6 +57,7 @@ async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
                 return Ok(());
             }
             Err(e) => {
+                println!("error: {}", e);
                 tracing::warn!("{}", e);
             }
         }
