@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v6.{{ checksum "rust-toolchain.toml" }}
+    default: v7.{{ checksum "rust-toolchain.toml" }}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -295,7 +295,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo xtask test --no-demo
+      - run: cargo test --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -317,7 +317,7 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
-      - run: cargo xtask test --no-demo
+      - run: cargo test --locked
 
       - save_cache:
           name: Save .cargo
