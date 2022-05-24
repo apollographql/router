@@ -289,7 +289,7 @@ commands:
       - run:
           name: Start jaeger
           background: true
-          command: jaeger.exe
+          command: jaeger\jaeger-all-in-one.exe
       - restore_cache:
           name: Restore .cargo
           keys:
@@ -310,7 +310,7 @@ commands:
       - run:
           name: Start jaeger
           background: true
-          command: ./jaeger
+          command: ./jaeger/jaeger-all-in-one
       - restore_cache:
           name: Restore .cargo
           keys:
