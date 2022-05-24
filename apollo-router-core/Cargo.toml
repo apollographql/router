@@ -13,7 +13,7 @@ publish = false
 failfast = []
 
 [dependencies]
-apollo-parser = {git="https://github.com/apollographql/apollo-rs.git", tag="hotfix_227"}
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", tag = "hotfix_227" }
 async-trait = "0.1.53"
 atty = "0.2.14"
 axum = { version = "0.5.4" }
@@ -43,7 +43,9 @@ opentelemetry-http = "0.6.0"
 paste = "1.0.6"
 regex = "1.5.5"
 router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "46fdeb35aa3d3f3289ff0dbbccf63c1234da92a8" }
-schemars = { version = "=0.8.8", features = ["url"] } # https://github.com/apollographql/router/issues/1074
+schemars = { version = "0.8.10", features = [
+    "url",
+] } # https://github.com/apollographql/router/issues/1074
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
