@@ -570,7 +570,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use apollo_router_core::http_compat::Request;
-    use http::header::CONTENT_TYPE;
+    use http::header::{self, CONTENT_TYPE};
     use mockall::mock;
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -852,6 +852,11 @@ mod tests {
             .unwrap()
             .error_for_status()
             .unwrap();
+
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
 
         assert_eq!(
             response.json::<graphql::Response>().await.unwrap(),
