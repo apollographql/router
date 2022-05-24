@@ -15,44 +15,29 @@ use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::Duration;
+use tokio::{net::TcpListener, sync::mpsc::error::TrySendError};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
 
-type QueuedReports = Arc<Mutex<Vec<ReporterRequest>>>;
-
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
-static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
-static TRIGGER_BATCH_LIMIT: u32 = 50; // TODO: arbitrary but it seems to work :D
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
 pub struct ReportSpaceport {
     shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     listener: Option<TcpListener>,
     addr: SocketAddr,
-    // This vec will contains all queued reports to send.
-    // Previously we were doing some aggregation on metrics in Spaceport, but for now this has been removed.
-    // Each report potentially contains details about the machine that the report came from, so we would
-    // have to think about if aggregation is really appropriate at the Spaceport level.
-    queued_reports: QueuedReports,
-    tx: Sender<()>,
-    total: Arc<AtomicU32>,
+    tx: Sender<ReporterRequest>,
 }
 
 impl ReportSpaceport {
     /// Create a new ReportSpaceport which is configured to serve requests at the
     /// supplied address
     ///
-    /// The spaceport will buffer data and attempt to transfer it to the Apollo Ingress
-    /// every 5 seconds. This transfer will be triggered sooner if data is
-    /// accumulating more quickly than usual.
+    /// The spaceport will transfer reports to the Apollo Ingress.
     ///
     /// The spaceport will attempt to make the transfer 5 times before failing. If
     /// the spaceport fails, the data is discarded.
@@ -63,43 +48,27 @@ impl ReportSpaceport {
         let listener = TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
 
-        // Spawn a task which will check if there are reports to
-        // submit every interval.
-        let queued_reports: QueuedReports = Arc::new(Mutex::new(Vec::new()));
-        let task_queued_reports = queued_reports.clone();
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(10);
-        let total = Arc::new(AtomicU32::new(0u32));
-        let task_total = total.clone();
+        // Spawn a task which will transmit reports
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ReporterRequest>(1024);
+
         tokio::task::spawn(async move {
             let client = Client::new();
-            let mut interval = interval(INGRESS_CLOCK_TICK);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            interval.tick().await;
-            loop {
-                tokio::select! {
-                    biased;
-                    mopt = rx.recv() => {
-                        tracing::debug!("spaceport triggered");
-                        match mopt {
-                            Some(_msg) => process_all_reports(&client, task_queued_reports.clone()).await,
-                            None => break
-                        }
-                    },
-                    _ = interval.tick() => {
-                        tracing::trace!("spaceport ticked");
-                        task_total.store(0, Ordering::SeqCst);
-                        process_all_reports(&client, task_queued_reports.clone()).await;
+            while let Some(report) = rx.recv().await {
+                if let Some(report_to_send) = report.report {
+                    match ReportSpaceport::submit_report(&client, report.apollo_key, report_to_send)
+                        .await
+                    {
+                        Ok(v) => tracing::debug!("report submission succeeded: {:?}", v),
+                        Err(e) => tracing::error!("report submission failed: {}", e),
                     }
-                };
+                }
             }
         });
         Ok(Self {
             shutdown_signal,
             listener: Some(listener),
             addr,
-            queued_reports,
             tx,
-            total,
         })
     }
 
@@ -228,69 +197,15 @@ impl ReportSpaceport {
         &self,
         report: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
-        let mut queued_reports = self.queued_reports.lock().await;
-        queued_reports.push(report);
-        // Drop the graph_usage lock to maximise concurrency
-        drop(queued_reports);
-
-        // This is inherently both imprecise and racy, but it doesn't matter
-        // because we are just hinting to the spaceport that it's probably a
-        // good idea to try to transfer data up to the ingress. Multiple
-        // notifications just trigger more transfers.
-        //
-        // TRIGGER_BATCH_LIMIT is a fairly arbitrary number which indicates
-        // that we are adding a lot of data for transfer. It is derived
-        // empirically from load testing.
-        let total = self.total.fetch_add(1, Ordering::SeqCst);
-        if total > TRIGGER_BATCH_LIMIT {
-            match self.tx.send(()).await {
-                Ok(_v) => {
-                    self.total.store(0, Ordering::SeqCst);
-                }
-                Err(e) => {
-                    // Not being able to trigger a transfer isn't an "error". We can
-                    // let the client know that the transfer was Ok and hope that the
-                    // backend server eventually catches up with the workload and
-                    // clears the incoming trigger messages.
-                    tracing::warn!("could not trigger transfer: {}", e);
-                }
+        match self.tx.try_send(report) {
+            Ok(()) => {
+                let response = ReporterResponse {
+                    message: "Report accepted".to_string(),
+                };
+                Ok(Response::new(response))
             }
-        }
-
-        let response = ReporterResponse {
-            message: "Report accepted".to_string(),
-        };
-        Ok(Response::new(response))
-    }
-}
-
-async fn process_all_reports(client: &Client, queued_reports: QueuedReports) {
-    for result in process_reports(client, queued_reports).await {
-        match result {
-            Ok(v) => tracing::debug!("report submission succeeded: {:?}", v),
-            Err(e) => tracing::error!("report submission failed: {}", e),
+            Err(TrySendError::Closed(_)) => Err(Status::internal("channel closed")),
+            Err(TrySendError::Full(_)) => Err(Status::resource_exhausted("channel full")),
         }
     }
-}
-
-async fn process_reports(
-    client: &Client,
-    queued_reports: QueuedReports,
-) -> Vec<Result<Response<ReporterResponse>, Status>> {
-    let mut all_entries = queued_reports.lock().await;
-    let drained = std::mem::take(&mut *all_entries);
-    // Release the lock ASAP so that clients can continue to add data
-    drop(all_entries);
-    let mut results = Vec::with_capacity(drained.len());
-    tracing::debug!("submitting: {} reports", drained.len());
-    for report in drained {
-        if let Some(report_to_send) = report.report {
-            results.push(
-                ReportSpaceport::submit_report(client, report.apollo_key, report_to_send).await,
-            )
-        } else {
-            results.push(Err(Status::internal("missing report")));
-        }
-    }
-    results
 }

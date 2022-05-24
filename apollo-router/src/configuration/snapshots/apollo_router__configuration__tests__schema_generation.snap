@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 702
+assertion_line: 687
 expression: "&schema"
 ---
 {
@@ -300,6 +300,7 @@ expression: "&schema"
           "additionalProperties": false
         },
         "experimental.rhai": {
+          "description": "Configuration for the Rhai Plugin",
           "type": "object",
           "required": [
             "filename"
@@ -464,16 +465,6 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
-            "apollo_graph_ref": {
-              "default": "${APOLLO_GRAPH_REF}",
-              "type": "string",
-              "nullable": true
-            },
-            "apollo_key": {
-              "default": "${APOLLO_KEY}",
-              "type": "string",
-              "nullable": true
-            },
             "client_name_header": {
               "default": "apollographql-client-name",
               "type": "string",
@@ -486,7 +477,6 @@ expression: "&schema"
             },
             "endpoint": {
               "type": "string",
-              "format": "uri",
               "nullable": true
             }
           },
@@ -532,18 +522,7 @@ expression: "&schema"
               ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "type": "string"
                 },
                 "grpc": {
                   "type": "object",
@@ -701,23 +680,10 @@ expression: "&schema"
           "properties": {
             "datadog": {
               "type": "object",
-              "required": [
-                "endpoint"
-              ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "default": "default",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
@@ -761,8 +727,7 @@ expression: "&schema"
                       ],
                       "properties": {
                         "endpoint": {
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "type": "string",
@@ -797,18 +762,7 @@ expression: "&schema"
               ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "type": "string"
                 },
                 "grpc": {
                   "type": "object",

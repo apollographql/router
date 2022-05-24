@@ -6,8 +6,9 @@ use std::cmp::Eq;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::broadcast::{self, Sender};
+use tokio::sync::oneshot;
 
 /// A caching map optimised for slow value resolution.
 ///
@@ -22,7 +23,7 @@ pub struct CachingMap<K, V> {
     cached: Mutex<LruCache<K, Result<V, CacheResolverError>>>,
     #[allow(clippy::type_complexity)]
     #[derivative(Debug = "ignore")]
-    wait_map: Mutex<HashMap<K, Weak<Sender<(K, Result<V, CacheResolverError>)>>>>,
+    wait_map: Arc<Mutex<HashMap<K, Sender<(K, Result<V, CacheResolverError>)>>>>,
     cache_limit: usize,
     #[derivative(Debug = "ignore")]
     resolver: Box<dyn CacheResolver<K, V> + Send + Sync>,
@@ -41,7 +42,7 @@ where
     pub fn new(resolver: Box<(dyn CacheResolver<K, V> + Send + Sync)>, cache_limit: usize) -> Self {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
-            wait_map: Mutex::new(HashMap::new()),
+            wait_map: Arc::new(Mutex::new(HashMap::new())),
             cache_limit,
             resolver,
         }
@@ -79,16 +80,7 @@ where
 
         loop {
             match locked_wait_map.get_mut(&key) {
-                Some(weak_waiter) => {
-                    // Try to upgrade our weak Arc. If we can't, the sender must have
-                    // been cancelled, so remove the entry from the map and try again.
-                    let waiter = match Weak::upgrade(weak_waiter) {
-                        Some(waiter) => waiter,
-                        None => {
-                            locked_wait_map.remove(&key);
-                            continue;
-                        }
-                    };
+                Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
@@ -106,24 +98,32 @@ where
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
-                    let tx = Arc::new(tx);
-                    locked_wait_map.insert(key.clone(), Arc::downgrade(&tx));
+                    locked_wait_map.insert(key.clone(), tx.clone());
                     drop(locked_wait_map);
-                    // This is the potentially high duration operation where we ask our resolver to
-                    // resolve the key (retrieve a value) for us
-                    // No cache locks are held here
-                    let value = self.resolver.retrieve(key.clone()).await;
 
-                    // this is a separate block used to release the locks after editing the cache and wait map,
-                    // but before broadcasting the value
-                    {
+                    let value = {
+                        // when _drop_signal is dropped, either by getting out of the block, returning
+                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
+                        // return with Err(), then we remove the entry from the wait map
+                        let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
+                        let wait_map = self.wait_map.clone();
+                        let k = key.clone();
+                        tokio::task::spawn(async move {
+                            let _ = drop_sentinel.await;
+                            let mut locked_wait_map = wait_map.lock().await;
+                            locked_wait_map.remove(&k);
+                        });
+
+                        // This is the potentially high duration operation where we ask our resolver to
+                        // resolve the key (retrieve a value) for us
+                        // No cache locks are held here
+                        let value = self.resolver.retrieve(key.clone()).await;
+
                         // Update our cache
                         let mut locked_cache = self.cached.lock().await;
                         locked_cache.put(key.clone(), value.clone());
-                        // Update our wait list
-                        let mut locked_wait_map = self.wait_map.lock().await;
-                        locked_wait_map.remove(&key);
-                    }
+                        value
+                    };
 
                     // Let our waiters know
                     let broadcast_value = value.clone();

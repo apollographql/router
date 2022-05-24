@@ -9,14 +9,15 @@ use url::Url;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[schemars(with = "Option<String>")]
     pub endpoint: Option<Url>,
 
-    #[schemars(with = "Option<String>", default = "apollo_key_env_str")]
-    #[serde(default = "apollo_key")]
+    #[schemars(skip)]
+    #[serde(skip, default = "apollo_key")]
     pub apollo_key: Option<String>,
 
-    #[schemars(with = "Option<String>", default = "apollo_graph_ref_env_str")]
-    #[serde(default = "apollo_graph_reference")]
+    #[schemars(skip)]
+    #[serde(skip, default = "apollo_graph_reference")]
     pub apollo_graph_ref: Option<String>,
 
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
@@ -37,14 +38,6 @@ pub struct Config {
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
     pub(crate) schema_id: String,
-}
-
-fn apollo_key_env_str() -> Option<String> {
-    Some("${APOLLO_KEY}".to_string())
-}
-
-fn apollo_graph_ref_env_str() -> Option<String> {
-    Some("${APOLLO_GRAPH_REF}".to_string())
 }
 
 fn apollo_key() -> Option<String> {

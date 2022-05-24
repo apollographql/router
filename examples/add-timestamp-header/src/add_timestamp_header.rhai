@@ -6,10 +6,10 @@
 fn router_service(service) {
     print("registering callbacks for operation timing");
 
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
 
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 

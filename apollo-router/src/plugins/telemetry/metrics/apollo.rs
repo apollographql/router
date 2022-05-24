@@ -4,11 +4,11 @@ use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
 use crate::stream::StreamExt;
-use apollo_spaceport::{Reporter, ReporterError};
+use apollo_spaceport::{ReportHeader, Reporter, ReporterError};
 use async_trait::async_trait;
+use deadpool::managed::Pool;
 use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
-use futures_batch::ChunksTimeoutStreamExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use studio::Report;
@@ -20,7 +20,6 @@ use url::Url;
 mod duration_histogram;
 pub(crate) mod studio;
 
-const DEFAULT_BATCH_SIZE: usize = 65_536;
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 
 #[derive(Clone)]
@@ -124,7 +123,7 @@ impl ApolloMetricsExporter {
         // * If we cannot connect to spaceport metrics are discarded and a warning raised.
         // * When the stream of metrics finishes we terminate the thread.
         // * If the exporter is dropped the remaining records are flushed.
-        let (tx, rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
 
         let header = apollo_spaceport::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
@@ -153,44 +152,67 @@ impl ApolloMetricsExporter {
 
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
-            // We want to collect stats into batches, but also send periodically if a batch is not filled.
-            // This implementation is not ideal as we do have to store all the data when really it could be folded as it is generated.
-            // But in the interested of getting something over the line quickly let's go with this as it is simple to understand.
-            rx.chunks_timeout(DEFAULT_BATCH_SIZE, Duration::from_secs(10))
-                .for_each(|reports| async {
-                    let aggregated_report = Report::new(reports);
+            let timeout = tokio::time::interval(Duration::from_secs(5));
+            let mut report = Report::default();
+            tokio::pin!(timeout);
 
-                    match pool.get().await {
-                        Ok(mut reporter) => {
-                            let report = aggregated_report.into_report(header.clone());
-                            match reporter
-                                .submit(apollo_spaceport::ReporterRequest {
-                                    apollo_key: apollo_key.clone(),
-                                    report: Some(report),
-                                })
-                                .await
-                            {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    tracing::warn!("failed to submit stats to spaceport: {}", e);
-                                }
-                            };
+            loop {
+                tokio::select! {
+                    single_report = rx.next() => {
+                        if let Some(r) = single_report {
+                            report += r;
+                        } else {
+                            break;
                         }
-                        Err(err) => {
-                            tracing::warn!(
-                                "stats discarded as unable to get connection to spaceport: {}",
-                                err
-                            );
-                        }
-                    };
-                })
-                .await;
+                       },
+                    _ = timeout.tick() => {
+                        Self::send_report(&pool, &apollo_key, &header, std::mem::take(&mut report)).await;
+                    }
+                };
+            }
+
+            Self::send_report(&pool, &apollo_key, &header, report).await;
         });
         Ok(ApolloMetricsExporter { tx })
     }
 
     pub(crate) fn provider(&self) -> Sender {
         Sender::Spaceport(self.tx.clone())
+    }
+
+    async fn send_report(
+        pool: &Pool<ReporterManager>,
+        apollo_key: &str,
+        header: &ReportHeader,
+        report: Report,
+    ) {
+        if report.operation_count == 0 {
+            return;
+        }
+
+        match pool.get().await {
+            Ok(mut reporter) => {
+                let report = report.into_report(header.clone());
+                match reporter
+                    .submit(apollo_spaceport::ReporterRequest {
+                        apollo_key: apollo_key.to_string(),
+                        report: Some(report),
+                    })
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!("failed to submit stats to spaceport: {}", e);
+                    }
+                };
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "stats discarded as unable to get connection to spaceport: {}",
+                    err
+                );
+            }
+        };
     }
 }
 

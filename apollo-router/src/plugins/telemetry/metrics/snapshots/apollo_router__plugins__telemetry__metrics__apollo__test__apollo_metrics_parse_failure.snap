@@ -17,7 +17,7 @@ expression: results
               "nanos": 100000000
             },
             "cache_hit": false,
-            "persisted_query_hit": false,
+            "persisted_query_hit": null,
             "cache_latency": null,
             "root_error_stats": {
               "children": {},

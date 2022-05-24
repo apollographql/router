@@ -20,7 +20,7 @@ fn router_service(service) {
 // responses. We are using a function here, but we could use a
 // closure if we chose (see router_service).
 fn execution_service(service) {
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 

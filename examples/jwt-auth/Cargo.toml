@@ -12,7 +12,7 @@ async-trait = "0.1.53"
 hex = "0.4.3"
 http = "0.2.6"
 jwt-simple = "0.10.8"
-schemars = "0.8.8"
+schemars = { version = "0.8.10", features = ["url"] }
 serde = "1.0.136"
 serde_json = "1.0.79"
 strum = { version = "0.24.0", features = ["derive"] }

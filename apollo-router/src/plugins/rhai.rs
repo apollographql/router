@@ -6,7 +6,8 @@ use apollo_router_core::{
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::{HeaderMap, StatusCode};
+use http::uri::{Parts, PathAndQuery};
+use http::{HeaderMap, StatusCode, Uri};
 use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
 use schemars::JsonSchema;
@@ -19,7 +20,7 @@ use std::{
 };
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
-pub trait Accessor<Access>: Send {
+pub(crate) trait Accessor<Access>: Send {
     fn accessor(&self) -> &Access;
 
     fn accessor_mut(&mut self) -> &mut Access;
@@ -65,33 +66,33 @@ mod router_plugin_mod {
                 $(
             paste::paste! {
 
-                pub fn [<get_context_ $base _request>](
+                pub(crate) fn [<get_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Context, Box<EvalAltResult>> {
                     obj.with_mut(get_context)
                 }
 
-                pub fn [<get_context_ $base _response>](
+                pub(crate) fn [<get_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
                 ) -> Result<Context, Box<EvalAltResult>> {
                     obj.with_mut(get_context)
                 }
 
-                pub fn [<insert_context_ $base _request>](
+                pub(crate) fn [<insert_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     context: Context
                 ) -> Result<(), Box<EvalAltResult>> {
                     obj.with_mut(|request| insert_context(request, context))
                 }
 
-                pub fn [<insert_context_ $base _response>](
+                pub(crate) fn [<insert_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
                     context: Context
                 ) -> Result<(), Box<EvalAltResult>> {
                     obj.with_mut(|response| insert_context(response, context))
                 }
 
-                pub fn [<get_originating_headers_ $base _request>](
+                pub(crate) fn [<get_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<HeaderMap, Box<EvalAltResult>> {
                     obj.with_mut(get_originating_headers)
@@ -102,13 +103,19 @@ mod router_plugin_mod {
                 // of <Type>Response means this isn't currently possible.
                 // We could revisit this later if these structures are re-shaped.
 
-                pub fn [<get_originating_body_ $base _request>](
+                pub(crate) fn [<get_originating_body_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Request, Box<EvalAltResult>> {
                     obj.with_mut(get_originating_body)
                 }
 
-                pub fn [<set_originating_headers_ $base _request>](
+                pub(crate) fn [<get_originating_uri_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                ) -> Result<Uri, Box<EvalAltResult>> {
+                    obj.with_mut(get_originating_uri)
+                }
+
+                pub(crate) fn [<set_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     headers: HeaderMap
                 ) -> Result<(), Box<EvalAltResult>> {
@@ -120,28 +127,34 @@ mod router_plugin_mod {
                 // of <Type>Response means this isn't currently possible.
                 // We could revisit this later if these structures are re-shaped.
 
-                pub fn [<set_originating_body_ $base _request>](
+                pub(crate) fn [<set_originating_body_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     body: Request
                 ) -> Result<(), Box<EvalAltResult>> {
                     obj.with_mut(|request| set_originating_body(request, body))
                 }
 
+                pub(crate) fn [<set_originating_uri_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    uri: Uri
+                ) -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| set_originating_uri(request, uri))
+                }
             }
                 )*
             }
         };
     }
 
-    #[rhai_fn(get = "sub_headers", return_raw)]
-    pub fn get_subgraph_headers(
+    #[rhai_fn(get = "sub_headers", pure, return_raw)]
+    pub(crate) fn get_subgraph_headers(
         obj: &mut SharedSubgraphRequest,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         obj.with_mut(|request| Ok(request.subgraph_request.headers().clone()))
     }
 
     #[rhai_fn(set = "sub_headers", return_raw)]
-    pub fn set_subgraph_headers(
+    pub(crate) fn set_subgraph_headers(
         obj: &mut SharedSubgraphRequest,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -151,50 +164,50 @@ mod router_plugin_mod {
         })
     }
 
-    #[rhai_fn(get = "headers", return_raw)]
-    pub fn get_originating_headers_router_response(
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         obj.with_mut(get_originating_headers_response_response_body)
     }
 
-    #[rhai_fn(get = "headers", return_raw)]
-    pub fn get_originating_headers_execution_response(
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_execution_response(
         obj: &mut SharedExecutionResponse,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         obj.with_mut(get_originating_headers_response_response)
     }
 
-    #[rhai_fn(get = "headers", return_raw)]
-    pub fn get_originating_headers_subgraph_response(
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_subgraph_response(
         obj: &mut SharedSubgraphResponse,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         obj.with_mut(get_originating_headers_response_response)
     }
 
-    #[rhai_fn(get = "body", return_raw)]
-    pub fn get_originating_body_router_response(
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_router_response(
         obj: &mut SharedRouterResponse,
     ) -> Result<ResponseBody, Box<EvalAltResult>> {
         obj.with_mut(get_originating_body_response_response_body)
     }
 
-    #[rhai_fn(get = "body", return_raw)]
-    pub fn get_originating_body_execution_response(
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_execution_response(
         obj: &mut SharedExecutionResponse,
     ) -> Result<Response, Box<EvalAltResult>> {
         obj.with_mut(get_originating_body_response_response)
     }
 
-    #[rhai_fn(get = "body", return_raw)]
-    pub fn get_originating_body_subgraph_response(
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_subgraph_response(
         obj: &mut SharedSubgraphResponse,
     ) -> Result<Response, Box<EvalAltResult>> {
         obj.with_mut(get_originating_body_response_response)
     }
 
     #[rhai_fn(set = "headers", return_raw)]
-    pub fn set_originating_headers_router_response(
+    pub(crate) fn set_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -202,7 +215,7 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "headers", return_raw)]
-    pub fn set_originating_headers_execution_response(
+    pub(crate) fn set_originating_headers_execution_response(
         obj: &mut SharedExecutionResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -210,7 +223,7 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "headers", return_raw)]
-    pub fn set_originating_headers_subgraph_response(
+    pub(crate) fn set_originating_headers_subgraph_response(
         obj: &mut SharedSubgraphResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -218,7 +231,7 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "body", return_raw)]
-    pub fn set_originating_body_router_response(
+    pub(crate) fn set_originating_body_router_response(
         obj: &mut SharedRouterResponse,
         body: ResponseBody,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -226,7 +239,7 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "body", return_raw)]
-    pub fn set_originating_body_execution_response(
+    pub(crate) fn set_originating_body_execution_response(
         obj: &mut SharedExecutionResponse,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -234,12 +247,14 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "body", return_raw)]
-    pub fn set_originating_body_subraph_response(
+    pub(crate) fn set_originating_body_subraph_response(
         obj: &mut SharedSubgraphResponse,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| set_originating_body_response_response(response, body))
     }
+
+    // Generic Trait Object accessors used by various shared type objects above
 
     fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.accessor().clone())
@@ -263,6 +278,12 @@ mod router_plugin_mod {
         obj: &mut T,
     ) -> Result<Request, Box<EvalAltResult>> {
         Ok(obj.accessor().body().clone())
+    }
+
+    fn get_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+    ) -> Result<Uri, Box<EvalAltResult>> {
+        Ok(obj.accessor().uri().clone())
     }
 
     fn get_originating_headers_response_response_body<
@@ -306,6 +327,14 @@ mod router_plugin_mod {
         body: Request,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().body_mut() = body;
+        Ok(())
+    }
+
+    fn set_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+        uri: Uri,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().uri_mut() = uri;
         Ok(())
     }
 
@@ -360,12 +389,14 @@ mod router_plugin_mod {
     gen_rhai_interface!(router, query_planner, execution, subgraph);
 }
 
+/// Plugin which implements Rhai functionality
 #[derive(Default, Clone)]
 pub struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
 }
 
+/// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Conf {
@@ -718,6 +749,16 @@ macro_rules! register_rhai_interface {
                 router_plugin_mod::router_generated_mod::[<set_originating_body_ $base _request>],
             );
 
+            $engine.register_get_result(
+                "uri",
+                router_plugin_mod::router_generated_mod::[<get_originating_uri_ $base _request>],
+            );
+
+            $engine.register_set_result(
+                "uri",
+                router_plugin_mod::router_generated_mod::[<set_originating_uri_ $base _request>],
+            );
+
             }
 
         )*
@@ -831,6 +872,7 @@ impl Rhai {
             .register_type::<Response>()
             .register_type::<Value>()
             .register_type::<Error>()
+            .register_type::<Uri>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -840,8 +882,6 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
-            // Register "==" for Error so Vec<Error> can be interacted with
-            .register_fn("==", |this: &mut Error, that: Error| this == &that)
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
                 let search_name =
@@ -910,6 +950,30 @@ impl Rhai {
             })
             .register_set_result("extensions", |x: &mut Request, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
+                Ok(())
+            })
+            // Request.uri.path
+            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path()))
+            .register_set_result("path", |x: &mut Uri, value: &str| {
+                // Because there is no simple way to update parts on an existing
+                // Uri (no parts_mut()), then we need to create a new Uri from our
+                // existing parts, preserving any query, and update our existing
+                // Uri.
+                let mut parts: Parts = x.clone().into_parts();
+                parts.path_and_query = match parts
+                    .path_and_query
+                    .ok_or("path and query are missing")?
+                    .query()
+                {
+                    Some(query) => Some(
+                        PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
+                            .map_err(|e| e.to_string())?,
+                    ),
+                    None => {
+                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
+                    }
+                };
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
             // ResponseBody "short-cuts" to bypass the enum
@@ -1064,6 +1128,9 @@ impl Rhai {
             // Default representation in rhai is the "type", so
             // we need to register a to_string function for all our registered
             // types so we can interact meaningfully with them.
+            .register_fn("to_string", |x: &mut Context| -> String {
+                format!("{:?}", x)
+            })
             .register_fn("to_string", |x: &mut Option<HeaderName>| -> String {
                 match x {
                     Some(v) => v.to_string(),
@@ -1111,9 +1178,6 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Response| -> String {
                 format!("{:?}", x)
             })
-            .register_fn("to_string", |x: &mut Vec<Error>| -> String {
-                format!("{:?}", x)
-            })
             .register_fn("to_string", |x: &mut Error| -> String {
                 format!("{:?}", x)
             })
@@ -1122,7 +1186,8 @@ impl Rhai {
             })
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
-            });
+            })
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
 
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 

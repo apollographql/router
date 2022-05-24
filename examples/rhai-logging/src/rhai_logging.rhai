@@ -18,27 +18,27 @@
 // At the router_service stage, register callbacks for processing requests and
 // responses.
 fn router_service(service) {
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 
 // At the query_planner_service stage, register callbacks for processing requests and
 // responses.
 fn query_planner_service(service) {
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 
 // At the execution_service stage, register callbacks for processing requests and
 // responses.
 fn execution_service(service) {
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 
@@ -46,9 +46,9 @@ fn execution_service(service) {
 // responses.
 fn subgraph_service(service, subgraph) {
     print(`in subgraph ${subgraph}`);
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
-    let response_callback = Fn("process_response");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 
