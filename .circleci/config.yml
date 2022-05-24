@@ -42,9 +42,6 @@ common_job_environment: &common_job_environment
   NPM_VERSION: 7.10.0
 
 commands:
-  initialize_submodules:
-    steps:
-      - run: git submodule update --recursive --init
 
   linux_install_baseline:
     steps:
@@ -406,7 +403,6 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      #- initialize_submodules
       - when:
           condition:
             equal: [*rust_linux_executor, << parameters.platform >>]
