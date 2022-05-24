@@ -5,15 +5,15 @@ use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::{
     header::{ACCEPT, CONTENT_TYPE},
-    HeaderValue, StatusCode,
+    HeaderValue,
 };
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
-use opentelemetry::global;
+use opentelemetry::{global, trace::SpanKind};
 use std::sync::Arc;
 use std::task::Poll;
 use tower::{BoxError, ServiceBuilder};
-use tracing::{field::display, Instrument, Span};
+use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Client for interacting with subgraphs.
@@ -78,23 +78,27 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
             });
 
             let schema_uri = request.uri();
-            let current_span = Span::current();
-            if let Some(host) = schema_uri.host() {
-                current_span.record("net.peer.name", &display(host));
-            }
-            if let Some(port) = schema_uri.port_u16() {
-                current_span.record("net.peer.port", &port);
-            }
-            current_span.record("http.route", &display(schema_uri.path()));
+            let host = schema_uri.host().map(String::from).unwrap_or_default();
+            let port = schema_uri.port_u16().unwrap_or_default();
+            let path = schema_uri.path().to_string();
+            let response = client
+                .call(request)
+                .instrument(tracing::info_span!("subgraph_request",
+                    "otel.kind" = %SpanKind::Client,
+                    "net.peer.name" = &display(host),
+                    "net.peer.port" = &display(port),
+                    "http.route" = &display(path),
+                    "net.transport" = "ip_tcp"
+                ))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-            let response = client.call(request).await.map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
-
-                graphql::FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: err.to_string(),
-                }
-            })?;
+                    graphql::FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
 
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
@@ -109,17 +113,6 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-            if parts.status >= StatusCode::BAD_REQUEST {
-                current_span.record(
-                    "otel.status_code",
-                    &opentelemetry::trace::StatusCode::Error.as_str(),
-                );
-            } else {
-                current_span.record(
-                    "otel.status_code",
-                    &opentelemetry::trace::StatusCode::Ok.as_str(),
-                );
-            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {

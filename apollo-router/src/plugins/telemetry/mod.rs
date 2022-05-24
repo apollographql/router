@@ -38,7 +38,6 @@ use std::time::{Duration, Instant};
 use tower::steer::Steer;
 use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
-use tracing_core::field;
 use url::Url;
 
 pub mod apollo;
@@ -287,12 +286,7 @@ impl Plugin for Telemetry {
             .instrument(move |_| {
                 info_span!("subgraph",
                     name = name.as_str(),
-                    "otel.kind" = %SpanKind::Client,
-                    "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                    "net.peer.name" = &field::Empty,
-                    "net.peer.port" = &field::Empty,
-                    "http.route" = &field::Empty,
-                    "net.transport" = "ip_tcp"
+                    "otel.kind" = %SpanKind::Internal,
                 )
             })
             .service(service)
