@@ -275,21 +275,6 @@ pub struct Server {
     #[serde(default = "default_endpoint")]
     #[builder(default_code = "default_endpoint()", setter(into))]
     pub endpoint: String,
-
-    /// Experimental configuration
-    #[serde(default)]
-    #[builder(default)]
-    pub experimental: Option<Experimental>,
-}
-
-/// Experimental configuration to configure unstable features/optimizations
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Experimental {
-    /// Enable variable deduplication optimization (https://github.com/apollographql/router/issues/87)
-    #[serde(default)]
-    #[builder(default)]
-    pub enable_variable_deduplication: bool,
 }
 
 /// Listening address.

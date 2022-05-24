@@ -1,10 +1,10 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
+use apollo_router_core::prelude::*;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
 };
-use apollo_router_core::{prelude::*, QueryPlanOptions};
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
@@ -62,17 +62,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();
-        }
-        if configuration
-            .server
-            .experimental
-            .as_ref()
-            .map(|e| e.enable_variable_deduplication)
-            .unwrap_or(false)
-        {
-            builder = builder.with_query_plan_options(QueryPlanOptions {
-                enable_variable_deduplication: true,
-            });
         }
 
         for (name, _) in schema.subgraphs() {

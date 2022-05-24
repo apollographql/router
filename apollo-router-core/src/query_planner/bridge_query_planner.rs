@@ -53,7 +53,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         "presence of a query has been checked by the RouterService before; qed",
                     ),
                     body.operation_name.to_owned(),
-                    Default::default(),
+                    req.query_plan_options,
                 )
                 .await
             {

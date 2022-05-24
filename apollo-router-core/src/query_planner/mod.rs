@@ -80,15 +80,6 @@ impl PlanNode {
 }
 
 impl QueryPlan {
-    /// Create a new QueryPlan
-    // pub(crate) fn new(root: PlanNode) -> Self {
-    //     Self {
-    //         root,
-    //         usage_reporting:
-    //         options: QueryPlanOptions::default(),
-    //     }
-    // }
-
     /// Pass some options to the QueryPlan
     pub fn with_options(mut self, options: QueryPlanOptions) -> Self {
         self.options = options;

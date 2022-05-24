@@ -185,6 +185,7 @@ where
                         .call(
                             QueryPlannerRequest::builder()
                                 .originating_request(req.originating_request.clone())
+                                .query_plan_options(QueryPlanOptions::default())
                                 .context(context)
                                 .build(),
                         )
@@ -246,7 +247,6 @@ pub struct PluggableRouterServiceBuilder {
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
     introspection: bool,
-    query_plan_options: QueryPlanOptions,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -256,7 +256,6 @@ impl PluggableRouterServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             introspection: false,
-            query_plan_options: QueryPlanOptions::default(),
         }
     }
 
@@ -303,15 +302,6 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    /// Change the default options for the Query Planner
-    pub fn with_query_plan_options(
-        mut self,
-        options: QueryPlanOptions,
-    ) -> PluggableRouterServiceBuilder {
-        self.query_plan_options = options;
-        self
-    }
-
     pub async fn build(
         mut self,
     ) -> Result<
@@ -337,14 +327,13 @@ impl PluggableRouterServiceBuilder {
         let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone())
             .await
             .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service = ServiceBuilder::new().buffered().service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
-                    .with_options(self.query_plan_options.clone())
-                    .boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ),
-        );
+        let query_planner_service =
+            ServiceBuilder::new()
+                .buffered()
+                .service(self.plugins.iter_mut().rev().fold(
+                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
+                    |acc, (_, e)| e.query_planning_service(acc),
+                ));
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self

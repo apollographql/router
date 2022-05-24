@@ -32,9 +32,9 @@ Description! And a link to a [reference](http://url)
 Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
 
 ```yaml title="router.yaml"
-server:
-  experimental:
-    enable_variable_deduplication: true
+plugins:
+  experimental.traffic_shaping:
+    variables_deduplication: true # Enable the variables deduplication optimization
 ```
 - **Measure APQ cache hits and registers** ([PR #1117](https://github.com/apollographql/router/pull/1117))
 
