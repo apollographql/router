@@ -69,6 +69,7 @@ where
                     (Some(query_hash), Some(query)) => {
                         if query_matches_hash(query.as_str(), query_hash.as_slice()) {
                             tracing::trace!("apq: cache insert");
+                            let _ = req.context.insert("persisted_query_hit", false);
                             cache.insert(query_hash, query);
                         } else {
                             tracing::warn!(
@@ -79,6 +80,7 @@ where
                     }
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
+                            let _ = req.context.insert("persisted_query_hit", true);
                             tracing::trace!("apq: cache hit");
                             req.originating_request.body_mut().query = Some(cached_query);
                             Ok(ControlFlow::Continue(req))

@@ -28,6 +28,10 @@ Description! And a link to a [reference](http://url)
 
 ## 🚀 Features
 
+- **Measure APQ cache hits and registers** ([PR #1117](https://github.com/apollographql/router/pull/1117))
+
+  The APQ layer will now report cache hits and misses to Apollo Studio if telemetry is configured
+
 ## 🐛 Fixes
 
 - **Prevent memory leaks when tasks are cancelled** [PR #767](https://github.com/apollographql/router/pull/767)

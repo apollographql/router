@@ -43,8 +43,8 @@ impl Package {
                 "router-{}-{}-{}.tar.gz",
                 *PKG_VERSION,
                 // NOTE: same as xtask
-                platforms::TARGET_ARCH,
-                platforms::TARGET_OS,
+                std::env::consts::ARCH,
+                std::env::consts::OS,
             ))
         } else {
             self.output.to_owned()
