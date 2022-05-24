@@ -32,5 +32,9 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Use subgraphs deployed on Fly in CI [PR #1090](https://github.com/apollographql/router/pull/1090)
+The CI needs some node subgraphs for integration tests, which complicates its setup and increases the run time. By deploying in advance those subgraphs on fly.io, we can simplify the CI run.
+
 ## 📚 Documentation
 ## 🐛 Fixes
