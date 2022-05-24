@@ -1,10 +1,10 @@
 ---
-title: Creating a custom router binary
+title: Creating a custom Apollo Router binary
 ---
 
-To create your own router binary, with custom plugins, you will need to use the router as a library.
-This page will walk you through creating your own Router binary from scratch, and creating a simple plugin.
+To use plugins that are not bundled with the default Apollo Router distribution you will need to create your own Apollo Router binary.
 
+This page will walk you through creating your own Router binary from scratch, and creating a simple plugin.
 
 > Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).
 > Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
@@ -24,26 +24,42 @@ cargo install cargo-scaffold
 
 # Create new project
 
-1. Use cargo scaffold to create the project. It will ask some questions about project.
+1. Use `cargo-scaffold` to create the project.
    
    ```bash
    cargo-scaffold scaffold https://github.com/apollographql/router.git -r apollo-router-scaffold/templates/base
    ```
-   You will be asked some questions about your project. For the purposes of this tutorial use `starstuff`.
+   You will be asked some questions about your project. For the purposes of this tutorial name your project `starstuff`.
    
 2. After the project has been created change to the `starstuff` directory
    ```bash
    cd starstuff
    ```
+The generated project has the following layout:
+```bash
+starstuff
+├── Cargo.toml       # Dependencies are declared here
+├── README.md
+├── router.yaml      # Router yaml config
+├── src
+│   ├── main.rs      # Entry point.
+│   └── plugins      # Custom plugins are located here.
+│       └── mod.rs
+└── xtask            # Build support files
+    ├── Cargo.toml
+    └── src
+        └── main.rs
+```
 
-# Compile the router
+The Apollo Router uses an auto discovery mechanism for plugin discovery, so any plugins that are added via dependency will automatically be available to the Router at runtime. 
+
+# Compile the Router
 
 To create a debug build use the following command.
 ```bash
 cargo build
 ```
 Your debug binary is now located in `target/debug/router`
-
 
 For production, you will want to create a release build.
 ```bash
@@ -93,7 +109,7 @@ Your release binary is now located in `target/release/router`
    ```yaml
    plugins:
      starstuff.hello_world:
-       message: "Starting my plugin"
+       message: "starting my plugin"
    ```
 
 5. Run the Apollo Router and see your plugin start up
@@ -103,13 +119,13 @@ Your release binary is now located in `target/release/router`
     
    In your output you should see something like:
    ```bash
-   2022-05-21T09:16:33.160288Z  INFO router::plugins::hello_world: Starting my plugin
+   2022-05-21T09:16:33.160288Z  INFO router::plugins::hello_world: starting my plugin
    ```
 
 # Remove a plugin
 
-1. From within your project run the following command. It makes a best effort to remove the plugin, but your mileage may vary. 
-   ```bash
-   cargo router plugin remove hello_world
-   ```
+From within your project run the following command. It makes a best effort to remove the plugin, but your mileage may vary. 
+```bash
+cargo router plugin remove hello_world
+```
 
