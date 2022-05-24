@@ -191,31 +191,7 @@ expression: get_spans()
                           ],
                           [
                             "otel.kind",
-                            "client"
-                          ],
-                          [
-                            "otel.status_code",
-                            ""
-                          ],
-                          [
-                            "net.transport",
-                            "ip_tcp"
-                          ],
-                          [
-                            "net.peer.name",
-                            "localhost"
-                          ],
-                          [
-                            "net.peer.port",
-                            4003
-                          ],
-                          [
-                            "http.route",
-                            "/graphql"
-                          ],
-                          [
-                            "otel.status_code",
-                            "OK"
+                            "internal"
                           ]
                         ],
                         "metadata": {
@@ -226,17 +202,55 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
-                              "otel.kind",
-                              "otel.status_code",
-                              "net.peer.name",
-                              "net.peer.port",
-                              "http.route",
-                              "net.transport"
+                              "otel.kind"
                             ]
                           }
                         }
                       },
                       "children": {
+                        "apollo_router_core::services::tower_subgraph_service::subgraph_request": {
+                          "name": "apollo_router_core::services::tower_subgraph_service::subgraph_request",
+                          "record": {
+                            "entries": [
+                              [
+                                "otel.kind",
+                                "client"
+                              ],
+                              [
+                                "net.peer.name",
+                                "localhost"
+                              ],
+                              [
+                                "net.peer.port",
+                                "4003"
+                              ],
+                              [
+                                "http.route",
+                                "/graphql"
+                              ],
+                              [
+                                "net.transport",
+                                "ip_tcp"
+                              ]
+                            ],
+                            "metadata": {
+                              "name": "subgraph_request",
+                              "target": "apollo_router_core::services::tower_subgraph_service",
+                              "level": "INFO",
+                              "module_path": "apollo_router_core::services::tower_subgraph_service",
+                              "fields": {
+                                "names": [
+                                  "otel.kind",
+                                  "net.peer.name",
+                                  "net.peer.port",
+                                  "http.route",
+                                  "net.transport"
+                                ]
+                              }
+                            }
+                          },
+                          "children": {}
+                        },
                         "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
                           "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
                           "record": {
@@ -337,31 +351,7 @@ expression: get_spans()
                           ],
                           [
                             "otel.kind",
-                            "client"
-                          ],
-                          [
-                            "otel.status_code",
-                            ""
-                          ],
-                          [
-                            "net.transport",
-                            "ip_tcp"
-                          ],
-                          [
-                            "net.peer.name",
-                            "localhost"
-                          ],
-                          [
-                            "net.peer.port",
-                            4002
-                          ],
-                          [
-                            "http.route",
-                            "/graphql"
-                          ],
-                          [
-                            "otel.status_code",
-                            "OK"
+                            "internal"
                           ]
                         ],
                         "metadata": {
@@ -372,17 +362,55 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
-                              "otel.kind",
-                              "otel.status_code",
-                              "net.peer.name",
-                              "net.peer.port",
-                              "http.route",
-                              "net.transport"
+                              "otel.kind"
                             ]
                           }
                         }
                       },
                       "children": {
+                        "apollo_router_core::services::tower_subgraph_service::subgraph_request": {
+                          "name": "apollo_router_core::services::tower_subgraph_service::subgraph_request",
+                          "record": {
+                            "entries": [
+                              [
+                                "otel.kind",
+                                "client"
+                              ],
+                              [
+                                "net.peer.name",
+                                "localhost"
+                              ],
+                              [
+                                "net.peer.port",
+                                "4002"
+                              ],
+                              [
+                                "http.route",
+                                "/graphql"
+                              ],
+                              [
+                                "net.transport",
+                                "ip_tcp"
+                              ]
+                            ],
+                            "metadata": {
+                              "name": "subgraph_request",
+                              "target": "apollo_router_core::services::tower_subgraph_service",
+                              "level": "INFO",
+                              "module_path": "apollo_router_core::services::tower_subgraph_service",
+                              "fields": {
+                                "names": [
+                                  "otel.kind",
+                                  "net.peer.name",
+                                  "net.peer.port",
+                                  "http.route",
+                                  "net.transport"
+                                ]
+                              }
+                            }
+                          },
+                          "children": {}
+                        },
                         "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
                           "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
                           "record": {
@@ -498,31 +526,7 @@ expression: get_spans()
                               ],
                               [
                                 "otel.kind",
-                                "client"
-                              ],
-                              [
-                                "otel.status_code",
-                                ""
-                              ],
-                              [
-                                "net.transport",
-                                "ip_tcp"
-                              ],
-                              [
-                                "net.peer.name",
-                                "localhost"
-                              ],
-                              [
-                                "net.peer.port",
-                                4003
-                              ],
-                              [
-                                "http.route",
-                                "/graphql"
-                              ],
-                              [
-                                "otel.status_code",
-                                "OK"
+                                "internal"
                               ]
                             ],
                             "metadata": {
@@ -533,17 +537,55 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
-                                  "otel.kind",
-                                  "otel.status_code",
-                                  "net.peer.name",
-                                  "net.peer.port",
-                                  "http.route",
-                                  "net.transport"
+                                  "otel.kind"
                                 ]
                               }
                             }
                           },
                           "children": {
+                            "apollo_router_core::services::tower_subgraph_service::subgraph_request": {
+                              "name": "apollo_router_core::services::tower_subgraph_service::subgraph_request",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "otel.kind",
+                                    "client"
+                                  ],
+                                  [
+                                    "net.peer.name",
+                                    "localhost"
+                                  ],
+                                  [
+                                    "net.peer.port",
+                                    "4003"
+                                  ],
+                                  [
+                                    "http.route",
+                                    "/graphql"
+                                  ],
+                                  [
+                                    "net.transport",
+                                    "ip_tcp"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "subgraph_request",
+                                  "target": "apollo_router_core::services::tower_subgraph_service",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router_core::services::tower_subgraph_service",
+                                  "fields": {
+                                    "names": [
+                                      "otel.kind",
+                                      "net.peer.name",
+                                      "net.peer.port",
+                                      "http.route",
+                                      "net.transport"
+                                    ]
+                                  }
+                                }
+                              },
+                              "children": {}
+                            },
                             "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
                               "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
                               "record": {
@@ -644,31 +686,7 @@ expression: get_spans()
                               ],
                               [
                                 "otel.kind",
-                                "client"
-                              ],
-                              [
-                                "otel.status_code",
-                                ""
-                              ],
-                              [
-                                "net.transport",
-                                "ip_tcp"
-                              ],
-                              [
-                                "net.peer.name",
-                                "localhost"
-                              ],
-                              [
-                                "net.peer.port",
-                                4001
-                              ],
-                              [
-                                "http.route",
-                                "/graphql"
-                              ],
-                              [
-                                "otel.status_code",
-                                "OK"
+                                "internal"
                               ]
                             ],
                             "metadata": {
@@ -679,17 +697,55 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
-                                  "otel.kind",
-                                  "otel.status_code",
-                                  "net.peer.name",
-                                  "net.peer.port",
-                                  "http.route",
-                                  "net.transport"
+                                  "otel.kind"
                                 ]
                               }
                             }
                           },
                           "children": {
+                            "apollo_router_core::services::tower_subgraph_service::subgraph_request": {
+                              "name": "apollo_router_core::services::tower_subgraph_service::subgraph_request",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "otel.kind",
+                                    "client"
+                                  ],
+                                  [
+                                    "net.peer.name",
+                                    "localhost"
+                                  ],
+                                  [
+                                    "net.peer.port",
+                                    "4001"
+                                  ],
+                                  [
+                                    "http.route",
+                                    "/graphql"
+                                  ],
+                                  [
+                                    "net.transport",
+                                    "ip_tcp"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "subgraph_request",
+                                  "target": "apollo_router_core::services::tower_subgraph_service",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router_core::services::tower_subgraph_service",
+                                  "fields": {
+                                    "names": [
+                                      "otel.kind",
+                                      "net.peer.name",
+                                      "net.peer.port",
+                                      "http.route",
+                                      "net.transport"
+                                    ]
+                                  }
+                                }
+                              },
+                              "children": {}
+                            },
                             "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
                               "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
                               "record": {
