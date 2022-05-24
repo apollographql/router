@@ -2,7 +2,7 @@
 name: Improvement
 about: Improve the project without adding new features
 title: ''
-labels: ['triage']
+labels: ['triage', 'raised by user']
 assignees: ''
 
 ---

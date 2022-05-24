@@ -391,25 +391,6 @@ impl PluggableRouterServiceBuilder {
             None
         };
 
-        /*FIXME
-        // Start warming up the cache
-        //
-        // We don't need to do this in background because the old server will keep running until
-        // this one is ready.
-        //
-        // If we first warm up the cache in foreground, then switch to the new config, the next
-        // queries will benefit from the warmed up cache. While if we switch and warm up in
-        // background, the next queries might be blocked until the cache is primed, so there'll be
-        // a perf hit.
-        if let Some(previous_router) = previous_router {
-            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
-                // We can ignore errors because some of the queries that were previously in the
-                // cache might not work with the new schema
-                let _ = query_planner.get(query, operation, options).await;
-            }
-        }
-        */
-
         // Router service takes a graphql::Request and outputs a graphql::Response
         // NB: Cannot use .buffer() here or the code won't compile...
         let router_service = Buffer::new(
