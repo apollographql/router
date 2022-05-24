@@ -125,7 +125,7 @@ fn get_router_version(cargo_toml: Value) -> String {
         Some(Value::String(version)) => version.clone(),
         Some(Value::Table(table)) => {
             if let Some(Value::String(branch)) = table.get("branch") {
-                branch.clone()
+                format!("origin/{}", branch.clone())
             } else if let Some(Value::String(tag)) = table.get("tag") {
                 tag.clone()
             } else if let Some(Value::String(rev)) = table.get("rev") {
