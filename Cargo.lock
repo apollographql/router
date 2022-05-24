@@ -255,7 +255,7 @@ version = "0.9.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.1.9",
+ "clap 3.1.18",
  "regex",
  "str_inflector",
  "tempfile",
@@ -708,7 +708,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.1.9",
+ "clap 3.1.18",
  "crates-io",
  "crossbeam-utils 0.8.8",
  "curl",
