@@ -39,6 +39,10 @@ Description! And a link to a [reference](http://url)
   Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
 
 ## 🛠 Maintenance
+### Unpin schemars version [#1074](https://github.com/apollographql/router/issues/1074)
+The Schemars 0.8.9 caused compile errors due to it validating default types.
+This change has however been rolled back upstream.
+We can now safely depend on schemars 0.8.10.
 
 ## 📚 Documentation
 
