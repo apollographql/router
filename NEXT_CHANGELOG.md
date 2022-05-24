@@ -44,6 +44,9 @@ The Schemars 0.8.9 caused compile errors due to it validating default types.
 This change has however been rolled back upstream.
 We can now safely depend on schemars 0.8.10.
 
+### Update Moka to fix occasional panics on AMD hardware [#1137](https://github.com/apollographql/router/issues/1137)
+Moka has a dependency on Quanta which had an issue with AMD hardware. This is now fixed via [Moka-#119](https://github.com/moka-rs/moka/issues/119).
+
 ## 📚 Documentation
 
 ## 🐛 Fixes
