@@ -286,12 +286,16 @@ commands:
 
   windows_test_workspace:
     steps:
+      - run:
+          name: Start jaeger
+          background: true
+          command: jaeger
       - restore_cache:
           name: Restore .cargo
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo xtask test --with-demo
+      - run: cargo xtask test --no-demo
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -303,13 +307,17 @@ commands:
       os:
         type: string
     steps:
+      - run:
+          name: Start jaeger
+          background: true
+          command: jaeger
       - restore_cache:
           name: Restore .cargo
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
-      - run: cargo xtask test --with-demo
+      - run: cargo xtask test --no-demo
 
       - save_cache:
           name: Save .cargo
