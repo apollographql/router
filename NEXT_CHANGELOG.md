@@ -30,7 +30,7 @@ Description! And a link to a [reference](http://url)
 ### Scaffold custom binary support ([PR #1104](https://github.com/apollographql/router/pull/1104))
 Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
 
-- **Measure APQ cache hits and registers** ([PR #1117](https://github.com/apollographql/router/pull/1117))
+### Measure APQ cache hits and registers ([PR #1117](https://github.com/apollographql/router/pull/1117))
 
   The APQ layer will now report cache hits and misses to Apollo Studio if telemetry is configured
 
