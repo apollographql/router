@@ -633,9 +633,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68af4c5e75a5ff25e046b770f10920925b4794f6ff7d166f4bf4cc3bad4cd728"
+checksum = "d40602615b158f55f9b0d70ec0e83a98f99c206b1725b095e793f111f7f8d56e"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -767,12 +767,12 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "732fef218fe718ef07a8459dff3a3d3d12ec2430fa0bed28d84f9ac5987164e8"
+checksum = "1bd663516ffce9d177f0579465f12c2636ff8c99e81556ac3c792ad08a15812b"
 dependencies = [
  "anyhow",
- "buildstructor 0.2.0",
+ "buildstructor 0.3.0",
  "cargo",
  "clap 2.34.0",
  "console 0.12.0",
