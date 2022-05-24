@@ -28,6 +28,9 @@ Description! And a link to a [reference](http://url)
 
 ## 🚀 Features
 
+### rhai Context::upsert() supported with example [PR #1136](https://github.com/apollographql/router/pull/1136)
+Rhai plugins can now interact with Context::upsert(). We provide an example (rhai-surrogate-cache-key) to illustrate its use.
+
 ## 🐛 Fixes
 
 ## 🛠 Maintenance

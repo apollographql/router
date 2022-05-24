@@ -167,6 +167,28 @@ print(`${request.context["contextual"]}`); // writes 42 into the router log at i
 request.context.contextual = 42;
 ```
 
+As well as allowing simple read/write of values in context, there is an `upsert()` function which can be used to help resolve situations where either an update or an insert is required. You use `upsert()` by providing a callback function which receives an existing value and then makes changes as required before returning the final value to be upserted.
+
+```javascript
+// Get a reference to a cache-key
+let my_cache_key = response.headers["cache-key"];
+// Declare an upsert resolver closure
+// current is the current value to be updated.
+// Check if current is an ObjectMap (default is the unit value of ()), if not assign an empty ObjectMap
+// Update our ObjectMap with our subgraph name as key and the returned cache-key as a value
+let resolver = |current| {
+    if current == () {
+        // No map found. Create an empty object map
+        current = #{};
+    }
+    // Update our object map with a key and value
+    current[subgraph] = my_cache_key;
+    return current;
+};
+// Upsert our context with our resolver
+response.context.upsert("surrogate-cache-key", resolver);
+```
+
 #### request.headers
 
 The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
@@ -400,4 +422,4 @@ fn process_request(request) {
 }
 ```
 
-There are six complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
+There are seven complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
