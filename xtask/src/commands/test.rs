@@ -54,8 +54,8 @@ impl Test {
                 None
             };
 
-            //let demo = FederationDemoRunner::new()?;
-            //let demo_guard = demo.start_background()?;
+            let demo = FederationDemoRunner::new()?;
+            let demo_guard = demo.start_background()?;
 
             let jaeger = JaegerRunner::new()?;
             let jaeger_guard = jaeger.start_background()?;
@@ -65,7 +65,7 @@ impl Test {
                 sub_process.wait()?;
             }
 
-            Box::new((/*demo, demo_guard,*/ jaeger, jaeger_guard))
+            Box::new((demo, demo_guard, jaeger, jaeger_guard))
         };
 
         eprintln!("Running tests");
