@@ -1,0 +1,26 @@
+[template]
+name = "apollo-router"
+author = "Apollo"
+version = "0.1.0"
+
+exclude = [
+    "./target"
+]
+
+disable_templating = [
+    "./scaffold/**/*"
+]
+
+notes = """
+Created new Apollo Router project '{{name}}'.
+
+> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).
+> Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+"""
+
+[parameters]
+[parameters.name]
+type = "string"
+message = "What is the name of your new router project?"
+required = true
+
