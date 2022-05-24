@@ -27,6 +27,8 @@ Description! And a link to a [reference](http://url)
 ## ❗ BREAKING ❗
 
 ## 🚀 Features
+### Scaffold custom binary support ([PR #1104](https://github.com/apollographql/router/pull/1104))
+  Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
 
 ### rhai Context::upsert() supported with example [PR #1136](https://github.com/apollographql/router/pull/1136)
 
@@ -38,6 +40,9 @@ Description! And a link to a [reference](http://url)
 
 ## 🐛 Fixes
 
+### Content-Type is application/json ([1154](https://github.com/apollographql/router/issues/1154)) 
+  The router was not setting a content-type on results. This fix ensures that a content-type of application/json is added when returning a graphql response.
+
 - **Prevent memory leaks when tasks are cancelled** [PR #767](https://github.com/apollographql/router/pull/767)
 
   Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
@@ -47,6 +52,9 @@ Description! And a link to a [reference](http://url)
 The Schemars 0.8.9 caused compile errors due to it validating default types.
 This change has however been rolled back upstream.
 We can now safely depend on schemars 0.8.10.
+
+### Update Moka to fix occasional panics on AMD hardware [#1137](https://github.com/apollographql/router/issues/1137)
+Moka has a dependency on Quanta which had an issue with AMD hardware. This is now fixed via [Moka-#119](https://github.com/moka-rs/moka/issues/119).
 
 ## 📚 Documentation
 
