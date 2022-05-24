@@ -62,6 +62,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         .repository_template_path("apollo-router-scaffold/templates/plugin")
         .target_dir(".")
         .project_name(name)
+        .parameter(format!("name={}", name))
         .append(true)
         .build();
     let desc = ScaffoldDescription::new(opts)?;
