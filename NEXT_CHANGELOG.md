@@ -36,6 +36,9 @@ Added CLI support for scaffolding a new Router binary project. This provides a s
 
 ## 🐛 Fixes
 
+### Content-Type is application/json ([1154](https://github.com/apollographql/router/issues/1154)) 
+  The router was not setting a content-type on results. This fix ensures that a content-type of application/json is added when returning a graphql response.
+
 - **Prevent memory leaks when tasks are cancelled** [PR #767](https://github.com/apollographql/router/pull/767)
 
   Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
