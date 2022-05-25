@@ -28,7 +28,11 @@ Description! And a link to a [reference](http://url)
 
 ## 🚀 Features
 ### Scaffold custom binary support ([PR #1104](https://github.com/apollographql/router/pull/1104))
-Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
+  Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
+
+### rhai Context::upsert() supported with example [PR #1136](https://github.com/apollographql/router/pull/1136)
+
+  Rhai plugins can now interact with Context::upsert(). We provide an example (rhai-surrogate-cache-key) to illustrate its use.
 
 ### Measure APQ cache hits and registers ([PR #1117](https://github.com/apollographql/router/pull/1117))
 
