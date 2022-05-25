@@ -38,6 +38,10 @@ Description! And a link to a [reference](http://url)
 
   The APQ layer will now report cache hits and misses to Apollo Studio if telemetry is configured
 
+- **Add more information for the subgraph_request span** ([PR #1119](https://github.com/apollographql/router/pull/1119))
+
+  Add a new span only for the subgraph request, with all HTTP and net information needed for the opentelemetry specs
+
 ## 🐛 Fixes
 
 ### Content-Type is application/json ([1154](https://github.com/apollographql/router/issues/1154)) 

@@ -218,7 +218,7 @@ impl PlanNode {
                         )
                         .instrument(tracing::info_span!(
                             "fetch",
-                            "otel.kind" = %SpanKind::Internal
+                            "otel.kind" = %SpanKind::Internal,
                         ))
                         .await
                     {
@@ -432,9 +432,9 @@ pub(crate) mod fetch {
                                 .find_map(|(name, url)| (name == service_name).then(|| url))
                                 .unwrap_or_else(|| {
                                     panic!(
-                                    "schema uri for subgraph '{}' should already have been checked",
-                                    service_name
-                                )
+                        "schema uri for subgraph '{}' should already have been checked",
+                        service_name
+                    )
                                 })
                                 .clone(),
                         )
