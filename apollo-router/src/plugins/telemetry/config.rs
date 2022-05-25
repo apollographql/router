@@ -1,4 +1,5 @@
 //! Configuration for the telemetry plugin.
+use super::metrics::MetricsLabelsConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
 use opentelemetry::sdk::Resource;
@@ -54,7 +55,9 @@ pub struct Metrics {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct MetricsCommon {
-    pub delay_interval: Duration,
+    pub delay_interval: Option<Duration>,
+    /// Configuration to add custom labels to metrics
+    pub additionnal_metric_labels: Option<MetricsLabelsConf>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

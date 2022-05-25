@@ -1,6 +1,5 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
-use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
     SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
@@ -40,6 +39,9 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
+use self::config::Conf;
+use self::metrics::{MetricsLabelsConf, Propagate};
+
 pub mod apollo;
 pub mod config;
 mod metrics;
@@ -49,6 +51,7 @@ mod tracing;
 pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
@@ -228,9 +231,11 @@ impl Plugin for Telemetry {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
-        let config = self.config.apollo.clone().unwrap_or_default();
+        let config = self.config.clone();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(config.clone()))
+            .instrument(Self::router_service_span(
+                config.apollo.clone().unwrap_or_default(),
+            ))
             .map_future_with_context(
                 move |req: &RouterRequest| {
                     Self::populate_context(&config, req);
@@ -243,9 +248,9 @@ impl Plugin for Telemetry {
                     async move {
                         let result: Result<RouterResponse, BoxError> = fut.await;
                         if !matches!(sender, Sender::Noop) {
-                            Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
+                            Self::update_apollo_metrics(&ctx, sender, &result, start.elapsed());
                         }
-                        Self::update_metrics(metrics, &result);
+                        Self::update_metrics(&ctx, metrics, &result);
                         result
                     }
                 },
@@ -307,12 +312,16 @@ impl Plugin for Telemetry {
                         Err(_) => {
                             metrics
                                 .http_requests_error_total
-                                .add(1, &[subgraph_attribute.clone()]);
+                                .add(1, &[
+                                    subgraph_attribute.clone(),
+                                ]);
                         }
                     }
                     metrics
                         .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[subgraph_attribute.clone()]);
+                        .record(now.elapsed().as_secs_f64(), &[
+                            subgraph_attribute.clone(),
+                        ]);
                     r
                 })
             })
@@ -469,7 +478,7 @@ impl Telemetry {
     }
 
     fn update_apollo_metrics(
-        context: Context,
+        context: &Context,
         sender: Sender,
         result: &Result<RouterResponse, BoxError>,
         duration: Duration,
@@ -547,18 +556,32 @@ impl Telemetry {
         sender.send(metrics);
     }
 
-    fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
+    fn update_metrics(
+        context: &Context,
+        metrics: BasicMetrics,
+        result: &Result<RouterResponse, BoxError>,
+    ) {
         // Using Instant because it is guaranteed to be monotonically increasing.
         let now = Instant::now();
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         match &result {
             Ok(response) => {
-                metrics.http_requests_total.add(
-                    1,
-                    &[KeyValue::new(
-                        "status",
-                        response.response.status().as_u16().to_string(),
-                    )],
-                );
+                metric_attrs.push(KeyValue::new(
+                    "status",
+                    response.response.status().as_u16().to_string(),
+                ));
+
+                metrics.http_requests_total.add(1, &metric_attrs);
             }
             Err(_) => {
                 metrics.http_requests_error_total.add(1, &[]);
@@ -566,15 +589,16 @@ impl Telemetry {
         }
         metrics
             .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &[]);
+            .record(now.elapsed().as_secs_f64(), &metric_attrs);
     }
 
-    fn populate_context(config: &Config, req: &RouterRequest) {
+    fn populate_context(config: &Conf, req: &RouterRequest) {
+        let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
         let headers = http_request.headers();
-        let client_name_header = &config.client_name_header;
-        let client_version_header = &config.client_version_header;
+        let client_name_header = &apollo_config.client_name_header;
+        let client_version_header = &apollo_config.client_version_header;
         let _ = context.insert(
             CLIENT_NAME,
             headers
@@ -595,6 +619,57 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
+        if let Some(metrics_conf) = &config.metrics {
+            // List of custom attributes for metrics
+            let mut attributes: HashMap<String, String> = HashMap::new();
+            if let Some(operation_name) = &req.originating_request.body().operation_name {
+                attributes.insert("operation_name".to_string(), operation_name.clone());
+            }
+
+            if let Some(MetricsCommon {
+                additionnal_metric_labels:
+                    Some(MetricsLabelsConf {
+                        propagate_headers: Some(propagate_headers),
+                        ..
+                    }),
+                ..
+            }) = &metrics_conf.common
+            {
+                for propagate_header in propagate_headers {
+                    match propagate_header {
+                        Propagate::Named {
+                            named,
+                            rename,
+                            default,
+                        } => {
+                            let value = req.originating_request.headers().get(named);
+                            if let Some(value) = value
+                                .and_then(|v| v.to_str().ok()?.to_string().into())
+                                .or_else(|| default.clone())
+                            {
+                                attributes.insert(
+                                    rename.clone().unwrap_or_else(|| named.to_string()),
+                                    value,
+                                );
+                            }
+                        }
+                        Propagate::Matching { matching } => {
+                            req.originating_request
+                                .headers()
+                                .iter()
+                                .filter(|(name, _)| matching.is_match(name.as_str()))
+                                .for_each(|(name, value)| {
+                                    if let Ok(value) = value.to_str() {
+                                        attributes.insert(name.to_string(), value.to_string());
+                                    }
+                                });
+                        }
+                    }
+                }
+            }
+
+            let _ = context.insert(ATTRIBUTES, attributes);
+        }
     }
 }
 
