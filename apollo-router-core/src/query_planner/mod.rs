@@ -61,6 +61,11 @@ pub(crate) enum PlanNode {
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
+
+    Defer {
+        primary: Primary,
+        deferred: DeferredNode,
+    },
 }
 
 impl PlanNode {
@@ -69,6 +74,8 @@ impl PlanNode {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            // FIXME: not sure about that one, can there be mutations in the deferred part?
+            Self::Defer { primary, .. } => primary.node.contains_mutations(),
             Self::Flatten(_) => false,
         }
     }
@@ -233,6 +240,12 @@ impl PlanNode {
                         }
                     }
                 }
+                PlanNode::Defer {
+                    primary: _,
+                    deferred: _,
+                } => {
+                    unimplemented!()
+                }
             }
 
             (value, errors)
@@ -249,6 +262,12 @@ impl PlanNode {
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
+            Self::Defer { primary, deferred } => Box::new(
+                primary
+                    .node
+                    .service_usage()
+                    .chain(deferred.node.iter().flat_map(|node| node.service_usage())),
+            ),
         }
     }
 
@@ -325,6 +344,9 @@ pub(crate) mod fetch {
 
         /// The GraphQL operation kind that is used for the fetch.
         operation_kind: OperationKind,
+
+        /// Optional id used by Deferred nodes
+        id: Option<String>,
     }
 
     struct Variables {
@@ -551,6 +573,53 @@ pub(crate) struct FlattenNode {
 
     /// The child execution plan.
     node: Box<PlanNode>,
+}
+
+/// A primary query for a Defer node, the non deferred part
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Primary {
+    /// Optional path, set if and only if the defer node is a
+    /// nested defer. If set, `subselection` starts at that `path`.
+    path: Option<Path>,
+
+    /// The part of the original query that "selects" the data to
+    /// send in that primary response (once the plan in `node` completes).
+    subselection: String,
+
+    // The plan to get all the data for that primary part
+    node: Box<PlanNode>,
+}
+
+/// The "deferred" parts of the defer (note that it's an array). Each
+/// of those deferred elements will correspond to a different chunk of
+/// the response to the client (after the initial non-deferred one that is).
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeferredNode {
+    /// References one or more fetch node(s) (by `id`) within
+    /// `primary.node`. The plan of this deferred part should not
+    /// be started before all those fetches returns.
+    depends: Depends,
+
+    /// The optional defer label.
+    label: Option<String>,
+    /// Path to the @defer this correspond to. `subselection` start at that `path`.
+    path: Path,
+    /// The part of the original query that "selects" the data to send
+    /// in that deferred response (once the plan in `node` completes).
+    /// Will be set _unless_ `node` is a `DeferNode` itself.
+    subselection: Option<String>,
+    /// The plan to get all the data for that deferred part
+    node: Option<Box<PlanNode>>,
+}
+
+/// A deferred node.
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Depends {
+    id: String,
+    defer_label: Option<String>,
 }
 
 // The code resides in a separate submodule to allow writing a log filter activating it
