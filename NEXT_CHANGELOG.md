@@ -44,6 +44,9 @@ Description! And a link to a [reference](http://url)
 
 ## 🐛 Fixes
 
+### Compute default port in span information ([1160](https://github.com/apollographql/router/issues/1160)) 
+  Compute default port in span information for `net.peer.port` regarding the scheme of the request URI.
+
 ### Content-Type is application/json ([1154](https://github.com/apollographql/router/issues/1154)) 
   The router was not setting a content-type on results. This fix ensures that a content-type of application/json is added when returning a graphql response.
 
