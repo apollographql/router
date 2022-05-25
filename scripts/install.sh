@@ -67,7 +67,7 @@ download_binary() {
     say "Downloading release info for '$_release_download_url'"
 
     # Cut the 'v' prefix
-    _name="router-$(echo "$_router_version" | cut -c2-)$_ext-$ARG_ARCH.tar.gz"
+    _name="router-$(echo "$_router_version" | cut -c2-)-$ARG_ARCH.tar.gz"
 
     _url="$GITHUB_REPO/releases/download/$_router_version/$_name"
 

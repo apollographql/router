@@ -57,6 +57,7 @@ pub enum Endpoint {
         endpoint: AgentEndpoint,
     },
     Collector {
+        #[schemars(with = "String")]
         endpoint: Url,
         username: Option<String>,
         password: Option<String>,

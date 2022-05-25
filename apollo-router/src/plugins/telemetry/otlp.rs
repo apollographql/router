@@ -17,6 +17,7 @@ use url::Url;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
+    #[schemars(with = "String")]
     pub endpoint: Endpoint,
     pub protocol: Option<Protocol>,
 

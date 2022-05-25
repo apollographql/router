@@ -86,7 +86,9 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                 }
             })?;
 
-            let body = hyper::body::to_bytes(response.into_body())
+            // Keep our parts, we'll need them later
+            let (parts, body) = response.into_parts();
+            let body = hyper::body::to_bytes(body)
                 .instrument(tracing::debug_span!("aggregate_response_data"))
                 .await
                 .map_err(|err| {
@@ -108,8 +110,10 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                     })
                 })?;
 
+            let resp = http::Response::from_parts(parts, graphql);
+
             Ok(graphql::SubgraphResponse::new_from_response(
-                http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),
+                resp.into(),
                 context,
             ))
         })

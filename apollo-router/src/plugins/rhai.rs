@@ -6,7 +6,8 @@ use apollo_router_core::{
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::{HeaderMap, StatusCode};
+use http::uri::{Parts, PathAndQuery};
+use http::{HeaderMap, StatusCode, Uri};
 use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
 use schemars::JsonSchema;
@@ -108,6 +109,12 @@ mod router_plugin_mod {
                     obj.with_mut(get_originating_body)
                 }
 
+                pub(crate) fn [<get_originating_uri_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                ) -> Result<Uri, Box<EvalAltResult>> {
+                    obj.with_mut(get_originating_uri)
+                }
+
                 pub(crate) fn [<set_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     headers: HeaderMap
@@ -127,6 +134,12 @@ mod router_plugin_mod {
                     obj.with_mut(|request| set_originating_body(request, body))
                 }
 
+                pub(crate) fn [<set_originating_uri_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    uri: Uri
+                ) -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| set_originating_uri(request, uri))
+                }
             }
                 )*
             }
@@ -267,6 +280,12 @@ mod router_plugin_mod {
         Ok(obj.accessor().body().clone())
     }
 
+    fn get_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+    ) -> Result<Uri, Box<EvalAltResult>> {
+        Ok(obj.accessor().uri().clone())
+    }
+
     fn get_originating_headers_response_response_body<
         T: Accessor<http_compat::Response<ResponseBody>>,
     >(
@@ -308,6 +327,14 @@ mod router_plugin_mod {
         body: Request,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().body_mut() = body;
+        Ok(())
+    }
+
+    fn set_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+        uri: Uri,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().uri_mut() = uri;
         Ok(())
     }
 
@@ -722,6 +749,16 @@ macro_rules! register_rhai_interface {
                 router_plugin_mod::router_generated_mod::[<set_originating_body_ $base _request>],
             );
 
+            $engine.register_get_result(
+                "uri",
+                router_plugin_mod::router_generated_mod::[<get_originating_uri_ $base _request>],
+            );
+
+            $engine.register_set_result(
+                "uri",
+                router_plugin_mod::router_generated_mod::[<set_originating_uri_ $base _request>],
+            );
+
             }
 
         )*
@@ -835,6 +872,7 @@ impl Rhai {
             .register_type::<Response>()
             .register_type::<Value>()
             .register_type::<Error>()
+            .register_type::<Uri>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -912,6 +950,30 @@ impl Rhai {
             })
             .register_set_result("extensions", |x: &mut Request, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
+                Ok(())
+            })
+            // Request.uri.path
+            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path()))
+            .register_set_result("path", |x: &mut Uri, value: &str| {
+                // Because there is no simple way to update parts on an existing
+                // Uri (no parts_mut()), then we need to create a new Uri from our
+                // existing parts, preserving any query, and update our existing
+                // Uri.
+                let mut parts: Parts = x.clone().into_parts();
+                parts.path_and_query = match parts
+                    .path_and_query
+                    .ok_or("path and query are missing")?
+                    .query()
+                {
+                    Some(query) => Some(
+                        PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
+                            .map_err(|e| e.to_string())?,
+                    ),
+                    None => {
+                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
+                    }
+                };
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
             // ResponseBody "short-cuts" to bypass the enum
@@ -1124,7 +1186,8 @@ impl Rhai {
             })
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
-            });
+            })
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
 
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
