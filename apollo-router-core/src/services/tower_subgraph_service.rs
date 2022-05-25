@@ -80,10 +80,13 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
             let schema_uri = request.uri();
             let host = schema_uri.host().map(String::from).unwrap_or_default();
             let port = schema_uri.port_u16().unwrap_or_else(|| {
-                if schema_uri.scheme_str() == Some("https") {
+                let scheme = schema_uri.scheme_str();
+                if scheme == Some("https") {
                     443
-                } else {
+                } else if scheme == Some("http") {
                     80
+                } else {
+                    0
                 }
             });
             let path = schema_uri.path().to_string();
