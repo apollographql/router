@@ -627,7 +627,7 @@ impl Telemetry {
             }
 
             if let Some(MetricsCommon {
-                additionnal_metric_labels:
+                additionnal_labels:
                     Some(MetricsLabelsConf {
                         propagate_headers: Some(propagate_headers),
                         ..
@@ -745,7 +745,26 @@ mod tests {
                             "bool_arr": [true, false]
                             }
                         }
+                    },
+                "metrics": {
+                    "common": {
+                        "additionnal_labels": {
+                            "propagate_headers": [
+                                {
+                                    "named": "test",
+                                    "default": "default_value",
+                                    "rename": "renamed_value",
+                                }
+                            ],
+                            "insert": [
+                                {
+                                    "name": "myname",
+                                    "value": "label_value"
+                                }
+                            ]
+                        }
                     }
+                }
             }))
             .await
             .unwrap();
