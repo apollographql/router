@@ -127,7 +127,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             }
                         }),
                 )
-                .route("/.well-known/apollo/server-health", get(health_check))
+                .route(&configuration.server.health_check_path, get(health_check))
                 .layer(Extension(boxed_service))
                 .layer(cors);
 
@@ -1450,6 +1450,27 @@ Content-Type: application/json\r
         //     &root_span.id().unwrap(),
         //     &test_span::Filter::new(Level::INFO)
         // ));
+    }
+
+    #[tokio::test]
+    async fn test_custom_health_check() {
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .health_check_path("/health")
+                    .build(),
+            )
+            .build();
+        let expectations = MockRouterService::new();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let url = format!(
+            "{}/health",
+            server.listen_address()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
     }
 
     #[test(tokio::test)]
