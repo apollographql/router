@@ -9,7 +9,7 @@ use http::{
 };
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
-use opentelemetry::global;
+use opentelemetry::{global, trace::SpanKind};
 use std::sync::Arc;
 use std::task::Poll;
 use tower::{BoxError, ServiceBuilder};
@@ -77,14 +77,28 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                 )
             });
 
-            let response = client.call(request).await.map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+            let schema_uri = request.uri();
+            let host = schema_uri.host().map(String::from).unwrap_or_default();
+            let port = schema_uri.port_u16().unwrap_or_default();
+            let path = schema_uri.path().to_string();
+            let response = client
+                .call(request)
+                .instrument(tracing::info_span!("subgraph_request",
+                    "otel.kind" = %SpanKind::Client,
+                    "net.peer.name" = &display(host),
+                    "net.peer.port" = &display(port),
+                    "http.route" = &display(path),
+                    "net.transport" = "ip_tcp"
+                ))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                graphql::FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: err.to_string(),
-                }
-            })?;
+                    graphql::FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
 
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();

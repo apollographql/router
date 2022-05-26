@@ -41,6 +41,11 @@ The main source of information about Rhai is the book (see above). That's where 
 
 This section covers functionality that the router explicitly exposes to Rhai.
 
+> **Deadlocks** The router requires that its rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within rhai could cause a deadlock. This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this a local copy of the required data is obtained and used in the closure.
+
+
+
+
 ### Global State
 
 The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
@@ -165,6 +170,28 @@ request.context["contextual"] = 42; // inserts a new key in the context "context
 print(`${request.context["contextual"]}`); // writes 42 into the router log at info level
 // Rhai also supports extended dot notation for indexed variables so, this is equivalent
 request.context.contextual = 42;
+```
+
+As well as allowing simple read/write of values in context, there is an `upsert()` function which can be used to help resolve situations where either an update or an insert is required. You use `upsert()` by providing a callback function which receives an existing value and then makes changes as required before returning the final value to be upserted.
+
+```javascript
+// Get a reference to a cache-key
+let my_cache_key = response.headers["cache-key"];
+// Declare an upsert resolver closure
+// current is the current value to be updated.
+// Check if current is an ObjectMap (default is the unit value of ()), if not assign an empty ObjectMap
+// Update our ObjectMap with our subgraph name as key and the returned cache-key as a value
+let resolver = |current| {
+    if current == () {
+        // No map found. Create an empty object map
+        current = #{};
+    }
+    // Update our object map with a key and value
+    current[subgraph] = my_cache_key;
+    return current;
+};
+// Upsert our context with our resolver
+response.context.upsert("surrogate-cache-key", resolver);
 ```
 
 #### request.headers
@@ -400,4 +427,4 @@ fn process_request(request) {
 }
 ```
 
-There are six complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
+There are seven complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.

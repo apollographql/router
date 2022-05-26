@@ -1,4 +1,4 @@
-//! garypen@Garys-MBP router % curl -v \
+//! % curl -v \
 //!    --header 'content-type: application/json' \
 //!    --url 'http://127.0.0.1:4000' \
 //!    --data '{"operationName": "me", "query":"query Query {\n  me {\n    name\n  }\n}"}'

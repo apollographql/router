@@ -4297,8 +4297,7 @@ dependencies = [
 [[package]]
 name = "rhai"
 version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f06953bb8b9e4307cb7ccc0d9d018e2ddd25a30d32831f631ce4fe8f17671f7"
+source = "git+https://github.com/rhaiscript/rhai.git?rev=6120b7a01a84a8d35d21fcdf2c44432455b68cdb#6120b7a01a84a8d35d21fcdf2c44432455b68cdb"
 dependencies = [
  "ahash",
  "bitflags",
@@ -4350,10 +4349,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rhai-surrogate-cache-key"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rhai_codegen"
 version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faa0ff1c9dc19c9f8bba510a2a75d3f0449f6233570c2672c7e31c692a11a59a"
+source = "git+https://github.com/rhaiscript/rhai.git?rev=6120b7a01a84a8d35d21fcdf2c44432455b68cdb#6120b7a01a84a8d35d21fcdf2c44432455b68cdb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4951,6 +4962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fb72c633efbaa2dd666986505016c32c3044395ceaf881518399d2f4127ee29"
 dependencies = [
  "autocfg 1.1.0",
+ "serde",
  "static_assertions",
  "version_check",
 ]
