@@ -1463,14 +1463,10 @@ Content-Type: application/json\r
             .build();
         let expectations = MockRouterService::new();
         let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
-        let url = format!(
-            "{}/health",
-            server.listen_address()
-        );
+        let url = format!("{}/health", server.listen_address());
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-
     }
 
     #[test(tokio::test)]
