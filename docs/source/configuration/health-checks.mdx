@@ -7,7 +7,7 @@ Health checks are often used by load balancers to determine whether a server is 
 
 The Apollo Router supports a basic HTTP-level health check. This is enabled by default and is served at the URL path `/.well-known/apollo/server-health`. This returns a `200` status code if the HTTP server is successfully serving. It does not invoke any GraphQL execution machinery.
 You can change this path by setting `server.health_check_path`:
-```yml
+```yaml title="router.yaml"
 server:
   health_check_path: /health
 ```
