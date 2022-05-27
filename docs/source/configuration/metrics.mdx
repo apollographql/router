@@ -19,6 +19,7 @@ telemetry:
 ```
 
 Assuming you are running locally:
+
 1. Run a query against the router.
 2. Navigate to [http://localhost:4000/plugins/apollo.telemetry/prometheus](http://localhost:4000/plugins/apollo.telemetry/prometheus) to see something like:
 
@@ -34,10 +35,10 @@ Note that if you have not run a query against the router you will see a blank pa
 
 Here is the list of available metrics you'll have using Prometheus:
 
-+ HTTP router request duration
-+ HTTP request duration by subgraph
-+ Total number of HTTP requests by HTTP Status
-+ Total number of HTTP requests in error
+- HTTP router request duration
+- HTTP request duration by subgraph
+- Total number of HTTP requests by HTTP Status
+- Total number of HTTP requests in error
 
 ## Using OpenTelemetry Collector
 
@@ -71,4 +72,23 @@ telemetry:
 
       # Optional timeout in humatime form
       timeout: 2s
+```
+
+## Add custom labels
+
+If you need to add labels on your generated metrics, for example add a custom labels coming from a specific header in the original HTTP request, or insert custom labels on every metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      additionnal_labels:
+        insert:
+          - name: "version"
+            value: "v1.0.0"
+        propagate_headers:
+          - named: "content-type"
+            rename: "payload_type"
+            default: "application/json"
+          - named: "x-custom-header-to-add"
 ```
