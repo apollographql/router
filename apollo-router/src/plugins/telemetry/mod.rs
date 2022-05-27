@@ -713,6 +713,15 @@ register_plugin!("apollo", "telemetry", Telemetry);
 //
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use apollo_router_core::{
+        http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
+    };
+    use bytes::Bytes;
+    use http::{Method, StatusCode, Uri};
+    use serde_json::Value;
+    use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -768,5 +777,117 @@ mod tests {
             }))
             .await
             .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics() {
+        let mut mock_service = MockRouterService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                Ok(RouterResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+            .get("apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(
+                &Value::from_str(
+                    r#"{
+                "apollo": {
+                    "client_name_header": "name_header",
+                    "client_version_header": "version_header",
+                    "schema_id": "schema_sha"
+                },
+                "metrics": {
+                    "common": {
+                        "additionnal_labels": {
+                            "propagate_headers": [
+                                {
+                                    "named": "test",
+                                    "default": "default_value",
+                                    "rename": "renamed_value"
+                                },
+                                {
+                                    "named": "another_test",
+                                    "default": "my_default_value"
+                                }
+                            ],
+                            "insert": [
+                                {
+                                    "name": "myname",
+                                    "value": "label_value"
+                                }
+                            ]
+                        }
+                    },
+                    "prometheus": {
+                        "enabled": true
+                    }
+                }
+            }"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
+        let router_req = RouterRequest::fake_builder().header("test", "my_value_set");
+
+        let _router_response = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap();
+
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let http_req_prom = http_compat::Request::fake_builder()
+            .uri(Uri::from_static(
+                "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
+            ))
+            .method(Method::GET)
+            .body(Bytes::new())
+            .build()
+            .unwrap();
+        let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let http_req_prom = http_compat::Request::fake_builder()
+            .uri(Uri::from_static(
+                "http://localhost:4000/plugins/apollo.telemetry/prometheus",
+            ))
+            .method(Method::GET)
+            .body(Bytes::new())
+            .build()
+            .unwrap();
+        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        match resp.body() {
+            apollo_router_core::ResponseBody::Text(prom_metrics) => {
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+            }
+            _ => panic!("body does not have the right format"),
+        }
     }
 }
