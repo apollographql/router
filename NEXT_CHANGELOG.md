@@ -52,6 +52,10 @@ Description! And a link to a [reference](http://url)
   Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
 
 ## 🛠 Maintenance
+
+### Use subgraphs deployed on Fly in CI [PR #1090](https://github.com/apollographql/router/pull/1090)
+The CI needs some node subgraphs for integration tests, which complicates its setup and increases the run time. By deploying in advance those subgraphs on fly.io, we can simplify the CI run.
+
 ### Unpin schemars version [#1074](https://github.com/apollographql/router/issues/1074)
 The Schemars 0.8.9 caused compile errors due to it validating default types.
 This change has however been rolled back upstream.
