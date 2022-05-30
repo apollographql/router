@@ -6,3 +6,5 @@ telemetry:
       scheduled_delay: 100ms
       agent:
         endpoint: default
+override_subgraph_url:
+  products: http://localhost:4005
