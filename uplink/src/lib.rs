@@ -48,7 +48,7 @@ pub struct Schema {
 pub fn stream_supergraph(
     api_key: String,
     graph_ref: String,
-    url: Option<Url>,
+    urls: Option<Vec<Url>>,
     interval: Duration,
 ) -> impl Stream<Item = Result<Schema, Error>> {
     let (sender, receiver) = channel(2);
@@ -56,13 +56,13 @@ pub fn stream_supergraph(
         let mut composition_id = None;
 
         let mut interval = tokio::time::interval(interval);
-
+        let mut current_url_idx = 0;
         loop {
             match fetch_supergraph(
                 api_key.to_string(),
                 graph_ref.to_string(),
                 composition_id.clone(),
-                &url,
+                urls.as_ref().map(|u| &u[current_url_idx]),
             )
             .await
             {
@@ -105,6 +105,9 @@ pub fn stream_supergraph(
                     }
                 }
             }
+            if let Some(urls) = &urls {
+                current_url_idx = (current_url_idx + 1) % urls.len();
+            }
 
             interval.tick().await;
         }
@@ -118,7 +121,7 @@ pub async fn fetch_supergraph(
     api_key: String,
     graph_ref: String,
     composition_id: Option<String>,
-    url: &Option<Url>,
+    url: Option<&Url>,
 ) -> Result<supergraph_sdl::ResponseData, Error> {
     let variables = supergraph_sdl::Variables {
         api_key,

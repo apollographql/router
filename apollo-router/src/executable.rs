@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{AppSettings, CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
+use std::error::Error;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -71,8 +72,9 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// The endpoint polled to fetch the latest supergraph schema.
-    #[clap(long, env)]
-    apollo_uplink_endpoints: Option<Url>,
+    #[clap(long, env, multiple_occurrences(true))]
+    // TODO find how to specify the parse function for env
+    apollo_uplink_endpoints: Option<Vec<Url>>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
@@ -199,6 +201,14 @@ pub async fn rt_main() -> Result<()> {
             }
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
+    println!("opt ---{:#?} ", opt.apollo_uplink_endpoints);
+    println!(
+        "len ---{:#?} ",
+        opt.apollo_uplink_endpoints
+            .as_ref()
+            .map(|u| u.len())
+            .unwrap_or(0)
+    );
     let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
@@ -226,7 +236,7 @@ pub async fn rt_main() -> Result<()> {
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_uplink_endpoints,
+                urls: opt.apollo_uplink_endpoints,
                 poll_interval: opt.apollo_uplink_poll_interval,
             }
         }
