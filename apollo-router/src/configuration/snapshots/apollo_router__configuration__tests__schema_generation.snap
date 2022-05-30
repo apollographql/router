@@ -474,37 +474,15 @@ expression: "&schema"
             "common": {
               "type": "object",
               "properties": {
-                "additionnal_labels": {
-                  "description": "Configuration to add custom labels to metrics",
+                "additionnal_attributes": {
+                  "description": "Configuration to add custom labels/attributes to metrics",
                   "type": "object",
                   "properties": {
-                    "insert": {
-                      "description": "Configuration to insert custom labels in metrics",
+                    "from_headers": {
+                      "description": "Configuration to forward header values in metric attributes/labels",
                       "type": "array",
                       "items": {
-                        "description": "Configuration to insert custom labels in metrics",
-                        "type": "object",
-                        "required": [
-                          "name",
-                          "value"
-                        ],
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "value": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "nullable": true
-                    },
-                    "propagate_headers": {
-                      "description": "Configuration to propagate header values in metric labels",
-                      "type": "array",
-                      "items": {
-                        "description": "Configuration to propagate header values in metric labels",
+                        "description": "Configuration to forward header values in metric labels",
                         "anyOf": [
                           {
                             "description": "Using a named header",
@@ -541,6 +519,28 @@ expression: "&schema"
                             "additionalProperties": false
                           }
                         ]
+                      },
+                      "nullable": true
+                    },
+                    "insert": {
+                      "description": "Configuration to insert custom attributes/labels in metrics",
+                      "type": "array",
+                      "items": {
+                        "description": "Configuration to insert custom attributes/labels in metrics",
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "nullable": true
                     }

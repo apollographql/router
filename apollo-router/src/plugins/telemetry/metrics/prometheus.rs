@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 use tower::{BoxError, ServiceExt};
 use tower_service::Service;
 
-use super::MetricsLabelsConf;
+use super::MetricsAttributesConf;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -30,8 +30,8 @@ impl MetricsConfigurator for Config {
         if self.enabled {
             let mut resources = Resource::default();
             if let MetricsCommon {
-                additionnal_labels:
-                    Some(MetricsLabelsConf {
+                additionnal_attributes:
+                    Some(MetricsAttributesConf {
                         insert: Some(insert_cfg),
                         ..
                     }),

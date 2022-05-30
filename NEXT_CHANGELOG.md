@@ -27,6 +27,24 @@ Description! And a link to a [reference](http://url)
 ## ❗ BREAKING ❗
 
 ## 🚀 Features
+### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
+Added the ability to add custom attributes/labels on metrics via the configuration file.
+Example:
+```yaml
+telemetry:
+  metrics:
+    common:
+      additionnal_attributes:
+        insert:
+          - name: "version"
+            value: "v1.0.0"
+        from_headers:
+          - named: "content-type"
+            rename: "payload_type"
+            default: "application/json"
+          - named: "x-custom-header-to-add"
+```
+
 ### Scaffold custom binary support ([PR #1104](https://github.com/apollographql/router/pull/1104))
 Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
 

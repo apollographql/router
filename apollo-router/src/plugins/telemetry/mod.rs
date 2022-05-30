@@ -40,7 +40,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 use self::config::Conf;
-use self::metrics::{MetricsLabelsConf, Propagate};
+use self::metrics::{Forward, MetricsAttributesConf};
 
 pub mod apollo;
 pub mod config;
@@ -627,17 +627,17 @@ impl Telemetry {
             }
 
             if let Some(MetricsCommon {
-                additionnal_labels:
-                    Some(MetricsLabelsConf {
-                        propagate_headers: Some(propagate_headers),
+                additionnal_attributes:
+                    Some(MetricsAttributesConf {
+                        from_headers: Some(from_headers),
                         ..
                     }),
                 ..
             }) = &metrics_conf.common
             {
-                for propagate_header in propagate_headers {
+                for propagate_header in from_headers {
                     match propagate_header {
-                        Propagate::Named {
+                        Forward::Named {
                             named,
                             rename,
                             default,
@@ -653,7 +653,7 @@ impl Telemetry {
                                 );
                             }
                         }
-                        Propagate::Matching { matching } => {
+                        Forward::Matching { matching } => {
                             req.originating_request
                                 .headers()
                                 .iter()
@@ -757,8 +757,8 @@ mod tests {
                     },
                 "metrics": {
                     "common": {
-                        "additionnal_labels": {
-                            "propagate_headers": [
+                        "additionnal_attributes": {
+                            "from_headers": [
                                 {
                                     "named": "test",
                                     "default": "default_value",
@@ -805,8 +805,8 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "additionnal_labels": {
-                            "propagate_headers": [
+                        "additionnal_attributes": {
+                            "from_headers": [
                                 {
                                     "named": "test",
                                     "default": "default_value",

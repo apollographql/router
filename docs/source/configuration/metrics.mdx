@@ -74,19 +74,19 @@ telemetry:
       timeout: 2s
 ```
 
-## Add custom labels
+## Add custom attributes/labels
 
-If you need to add labels on your generated metrics, for example add a custom labels coming from a specific header in the original HTTP request, or insert custom labels on every metrics.
+If you need to add attributes/labels on your generated metrics, for example add a custom attributes/labels coming from a specific header in the original HTTP request, or insert custom attributes/labels on every metrics.
 
 ```yaml title="router.yaml"
 telemetry:
   metrics:
     common:
-      additionnal_labels:
+      additionnal_attributes:
         insert:
           - name: "version"
             value: "v1.0.0"
-        propagate_headers:
+        from_headers:
           - named: "content-type"
             rename: "payload_type"
             default: "application/json"

@@ -25,17 +25,17 @@ pub(crate) type CustomEndpoint =
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// Configuration to add custom labels on metrics
-pub struct MetricsLabelsConf {
-    /// Configuration to propagate header values in metric labels
-    pub(crate) propagate_headers: Option<Vec<Propagate>>,
-    /// Configuration to insert custom labels in metrics
+/// Configuration to add custom attributes/labels on metrics
+pub struct MetricsAttributesConf {
+    /// Configuration to forward header values in metric attributes/labels
+    pub(crate) from_headers: Option<Vec<Forward>>,
+    /// Configuration to insert custom attributes/labels in metrics
     pub(crate) insert: Option<Vec<Insert>>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-/// Configuration to insert custom labels in metrics
+/// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
     name: String,
     value: String,
@@ -44,8 +44,8 @@ pub(crate) struct Insert {
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
-/// Configuration to propagate header values in metric labels
-pub(crate) enum Propagate {
+/// Configuration to forward header values in metric labels
+pub(crate) enum Forward {
     /// Using a named header
     Named {
         #[schemars(schema_with = "string_schema")]
