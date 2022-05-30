@@ -240,10 +240,7 @@ impl PlanNode {
                         }
                     }
                 }
-                PlanNode::Defer {
-                    primary: _,
-                    deferred: _,
-                } => {
+                PlanNode::Defer { primary, deferred } => {
                     unimplemented!()
                 }
             }
@@ -653,6 +650,7 @@ mod log {
 mod tests {
     use super::*;
     use http::Method;
+    use serde_json::json;
     use std::str::FromStr;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -813,5 +811,85 @@ mod tests {
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
         );
+    }
+
+    #[tokio::test]
+    async fn defer() {
+        // plan for { t { x ... @defer { y } }}
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_value(json! {{
+                "kind": "Defer",
+                "primary": {
+                    "path":["t", "x"],
+                    "subselection": "{ t { x } }",
+                    "node":  {
+                        "kind": "Fetch",
+                        "serviceName": "X",
+                        "variableUsages": [],
+                        "operation": "{ t { id x } }",
+                        "operationKind": "query",
+                        "operationName": "t",
+                        "id": "fetch1"
+                    }
+                },
+                "deferred": {
+                    "depends": {
+                        "id": "fetch1",
+                    },
+                    "path":["t"],
+                    "subselection": "{ ... on T { y } }",
+                    "node": {
+                        "kind": "Fetch",
+                        "serviceName": "Y",
+                        "variableUsages": [],
+                        "operation": "{ t { y } }",
+                        "operationKind": "query",
+                        "operationName": "t",
+                        "id": "fetch2"
+                    }
+                }
+            }})
+            .unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+        };
+
+        let mut mock_x_service = plugin::utils::test::MockSubgraphService::new();
+        mock_x_service
+            .expect_call()
+            .times(1)
+            .withf(move |_request| true)
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        let mut mock_y_service = plugin::utils::test::MockSubgraphService::new();
+        mock_y_service
+            .expect_call()
+            .times(1)
+            .withf(move |_request| true)
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        let response = query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([
+                    (
+                        "X".into(),
+                        ServiceBuilder::new()
+                            .buffer(1)
+                            .service(mock_x_service.build().boxed()),
+                    ),
+                    (
+                        "Y".into(),
+                        ServiceBuilder::new()
+                            .buffer(1)
+                            .service(mock_y_service.build().boxed()),
+                    ),
+                ])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+        println!("got response: {:?}", response);
+        panic!();
     }
 }
