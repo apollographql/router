@@ -1,4 +1,5 @@
 use crate::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
+use futures::stream::{once, BoxStream};
 use http::header;
 use http::{HeaderMap, StatusCode};
 use schemars::JsonSchema;
@@ -88,8 +89,8 @@ impl Plugin for Csrf {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -112,7 +113,7 @@ impl Plugin for Csrf {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()?;
-                        Ok(ControlFlow::Break(res))
+                        Ok(ControlFlow::Break(Box::pin(once(async { res})) as BoxStream<RouterResponse>))
                     }
                 })
                 .service(service)

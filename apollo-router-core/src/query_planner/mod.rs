@@ -99,12 +99,13 @@ impl QueryPlan {
 
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
-        &'a self,
+        &self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         originating_request: http_compat::Request<Request>,
         schema: &'a Schema,
-    ) -> Response {
+        mut sender: futures::channel::mpsc::Sender<Response>,
+    ) {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
@@ -121,7 +122,9 @@ impl QueryPlan {
             )
             .await;
 
-        Response::builder().data(value).errors(errors).build()
+        sender
+            .send(Response::builder().data(value).errors(errors).build())
+            .await;
     }
 
     pub fn contains_mutations(&self) -> bool {

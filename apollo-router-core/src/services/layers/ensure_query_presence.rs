@@ -6,6 +6,7 @@
 
 use crate::sync_checkpoint::CheckpointService;
 use crate::{RouterRequest, RouterResponse};
+use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use serde_json_bytes::Value;
 use std::ops::ControlFlow;
@@ -16,7 +17,7 @@ pub struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
+    S: Service<RouterRequest, Response = BoxStream<'static, RouterResponse>> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -43,7 +44,7 @@ where
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(Box::pin(once(async { res }))))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }

@@ -2,7 +2,9 @@
 
 use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
+use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -36,7 +38,7 @@ impl ExecutionService {
 }
 
 impl Service<ExecutionRequest> for ExecutionService {
-    type Response = ExecutionResponse;
+    type Response = BoxStream<'static, ExecutionResponse>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -55,22 +57,29 @@ impl Service<ExecutionRequest> for ExecutionService {
         let this = self.clone();
         let fut = async move {
             let context = req.context;
-            let response = req
+            let ctx = context.clone();
+            let (sender, receiver) = futures::channel::mpsc::channel(10);
+
+            tokio::task::spawn(async move {
+            req
                 .query_plan
                 .execute(
                     &context,
                     &this.subgraph_services,
                     req.originating_request.clone(),
                     &this.schema,
+                    sender,
                 )
                 .await;
+            });
 
+            Ok(Box::pin(receiver.map(move |response| 
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
-            Ok(ExecutionResponse::new_from_response(
+            ExecutionResponse::new_from_response(
                 http::Response::new(response).into(),
-                context,
-            ))
+                ctx.clone(),
+            ))) as BoxStream<'static, ExecutionResponse>)
         }
         .in_current_span();
         Box::pin(fut)

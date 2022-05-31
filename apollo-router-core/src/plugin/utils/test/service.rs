@@ -1,3 +1,5 @@
+use futures::stream::BoxStream;
+
 use crate::{
     ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
     RouterResponse, SubgraphRequest, SubgraphResponse,
@@ -36,7 +38,11 @@ macro_rules! mock_service {
     };
 }
 
-mock_service!(Router, RouterRequest, RouterResponse);
+mock_service!(Router, RouterRequest, BoxStream<'static, RouterResponse>);
 mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
-mock_service!(Execution, ExecutionRequest, ExecutionResponse);
+mock_service!(
+    Execution,
+    ExecutionRequest,
+    BoxStream<'static, ExecutionResponse>
+);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);

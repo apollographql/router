@@ -5,6 +5,7 @@ use apollo_router_core::{
     Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
+use futures::stream::BoxStream;
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::uri::{Parts, PathAndQuery};
 use http::{HeaderMap, StatusCode, Uri};
@@ -415,8 +416,8 @@ impl Plugin for Rhai {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -455,8 +456,8 @@ impl Plugin for Rhai {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;

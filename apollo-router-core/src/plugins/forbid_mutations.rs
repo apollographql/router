@@ -1,6 +1,7 @@
 use crate::{
     register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, ServiceBuilderExt,
 };
+use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use std::ops::ControlFlow;
 use tower::util::BoxService;
@@ -21,8 +22,8 @@ impl Plugin for ForbidMutations {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         if self.forbid {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
@@ -39,7 +40,9 @@ impl Plugin for ForbidMutations {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build();
-                        Ok(ControlFlow::Break(res))
+                        Ok(ControlFlow::Break(
+                            Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
+                        ))
                     } else {
                         Ok(ControlFlow::Continue(req))
                     }

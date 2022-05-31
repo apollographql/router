@@ -11,6 +11,7 @@ use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use futures::{channel::oneshot, prelude::*};
 use http::{HeaderValue, Request, Uri};
 use hyper::server::conn::Http;
@@ -70,7 +71,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RS: Service<
                 http_compat::Request<graphql::Request>,
-                Response = http_compat::Response<ResponseBody>,
+                Response = BoxStream<'static, http_compat::Response<ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync

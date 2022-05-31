@@ -74,6 +74,7 @@ mod test {
         RouterResponse, Schema,
     };
     use bytes::Bytes;
+    use futures::stream::BoxStream;
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
     use std::sync::Arc;
@@ -109,7 +110,11 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &ResponseBody,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut router_service: BoxCloneService<
+            RouterRequest,
+            BoxStream<'static, RouterResponse>,
+            BoxError,
+        >,
     ) {
         let request = RouterRequest::fake_builder()
             .query(query.to_string())
@@ -124,12 +129,12 @@ mod test {
             .call(request)
             .await
             .unwrap();
-        assert_eq!(response.response.body(), body);
+        assert_eq!(response.response.next().await.body(), body);
     }
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 

@@ -21,6 +21,7 @@ use apollo_router_core::{
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
@@ -224,8 +225,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.apollo.clone().unwrap_or_default();
@@ -241,7 +242,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<RouterResponse, BoxError> = fut.await;
+                        let result: Result<BoxStream<RouterResponse>, BoxError> = fut.await;
                         if !matches!(sender, Sender::Noop) {
                             Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
                         }
@@ -266,8 +267,8 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)

@@ -402,6 +402,7 @@ mod tests {
     use apollo_router_core::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
+    use futures::stream::BoxStream;
     use mockall::{mock, Sequence};
     use std::net::SocketAddr;
     use std::pin::Pin;
@@ -702,7 +703,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = Response<ResponseBody>;
+        type Response = BoxStream<'static, Response<ResponseBody>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -737,7 +738,7 @@ mod tests {
         where
             RS: Service<
                     Request<graphql::Request>,
-                    Response = Response<ResponseBody>,
+                    Response = BoxStream<'static, Response<ResponseBody>>,
                     Error = BoxError,
                 > + Send
                 + Sync

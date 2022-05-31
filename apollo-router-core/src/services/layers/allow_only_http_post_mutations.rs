@@ -4,6 +4,7 @@
 
 use crate::sync_checkpoint::CheckpointService;
 use crate::{ExecutionRequest, ExecutionResponse, Object};
+use futures::stream::{once, BoxStream};
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -13,7 +14,7 @@ pub struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
+    S: Service<ExecutionRequest, Response = BoxStream<'static, ExecutionResponse>> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
     <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -41,7 +42,7 @@ where
                         "Allow".parse::<HeaderName>().unwrap(),
                         "POST".parse().unwrap(),
                     );
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(Box::pin(once(async { res }))))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
