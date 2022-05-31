@@ -222,7 +222,7 @@ expression: get_spans()
                               ],
                               [
                                 "net.peer.port",
-                                "0"
+                                "443"
                               ],
                               [
                                 "http.route",
@@ -382,7 +382,7 @@ expression: get_spans()
                               ],
                               [
                                 "net.peer.port",
-                                "0"
+                                "443"
                               ],
                               [
                                 "http.route",
@@ -557,7 +557,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "net.peer.port",
-                                    "0"
+                                    "443"
                                   ],
                                   [
                                     "http.route",
@@ -717,7 +717,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "net.peer.port",
-                                    "0"
+                                    "443"
                                   ],
                                   [
                                     "http.route",
