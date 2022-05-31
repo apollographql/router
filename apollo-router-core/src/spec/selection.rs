@@ -1,4 +1,6 @@
-use crate::{FieldType, Fragment, Object, Schema};
+use std::collections::HashMap;
+
+use crate::{FieldType, Object, Path, Schema, SelectionSet};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 
@@ -13,19 +15,29 @@ pub(crate) enum Selection {
         include: Include,
     },
     InlineFragment {
-        fragment: Fragment,
+        // Internal name only useful for the deferred queries hashmap
+        internal_name: String,
+        // Optional in specs but we fill it with the current type if not specified
+        type_condition: String,
+        skip: Skip,
+        include: Include,
+        defer: Option<Defer>,
         known_type: bool,
+        selection_set: SelectionSet,
     },
     FragmentSpread {
         name: String,
         known_type: Option<String>,
         skip: Skip,
         include: Include,
+        defer: Option<Defer>,
     },
 }
 
 impl Selection {
     pub(crate) fn from_ast(
+        current_path: &Path,
+        deferred_queries: &mut HashMap<Path, Selection>,
         selection: ast::Selection,
         current_type: &FieldType,
         schema: &Schema,
@@ -78,11 +90,20 @@ impl Selection {
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
                 } else {
-                    field.selection_set().and_then(|x| {
+                    field.selection_set().map(|x| {
                         x.selections()
                             .into_iter()
-                            .map(|selection| {
-                                Selection::from_ast(selection, &field_type, schema, count)
+                            .filter_map(|selection| {
+                                let current_path = current_path
+                                    .join(Path::from(alias.as_ref().unwrap_or(&field_name)));
+                                Selection::from_ast(
+                                    &current_path,
+                                    deferred_queries,
+                                    selection,
+                                    &field_type,
+                                    schema,
+                                    count,
+                                )
                             })
                             .collect()
                     })
@@ -144,8 +165,17 @@ impl Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                     .into_iter()
-                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
-                    .collect::<Option<_>>()?;
+                    .filter_map(|selection| {
+                        Selection::from_ast(
+                            current_path,
+                            deferred_queries,
+                            selection,
+                            &fragment_type,
+                            schema,
+                            count,
+                        )
+                    })
+                    .collect();
 
                 let skip = inline_fragment
                     .directives()
@@ -170,16 +200,36 @@ impl Selection {
                     })
                     .unwrap_or(Include::Yes);
 
+                let defer = inline_fragment.directives().and_then(|directives| {
+                    for directive in directives.directives() {
+                        if let Some(defer) = parse_defer(&directive) {
+                            return Some(defer);
+                        }
+                    }
+                    None
+                });
+                let is_deferred = defer.is_some();
+
                 let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
-                Some(Self::InlineFragment {
-                    fragment: Fragment {
-                        type_condition,
-                        selection_set,
-                        skip,
-                        include,
-                    },
+                let internal_name = format!("inline_fragment_{}", deferred_queries.len());
+                let current_path = current_path.join(Path::from(&internal_name));
+                let inline_fragment = Self::InlineFragment {
+                    internal_name,
+                    type_condition,
+                    selection_set,
+                    skip,
+                    include,
+                    defer,
                     known_type,
-                })
+                };
+
+                if is_deferred {
+                    deferred_queries.insert(current_path, inline_fragment);
+
+                    None
+                } else {
+                    Some(inline_fragment)
+                }
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             ast::Selection::FragmentSpread(fragment_spread) => {
@@ -214,11 +264,21 @@ impl Selection {
                     })
                     .unwrap_or(Include::Yes);
 
+                let defer = fragment_spread.directives().and_then(|directives| {
+                    for directive in directives.directives() {
+                        if let Some(defer) = parse_defer(&directive) {
+                            return Some(defer);
+                        }
+                    }
+                    None
+                });
+
                 Some(Self::FragmentSpread {
                     name,
                     known_type: current_type.inner_type_name().map(|s| s.to_string()),
                     skip,
                     include,
+                    defer,
                 })
             }
         }
@@ -318,6 +378,61 @@ pub(crate) fn parse_include(directive: &ast::Directive) -> Option<Include> {
     None
 }
 
+pub(crate) fn parse_defer(directive: &ast::Directive) -> Option<Defer> {
+    if directive
+        .name()
+        .map(|name| &name.text().to_string() == "defer")
+        .unwrap_or(false)
+    {
+        let mut condition = None;
+        let mut label = None;
+        if let Some(argument) = directive
+            .arguments()
+            .and_then(|args| args.arguments().next())
+        {
+            if argument
+                .name()
+                .map(|name| &name.text().to_string() == "if")
+                .unwrap_or(false)
+            {
+                condition = match argument.value() {
+                    Some(Value::BooleanValue(b)) => {
+                        match (b.true_token().is_some(), b.false_token().is_some()) {
+                            (true, false) => Some(true),
+                            (false, true) => Some(false),
+                            _ => None,
+                        }
+                    }
+                    // Some(Value::Variable(variable)) => variable
+                    //     .name()
+                    //     .map(|name| Include::Variable(name.text().to_string())),
+                    Some(Value::Variable(variable)) => todo!(),
+                    _ => None,
+                }
+            }
+            if argument
+                .name()
+                .map(|name| &name.text().to_string() == "label")
+                .unwrap_or(false)
+            {
+                // invalid argument values should have been already validated
+                label = match argument.value() {
+                    Some(Value::StringValue(b)) => Some(b.to_string()),
+                    Some(Value::Variable(variable)) => todo!(),
+                    _ => None,
+                };
+            }
+        }
+
+        return Some(Defer {
+            condition: condition.unwrap_or_default(),
+            label,
+        });
+    }
+
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Include {
     Yes,
@@ -335,4 +450,11 @@ impl Include {
                 .and_then(|v| v.as_bool()),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Defer {
+    // TODO change this
+    condition: bool,
+    label: Option<String>,
 }

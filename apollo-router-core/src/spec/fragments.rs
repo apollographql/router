@@ -8,7 +8,12 @@ pub(crate) struct Fragments {
 }
 
 impl Fragments {
-    pub(crate) fn from_ast(document: &ast::Document, schema: &Schema) -> Option<Self> {
+    pub(crate) fn from_ast(
+        current_path: &Path,
+        deferred_queries: &mut HashMap<Path, Selection>,
+        document: &ast::Document,
+        schema: &Schema,
+    ) -> Option<Self> {
         let map = document
             .definitions()
             .filter_map(|definition| match definition {
@@ -38,6 +43,8 @@ impl Fragments {
                         .selections()
                         .map(|selection| {
                             Selection::from_ast(
+                                &current_path.join(Path::from(&name)),
+                                deferred_queries,
                                 selection,
                                 &FieldType::Named(type_condition.clone()),
                                 schema,
@@ -68,6 +75,14 @@ impl Fragments {
                             Include::Yes
                         })
                         .unwrap_or(Include::Yes);
+                    let defer = fragment_definition.directives().and_then(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(defer) = parse_defer(&directive) {
+                                return Some(defer);
+                            }
+                        }
+                        None
+                    });
 
                     Some((
                         name,
@@ -76,6 +91,7 @@ impl Fragments {
                             selection_set,
                             skip,
                             include,
+                            defer,
                         },
                     ))
                 }
@@ -98,4 +114,5 @@ pub(crate) struct Fragment {
     pub(crate) selection_set: Vec<Selection>,
     pub(crate) skip: Skip,
     pub(crate) include: Include,
+    pub(crate) defer: Option<Defer>,
 }

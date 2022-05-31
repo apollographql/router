@@ -11,6 +11,8 @@ use tracing::level_filters::LevelFilter;
 
 const TYPENAME: &str = "__typename";
 
+pub(crate) type SelectionSet = Vec<Selection>;
+
 /// A GraphQL query.
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
@@ -89,6 +91,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
+
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
@@ -105,7 +108,10 @@ impl Query {
         }
 
         let document = tree.document();
-        let fragments = Fragments::from_ast(&document, schema)?;
+        let mut deferred_queries = HashMap::new();
+        let current_path = Path::default();
+        let fragments =
+            Fragments::from_ast(&current_path, &mut deferred_queries, &document, schema)?;
 
         let operations = document
             .definitions()
@@ -323,6 +329,7 @@ impl Query {
                     field_type,
                     skip,
                     include,
+                    ..
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
                     if skip
@@ -381,14 +388,12 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment {
-                    fragment:
-                        Fragment {
-                            type_condition,
-                            selection_set,
-                            skip,
-                            include,
-                        },
+                    type_condition,
+                    selection_set,
+                    skip,
+                    include,
                     known_type,
+                    ..
                 } => {
                     if skip
                         .should_skip(variables)
@@ -436,6 +441,7 @@ impl Query {
                     known_type,
                     skip,
                     include,
+                    ..
                 } => {
                     if skip
                         .should_skip(variables)
@@ -517,6 +523,7 @@ impl Query {
                     field_type,
                     skip,
                     include,
+                    ..
                 } => {
                     if skip
                         .should_skip(variables)
@@ -572,14 +579,12 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment {
-                    fragment:
-                        Fragment {
-                            type_condition,
-                            selection_set,
-                            skip: _,
-                            include: _,
-                        },
+                    type_condition,
+                    selection_set,
+                    skip: _,
+                    include: _,
                     known_type: _,
+                    ..
                 } => {
                     // top level objects will not provide a __typename field
                     match (type_condition.as_str(), operation.kind) {
@@ -596,6 +601,7 @@ impl Query {
                     known_type: _,
                     skip: _,
                     include: _,
+                    ..
                 } => {
                     if let Some(fragment) = self.fragments.get(name) {
                         // top level objects will not provide a __typename field
@@ -685,8 +691,10 @@ impl Query {
 struct Operation {
     name: Option<String>,
     kind: OperationKind,
+    // Equivalent of primary
     selection_set: Vec<Selection>,
     variables: HashMap<ByteString, (FieldType, Option<Value>)>,
+    deferred_queries: HashMap<Path, Selection>,
 }
 
 impl Operation {
@@ -712,13 +720,25 @@ impl Operation {
             OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
             OperationKind::Subscription => return None,
         };
+        let mut deferred_queries = HashMap::new();
+        let current_path = Path::default();
 
         let selection_set = operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
-            .collect::<Option<_>>()?;
+            .filter_map(|selection| {
+                // If we want to enable defer on field then we should add deferred here
+                Selection::from_ast(
+                    &current_path,
+                    &mut deferred_queries,
+                    selection,
+                    &current_field_type,
+                    schema,
+                    0,
+                )
+            })
+            .collect();
 
         let variables = operation
             .variable_definitions()
@@ -750,6 +770,7 @@ impl Operation {
             name,
             variables,
             kind,
+            deferred_queries,
         })
     }
 
@@ -974,6 +995,116 @@ mod tests {
         "#,
             content
         )
+    }
+
+    #[test]
+    fn it_split_queries() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+                iz: Iz
+            }
+            type Iz {
+                field: String
+                another: String
+            }
+            ",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+        // let api_schema = schema.api_schema();
+        let query = Query::parse(
+            "query Test {
+                baz
+                array {
+                    bar
+                }
+                ... @defer {
+                    foo
+                    stuff {
+                        baz
+                        ... @defer {
+                            bar
+                            iz {
+                                field
+                                another
+                            }
+                        }
+                    }
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.deferred_queries.len(), 2);
+        assert_eq!(operation.selection_set.len(), 2);
+        println!("{:#?}", query);
+    }
+
+    #[test]
+    fn it_split_queries_at_same_path() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+                iz: Iz
+            }
+            type Iz {
+                field: String
+                another: String
+            }
+            ",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+        // let api_schema = schema.api_schema();
+        let query = Query::parse(
+            "query Test {
+                baz
+                ... @defer {
+                    array {
+                        bar
+                    }
+                }
+                ... @defer {
+                    foo
+                    stuff {
+                        baz
+                        ... @defer {
+                            bar
+                            iz {
+                                field
+                                another
+                            }
+                        }
+                    }
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.deferred_queries.len(), 3);
+        assert_eq!(operation.selection_set.len(), 1);
+        println!("{:#?}", query);
     }
 
     #[test]
