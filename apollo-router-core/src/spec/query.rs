@@ -1087,6 +1087,94 @@ mod tests {
     }
 
     #[test]
+    fn it_split_queries_without_static_if() {
+        // Test with a variable in `if` parameter of deferred
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+                other: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+                iz: Iz
+            }
+            type Iz {
+                field: String
+                another: String
+            }
+            ",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+        // let api_schema = schema.api_schema();
+        let query = Query::parse(
+            "query Test {
+                baz
+                array {
+                    bar
+                }
+                ... @defer(if: $deferred) {
+                    foo
+                    other
+                    stuff {
+                        baz
+                        ... @defer(if: $deferred) {
+                            bar
+                            iz {
+                                field
+                                another
+                            }
+                        }
+                    }
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.deferred_queries.len(), 2);
+        assert_eq!(operation.selection_set.len(), 3);
+
+        let first_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_1"))
+            .unwrap();
+        match first_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 3);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let second_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/inline_fragment_0"))
+            .unwrap();
+        match second_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 2);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        println!("{:#?}", query);
+    }
+
+    #[test]
     fn it_split_queries_at_same_path_and_fragment_spread() {
         let schema = with_supergraph_boilerplate(
             "type Query {

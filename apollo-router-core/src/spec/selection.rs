@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{FieldType, Fragment, Fragments, Object, Path, Schema, SelectionSet};
+use crate::{FieldType, Fragment, Object, Path, Schema, SelectionSet};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 
@@ -212,6 +212,10 @@ impl Selection {
                     None
                 });
                 let is_deferred = defer.is_some();
+                let is_statically_deferred = defer
+                    .as_ref()
+                    .map(|d| d.statically_deferred())
+                    .unwrap_or_default();
 
                 let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
                 let internal_name = format!("inline_fragment_{}", deferred_queries.len());
@@ -227,8 +231,10 @@ impl Selection {
                 };
 
                 if is_deferred {
-                    deferred_queries.insert(current_path, inline_fragment);
+                    deferred_queries.insert(current_path, inline_fragment.clone());
+                }
 
+                if is_statically_deferred {
                     None
                 } else {
                     Some(inline_fragment)
@@ -276,6 +282,10 @@ impl Selection {
                     None
                 });
                 let is_deferred = defer.is_some();
+                let is_statically_deferred = defer
+                    .as_ref()
+                    .map(|d| d.statically_deferred())
+                    .unwrap_or_default();
                 let current_path = current_path.join(Path::from(&name));
 
                 // Add deferred queries found in a fragment
@@ -297,8 +307,10 @@ impl Selection {
                 };
 
                 if is_deferred {
-                    deferred_queries.insert(current_path, fragment_spread);
+                    deferred_queries.insert(current_path, fragment_spread.clone());
+                }
 
+                if is_statically_deferred {
                     None
                 } else {
                     Some(fragment_spread)
@@ -421,15 +433,14 @@ pub(crate) fn parse_defer(directive: &ast::Directive) -> Option<Defer> {
                 condition = match argument.value() {
                     Some(Value::BooleanValue(b)) => {
                         match (b.true_token().is_some(), b.false_token().is_some()) {
-                            (true, false) => Some(true),
-                            (false, true) => Some(false),
+                            (true, false) => Some(ValueOrVariable::Value(true)),
+                            (false, true) => Some(ValueOrVariable::Value(false)),
                             _ => None,
                         }
                     }
-                    // Some(Value::Variable(variable)) => variable
-                    //     .name()
-                    //     .map(|name| Include::Variable(name.text().to_string())),
-                    Some(Value::Variable(variable)) => todo!(),
+                    Some(Value::Variable(variable)) => variable
+                        .name()
+                        .map(|name| ValueOrVariable::Variable(name.text().to_string())),
                     _ => None,
                 }
             }
@@ -440,17 +451,16 @@ pub(crate) fn parse_defer(directive: &ast::Directive) -> Option<Defer> {
             {
                 // invalid argument values should have been already validated
                 label = match argument.value() {
-                    Some(Value::StringValue(b)) => Some(b.to_string()),
-                    Some(Value::Variable(variable)) => todo!(),
+                    Some(Value::StringValue(b)) => Some(ValueOrVariable::Value(b.to_string())),
+                    Some(Value::Variable(variable)) => variable
+                        .name()
+                        .map(|name| ValueOrVariable::Variable(name.text().to_string())),
                     _ => None,
                 };
             }
         }
 
-        return Some(Defer {
-            condition: condition.unwrap_or_default(),
-            label,
-        });
+        return Some(Defer { condition, label });
     }
 
     None
@@ -477,7 +487,22 @@ impl Include {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Defer {
-    // TODO change this
-    condition: bool,
-    label: Option<String>,
+    condition: Option<ValueOrVariable<bool>>,
+    label: Option<ValueOrVariable<String>>,
+}
+
+impl Defer {
+    pub(crate) fn statically_deferred(&self) -> bool {
+        // If we don't have any condition then it's true by default
+        self.condition
+            .as_ref()
+            .map(|c| matches!(c, ValueOrVariable::Value(true)))
+            .unwrap_or(true)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ValueOrVariable<T> {
+    Value(T),
+    Variable(String),
 }
