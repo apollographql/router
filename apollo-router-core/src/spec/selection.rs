@@ -521,6 +521,16 @@ pub struct Defer {
 }
 
 impl Defer {
+    pub(crate) fn should_defer(&self, variables: &Object) -> Option<bool> {
+        match &self.condition {
+            Some(ValueOrVariable::Value(val)) => Some(*val),
+            Some(ValueOrVariable::Variable(variable_name)) => variables
+                .get(variable_name.as_str())
+                .and_then(|v| v.as_bool()),
+            None => Some(true),
+        }
+    }
+
     pub(crate) fn statically_deferred(&self) -> bool {
         // If we don't have any condition then it's true by default
         self.condition
