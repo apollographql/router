@@ -218,15 +218,15 @@ expression: get_spans()
                               ],
                               [
                                 "net.peer.name",
-                                "localhost"
+                                "products.demo.starstuff.dev"
                               ],
                               [
                                 "net.peer.port",
-                                "4003"
+                                "443"
                               ],
                               [
                                 "http.route",
-                                "/graphql"
+                                "/"
                               ],
                               [
                                 "net.transport",
@@ -378,15 +378,15 @@ expression: get_spans()
                               ],
                               [
                                 "net.peer.name",
-                                "localhost"
+                                "reviews.demo.starstuff.dev"
                               ],
                               [
                                 "net.peer.port",
-                                "4002"
+                                "443"
                               ],
                               [
                                 "http.route",
-                                "/graphql"
+                                "/"
                               ],
                               [
                                 "net.transport",
@@ -553,15 +553,15 @@ expression: get_spans()
                                   ],
                                   [
                                     "net.peer.name",
-                                    "localhost"
+                                    "products.demo.starstuff.dev"
                                   ],
                                   [
                                     "net.peer.port",
-                                    "4003"
+                                    "443"
                                   ],
                                   [
                                     "http.route",
-                                    "/graphql"
+                                    "/"
                                   ],
                                   [
                                     "net.transport",
@@ -713,15 +713,15 @@ expression: get_spans()
                                   ],
                                   [
                                     "net.peer.name",
-                                    "localhost"
+                                    "accounts.demo.starstuff.dev"
                                   ],
                                   [
                                     "net.peer.port",
-                                    "4001"
+                                    "443"
                                   ],
                                   [
                                     "http.route",
-                                    "/graphql"
+                                    "/"
                                   ],
                                   [
                                     "net.transport",
