@@ -74,7 +74,11 @@ By [@BrynCooke](https://github.com/BrynCooke) in [`6b20dc85`](https://github.com
 
 ## 📚 Documentation
 
-## 🐛 Fixes
+### rhai `Context::upsert()` supported with example ([Issue #648](https://github.com/apollographql/router/issues/648))
+
+Rhai documentation now illustrates how to use `Context::upsert()` in rhai code.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1136
 
 # [0.9.2] - 2022-05-20
 
