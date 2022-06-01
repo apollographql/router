@@ -14,7 +14,7 @@ Added CLI support for scaffolding a new Router binary project. This provides a s
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1104
 
-### rhai Context::upsert() supported with example ([Issue #648](https://github.com/apollographql/router/issues/648))
+### rhai `Context::upsert()` supported with example ([Issue #648](https://github.com/apollographql/router/issues/648))
 
 Rhai plugins can now interact with `Context::upsert()`. We provide an [example in `./examples/rhai-surrogate-cache-key`](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) to illustrate its use.
 
