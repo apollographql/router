@@ -4,19 +4,20 @@ use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub(crate) struct Fragments {
-    map: HashMap<String, Fragment>,
+    pub(crate) map: HashMap<String, Fragment>,
 }
 
 impl Fragments {
-    pub(crate) fn from_ast(
-        current_path: &Path,
-        deferred_queries: &mut HashMap<Path, Selection>,
-        document: &ast::Document,
-        schema: &Schema,
-    ) -> Option<Self> {
-        let map = document
+    pub(crate) fn from_ast(document: &ast::Document, schema: &Schema) -> Option<Self> {
+        let mut map = HashMap::new();
+        let current_path = Path::default();
+
+        for definition in document
             .definitions()
-            .filter_map(|definition| match definition {
+            .filter(|d| matches!(d, ast::Definition::FragmentDefinition(_)))
+        {
+            let mut deferred_queries: HashMap<Path, Selection> = HashMap::new();
+            match definition {
                 // Spec: https://spec.graphql.org/draft/#FragmentDefinition
                 ast::Definition::FragmentDefinition(fragment_definition) => {
                     let name = fragment_definition
@@ -41,17 +42,18 @@ impl Fragments {
                         .selection_set()
                         .expect("the node SelectionSet is not optional in the spec; qed")
                         .selections()
-                        .map(|selection| {
+                        .filter_map(|selection| {
                             Selection::from_ast(
-                                &current_path.join(Path::from(&name)),
-                                deferred_queries,
+                                &current_path,
+                                &mut deferred_queries,
                                 selection,
                                 &FieldType::Named(type_condition.clone()),
                                 schema,
+                                &map,
                                 0,
                             )
                         })
-                        .collect::<Option<_>>()?;
+                        .collect();
 
                     let skip = fragment_definition
                         .directives()
@@ -75,29 +77,22 @@ impl Fragments {
                             Include::Yes
                         })
                         .unwrap_or(Include::Yes);
-                    let defer = fragment_definition.directives().and_then(|directives| {
-                        for directive in directives.directives() {
-                            if let Some(defer) = parse_defer(&directive) {
-                                return Some(defer);
-                            }
-                        }
-                        None
-                    });
 
-                    Some((
+                    map.insert(
                         name,
                         Fragment {
                             type_condition,
                             selection_set,
                             skip,
                             include,
-                            defer,
+                            deferred_queries,
                         },
-                    ))
+                    );
                 }
-                _ => None,
-            })
-            .collect();
+                _ => unreachable!(),
+            }
+        }
+
         Some(Fragments { map })
     }
 }
@@ -108,11 +103,11 @@ impl Fragments {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Fragment {
     pub(crate) type_condition: String,
     pub(crate) selection_set: Vec<Selection>,
     pub(crate) skip: Skip,
     pub(crate) include: Include,
-    pub(crate) defer: Option<Defer>,
+    pub(crate) deferred_queries: HashMap<Path, Selection>,
 }

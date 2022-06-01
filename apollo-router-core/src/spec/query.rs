@@ -108,16 +108,13 @@ impl Query {
         }
 
         let document = tree.document();
-        let mut deferred_queries = HashMap::new();
-        let current_path = Path::default();
-        let fragments =
-            Fragments::from_ast(&current_path, &mut deferred_queries, &document, schema)?;
+        let fragments = Fragments::from_ast(&document, schema)?;
 
         let operations = document
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Operation::from_ast(operation, schema)
+                    Operation::from_ast(operation, &fragments, schema)
                 } else {
                     None
                 }
@@ -702,7 +699,11 @@ impl Operation {
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
+    fn from_ast(
+        operation: ast::OperationDefinition,
+        fragments: &Fragments,
+        schema: &Schema,
+    ) -> Option<Self> {
         let name = operation.name().map(|x| x.text().to_string());
 
         let kind = operation
@@ -735,6 +736,7 @@ impl Operation {
                     selection,
                     &current_field_type,
                     schema,
+                    &fragments.map,
                     0,
                 )
             })
@@ -1005,6 +1007,7 @@ mod tests {
                 stuff: Bar
                 array: [Bar]
                 baz: String
+                other: String
             }
             type Bar {
                 bar: String
@@ -1028,6 +1031,7 @@ mod tests {
                 }
                 ... @defer {
                     foo
+                    other
                     stuff {
                         baz
                         ... @defer {
@@ -1048,11 +1052,42 @@ mod tests {
         let operation = &query.operations[0];
         assert_eq!(operation.deferred_queries.len(), 2);
         assert_eq!(operation.selection_set.len(), 2);
+
+        let first_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_1"))
+            .unwrap();
+        match first_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 3);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let second_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/inline_fragment_0"))
+            .unwrap();
+        match second_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 2);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
         println!("{:#?}", query);
     }
 
     #[test]
-    fn it_split_queries_at_same_path() {
+    fn it_split_queries_at_same_path_and_fragment_spread() {
         let schema = with_supergraph_boilerplate(
             "type Query {
                 foo: String
@@ -1075,7 +1110,13 @@ mod tests {
         .expect("could not parse schema");
         // let api_schema = schema.api_schema();
         let query = Query::parse(
-            "query Test {
+            "
+            fragment exampleFragment on Bar {
+                bar
+                baz
+            }
+
+            query Test {
                 baz
                 ... @defer {
                     array {
@@ -1085,14 +1126,7 @@ mod tests {
                 ... @defer {
                     foo
                     stuff {
-                        baz
-                        ... @defer {
-                            bar
-                            iz {
-                                field
-                                another
-                            }
-                        }
+                        ...exampleFragment @defer
                     }
                 }
             }",
@@ -1104,7 +1138,179 @@ mod tests {
         let operation = &query.operations[0];
         assert_eq!(operation.deferred_queries.len(), 3);
         assert_eq!(operation.selection_set.len(), 1);
-        println!("{:#?}", query);
+        let first_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_0"))
+            .unwrap();
+        match first_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 1);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let second_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_2"))
+            .unwrap();
+        match second_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 2);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let third_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/exampleFragment"))
+            .unwrap();
+        match third_deferred_query {
+            Selection::FragmentSpread { defer, .. } => {
+                assert!(defer.is_some());
+                let fragment_def = query.fragments.get("exampleFragment").unwrap();
+                assert_eq!(fragment_def.selection_set.len(), 2);
+            }
+            _ => panic!("must be an spread fragment"),
+        }
+    }
+
+    #[test]
+    fn it_split_queries_with_defer_in_fragment() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+                iz: Iz
+                to: String
+            }
+            type Iz {
+                field: String
+                another: String
+            }
+            ",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+        // let api_schema = schema.api_schema();
+        let query = Query::parse(
+            "
+            fragment exampleFragment on Bar {
+                ... @defer {
+                    bar 
+                    baz
+                }
+                to
+                ...exampleFragmentIz @defer
+            }
+            fragment exampleFragmentIz on Iz {
+                field
+            }
+
+            query Test {
+                baz
+                ... @defer {
+                    array {
+                        bar
+                    }
+                }
+                ... @defer {
+                    foo
+                    stuff {
+                        ...exampleFragment @defer
+                    }
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+        println!("query -- {:#?}", query);
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.deferred_queries.len(), 5);
+        assert_eq!(operation.selection_set.len(), 1);
+        let first_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_0"))
+            .unwrap();
+        match first_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 1);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let second_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("inline_fragment_4"))
+            .unwrap();
+        match second_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 2);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let third_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/exampleFragment"))
+            .unwrap();
+        match third_deferred_query {
+            Selection::FragmentSpread { defer, .. } => {
+                assert!(defer.is_some());
+                let fragment_def = query.fragments.get("exampleFragment").unwrap();
+                assert_eq!(fragment_def.selection_set.len(), 1);
+            }
+            _ => panic!("must be an spread fragment"),
+        }
+        let fourth_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/exampleFragment/inline_fragment_0"))
+            .unwrap();
+        match fourth_deferred_query {
+            Selection::InlineFragment {
+                defer,
+                selection_set,
+                ..
+            } => {
+                assert!(defer.is_some());
+                assert_eq!(selection_set.len(), 2);
+            }
+            _ => panic!("must be an inline fragment"),
+        }
+        let fifth_deferred_query = operation
+            .deferred_queries
+            .get(&Path::from("stuff/exampleFragment/exampleFragmentIz"))
+            .unwrap();
+        match fifth_deferred_query {
+            Selection::FragmentSpread { defer, .. } => {
+                assert!(defer.is_some());
+                let fragment_def = query.fragments.get("exampleFragmentIz").unwrap();
+                assert_eq!(fragment_def.selection_set.len(), 1);
+            }
+            _ => panic!("must be an spread fragment"),
+        }
     }
 
     #[test]
