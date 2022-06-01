@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{FieldType, Object, Path, Schema, SelectionSet};
+use crate::{FieldType, Fragment, Fragments, Object, Path, Schema, SelectionSet};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 
@@ -41,6 +41,7 @@ impl Selection {
         selection: ast::Selection,
         current_type: &FieldType,
         schema: &Schema,
+        fragments: &HashMap<String, Fragment>,
         mut count: usize,
     ) -> Option<Self> {
         // The RECURSION_LIMIT is chosen to be:
@@ -102,6 +103,7 @@ impl Selection {
                                     selection,
                                     &field_type,
                                     schema,
+                                    fragments,
                                     count,
                                 )
                             })
@@ -172,6 +174,7 @@ impl Selection {
                             selection,
                             &fragment_type,
                             schema,
+                            fragments,
                             count,
                         )
                     })
@@ -272,14 +275,34 @@ impl Selection {
                     }
                     None
                 });
+                let is_deferred = defer.is_some();
+                let current_path = current_path.join(Path::from(&name));
 
-                Some(Self::FragmentSpread {
+                // Add deferred queries found in a fragment
+                if let Some(fragment_found) = fragments.get(&name) {
+                    fragment_found
+                        .deferred_queries
+                        .iter()
+                        .for_each(|(path, dq)| {
+                            deferred_queries.insert(current_path.join(path), dq.clone());
+                        });
+                }
+
+                let fragment_spread = Self::FragmentSpread {
                     name,
                     known_type: current_type.inner_type_name().map(|s| s.to_string()),
                     skip,
                     include,
                     defer,
-                })
+                };
+
+                if is_deferred {
+                    deferred_queries.insert(current_path, fragment_spread);
+
+                    None
+                } else {
+                    Some(fragment_spread)
+                }
             }
         }
     }
