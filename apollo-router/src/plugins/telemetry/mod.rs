@@ -22,7 +22,7 @@ use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
@@ -242,12 +242,38 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<BoxStream<RouterResponse>, BoxError> = fut.await;
-                        if !matches!(sender, Sender::Noop) {
-                            Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
+                        let result: Result<BoxStream<'static, RouterResponse>, BoxError> =
+                            fut.await;
+
+                        match result {
+                            Err(e) => {
+                                let res = Err(e);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(ctx, sender, &res, start.elapsed());
+                                }
+                                Self::update_metrics(metrics, &res);
+                                Err(res.unwrap_err())
+                            }
+                            Ok(stream) => {
+                                //let metrics = metrics.clone();
+                                let start = start.clone();
+                                //let sender = sender.clone();
+                                Ok(Box::pin(stream.map(move |response| {
+                                    let res = Ok(response);
+                                    if !matches!(sender, Sender::Noop) {
+                                        Self::update_apollo_metrics(
+                                            ctx.clone(),
+                                            sender.clone(),
+                                            &res,
+                                            start.elapsed(),
+                                        );
+                                    }
+                                    Self::update_metrics(metrics.clone(), &res);
+                                    res.expect("is always Ok")
+                                }))
+                                    as BoxStream<'static, RouterResponse>)
+                            }
                         }
-                        Self::update_metrics(metrics, &result);
-                        result
                     }
                 },
             )
