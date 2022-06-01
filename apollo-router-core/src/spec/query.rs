@@ -329,21 +329,14 @@ impl Query {
                     ..
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -390,22 +383,24 @@ impl Query {
                     skip,
                     include,
                     known_type,
+                    defer,
                     ..
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    if defer
+                        .as_ref()
+                        .map(|d| d.should_defer(variables).unwrap_or(true))
+                        .unwrap_or(false)
                     {
                         continue;
                     }
@@ -438,21 +433,22 @@ impl Query {
                     known_type,
                     skip,
                     include,
-                    ..
+                    defer,
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    if defer
+                        .as_ref()
+                        .map(|d| d.should_defer(variables).unwrap_or(true))
+                        .unwrap_or(false)
                     {
                         continue;
                     }
@@ -522,21 +518,14 @@ impl Query {
                     include,
                     ..
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or_default()
-                    {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or_default() {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
