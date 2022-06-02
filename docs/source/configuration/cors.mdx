@@ -85,10 +85,10 @@ server:
 
 #### APIs with non browser consumers
 
-The default Apollo Server CORS behavior should suit your use case, and https://studio.apollographql.com/sandbox/explorer allows you to run queries against your Apollo Router.
+The default Apollo Router CORS behavior should suit your use case, and https://studio.apollographql.com/sandbox/explorer allows you to run queries against your Apollo Router.
 You can always specify origins in your CORS configuration later. 
 
-##  Configuring CORS options for Apollo Server
+##  Configuring CORS options for Apollo Router
 
 By default, the Apollo Router only allows requests from https://studio.apollographql.com. If your Apollo Router is serving data for web applications, you want to either add their origin to the list of allowed origins, or switch to `allow_any_origin`.
 
