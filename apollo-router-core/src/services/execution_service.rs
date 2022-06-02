@@ -71,7 +71,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                     sender,
                 )
                 .await;
-            });
+            }.in_current_span());
 
             Ok(Box::pin(receiver.map(move |response| 
             // Note that request context is not propagated from downstream.

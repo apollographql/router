@@ -11,8 +11,8 @@ use crate::{
     SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use futures::{future::BoxFuture, TryFutureExt};
-use futures::{Stream, StreamExt};
 use http::StatusCode;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
+use tracing_futures::Instrument;
 
 /// An [`IndexMap`] of available plugins.
 pub type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -214,23 +215,27 @@ where
                     )
                     .await?;
 
-                Ok(Box::pin(response_stream.map(move |mut response| {
-                    if let Some(query) = query.as_ref() {
-                        tracing::debug_span!("format_response").in_scope(|| {
-                            query.format_response(
-                                response.response.body_mut(),
-                                operation_name.as_deref(),
-                                (*variables).clone(),
-                                schema.api_schema(),
-                            )
-                        });
-                    }
+                Ok(Box::pin(
+                    response_stream
+                        .map(move |mut response| {
+                            if let Some(query) = query.as_ref() {
+                                tracing::debug_span!("format_response").in_scope(|| {
+                                    query.format_response(
+                                        response.response.body_mut(),
+                                        operation_name.as_deref(),
+                                        (*variables).clone(),
+                                        schema.api_schema(),
+                                    )
+                                });
+                            }
 
-                    RouterResponse {
-                        context: response.context,
-                        response: response.response.map(ResponseBody::GraphQL),
-                    }
-                })) as BoxStream<RouterResponse>)
+                            RouterResponse {
+                                context: response.context,
+                                response: response.response.map(ResponseBody::GraphQL),
+                            }
+                        })
+                        .in_current_span(),
+                ) as BoxStream<RouterResponse>)
             }
         }
         .or_else(|error: BoxError| async move {

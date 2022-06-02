@@ -243,6 +243,7 @@ dependencies = [
  "tower-service",
  "tower-test",
  "tracing",
+ "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "typed-builder 0.10.0",
@@ -5683,6 +5684,8 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97d095ae15e245a057c8e8451bab9b3ee1e1f68e9ba2b4fbc18d0ac5237835f2"
 dependencies = [
+ "futures",
+ "futures-task",
  "pin-project",
  "tracing",
 ]

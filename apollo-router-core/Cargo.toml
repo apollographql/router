@@ -34,6 +34,7 @@ itertools = "0.10.3"
 lazy_static = "1.4.0"
 lru = "0.7.5"
 miette = { version = "4.7.1", features = ["fancy"] }
+mime = "0.3.16"
 mockall = "0.11.0"
 multimap = "0.8.3"
 moka = { version = "0.8.4", features = ["future", "futures-util"] }
@@ -58,9 +59,9 @@ tower-service = "0.3.1"
 tower-test = "0.4.0"
 tracing = "0.1.34"
 tracing-opentelemetry = "0.17.2"
+tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 typed-builder = "0.10.0"
 urlencoding = "2.1.0"
-mime = "0.3.16"
 
 [dev-dependencies]
 insta = "1.14.0"
