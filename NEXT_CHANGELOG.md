@@ -36,3 +36,10 @@ server:
 ```
 
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
+
+## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
+Force the creation of `SocketAddr` to use a new unused port.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
