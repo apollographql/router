@@ -75,6 +75,7 @@ mod test {
     };
     use bytes::Bytes;
     use futures::stream::BoxStream;
+    use futures::StreamExt;
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
     use std::sync::Arc;
@@ -128,8 +129,11 @@ mod test {
             .unwrap()
             .call(request)
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
-        assert_eq!(response.response.next().await.body(), body);
+        assert_eq!(response.response.body(), body);
     }
 
     async fn build_mock_router(

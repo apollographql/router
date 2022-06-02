@@ -59,6 +59,7 @@ mod forbid_http_get_mutations_tests {
     use crate::query_planner::fetch::OperationKind;
     use crate::{http_compat, PlanNode};
     use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
+    use futures::StreamExt;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -67,10 +68,11 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(Box::pin(once(async {
+                ExecutionResponse::fake_builder().build()
+            })))
+        });
 
         let mock = mock_service.build();
 
@@ -79,17 +81,24 @@ mod forbid_http_get_mutations_tests {
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
         let services = service_stack.ready().await.unwrap();
-        services.call(http_post_query_plan_request).await.unwrap();
+        services
+            .call(http_post_query_plan_request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn it_lets_http_post_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(Box::pin(once(async {
+                ExecutionResponse::fake_builder().build()
+            })))
+        });
 
         let mock = mock_service.build();
 
@@ -98,17 +107,24 @@ mod forbid_http_get_mutations_tests {
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
         let services = service_stack.ready().await.unwrap();
-        services.call(http_post_query_plan_request).await.unwrap();
+        services
+            .call(http_post_query_plan_request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn it_lets_http_get_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(Box::pin(once(async {
+                ExecutionResponse::fake_builder().build()
+            })))
+        });
 
         let mock = mock_service.build();
 
@@ -117,7 +133,13 @@ mod forbid_http_get_mutations_tests {
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
         let services = service_stack.ready().await.unwrap();
-        services.call(http_post_query_plan_request).await.unwrap();
+        services
+            .call(http_post_query_plan_request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -150,7 +172,7 @@ mod forbid_http_get_mutations_tests {
         let services = service_stack.ready().await.unwrap();
 
         for request in forbidden_requests {
-            let actual_error = services.call(request).await.unwrap();
+            let actual_error = services.call(request).await.unwrap().next().await.unwrap();
 
             assert_eq!(expected_status, actual_error.response.status());
             assert_eq!(

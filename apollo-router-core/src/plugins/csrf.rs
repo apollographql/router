@@ -217,6 +217,7 @@ mod csrf_tests {
 
     use super::*;
     use crate::{plugin::utils::test::MockRouterService, ResponseBody};
+    use futures::StreamExt;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
@@ -288,9 +289,12 @@ mod csrf_tests {
     async fn assert_accepted(config: CSRFConfig, request: RouterRequest) {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_| {
-            RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
+            Ok(Box::pin(once(async {
+                RouterResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+                    .unwrap()
+            })))
         });
 
         let mock = mock_service.build();
@@ -298,7 +302,13 @@ mod csrf_tests {
             .await
             .unwrap()
             .router_service(mock.boxed());
-        let res = service_stack.oneshot(request).await.unwrap();
+        let res = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {
@@ -314,7 +324,13 @@ mod csrf_tests {
             .await
             .unwrap()
             .router_service(mock.boxed());
-        let res = service_stack.oneshot(request).await.unwrap();
+        let res = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {

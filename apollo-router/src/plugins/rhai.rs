@@ -1546,10 +1546,13 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
-                RouterResponse::fake_builder()
-                    .header("x-custom-header", "CUSTOM_VALUE")
-                    .context(req.context)
-                    .build()
+                Ok(Box::pin(once(async {
+                    RouterResponse::fake_builder()
+                        .header("x-custom-header", "CUSTOM_VALUE")
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })))
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -1565,7 +1568,14 @@ mod tests {
         context.insert("test", 5i64).unwrap();
         let router_req = RouterRequest::fake_builder().context(context).build()?;
 
-        let router_resp = router_service.ready().await?.call(router_req).await?;
+        let router_resp = router_service
+            .ready()
+            .await?
+            .call(router_req)
+            .await?
+            .next()
+            .await
+            .unwrap();
         assert_eq!(router_resp.response.status(), 200);
         let headers = router_resp.response.headers().clone();
         let context = router_resp.context;
@@ -1606,9 +1616,11 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .context(req.context)
-                    .build())
+                Ok(Box::pin(once(async {
+                    ExecutionResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                })))
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -1641,6 +1653,9 @@ mod tests {
             .await
             .unwrap()
             .call(exec_req)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
         assert_eq!(

@@ -203,6 +203,7 @@ impl PluginTestHarness {
 #[cfg(test)]
 mod testing {
     use super::*;
+    use futures::StreamExt;
     use insta::assert_json_snapshot;
 
     struct EmptyPlugin {}
@@ -222,7 +223,7 @@ mod testing {
             .schema(IntoSchema::Canned)
             .build()
             .await?;
-        let result = harness.call_canned().await?;
+        let result = harness.call_canned().await?.next().await.unwrap();
         if let crate::ResponseBody::GraphQL(graphql) = result.response.body() {
             insta::with_settings!({sort_maps => true}, {
                 assert_json_snapshot!(graphql.data);

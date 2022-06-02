@@ -128,6 +128,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 mod apq_tests {
     use super::*;
     use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
+    use futures::StreamExt;
     use serde_json_bytes::json;
     use std::borrow::Cow;
     use std::collections::HashMap;
@@ -172,9 +173,11 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::fake_builder()
-                .build()
-                .expect("expecting valid request"))
+            Ok(Box::pin(once(async {
+                RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request")
+            })))
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -199,9 +202,11 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::fake_builder()
-                    .build()
-                    .expect("expecting valid request"))
+                Ok(Box::pin(once(async {
+                    RouterResponse::fake_builder()
+                        .build()
+                        .expect("expecting valid request")
+                })))
             });
 
         let mock = mock_service.build();
@@ -233,7 +238,13 @@ mod apq_tests {
             .expect("expecting valid request");
 
         let services = service_stack.ready().await.unwrap();
-        let apq_error = services.call(hash_only).await.unwrap();
+        let apq_error = services
+            .call(hash_only)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
@@ -284,9 +295,11 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(RouterResponse::fake_builder()
-                    .build()
-                    .expect("expecting valid request"))
+                Ok(Box::pin(once(async {
+                    RouterResponse::fake_builder()
+                        .build()
+                        .expect("expecting valid request")
+                })))
             });
 
         // the last call should be an APQ error.
@@ -328,7 +341,13 @@ mod apq_tests {
 
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss the APQ cache
-        let apq_error = services.call(hash_only).await.unwrap();
+        let apq_error = services
+            .call(hash_only)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
@@ -339,7 +358,13 @@ mod apq_tests {
         let services = services.ready().await.unwrap();
 
         // apq insert failed, this call will miss
-        let second_apq_error = services.call(second_hash_only).await.unwrap();
+        let second_apq_error = services
+            .call(second_hash_only)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }

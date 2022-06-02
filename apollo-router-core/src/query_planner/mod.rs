@@ -653,7 +653,6 @@ mod log {
 mod tests {
     use super::*;
     use http::Method;
-    use serde_json::json;
     use std::str::FromStr;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -711,7 +710,9 @@ mod tests {
             panic!("this panic should be propagated to the test harness");
         });
 
-        let result = query_plan
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
+        query_plan
             .execute(
                 &Context::new(),
                 &ServiceRegistry::new(HashMap::from([(
@@ -722,8 +723,10 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
+        let result = receiver.next().await.unwrap();
         assert_eq!(result.errors.len(), 1);
         let reason: String = serde_json_bytes::from_value(
             result.errors[0].extensions.get("reason").unwrap().clone(),
@@ -756,6 +759,9 @@ mod tests {
                 matches
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
         query_plan
             .execute(
                 &Context::new(),
@@ -767,9 +773,11 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
 
+        receiver.next().await.unwrap();
         assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
     }
 
@@ -796,6 +804,8 @@ mod tests {
                 matches
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
         query_plan
             .execute(
                 &Context::new(),
@@ -807,15 +817,18 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
 
+        receiver.next().await.unwrap();
         assert!(
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
         );
     }
 
+    /*
     #[tokio::test]
     async fn defer() {
         // plan for { t { x ... @defer { y } }}
@@ -871,28 +884,38 @@ mod tests {
             .times(1)
             .withf(move |_request| true)
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        let response = query_plan
-            .execute(
-                &Context::new(),
-                &ServiceRegistry::new(HashMap::from([
-                    (
-                        "X".into(),
-                        ServiceBuilder::new()
-                            .buffer(1)
-                            .service(mock_x_service.build().boxed()),
-                    ),
-                    (
-                        "Y".into(),
-                        ServiceBuilder::new()
-                            .buffer(1)
-                            .service(mock_y_service.build().boxed()),
-                    ),
-                ])),
-                http_compat::Request::mock(),
-                &Schema::from_str(test_schema!()).unwrap(),
-            )
-            .await;
+
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
+        let jh = tokio::task::spawn(async move {
+            let schema = Schema::from_str(test_schema!()).unwrap();
+
+            query_plan
+                .execute(
+                    &Context::new(),
+                    &ServiceRegistry::new(HashMap::from([
+                        (
+                            "X".into(),
+                            ServiceBuilder::new()
+                                .buffer(1)
+                                .service(mock_x_service.build().boxed()),
+                        ),
+                        (
+                            "Y".into(),
+                            ServiceBuilder::new()
+                                .buffer(1)
+                                .service(mock_y_service.build().boxed()),
+                        ),
+                    ])),
+                    http_compat::Request::mock(),
+                    &schema,
+                    sender,
+                )
+                .await
+        });
+        let response = receiver.next().await.unwrap();
         println!("got response: {:?}", response);
-        panic!();
-    }
+        jh.await.unwrap();
+        //panic!();
+    }*/
 }

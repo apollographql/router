@@ -61,6 +61,7 @@ mod forbid_http_get_mutations_tests {
     use crate::http_compat::Request;
     use crate::query_planner::fetch::OperationKind;
     use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
+    use futures::StreamExt;
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
@@ -69,10 +70,11 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(Box::pin(once(async {
+                ExecutionResponse::fake_builder().build()
+            })))
+        });
 
         let mock = mock_service.build();
 
@@ -83,7 +85,13 @@ mod forbid_http_get_mutations_tests {
 
         let request = create_request(Method::GET, OperationKind::Query);
 
-        let _ = service_stack.oneshot(request).await.unwrap();
+        let _ = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -103,7 +111,13 @@ mod forbid_http_get_mutations_tests {
             .execution_service(mock.boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
-        let actual_error = service_stack.oneshot(request).await.unwrap();
+        let actual_error = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         assert_eq!(expected_status, actual_error.response.status());
         assert_error_matches(&expected_error, actual_error);
@@ -113,10 +127,11 @@ mod forbid_http_get_mutations_tests {
     async fn configuration_set_to_false_lets_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(Box::pin(once(async {
+                ExecutionResponse::fake_builder().build()
+            })))
+        });
 
         let mock = mock_service.build();
 
@@ -127,7 +142,13 @@ mod forbid_http_get_mutations_tests {
 
         let request = create_request(Method::GET, OperationKind::Mutation);
 
-        let _ = service_stack.oneshot(request).await.unwrap();
+        let _ = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
     }
 
     fn assert_error_matches(expected_error: &crate::Error, response: crate::ExecutionResponse) {

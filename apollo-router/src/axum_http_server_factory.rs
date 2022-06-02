@@ -571,6 +571,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use apollo_router_core::http_compat::Request;
+    use futures::stream::once;
     use http::header::{self, CONTENT_TYPE};
     use mockall::mock;
     use reqwest::header::{
@@ -628,7 +629,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_compat::Response<ResponseBody>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<BoxStream<'static, http_compat::Response<ResponseBody>>, BoxError>;
         }
     }
 
@@ -820,11 +821,13 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -921,11 +924,13 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let conf = Configuration::builder()
             .server(
@@ -989,11 +994,13 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let conf = Configuration::builder()
             .server(
@@ -1057,11 +1064,13 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let conf = Configuration::builder()
             .server(
@@ -1148,11 +1157,13 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1207,11 +1218,13 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1245,11 +1258,13 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let (server, client) = init(expectations).await;
 
@@ -1337,11 +1352,15 @@ mod tests {
             .expect_service_call()
             .times(2)
             .returning(move |_| {
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::GraphQL(example_response.clone()))
-                    .unwrap()
-                    .into())
+                let example_response = example_response.clone();
+
+                Ok(Box::pin(once(async move {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap()
+                        .into()
+                })))
             });
         let server = init_unix(expectations, &temp_dir).await;
 
@@ -1592,16 +1611,18 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(ResponseBody::Text(format!(
-                        "{} + {} + {:?}",
-                        req.method(),
-                        req.uri(),
-                        serde_json::to_string(req.body()).unwrap()
-                    )))
-                    .unwrap()
-                    .into())
+                Ok(Box::pin(once(async move {
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::Text(format!(
+                            "{} + {} + {:?}",
+                            req.method(),
+                            req.uri(),
+                            serde_json::to_string(req.body()).unwrap()
+                        )))
+                        .unwrap()
+                        .into()
+                })))
             });
         let (server, client) = init(expectations).await;
         let query = json!(
