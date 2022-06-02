@@ -254,25 +254,20 @@ impl Plugin for Telemetry {
                                 Self::update_metrics(metrics, &res);
                                 Err(res.unwrap_err())
                             }
-                            Ok(stream) => {
-                                //let metrics = metrics.clone();
-                                let start = start.clone();
-                                //let sender = sender.clone();
-                                Ok(Box::pin(stream.map(move |response| {
-                                    let res = Ok(response);
-                                    if !matches!(sender, Sender::Noop) {
-                                        Self::update_apollo_metrics(
-                                            ctx.clone(),
-                                            sender.clone(),
-                                            &res,
-                                            start.elapsed(),
-                                        );
-                                    }
-                                    Self::update_metrics(metrics.clone(), &res);
-                                    res.expect("is always Ok")
-                                }))
-                                    as BoxStream<'static, RouterResponse>)
-                            }
+                            Ok(stream) => Ok(Box::pin(stream.map(move |response| {
+                                let res = Ok(response);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(
+                                        ctx.clone(),
+                                        sender.clone(),
+                                        &res,
+                                        start.elapsed(),
+                                    );
+                                }
+                                Self::update_metrics(metrics.clone(), &res);
+                                res.expect("is always Ok")
+                            }))
+                                as BoxStream<'static, RouterResponse>),
                         }
                     }
                 },

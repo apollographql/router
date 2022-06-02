@@ -469,14 +469,7 @@ async fn health_check() -> impl IntoResponse {
 }
 
 async fn run_graphql_request(
-    service: Buffer<
-        BoxService<
-            http_compat::Request<graphql::Request>,
-            BoxStream<'static, http_compat::Response<ResponseBody>>,
-            BoxError,
-        >,
-        http_compat::Request<graphql::Request>,
-    >,
+    service: BufferedService,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse {
     match service.ready_oneshot().await {

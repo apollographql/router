@@ -2,9 +2,9 @@
 
 use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
-use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -60,20 +60,22 @@ impl Service<ExecutionRequest> for ExecutionService {
             let ctx = context.clone();
             let (sender, receiver) = futures::channel::mpsc::channel(10);
 
-            tokio::task::spawn(async move {
-            req
-                .query_plan
-                .execute(
-                    &context,
-                    &this.subgraph_services,
-                    req.originating_request.clone(),
-                    &this.schema,
-                    sender,
-                )
-                .await;
-            }.in_current_span());
+            tokio::task::spawn(
+                async move {
+                    req.query_plan
+                        .execute(
+                            &context,
+                            &this.subgraph_services,
+                            req.originating_request.clone(),
+                            &this.schema,
+                            sender,
+                        )
+                        .await;
+                }
+                .in_current_span(),
+            );
 
-            Ok(Box::pin(receiver.map(move |response| 
+            Ok(Box::pin(receiver.map(move |response|
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
             ExecutionResponse::new_from_response(
