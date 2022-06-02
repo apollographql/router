@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
+use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
@@ -28,8 +29,8 @@ impl Plugin for ForbidAnonymousOperations {
     // We will thus put the logic it in the `router_service` section of our plugin.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
@@ -60,7 +61,9 @@ impl Plugin for ForbidAnonymousOperations {
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
                         .build()?;
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(
+                        Box::pin(once(async move { res })) as BoxStream<'static, RouterResponse>
+                    ))
                 } else {
                     // we're good to go!
                     tracing::info!("operation is allowed!");
@@ -91,6 +94,7 @@ register_plugin!(
 mod tests {
     use super::ForbidAnonymousOperations;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -130,6 +134,9 @@ mod tests {
         let service_response = service_stack
             .oneshot(request_without_any_operation_name)
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
 
         // ForbidAnonymousOperations should return a 400...
@@ -166,6 +173,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_empty_operation_name)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -207,9 +217,12 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                RouterResponse::fake_builder()
-                    .data(expected_mock_response_data)
-                    .build()
+                Ok(Box::pin(once(async move {
+                    RouterResponse::fake_builder()
+                        .data(expected_mock_response_data)
+                        .build()
+                        .unwrap()
+                })))
             });
 
         // The mock has been set up, we can now build a service from it
@@ -228,6 +241,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_operation_name)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 

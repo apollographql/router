@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
 use apollo_router_core::{PluggableRouterServiceBuilder, RouterRequest};
+use futures::StreamExt;
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
@@ -40,7 +41,10 @@ async fn main() -> Result<()> {
     let res = router_service
         .oneshot(request)
         .await
-        .map_err(|e| anyhow!("router_service call failed: {}", e))?;
+        .map_err(|e| anyhow!("router_service call failed: {}", e))?
+        .next()
+        .await
+        .unwrap();
 
     // {
     //   "data": {
