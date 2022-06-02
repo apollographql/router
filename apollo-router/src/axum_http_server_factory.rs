@@ -1457,6 +1457,7 @@ Content-Type: application/json\r
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .health_check_path("/health")
                     .build(),
             )
