@@ -29,7 +29,10 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
 Added the possibility to set a custom health check path
-  ```yaml
+```yaml
 server:
   # Default is /.well-known/apollo/server-health
   health_check_path: /health
+```
+
+By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
