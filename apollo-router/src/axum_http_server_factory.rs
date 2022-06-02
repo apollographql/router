@@ -51,7 +51,7 @@ impl AxumHttpServerFactory {
 type BufferedService = Buffer<
     BoxService<
         http_compat::Request<graphql::Request>,
-        http_compat::Response<ResponseBody>,
+        BoxStream<'static, http_compat::Response<ResponseBody>>,
         BoxError,
     >,
     http_compat::Request<graphql::Request>,
@@ -472,7 +472,7 @@ async fn run_graphql_request(
     service: Buffer<
         BoxService<
             http_compat::Request<graphql::Request>,
-            http_compat::Response<ResponseBody>,
+            BoxStream<'static, http_compat::Response<ResponseBody>>,
             BoxError,
         >,
         http_compat::Request<graphql::Request>,
@@ -483,20 +483,31 @@ async fn run_graphql_request(
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
 
-            service
+            match service
                 .call(http_compat::Request::from_parts(head, body))
                 .await
-                .map(|response| {
-                    tracing::trace_span!("serialize_response").in_scope(|| response.into_response())
-                })
-                .unwrap_or_else(|e| {
+            {
+                Err(e) => {
                     tracing::error!("router service call failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "router service call failed",
                     )
                         .into_response()
-                })
+                }
+                Ok(mut stream) => match stream.next().await {
+                    None => {
+                        tracing::error!("router service is not available to process request",);
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "router service is not available to process request",
+                        )
+                            .into_response()
+                    }
+                    Some(response) => tracing::trace_span!("serialize_response")
+                        .in_scope(|| response.into_response()),
+                },
+            }
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
