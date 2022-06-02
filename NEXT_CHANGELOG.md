@@ -33,4 +33,3 @@ Added the possibility to set a custom health check path
 server:
   # Default is /.well-known/apollo/server-health
   health_check_path: /health
-```
