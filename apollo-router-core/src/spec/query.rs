@@ -680,6 +680,8 @@ struct Operation {
     // Equivalent of primary
     selection_set: Vec<Selection>,
     variables: HashMap<ByteString, (FieldType, Option<Value>)>,
+    #[allow(dead_code)]
+    // Not already used, waiting to fulfill the @defer implementation
     deferred_queries: HashMap<Path, Selection>,
 }
 
