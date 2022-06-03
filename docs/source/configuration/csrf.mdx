@@ -25,7 +25,7 @@ Apollo Router 0.9 introduced a CSRF prevention feature, which is enabled by defa
 
 Note that all HTTP header names are case-insensitive.
 
-> CSRF prevention is only applied to requests that will execute GraphQL operations, not to requests that would load landing pages or run health checks.)
+> Unlike requests that will execute GraphQL operations, CSRF prevention is not applied to the landing page or to health checks. It does however apply to new endpoints added by plugins.
 
 HTTP requests that satisfy none of the conditions above will be rejected with a 400 status code and a message clearly explaining which headers need to be added in order to make the request succeed.
 
