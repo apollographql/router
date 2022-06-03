@@ -1,10 +1,10 @@
 use super::FederatedServerError;
 use crate::configuration::{Configuration, ListenAddr};
-use apollo_router_core::{
+use crate::{
     http_compat::{Request, Response},
     prelude::*,
 };
-use apollo_router_core::{Handler, ResponseBody};
+use crate::{Handler, ResponseBody};
 use derivative::Derivative;
 use futures::prelude::*;
 use futures::{channel::oneshot, stream::BoxStream};
@@ -36,7 +36,7 @@ pub(crate) trait HttpServerFactory {
             + Sync
             + Clone
             + 'static,
-        <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send;
+        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -102,7 +102,7 @@ impl HttpServerHandle {
             + Sync
             + Clone
             + 'static,
-        <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {

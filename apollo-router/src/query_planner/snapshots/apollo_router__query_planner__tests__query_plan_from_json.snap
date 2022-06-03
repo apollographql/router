@@ -1,5 +1,5 @@
 ---
-source: apollo-router-core/src/query_planner/mod.rs
+source: apollo-router/src/query_planner/mod.rs
 assertion_line: 610
 expression: query_plan
 ---
