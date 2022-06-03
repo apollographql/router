@@ -8,6 +8,8 @@ use apollo_router_core::{
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
+use futures::stream::BoxStream;
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,7 +26,7 @@ use tower_service::Service;
 pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = Response<ResponseBody>,
+            Response = BoxStream<'static, Response<ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -48,7 +50,11 @@ pub struct YamlRouterServiceFactory;
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
-        BoxCloneService<Request<graphql::Request>, Response<ResponseBody>, BoxError>,
+        BoxCloneService<
+            Request<graphql::Request>,
+            BoxStream<'static, Response<ResponseBody>>,
+            BoxError,
+        >,
         Request<graphql::Request>,
     >;
     type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
@@ -82,7 +88,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 .map_request(|http_request: Request<apollo_router_core::Request>| {
                     http_request.into()
                 })
-                .map_response(|response| response.response)
+                .map_response(|response| {
+                    Box::pin(response.map(|r| r.response))
+                        as BoxStream<'static, Response<ResponseBody>>
+                })
                 .boxed_clone(),
         );
 

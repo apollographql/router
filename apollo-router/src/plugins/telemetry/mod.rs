@@ -20,7 +20,8 @@ use apollo_router_core::{
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
-use futures::FutureExt;
+use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
@@ -227,8 +228,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.clone();
@@ -246,12 +247,38 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<RouterResponse, BoxError> = fut.await;
-                        if !matches!(sender, Sender::Noop) {
-                            Self::update_apollo_metrics(&ctx, sender, &result, start.elapsed());
+                        let result: Result<BoxStream<'static, RouterResponse>, BoxError> =
+                            fut.await;
+
+                        match result {
+                            Err(e) => {
+                                let res = Err(e);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(
+                                        &ctx,
+                                        sender,
+                                        &res,
+                                        start.elapsed(),
+                                    );
+                                }
+                                Self::update_metrics(&ctx, metrics, &res);
+                                Err(res.unwrap_err())
+                            }
+                            Ok(stream) => Ok(Box::pin(stream.map(move |response| {
+                                let res = Ok(response);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(
+                                        &ctx,
+                                        sender.clone(),
+                                        &res,
+                                        start.elapsed(),
+                                    );
+                                }
+                                Self::update_metrics(&ctx, metrics.clone(), &res);
+                                res.expect("is always Ok")
+                            }))
+                                as BoxStream<'static, RouterResponse>),
                         }
-                        Self::update_metrics(&ctx, metrics, &result);
-                        result
                     }
                 },
             )
@@ -271,8 +298,8 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
@@ -720,6 +747,7 @@ mod tests {
         http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
     };
     use bytes::Bytes;
+    use futures::{stream::once, StreamExt};
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -787,10 +815,12 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
-                    .context(req.context)
-                    .build()
-                    .unwrap())
+                Ok(Box::pin(once(async {
+                    RouterResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })))
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -845,6 +875,9 @@ mod tests {
             .unwrap()
             .call(router_req.build().unwrap())
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
 
         let handler = dyn_plugin.custom_endpoint().unwrap();
@@ -869,7 +902,6 @@ mod tests {
             .unwrap();
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-
         match resp.body() {
             apollo_router_core::ResponseBody::Text(prom_metrics) => {
                 assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));

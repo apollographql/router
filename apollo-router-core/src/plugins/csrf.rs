@@ -1,4 +1,5 @@
 use crate::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
+use futures::stream::{once, BoxStream};
 use http::header;
 use http::{HeaderMap, StatusCode};
 use schemars::JsonSchema;
@@ -88,8 +89,8 @@ impl Plugin for Csrf {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -112,7 +113,7 @@ impl Plugin for Csrf {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()?;
-                        Ok(ControlFlow::Break(res))
+                        Ok(ControlFlow::Break(Box::pin(once(async { res})) as BoxStream<RouterResponse>))
                     }
                 })
                 .service(service)
@@ -216,6 +217,7 @@ mod csrf_tests {
 
     use super::*;
     use crate::{plugin::utils::test::MockRouterService, ResponseBody};
+    use futures::StreamExt;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
@@ -287,9 +289,12 @@ mod csrf_tests {
     async fn assert_accepted(config: CSRFConfig, request: RouterRequest) {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_| {
-            RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
+            Ok(Box::pin(once(async {
+                RouterResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+                    .unwrap()
+            })))
         });
 
         let mock = mock_service.build();
@@ -297,7 +302,13 @@ mod csrf_tests {
             .await
             .unwrap()
             .router_service(mock.boxed());
-        let res = service_stack.oneshot(request).await.unwrap();
+        let res = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {
@@ -313,7 +324,13 @@ mod csrf_tests {
             .await
             .unwrap()
             .router_service(mock.boxed());
-        let res = service_stack.oneshot(request).await.unwrap();
+        let res = service_stack
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {

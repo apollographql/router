@@ -5,6 +5,8 @@ use apollo_router_core::{
     Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
+use futures::stream::{once, BoxStream};
+use futures::StreamExt;
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::uri::{Parts, PathAndQuery};
 use http::{HeaderMap, StatusCode, Uri};
@@ -415,8 +417,8 @@ impl Plugin for Rhai {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -455,8 +457,8 @@ impl Plugin for Rhai {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -672,8 +674,41 @@ macro_rules! gen_map_response {
 }
 
 // Special case for subgraph, so invoke separately
-gen_shared_types!(router, query_planner, execution);
+gen_shared_types!(query_planner);
 gen_shared_types!(subgraph);
+
+#[allow(dead_code)]
+type SharedExecutionService = Arc<
+    Mutex<Option<BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>>>,
+>;
+#[allow(dead_code)]
+type SharedExecutionRequest = Arc<Mutex<Option<ExecutionRequest>>>;
+#[allow(dead_code)]
+type SharedExecutionResponse = Arc<Mutex<Option<ExecutionResponse>>>;
+impl Accessor<Context> for ExecutionRequest {
+    fn accessor(&self) -> &Context {
+        &self.context
+    }
+    fn accessor_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+}
+impl Accessor<Context> for ExecutionResponse {
+    fn accessor(&self) -> &Context {
+        &self.context
+    }
+    fn accessor_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+}
+impl Accessor<http_compat::Request<Request>> for ExecutionRequest {
+    fn accessor(&self) -> &http_compat::Request<Request> {
+        &self.originating_request
+    }
+    fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+        &mut self.originating_request
+    }
+}
 
 impl Accessor<http_compat::Response<ResponseBody>> for RouterResponse {
     fn accessor(&self) -> &http_compat::Response<ResponseBody> {
@@ -702,6 +737,38 @@ impl Accessor<http_compat::Response<Response>> for SubgraphResponse {
 
     fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
         &mut self.response
+    }
+}
+
+#[allow(dead_code)]
+type SharedRouterService =
+    Arc<Mutex<Option<BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>>>>;
+#[allow(dead_code)]
+type SharedRouterRequest = Arc<Mutex<Option<RouterRequest>>>;
+#[allow(dead_code)]
+type SharedRouterResponse = Arc<Mutex<Option<RouterResponse>>>;
+impl Accessor<Context> for RouterRequest {
+    fn accessor(&self) -> &Context {
+        &self.context
+    }
+    fn accessor_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+}
+impl Accessor<Context> for RouterResponse {
+    fn accessor(&self) -> &Context {
+        &self.context
+    }
+    fn accessor_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+}
+impl Accessor<http_compat::Request<Request>> for RouterRequest {
+    fn accessor(&self) -> &http_compat::Request<Request> {
+        &self.originating_request
+    }
+    fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+        &mut self.originating_request
     }
 }
 
@@ -769,13 +836,140 @@ impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_request!(router, service, rhai_service, callback);
+                //gen_map_request!(router, service, rhai_service, callback);
+                service.replace(|service| {
+                    ServiceBuilder::new()
+                        .checkpoint(move |request: RouterRequest| {
+                            // Let's define a local function to build an error response
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> Result<
+                                ControlFlow<BoxStream<'static, RouterResponse>, RouterRequest>,
+                                BoxError,
+                            > {
+                                let res = RouterResponse::error_builder()
+                                    .errors(vec![apollo_router_core::Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()?;
+                                Ok(ControlFlow::Break(
+                                    Box::pin(once(async { res })) as BoxStream<RouterResponse>
+                                ))
+                            }
+                            let shared_request = Shared::new(Mutex::new(Some(request)));
+                            let result: Result<Dynamic, String> = if callback.is_curried() {
+                                callback
+                                    .call(
+                                        &rhai_service.engine,
+                                        &rhai_service.ast,
+                                        (shared_request.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            } else {
+                                let mut scope = rhai_service.scope.clone();
+                                rhai_service
+                                    .engine
+                                    .call_fn(
+                                        &mut scope,
+                                        &rhai_service.ast,
+                                        callback.fn_name(),
+                                        (shared_request.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            };
+                            if let Err(error) = result {
+                                tracing::error!("map_request callback failed: {error}");
+                                let mut guard = shared_request.lock().unwrap();
+                                let request_opt = guard.take();
+                                return failure_message(
+                                    request_opt.unwrap().context,
+                                    format!("rhai execution error: '{}'", error),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                );
+                            }
+                            let mut guard = shared_request.lock().unwrap();
+                            let request_opt = guard.take();
+                            Ok(ControlFlow::Continue(request_opt.unwrap()))
+                        })
+                        .service(service)
+                        .boxed()
+                })
             }
             ServiceStep::QueryPlanner(service) => {
                 gen_map_request!(query_planner, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_request!(execution, service, rhai_service, callback);
+                //gen_map_request!(execution, service, rhai_service, callback);
+                service.replace(|service| {
+                    ServiceBuilder::new()
+                        .checkpoint(move |request: ExecutionRequest| {
+                            // Let's define a local function to build an error response
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> Result<
+                                ControlFlow<
+                                    BoxStream<'static, ExecutionResponse>,
+                                    ExecutionRequest,
+                                >,
+                                BoxError,
+                            > {
+                                let res = ExecutionResponse::error_builder()
+                                    .errors(vec![apollo_router_core::Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()?;
+                                Ok(ControlFlow::Break(
+                                    Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
+                                ))
+                            }
+                            let shared_request = Shared::new(Mutex::new(Some(request)));
+                            let result: Result<Dynamic, String> = if callback.is_curried() {
+                                callback
+                                    .call(
+                                        &rhai_service.engine,
+                                        &rhai_service.ast,
+                                        (shared_request.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            } else {
+                                let mut scope = rhai_service.scope.clone();
+                                rhai_service
+                                    .engine
+                                    .call_fn(
+                                        &mut scope,
+                                        &rhai_service.ast,
+                                        callback.fn_name(),
+                                        (shared_request.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            };
+                            if let Err(error) = result {
+                                tracing::error!("map_request callback failed: {error}");
+                                let mut guard = shared_request.lock().unwrap();
+                                let request_opt = guard.take();
+                                return failure_message(
+                                    request_opt.unwrap().context,
+                                    format!("rhai execution error: '{}'", error),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                );
+                            }
+                            let mut guard = shared_request.lock().unwrap();
+                            let request_opt = guard.take();
+                            Ok(ControlFlow::Continue(request_opt.unwrap()))
+                        })
+                        .service(service)
+                        .boxed()
+                })
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback);
@@ -786,13 +980,144 @@ impl ServiceStep {
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_response!(router, service, rhai_service, callback);
+                // gen_map_response!(router, service, rhai_service, callback);
+                service.replace(|service| {
+                    service
+                        .map_response(move |response_stream: BoxStream<'static, RouterResponse>| {
+                            // Let's define a local function to build an error response
+                            // XXX: This isn't ideal. We already have a response, so ideally we'd
+                            // like to append this error into the existing response. However,
+                            // the significantly different treatment of errors in different
+                            // response types makes this extremely painful. This needs to be
+                            // re-visited at some point post GA.
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> RouterResponse {
+                                let res = RouterResponse::error_builder()
+                                    .errors(vec![apollo_router_core::Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()
+                                    .expect("can't fail to build our error message");
+                                res
+                            }
+                            Box::pin(response_stream.map(move |response| {
+                                let shared_response = Shared::new(Mutex::new(Some(response)));
+                                let result: Result<Dynamic, String> = if callback.is_curried() {
+                                    callback
+                                        .call(
+                                            &rhai_service.engine,
+                                            &rhai_service.ast,
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                } else {
+                                    let mut scope = rhai_service.scope.clone();
+                                    rhai_service
+                                        .engine
+                                        .call_fn(
+                                            &mut scope,
+                                            &rhai_service.ast,
+                                            callback.fn_name(),
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                };
+                                if let Err(error) = result {
+                                    tracing::error!("map_response callback failed: {error}");
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    return failure_message(
+                                        response_opt.unwrap().context,
+                                        format!("rhai execution error: '{}'", error),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    );
+                                }
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                response_opt.unwrap()
+                            })) as BoxStream<RouterResponse>
+                        })
+                        .boxed()
+                })
             }
             ServiceStep::QueryPlanner(service) => {
                 gen_map_response!(query_planner, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_response!(execution, service, rhai_service, callback);
+                //gen_map_response!(execution, service, rhai_service, callback);
+                service.replace(|service| {
+                    service
+                        .map_response(
+                            move |response_stream: BoxStream<'static, ExecutionResponse>| {
+                                // Let's define a local function to build an error response
+                                // XXX: This isn't ideal. We already have a response, so ideally we'd
+                                // like to append this error into the existing response. However,
+                                // the significantly different treatment of errors in different
+                                // response types makes this extremely painful. This needs to be
+                                // re-visited at some point post GA.
+                                fn failure_message(
+                                    context: Context,
+                                    msg: String,
+                                    status: StatusCode,
+                                ) -> ExecutionResponse {
+                                    let res = ExecutionResponse::error_builder()
+                                        .errors(vec![apollo_router_core::Error {
+                                            message: msg,
+                                            ..Default::default()
+                                        }])
+                                        .status_code(status)
+                                        .context(context)
+                                        .build()
+                                        .expect("can't fail to build our error message");
+                                    //Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
+                                    res
+                                }
+                                Box::pin(response_stream.map(move |response| {
+                                    let shared_response = Shared::new(Mutex::new(Some(response)));
+                                    let result: Result<Dynamic, String> = if callback.is_curried() {
+                                        callback
+                                            .call(
+                                                &rhai_service.engine,
+                                                &rhai_service.ast,
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    } else {
+                                        let mut scope = rhai_service.scope.clone();
+                                        rhai_service
+                                            .engine
+                                            .call_fn(
+                                                &mut scope,
+                                                &rhai_service.ast,
+                                                callback.fn_name(),
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    };
+                                    if let Err(error) = result {
+                                        tracing::error!("map_response callback failed: {error}");
+                                        let mut guard = shared_response.lock().unwrap();
+                                        let response_opt = guard.take();
+                                        return failure_message(
+                                            response_opt.unwrap().context,
+                                            format!("rhai execution error: '{}'", error),
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                        );
+                                    }
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    response_opt.unwrap()
+                                })) as BoxStream<ExecutionResponse>
+                            },
+                        )
+                        .boxed()
+                })
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback);
@@ -1240,10 +1565,13 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
-                RouterResponse::fake_builder()
-                    .header("x-custom-header", "CUSTOM_VALUE")
-                    .context(req.context)
-                    .build()
+                Ok(Box::pin(once(async {
+                    RouterResponse::fake_builder()
+                        .header("x-custom-header", "CUSTOM_VALUE")
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })))
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -1259,7 +1587,14 @@ mod tests {
         context.insert("test", 5i64).unwrap();
         let router_req = RouterRequest::fake_builder().context(context).build()?;
 
-        let router_resp = router_service.ready().await?.call(router_req).await?;
+        let router_resp = router_service
+            .ready()
+            .await?
+            .call(router_req)
+            .await?
+            .next()
+            .await
+            .unwrap();
         assert_eq!(router_resp.response.status(), 200);
         let headers = router_resp.response.headers().clone();
         let context = router_resp.context;
@@ -1300,9 +1635,11 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .context(req.context)
-                    .build())
+                Ok(Box::pin(once(async {
+                    ExecutionResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                })))
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -1335,6 +1672,9 @@ mod tests {
             .await
             .unwrap()
             .call(exec_req)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
         assert_eq!(

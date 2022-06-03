@@ -14,6 +14,7 @@ use crate::RouterService;
 use crate::Schema;
 use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
 use crate::{RouterRequest, RouterResponse};
+use futures::stream::BoxStream;
 pub use service::{
     MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
 };
@@ -27,7 +28,7 @@ use tower::ServiceExt;
 use tower::{BoxError, ServiceBuilder};
 
 pub struct PluginTestHarness {
-    router_service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    router_service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
 }
 pub enum IntoSchema {
     String(String),
@@ -177,12 +178,15 @@ impl PluginTestHarness {
     }
 
     /// Call the test harness with a request. Not that you will need to have set up appropriate responses via mocks.
-    pub async fn call(&mut self, request: RouterRequest) -> Result<RouterResponse, BoxError> {
+    pub async fn call(
+        &mut self,
+        request: RouterRequest,
+    ) -> Result<BoxStream<'static, RouterResponse>, BoxError> {
         self.router_service.ready().await?.call(request).await
     }
 
     /// If using the canned schema this canned request will give a response.
-    pub async fn call_canned(&mut self) -> Result<RouterResponse, BoxError> {
+    pub async fn call_canned(&mut self) -> Result<BoxStream<'static, RouterResponse>, BoxError> {
         self.router_service
             .ready()
             .await?
@@ -199,6 +203,7 @@ impl PluginTestHarness {
 #[cfg(test)]
 mod testing {
     use super::*;
+    use futures::StreamExt;
     use insta::assert_json_snapshot;
 
     struct EmptyPlugin {}
@@ -218,7 +223,7 @@ mod testing {
             .schema(IntoSchema::Canned)
             .build()
             .await?;
-        let result = harness.call_canned().await?;
+        let result = harness.call_canned().await?.next().await.unwrap();
         if let crate::ResponseBody::GraphQL(graphql) = result.response.body() {
             insta::with_settings!({sort_maps => true}, {
                 assert_json_snapshot!(graphql.data);

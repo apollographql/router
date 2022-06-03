@@ -6,6 +6,7 @@
 
 use crate::sync_checkpoint::CheckpointService;
 use crate::{RouterRequest, RouterResponse};
+use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use serde_json_bytes::Value;
 use std::ops::ControlFlow;
@@ -16,7 +17,7 @@ pub struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
+    S: Service<RouterRequest, Response = BoxStream<'static, RouterResponse>> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -43,7 +44,7 @@ where
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(Box::pin(once(async { res }))))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -58,15 +59,18 @@ mod ensure_query_presence_tests {
     use super::*;
     use crate::plugin::utils::test::MockRouterService;
     use crate::ResponseBody;
+    use futures::StreamExt;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_works_with_query() {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_req| {
-            Ok(RouterResponse::fake_builder()
-                .build()
-                .expect("expecting valid request"))
+            Ok(Box::pin(once(async {
+                RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request")
+            })))
         });
 
         let mock = mock_service.build();
@@ -98,6 +102,9 @@ mod ensure_query_presence_tests {
             .oneshot(request)
             .await
             .unwrap()
+            .next()
+            .await
+            .unwrap()
             .response
             .into_body();
         let actual_error = if let ResponseBody::GraphQL(b) = response {
@@ -123,6 +130,9 @@ mod ensure_query_presence_tests {
 
         let response = service_stack
             .oneshot(request)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap()
             .response
