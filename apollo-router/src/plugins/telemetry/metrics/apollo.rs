@@ -360,7 +360,11 @@ mod test {
                     .and_context(context)
                     .build()?,
             )
-            .await;
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap();
 
         drop(test_harness);
         let results = rx

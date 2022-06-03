@@ -164,6 +164,7 @@ mod async_checkpoint_tests {
         plugin::utils::test::MockExecutionService, ExecutionRequest, ExecutionResponse,
         ServiceBuilderExt,
     };
+    use futures::stream::{once, BoxStream, StreamExt};
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 
     #[tokio::test]
@@ -176,9 +177,11 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req: crate::ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
+                Ok(Box::pin(once(async {
+                    ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .build()
+                })))
             });
 
         let service = execution_service.build();
@@ -193,6 +196,9 @@ mod async_checkpoint_tests {
 
         let actual_label = service_stack
             .oneshot(request)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap()
             .response
@@ -212,9 +218,11 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
+                Ok(Box::pin(once(async {
+                    ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .build()
+                })))
             });
 
         let service = router_service.build();
@@ -227,6 +235,9 @@ mod async_checkpoint_tests {
 
         let actual_label = service_stack
             .oneshot(request)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap()
             .response
@@ -246,11 +257,12 @@ mod async_checkpoint_tests {
 
         let service_stack = AsyncCheckpointLayer::new(|_req| {
             Box::pin(async {
-                Ok(ControlFlow::Break(
+                Ok(ControlFlow::Break(Box::pin(once(async {
                     ExecutionResponse::fake_builder()
                         .label("returned_before_mock_service".to_string())
-                        .build(),
-                ))
+                        .build()
+                }))
+                    as BoxStream<ExecutionResponse>))
             })
         })
         .layer(service);
@@ -259,6 +271,9 @@ mod async_checkpoint_tests {
 
         let actual_label = service_stack
             .oneshot(request)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap()
             .response

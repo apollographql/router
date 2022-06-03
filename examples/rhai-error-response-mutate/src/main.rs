@@ -16,6 +16,7 @@ mod tests {
     use apollo_router_core::utils::test::IntoSchema::Canned;
     use apollo_router_core::utils::test::PluginTestHarness;
     use apollo_router_core::{Context, Plugin, RouterRequest};
+    use futures::StreamExt;
     use http::StatusCode;
 
     #[tokio::test]
@@ -56,7 +57,10 @@ mod tests {
                     .expect("a valid RouterRequest"),
             )
             .await
-            .expect("a router response");
+            .expect("a router response")
+            .next()
+            .await
+            .unwrap();
 
         assert_eq!(StatusCode::OK, service_response.response.status());
         /* TBD: Figure out how to run this as a test

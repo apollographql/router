@@ -92,12 +92,13 @@ impl QueryPlan {
 
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
-        &'a self,
+        &self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         originating_request: http_compat::Request<Request>,
         schema: &'a Schema,
-    ) -> Response {
+        mut sender: futures::channel::mpsc::Sender<Response>,
+    ) {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
@@ -114,7 +115,9 @@ impl QueryPlan {
             )
             .await;
 
-        Response::builder().data(value).errors(errors).build()
+        let _ = sender
+            .send(Response::builder().data(value).errors(errors).build())
+            .await;
     }
 
     pub fn contains_mutations(&self) -> bool {
@@ -641,7 +644,9 @@ mod tests {
             panic!("this panic should be propagated to the test harness");
         });
 
-        let result = query_plan
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
+        query_plan
             .execute(
                 &Context::new(),
                 &ServiceRegistry::new(HashMap::from([(
@@ -652,8 +657,10 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
+        let result = receiver.next().await.unwrap();
         assert_eq!(result.errors.len(), 1);
         let reason: String = serde_json_bytes::from_value(
             result.errors[0].extensions.get("reason").unwrap().clone(),
@@ -686,6 +693,9 @@ mod tests {
                 matches
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
         query_plan
             .execute(
                 &Context::new(),
@@ -697,9 +707,11 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
 
+        receiver.next().await.unwrap();
         assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
     }
 
@@ -726,6 +738,8 @@ mod tests {
                 matches
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
         query_plan
             .execute(
                 &Context::new(),
@@ -737,9 +751,11 @@ mod tests {
                 )])),
                 http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
+                sender,
             )
             .await;
 
+        receiver.next().await.unwrap();
         assert!(
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"

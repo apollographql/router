@@ -1,6 +1,7 @@
 use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+use futures::stream::{BoxStream, StreamExt};
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
@@ -39,8 +40,8 @@ impl Plugin for ContextData {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
@@ -57,12 +58,14 @@ impl Plugin for ContextData {
                 req
             })
             .service(service)
-            .map_response(|resp| {
-                // Pick up a value from the context on the response.
-                if let Ok(Some(data)) = resp.context.get::<_, u64>("response_count") {
-                    tracing::info!("subrequest count {}", data);
-                }
-                resp
+            .map_response(|stream| {
+                Box::pin(stream.map(|resp| {
+                    // Pick up a value from the context on the response.
+                    if let Ok(Some(data)) = resp.context.get::<_, u64>("response_count") {
+                        tracing::info!("subrequest count {}", data);
+                    }
+                    resp
+                })) as BoxStream<'static, RouterResponse>
             })
             .boxed()
     }

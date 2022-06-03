@@ -6,8 +6,8 @@ use apollo_router_core::{
 };
 use apollo_router_core::{Handler, ResponseBody};
 use derivative::Derivative;
-use futures::channel::oneshot;
 use futures::prelude::*;
+use futures::{channel::oneshot, stream::BoxStream};
 use std::sync::Arc;
 use std::{collections::HashMap, pin::Pin};
 use tower::BoxError;
@@ -28,8 +28,11 @@ pub(crate) trait HttpServerFactory {
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-            + Send
+        RS: Service<
+                Request<graphql::Request>,
+                Response = BoxStream<'static, Response<ResponseBody>>,
+                Error = BoxError,
+            > + Send
             + Sync
             + Clone
             + 'static,
@@ -91,8 +94,11 @@ impl HttpServerHandle {
     ) -> Result<Self, FederatedServerError>
     where
         SF: HttpServerFactory,
-        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-            + Send
+        RS: Service<
+                Request<graphql::Request>,
+                Response = BoxStream<'static, Response<ResponseBody>>,
+                Error = BoxError,
+            > + Send
             + Sync
             + Clone
             + 'static,

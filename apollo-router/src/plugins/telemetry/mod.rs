@@ -21,7 +21,8 @@ use apollo_router_core::{
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
-use futures::FutureExt;
+use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
@@ -224,8 +225,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.apollo.clone().unwrap_or_default();
@@ -241,12 +242,33 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<RouterResponse, BoxError> = fut.await;
-                        if !matches!(sender, Sender::Noop) {
-                            Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
+                        let result: Result<BoxStream<'static, RouterResponse>, BoxError> =
+                            fut.await;
+
+                        match result {
+                            Err(e) => {
+                                let res = Err(e);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(ctx, sender, &res, start.elapsed());
+                                }
+                                Self::update_metrics(metrics, &res);
+                                Err(res.unwrap_err())
+                            }
+                            Ok(stream) => Ok(Box::pin(stream.map(move |response| {
+                                let res = Ok(response);
+                                if !matches!(sender, Sender::Noop) {
+                                    Self::update_apollo_metrics(
+                                        ctx.clone(),
+                                        sender.clone(),
+                                        &res,
+                                        start.elapsed(),
+                                    );
+                                }
+                                Self::update_metrics(metrics.clone(), &res);
+                                res.expect("is always Ok")
+                            }))
+                                as BoxStream<'static, RouterResponse>),
                         }
-                        Self::update_metrics(metrics, &result);
-                        result
                     }
                 },
             )
@@ -266,8 +288,8 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)

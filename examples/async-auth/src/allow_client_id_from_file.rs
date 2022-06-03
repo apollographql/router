@@ -1,6 +1,7 @@
 use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
+use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -41,8 +42,8 @@ impl Plugin for AllowClientIdFromFile {
     // switching the async file read with an async http request
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -73,7 +74,10 @@ impl Plugin for AllowClientIdFromFile {
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    return Box::pin(async { Ok(ControlFlow::Break(res)) });
+                    return Box::pin(async {
+                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
+                            as BoxStream<'static, RouterResponse>))
+                    });
                 }
 
                 // It is best practice to perform checks before we unwrap,
@@ -99,7 +103,10 @@ impl Plugin for AllowClientIdFromFile {
                             .context(req.context)
                             .build()
                             .expect("response is valid");
-                        return Box::pin(async { Ok(ControlFlow::Break(res)) });
+                        return Box::pin(async {
+                            Ok(ControlFlow::Break(Box::pin(once(async move { res }))
+                                as BoxStream<'static, RouterResponse>))
+                        });
                     }
                 };
 
@@ -135,7 +142,8 @@ impl Plugin for AllowClientIdFromFile {
                             .context(req.context)
                             .build()
                             .expect("response is valid");
-                        Ok(ControlFlow::Break(res))
+                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
+                            as BoxStream<'static, RouterResponse>))
                     }
                 })
             })
@@ -173,6 +181,7 @@ mod tests {
 
     use super::AllowClientIdFromFile;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -217,6 +226,9 @@ mod tests {
         let service_response = service_stack
             .oneshot(request_without_client_id)
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
 
         // AllowClientIdFromFile should return a 401...
@@ -259,6 +271,9 @@ mod tests {
         let service_response = service_stack
             .oneshot(request_with_unauthorized_client_id)
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
 
         // AllowClientIdFromFile should return a 403...
@@ -300,9 +315,12 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                RouterResponse::fake_builder()
-                    .data(expected_mock_response_data)
-                    .build()
+                Ok(Box::pin(once(async move {
+                    RouterResponse::fake_builder()
+                        .data(expected_mock_response_data)
+                        .build()
+                        .unwrap()
+                })))
             });
 
         // The mock has been set up, we can now build a service from it
@@ -326,6 +344,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_valid_client_id)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 

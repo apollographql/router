@@ -64,6 +64,7 @@ use apollo_router_core::Context;
 use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
+use futures::stream::{once, BoxStream};
 use http::header::AUTHORIZATION;
 use http::StatusCode;
 use jwt_simple::prelude::*;
@@ -204,8 +205,8 @@ impl Plugin for JwtAuth {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         // We are going to use the `jwt-simple` crate for our JWT verification.
         // The crate provides straightforward support for the popular JWT algorithms.
 
@@ -230,7 +231,7 @@ impl Plugin for JwtAuth {
                     context: Context,
                     msg: String,
                     status: StatusCode,
-                ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
+                ) -> Result<ControlFlow<BoxStream<'static, RouterResponse>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
                         .errors(vec![apollo_router_core::Error {
                             message: msg,
@@ -239,7 +240,7 @@ impl Plugin for JwtAuth {
                         .status_code(status)
                         .context(context)
                         .build()?;
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(Box::pin(once(async move {res}))))
                 }
 
                 // The http_request is stored in a `RouterRequest` context.
@@ -383,6 +384,7 @@ register_plugin!("example", "jwt", JwtAuth);
 mod tests {
     use super::*;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use futures::StreamExt;
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -417,6 +419,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_without_any_authorization_header)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -454,6 +459,9 @@ mod tests {
         let service_response = service_stack
             .oneshot(request_with_no_bearer_in_auth)
             .await
+            .unwrap()
+            .next()
+            .await
             .unwrap();
 
         // JwtAuth should return a 400...
@@ -489,6 +497,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_too_many_spaces_in_auth)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -526,6 +537,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_appropriate_auth)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -567,10 +581,12 @@ mod tests {
                 assert_eq!(claims.subject, Some("subject".to_string()));
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
-                Ok(RouterResponse::fake_builder()
-                    .data(expected_mock_response_data)
-                    .build()
-                    .expect("expecting valid request"))
+                Ok(Box::pin(once(async move {
+                    RouterResponse::fake_builder()
+                        .data(expected_mock_response_data)
+                        .build()
+                        .expect("expecting valid request")
+                })))
             });
 
         // The mock has been set up, we can now build a service from it
@@ -612,6 +628,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_appropriate_auth)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -663,6 +682,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_appropriate_auth)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 
@@ -721,6 +743,9 @@ mod tests {
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_appropriate_auth)
+            .await
+            .unwrap()
+            .next()
             .await
             .unwrap();
 

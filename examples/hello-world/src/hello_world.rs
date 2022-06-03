@@ -3,6 +3,7 @@ use apollo_router_core::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
     QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -31,8 +32,8 @@ impl Plugin for HelloWorld {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -62,8 +63,8 @@ impl Plugin for HelloWorld {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
