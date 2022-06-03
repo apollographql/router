@@ -1,4 +1,4 @@
-use crate::{FieldType, Fragment, Object, Schema};
+use crate::{FieldType, Object, Schema};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 
@@ -13,8 +13,12 @@ pub(crate) enum Selection {
         include: Include,
     },
     InlineFragment {
-        fragment: Fragment,
+        // Optional in specs but we fill it with the current type if not specified
+        type_condition: String,
+        skip: Skip,
+        include: Include,
         known_type: bool,
+        selection_set: Vec<Selection>,
     },
     FragmentSpread {
         name: String,
@@ -43,6 +47,36 @@ impl Selection {
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
+                let skip = field
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(skip) = parse_skip(&directive) {
+                                return skip;
+                            }
+                        }
+                        Skip::No
+                    })
+                    .unwrap_or(Skip::No);
+                if skip.statically_skipped() {
+                    return None;
+                }
+
+                let include = field
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(include) = parse_include(&directive) {
+                                return include;
+                            }
+                        }
+                        Include::Yes
+                    })
+                    .unwrap_or(Include::Yes);
+                if include.statically_skipped() {
+                    return None;
+                }
+
                 let field_name = field
                     .name()
                     .expect("the node Name is not optional in the spec; qed")
@@ -78,38 +112,15 @@ impl Selection {
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
                 } else {
-                    field.selection_set().and_then(|x| {
+                    field.selection_set().map(|x| {
                         x.selections()
                             .into_iter()
-                            .map(|selection| {
+                            .filter_map(|selection| {
                                 Selection::from_ast(selection, &field_type, schema, count)
                             })
                             .collect()
                     })
                 };
-
-                let skip = field
-                    .directives()
-                    .map(|directives| {
-                        for directive in directives.directives() {
-                            if let Some(skip) = parse_skip(&directive) {
-                                return skip;
-                            }
-                        }
-                        Skip::No
-                    })
-                    .unwrap_or(Skip::No);
-                let include = field
-                    .directives()
-                    .map(|directives| {
-                        for directive in directives.directives() {
-                            if let Some(include) = parse_include(&directive) {
-                                return include;
-                            }
-                        }
-                        Include::Yes
-                    })
-                    .unwrap_or(Include::Yes);
 
                 Some(Self::Field {
                     alias: alias.map(|alias| alias.into()),
@@ -122,6 +133,36 @@ impl Selection {
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
             ast::Selection::InlineFragment(inline_fragment) => {
+                let skip = inline_fragment
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(skip) = parse_skip(&directive) {
+                                return skip;
+                            }
+                        }
+                        Skip::No
+                    })
+                    .unwrap_or(Skip::No);
+                if skip.statically_skipped() {
+                    return None;
+                }
+
+                let include = inline_fragment
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(include) = parse_include(&directive) {
+                                return include;
+                            }
+                        }
+                        Include::Yes
+                    })
+                    .unwrap_or(Include::Yes);
+                if include.statically_skipped() {
+                    return None;
+                }
+
                 let type_condition = inline_fragment
                     .type_condition()
                     .map(|condition| {
@@ -144,53 +185,22 @@ impl Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                     .into_iter()
-                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
-                    .collect::<Option<_>>()?;
-
-                let skip = inline_fragment
-                    .directives()
-                    .map(|directives| {
-                        for directive in directives.directives() {
-                            if let Some(skip) = parse_skip(&directive) {
-                                return skip;
-                            }
-                        }
-                        Skip::No
+                    .filter_map(|selection| {
+                        Selection::from_ast(selection, &fragment_type, schema, count)
                     })
-                    .unwrap_or(Skip::No);
-                let include = inline_fragment
-                    .directives()
-                    .map(|directives| {
-                        for directive in directives.directives() {
-                            if let Some(include) = parse_include(&directive) {
-                                return include;
-                            }
-                        }
-                        Include::Yes
-                    })
-                    .unwrap_or(Include::Yes);
+                    .collect();
 
                 let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
                 Some(Self::InlineFragment {
-                    fragment: Fragment {
-                        type_condition,
-                        selection_set,
-                        skip,
-                        include,
-                    },
+                    type_condition,
+                    selection_set,
+                    skip,
+                    include,
                     known_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             ast::Selection::FragmentSpread(fragment_spread) => {
-                let name = fragment_spread
-                    .fragment_name()
-                    .expect("the node FragmentName is not optional in the spec; qed")
-                    .name()
-                    .unwrap()
-                    .text()
-                    .to_string();
-
                 let skip = fragment_spread
                     .directives()
                     .map(|directives| {
@@ -202,6 +212,10 @@ impl Selection {
                         Skip::No
                     })
                     .unwrap_or(Skip::No);
+                if skip.statically_skipped() {
+                    return None;
+                }
+
                 let include = fragment_spread
                     .directives()
                     .map(|directives| {
@@ -213,6 +227,17 @@ impl Selection {
                         Include::Yes
                     })
                     .unwrap_or(Include::Yes);
+                if include.statically_skipped() {
+                    return None;
+                }
+
+                let name = fragment_spread
+                    .fragment_name()
+                    .expect("the node FragmentName is not optional in the spec; qed")
+                    .name()
+                    .unwrap()
+                    .text()
+                    .to_string();
 
                 Some(Self::FragmentSpread {
                     name,
@@ -279,6 +304,9 @@ impl Skip {
                 .and_then(|v| v.as_bool()),
         }
     }
+    pub(crate) fn statically_skipped(&self) -> bool {
+        matches!(self, Skip::Yes)
+    }
 }
 
 pub(crate) fn parse_include(directive: &ast::Directive) -> Option<Include> {
@@ -334,5 +362,8 @@ impl Include {
                 .get(variable_name.as_str())
                 .and_then(|v| v.as_bool()),
         }
+    }
+    pub(crate) fn statically_skipped(&self) -> bool {
+        matches!(self, Include::No)
     }
 }

@@ -36,7 +36,7 @@ impl Fragments {
                         .selection_set()
                         .expect("the node SelectionSet is not optional in the spec; qed")
                         .selections()
-                        .map(|selection| {
+                        .filter_map(|selection| {
                             Selection::from_ast(
                                 selection,
                                 &FieldType::Named(type_condition.clone()),
@@ -44,7 +44,7 @@ impl Fragments {
                                 0,
                             )
                         })
-                        .collect::<Option<_>>()?;
+                        .collect();
 
                     let skip = fragment_definition
                         .directives()
