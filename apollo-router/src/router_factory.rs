@@ -209,8 +209,9 @@ fn visit(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod test {
+    use crate::configuration::Configuration;
+    use crate::router_factory::YamlRouterServiceFactory;
     use crate::router_factory::{inject_schema_id, RouterServiceFactory};
-    use crate::{Configuration, YamlRouterServiceFactory};
     use apollo_router_core::Schema;
     use apollo_router_core::{register_plugin, Plugin};
     use schemars::JsonSchema;

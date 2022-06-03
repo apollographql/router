@@ -3,12 +3,12 @@
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use crate::stream::StreamExt;
 use apollo_spaceport::{ReportHeader, Reporter, ReporterError};
 use async_trait::async_trait;
 use deadpool::managed::Pool;
 use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
+use futures::stream::StreamExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use studio::Report;

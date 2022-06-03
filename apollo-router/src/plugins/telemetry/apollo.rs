@@ -1,6 +1,6 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
-use crate::graphql::plugin::utils::serde::deserialize_header_name;
+use apollo_router_core::plugin::utils::serde::deserialize_header_name;
 use http::header::HeaderName;
 use schemars::JsonSchema;
 use serde::Deserialize;
