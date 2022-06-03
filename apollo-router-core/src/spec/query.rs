@@ -1169,7 +1169,7 @@ mod tests {
 
             union Element = Baz | Bar
             ",
-            "{get {foo stuff{bar baz} ...fragment array{bar baz} other{bar}}}",
+            "{get {foo stuff{bar baz} array{... on Baz { bar baz } } other{bar}}}",
             json! {{
                 "get": {
                     "foo": "1",
