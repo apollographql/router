@@ -41,7 +41,7 @@ Refer to [the README file](README.md) or run `cargo run --help` for more informa
 
 ## Project Structure
 
-- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc. As well as:
+- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc. As well as everything required to handle graphql queries:
 
   - query plan building
   - query plan execution
