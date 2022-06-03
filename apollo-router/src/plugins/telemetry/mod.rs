@@ -317,16 +317,12 @@ impl Plugin for Telemetry {
                         Err(_) => {
                             metrics
                                 .http_requests_error_total
-                                .add(1, &[
-                                    subgraph_attribute.clone(),
-                                ]);
+                                .add(1, &[subgraph_attribute.clone()]);
                         }
                     }
                     metrics
                         .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[
-                            subgraph_attribute.clone(),
-                        ]);
+                        .record(now.elapsed().as_secs_f64(), &[subgraph_attribute.clone()]);
                     r
                 })
             })
@@ -632,7 +628,7 @@ impl Telemetry {
             }
 
             if let Some(MetricsCommon {
-                additionnal_attributes:
+                attributes:
                     Some(MetricsAttributesConf {
                         from_headers: Some(from_headers),
                         ..
@@ -762,7 +758,7 @@ mod tests {
                     },
                 "metrics": {
                     "common": {
-                        "additionnal_attributes": {
+                        "attributes": {
                             "from_headers": [
                                 {
                                     "named": "test",
@@ -770,7 +766,7 @@ mod tests {
                                     "rename": "renamed_value",
                                 }
                             ],
-                            "insert": [
+                            "static": [
                                 {
                                     "name": "myname",
                                     "value": "label_value"
@@ -810,7 +806,7 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "additionnal_attributes": {
+                        "attributes": {
                             "from_headers": [
                                 {
                                     "named": "test",
@@ -822,7 +818,7 @@ mod tests {
                                     "default": "my_default_value"
                                 }
                             ],
-                            "insert": [
+                            "static": [
                                 {
                                     "name": "myname",
                                     "value": "label_value"

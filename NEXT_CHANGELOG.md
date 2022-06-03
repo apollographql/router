@@ -34,8 +34,8 @@ Example:
 telemetry:
   metrics:
     common:
-      additionnal_attributes:
-        insert:
+      attributes:
+        static:
           - name: "version"
             value: "v1.0.0"
         from_headers:

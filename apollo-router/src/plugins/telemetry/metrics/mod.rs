@@ -30,6 +30,7 @@ pub struct MetricsAttributesConf {
     /// Configuration to forward header values in metric attributes/labels
     pub(crate) from_headers: Option<Vec<Forward>>,
     /// Configuration to insert custom attributes/labels in metrics
+    #[serde(rename = "static")]
     pub(crate) insert: Option<Vec<Insert>>,
 }
 

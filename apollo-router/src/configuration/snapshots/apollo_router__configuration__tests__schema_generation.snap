@@ -480,7 +480,7 @@ expression: "&schema"
             "common": {
               "type": "object",
               "properties": {
-                "additionnal_attributes": {
+                "attributes": {
                   "description": "Configuration to add custom labels/attributes to metrics",
                   "type": "object",
                   "properties": {
@@ -528,7 +528,7 @@ expression: "&schema"
                       },
                       "nullable": true
                     },
-                    "insert": {
+                    "static": {
                       "description": "Configuration to insert custom attributes/labels in metrics",
                       "type": "array",
                       "items": {

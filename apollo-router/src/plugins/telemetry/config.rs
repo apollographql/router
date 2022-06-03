@@ -57,7 +57,7 @@ pub struct Metrics {
 pub struct MetricsCommon {
     pub delay_interval: Option<Duration>,
     /// Configuration to add custom labels/attributes to metrics
-    pub additionnal_attributes: Option<MetricsAttributesConf>,
+    pub attributes: Option<MetricsAttributesConf>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

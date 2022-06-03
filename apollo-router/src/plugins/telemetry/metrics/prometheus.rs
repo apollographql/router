@@ -30,7 +30,7 @@ impl MetricsConfigurator for Config {
         if self.enabled {
             let mut resources = Resource::default();
             if let MetricsCommon {
-                additionnal_attributes:
+                attributes:
                     Some(MetricsAttributesConf {
                         insert: Some(insert_cfg),
                         ..
