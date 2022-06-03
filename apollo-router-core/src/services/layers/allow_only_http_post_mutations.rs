@@ -4,7 +4,6 @@
 
 use crate::sync_checkpoint::CheckpointService;
 use crate::{ExecutionRequest, ExecutionResponse, Object, Response};
-use futures::stream::once;
 use futures::Stream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
@@ -18,7 +17,7 @@ where
     S: Service<ExecutionRequest, Response = ExecutionResponse<ResponseStream>> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
     <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
-    ResponseStream: Stream<Item = Response>,
+    ResponseStream: Stream<Item = Response> + Send + 'static,
 {
     type Service = CheckpointService<S, ExecutionRequest>;
 
@@ -44,7 +43,7 @@ where
                         "Allow".parse::<HeaderName>().unwrap(),
                         "POST".parse().unwrap(),
                     );
-                    Ok(ControlFlow::Break(Box::pin(once(async { res }))))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }

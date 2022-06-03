@@ -127,8 +127,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service<Res: Stream<Item = Response>>(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError> {
         service
     }
 
@@ -187,10 +187,18 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service<Res: Stream<Item = Response>>(
+    fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>;
+        service: BoxService<
+            ExecutionRequest,
+            BoxStream<'static, ExecutionResponse<BoxStream<Response>>>,
+            BoxError,
+        >,
+    ) -> BoxService<
+        ExecutionRequest,
+        BoxStream<'static, ExecutionResponse<BoxStream<Response>>>,
+        BoxError,
+    >;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -233,10 +241,15 @@ where
         self.query_planning_service(service)
     }
 
-    fn execution_service<Res: Stream<Item = Response>>(
+    fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         self.execution_service(service)
     }
 

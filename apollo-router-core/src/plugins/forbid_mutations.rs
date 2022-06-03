@@ -24,8 +24,8 @@ impl Plugin for ForbidMutations {
 
     fn execution_service<Res: Stream<Item = Response>>(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError> {
         if self.forbid {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {

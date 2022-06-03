@@ -263,7 +263,7 @@ impl<T> Response<T> {
 
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
-        F: FnOnce(T) -> U,
+        F: FnMut(T) -> U,
     {
         self.inner.map(f).into()
     }

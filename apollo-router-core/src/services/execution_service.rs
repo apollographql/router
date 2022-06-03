@@ -1,10 +1,10 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
+use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
+use futures::channel::mpsc::Receiver;
 use futures::future::BoxFuture;
-use futures::stream::BoxStream;
-use futures::StreamExt;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -38,7 +38,7 @@ impl ExecutionService {
 }
 
 impl Service<ExecutionRequest> for ExecutionService {
-    type Response = ExecutionResponse<()>;
+    type Response = ExecutionResponse<Receiver<Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 

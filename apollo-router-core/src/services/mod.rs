@@ -4,6 +4,10 @@ pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::prelude::graphql::*;
+use futures::future::ready;
+use futures::future::Ready;
+use futures::stream::once;
+use futures::stream::Once;
 use futures::Stream;
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
@@ -591,7 +595,7 @@ impl ExecutionRequest {
     }
 }
 
-assert_impl_all!(ExecutionResponse: Send);
+//assert_impl_all!(ExecutionResponse: Send);
 /// [`Context`] and [`http_compat::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
@@ -601,16 +605,10 @@ pub struct ExecutionResponse<T: Stream<Item = Response>> {
     pub context: Context,
 }
 
+/// welp
+type EEE = ExecutionResponse<Once<Ready<Response>>>;
 #[buildstructor::builder]
-impl<T: Stream<Item = Response>> ExecutionResponse<T> {
-    /// This is the constructor to use when constructing a real ExecutionResponse.
-    ///
-    /// In this case, you already have a valid request and just wish to associate it with a context
-    /// and create a ExecutionResponse.
-    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
-        Self { response, context }
-    }
-
+impl EEE {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
@@ -636,7 +634,7 @@ impl<T: Stream<Item = Response>> ExecutionResponse<T> {
         // Build an http Response
         let http_response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
-            .body(res)
+            .body(once(ready(res)))
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
@@ -694,6 +692,26 @@ impl<T: Stream<Item = Response>> ExecutionResponse<T> {
             status_code,
             context,
         ))
+    }
+}
+
+impl<T: Stream<Item = Response>> ExecutionResponse<T> {
+    /// This is the constructor to use when constructing a real ExecutionResponse.
+    ///
+    /// In this case, you already have a valid request and just wish to associate it with a context
+    /// and create a ExecutionResponse.
+    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+        Self { response, context }
+    }
+
+    pub fn map<F>(self, f: F) -> ExecutionResponse<T>
+    where
+        F: FnMut(Response) -> Response,
+    {
+        ExecutionResponse {
+            context: self.context,
+            response: self.response.map(f),
+        }
     }
 }
 
