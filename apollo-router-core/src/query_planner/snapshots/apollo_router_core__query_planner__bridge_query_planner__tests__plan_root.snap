@@ -11,6 +11,5 @@ Fetch(
         operation: "{me{name{first last}}}",
         operation_name: None,
         operation_kind: Query,
-        id: None,
     },
 )

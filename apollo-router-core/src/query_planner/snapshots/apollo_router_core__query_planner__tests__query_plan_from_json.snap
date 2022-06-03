@@ -1,6 +1,6 @@
 ---
 source: apollo-router-core/src/query_planner/mod.rs
-assertion_line: 639
+assertion_line: 610
 expression: query_plan
 ---
 Sequence {
@@ -15,7 +15,6 @@ Sequence {
                     "topProducts_product_0",
                 ),
                 operation_kind: Query,
-                id: None,
             },
         ),
         Parallel {
@@ -66,7 +65,6 @@ Sequence {
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
                                         operation_name: None,
                                         operation_kind: Query,
-                                        id: None,
                                     },
                                 ),
                             },
@@ -127,7 +125,6 @@ Sequence {
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
                                         operation_name: None,
                                         operation_kind: Query,
-                                        id: None,
                                     },
                                 ),
                             },
@@ -177,7 +174,6 @@ Sequence {
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
                                         operation_name: None,
                                         operation_kind: Query,
-                                        id: None,
                                     },
                                 ),
                             },
@@ -237,7 +233,6 @@ Sequence {
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
                                         operation_name: None,
                                         operation_kind: Query,
-                                        id: None,
                                     },
                                 ),
                             },
