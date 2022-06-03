@@ -249,6 +249,9 @@ pub enum QueryPlannerError {
 
     /// router bridge error: {0}
     RouterBridgeError(router_bridge::error::Error),
+
+    /// spec error: {0}
+    SpecError(SpecError),
 }
 
 #[derive(Clone, Debug, Error)]
@@ -289,6 +292,12 @@ impl From<JoinError> for QueryPlannerError {
 impl From<CacheResolverError> for QueryPlannerError {
     fn from(err: CacheResolverError) -> Self {
         QueryPlannerError::CacheResolverError(Arc::new(err))
+    }
+}
+
+impl From<SpecError> for QueryPlannerError {
+    fn from(err: SpecError) -> Self {
+        QueryPlannerError::SpecError(err)
     }
 }
 

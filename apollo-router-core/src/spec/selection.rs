@@ -1,4 +1,4 @@
-use crate::{FieldType, Object, Schema};
+use crate::{FieldType, Object, Schema, SpecError};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 
@@ -34,22 +34,23 @@ impl Selection {
         current_type: &FieldType,
         schema: &Schema,
         mut count: usize,
-    ) -> Option<Self> {
+    ) -> Result<Option<Self>, SpecError> {
         // The RECURSION_LIMIT is chosen to be:
         //   < # expected to cause stack overflow &&
         //   > # expected in a legitimate query
         const RECURSION_LIMIT: usize = 512;
         if count > RECURSION_LIMIT {
             tracing::error!("selection processing recursion limit({RECURSION_LIMIT}) exceeded");
-            return None;
+            return Err(SpecError::RecursionLimitExceeded);
         }
         count += 1;
-        match selection {
+        let selection = match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
                 let skip = field
                     .directives()
                     .map(|directives| {
+                        // skip directives have been validated before, so we re safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -59,13 +60,14 @@ impl Selection {
                     })
                     .unwrap_or(Skip::No);
                 if skip.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let include = field
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
+                            // include directives have been validated before, so we re safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
@@ -74,7 +76,7 @@ impl Selection {
                     })
                     .unwrap_or(Include::Yes);
                 if include.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let field_name = field
@@ -103,7 +105,8 @@ impl Selection {
                                         .get(name)
                                         .and_then(|ty| ty.field(&field_name))
                                 })
-                        })?
+                        })
+                        .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?
                         .clone()
                 };
 
@@ -112,14 +115,19 @@ impl Selection {
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
                 } else {
-                    field.selection_set().map(|x| {
-                        x.selections()
-                            .into_iter()
-                            .filter_map(|selection| {
+                    match field.selection_set() {
+                        None => None,
+                        Some(selection_set) => selection_set
+                            .selections()
+                            .map(|selection| {
                                 Selection::from_ast(selection, &field_type, schema, count)
                             })
-                            .collect()
-                    })
+                            .collect::<Result<Vec<Option<_>>, _>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<Selection>>()
+                            .into(),
+                    }
                 };
 
                 Some(Self::Field {
@@ -136,6 +144,7 @@ impl Selection {
                 let skip = inline_fragment
                     .directives()
                     .map(|directives| {
+                        // skip directives have been validated before, so we re safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -145,13 +154,14 @@ impl Selection {
                     })
                     .unwrap_or(Skip::No);
                 if skip.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let include = inline_fragment
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
+                            // include directives have been validated before, so we re safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
@@ -160,7 +170,7 @@ impl Selection {
                     })
                     .unwrap_or(Include::Yes);
                 if include.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let type_condition = inline_fragment
@@ -176,7 +186,8 @@ impl Selection {
                     })
                     // if we can't get a type name from the current type, that means we're applying
                     // a fragment onto a scalar
-                    .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))?;
+                    .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
+                    .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?;
 
                 let fragment_type = FieldType::Named(type_condition.clone());
 
@@ -184,10 +195,10 @@ impl Selection {
                     .selection_set()
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
+                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
+                    .collect::<Result<Vec<Option<_>>, _>>()?
                     .into_iter()
-                    .filter_map(|selection| {
-                        Selection::from_ast(selection, &fragment_type, schema, count)
-                    })
+                    .flatten()
                     .collect();
 
                 let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
@@ -204,6 +215,7 @@ impl Selection {
                 let skip = fragment_spread
                     .directives()
                     .map(|directives| {
+                        // skip directives have been validated before, so we re safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -213,13 +225,14 @@ impl Selection {
                     })
                     .unwrap_or(Skip::No);
                 if skip.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let include = fragment_spread
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
+                            // include directives have been validated before, so we re safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
@@ -228,7 +241,7 @@ impl Selection {
                     })
                     .unwrap_or(Include::Yes);
                 if include.statically_skipped() {
-                    return None;
+                    return Ok(None);
                 }
 
                 let name = fragment_spread
@@ -246,7 +259,9 @@ impl Selection {
                     include,
                 })
             }
-        }
+        };
+
+        Ok(selection)
     }
 }
 

@@ -89,7 +89,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -100,25 +100,27 @@ impl Query {
             .collect::<Vec<_>>();
 
         if !errors.is_empty() {
-            failfast_debug!("parsing error(s): {}", errors.join(", "));
-            return None;
+            let errors = errors.join(", ");
+            failfast_debug!("parsing error(s): {}", errors);
+            return Err(SpecError::ParsingError(errors));
         }
 
         let document = tree.document();
         let fragments = Fragments::from_ast(&document, schema)?;
 
-        let operations = document
+        let operations: Vec<Operation> = document
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Operation::from_ast(operation, schema)
+                    Some(operation)
                 } else {
                     None
                 }
             })
-            .collect();
+            .map(|operation| Operation::from_ast(operation, schema))
+            .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Some(Query {
+        Ok(Query {
             string,
             fragments,
             operations,
@@ -661,7 +663,7 @@ impl Operation {
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
+    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
         let name = operation.name().map(|x| x.text().to_string());
 
         let kind = operation
@@ -677,15 +679,18 @@ impl Operation {
         let current_field_type = match kind {
             OperationKind::Query => FieldType::Named("Query".to_string()),
             OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return None,
+            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
         };
 
         let selection_set = operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .filter_map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
-            .collect();
+            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
+            .collect::<Result<Vec<Option<_>>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<Selection>>();
 
         let variables = operation
             .variable_definitions()
@@ -712,7 +717,7 @@ impl Operation {
             })
             .collect();
 
-        Some(Operation {
+        Ok(Operation {
             selection_set,
             name,
             variables,
@@ -3322,6 +3327,31 @@ mod tests {
             }
             _ => panic!("expected a field"),
         }
+    }
+
+    #[test]
+    fn it_should_fail_with_empty_selection_set() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+            product: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+        }",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+
+        let _query_error = Query::parse(
+            "query  {
+                product {
+                }
+            }",
+            &schema,
+        )
+        .expect_err("should not parse query");
     }
 
     #[test]
