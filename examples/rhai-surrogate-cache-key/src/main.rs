@@ -19,10 +19,10 @@ mod tests {
     use http::StatusCode;
 
     #[tokio::test]
-    async fn test_subgraph_mutates_error() {
+    async fn test_surrogate_cache_key_created() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_error_response_mutate.rhai",
+            "filename": "src/rhai_surrogate_cache_key.rhai",
         }))
         .expect("valid conf supplied");
 
@@ -37,8 +37,8 @@ mod tests {
             .await
             .expect("building harness");
 
-        // The expected reply is going to be JSON returned in the RouterResponse { error } section.
-        let _expected_mock_response_error = "error created within the mock";
+        // The expected reply is going to be JSON returned in the RouterResponse { data } section.
+        let _expected_mock_response_data = "response created within the mock";
 
         // ... Call our test harness
         let query = "query {topProducts{name}}";
@@ -59,11 +59,11 @@ mod tests {
             .expect("a router response");
 
         assert_eq!(StatusCode::OK, service_response.response.status());
-        /* TBD: Figure out how to run this as a test
         // Rhai should return a 200...
         println!("RESPONSE: {:?}", service_response);
         assert_eq!(StatusCode::OK, service_response.response.status());
 
+        /* TBD: Figure out how to run this as a test
         // with the expected message
         if let apollo_router_core::ResponseBody::GraphQL(response) =
             service_response.response.body()

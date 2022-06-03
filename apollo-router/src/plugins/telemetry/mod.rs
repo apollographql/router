@@ -288,7 +288,12 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("subgraph", name = name.as_str(), "otel.kind" = %SpanKind::Client))
+            .instrument(move |_| {
+                info_span!("subgraph",
+                    name = name.as_str(),
+                    "otel.kind" = %SpanKind::Internal,
+                )
+            })
             .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();

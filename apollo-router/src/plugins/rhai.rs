@@ -911,6 +911,25 @@ impl Rhai {
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
+            // Register Context.upsert()
+            .register_result_fn(
+                "upsert",
+                |context: NativeCallContext,
+                 x: &mut Context,
+                 key: &str,
+                 callback: FnPtr|
+                 -> Result<(), Box<EvalAltResult>> {
+                    x.upsert(key, |v: Dynamic| -> Dynamic {
+                        // Note: Context::upsert() does not allow the callback to fail, although it
+                        // can. If call_within_context() fails, return the original provided
+                        // value.
+                        callback
+                            .call_within_context(&context, (v.clone(),))
+                            .unwrap_or(v)
+                    })
+                    .map_err(|e: BoxError| e.to_string().into())
+                },
+            )
             // Register get for Header Name/Value from a tuple pair
             .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.0.clone()
