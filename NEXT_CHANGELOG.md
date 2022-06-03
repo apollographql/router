@@ -17,23 +17,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-### **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
+### **Headline** ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
 
 Description! And a link to a [reference](http://url)
+
+By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.9.3] (unreleased) - 2022-mm-dd
-
-## ❗ BREAKING ❗
+# [0.9.4] (unreleased) - 2022-mm-dd
 
 ## 🚀 Features
-### Scaffold custom binary support ([PR #1104](https://github.com/apollographql/router/pull/1104))
-  Added CLI support for scaffolding a new Router binary project. This provides a starting point for people who want to use the Router as a library and create their own plugins
-
-### rhai Context::upsert() supported with example [PR #1136](https://github.com/apollographql/router/pull/1136)
-
-  Rhai plugins can now interact with Context::upsert(). We provide an example (rhai-surrogate-cache-key) to illustrate its use.
-
 ### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
 Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
 
@@ -43,38 +36,19 @@ plugins:
     variables_deduplication: true # Enable the variables deduplication optimization
 ```
 
-### Measure APQ cache hits and registers ([PR #1117](https://github.com/apollographql/router/pull/1117))
+### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
+Added the possibility to set a custom health check path
+```yaml
+server:
+  # Default is /.well-known/apollo/server-health
+  health_check_path: /health
+```
 
-  The APQ layer will now report cache hits and misses to Apollo Studio if telemetry is configured
+By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
-- **Add more information for the subgraph_request span** ([PR #1119](https://github.com/apollographql/router/pull/1119))
+## 🛠 Maintenance ( :hammer_and_wrench: )
 
-  Add a new span only for the subgraph request, with all HTTP and net information needed for the opentelemetry specs
+### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
+Force the creation of `SocketAddr` to use a new unused port.
 
-## 🐛 Fixes
-
-### Compute default port in span information ([1160](https://github.com/apollographql/router/issues/1160)) 
-  Compute default port in span information for `net.peer.port` regarding the scheme of the request URI.
-
-### Content-Type is application/json ([1154](https://github.com/apollographql/router/issues/1154)) 
-  The router was not setting a content-type on results. This fix ensures that a content-type of application/json is added when returning a graphql response.
-
-### Prevent memory leaks when tasks are cancelled [PR #767](https://github.com/apollographql/router/pull/767)
-  Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
-
-## 🛠 Maintenance
-
-### Use subgraphs deployed on Fly in CI [PR #1090](https://github.com/apollographql/router/pull/1090)
-The CI needs some node subgraphs for integration tests, which complicates its setup and increases the run time. By deploying in advance those subgraphs on fly.io, we can simplify the CI run.
-
-### Unpin schemars version [#1074](https://github.com/apollographql/router/issues/1074)
-The Schemars 0.8.9 caused compile errors due to it validating default types.
-This change has however been rolled back upstream.
-We can now safely depend on schemars 0.8.10.
-
-### Update Moka to fix occasional panics on AMD hardware [#1137](https://github.com/apollographql/router/issues/1137)
-Moka has a dependency on Quanta which had an issue with AMD hardware. This is now fixed via [Moka-#119](https://github.com/moka-rs/moka/issues/119).
-
-## 📚 Documentation
-
-## 🐛 Fixes
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176

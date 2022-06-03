@@ -275,6 +275,12 @@ pub struct Server {
     #[serde(default = "default_endpoint")]
     #[builder(default_code = "default_endpoint()", setter(into))]
     pub endpoint: String,
+
+    /// healthCheck path
+    /// default: "/.well-known/apollo/server-health"
+    #[serde(default = "default_health_check_path")]
+    #[builder(default_code = "default_health_check_path()", setter(into))]
+    pub health_check_path: String,
 }
 
 /// Listening address.
@@ -390,6 +396,10 @@ fn default_landing_page() -> bool {
 
 fn default_endpoint() -> String {
     String::from("/")
+}
+
+fn default_health_check_path() -> String {
+    String::from("/.well-known/apollo/server-health")
 }
 
 impl Default for Server {
@@ -696,13 +706,13 @@ mod tests {
         {
           query: Query
         }
-        
+
         type Query {
           me: String
         }
-        
+
         directive @core(feature: String!) repeatable on SCHEMA
-        
+
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -748,15 +758,15 @@ mod tests {
         {
           query: Query
         }
-        
+
         type Query {
           me: String
         }
-        
+
         directive @core(feature: String!) repeatable on SCHEMA
-        
+
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        
+
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
@@ -839,7 +849,7 @@ plugins:
   non_existant:
     foo: "bar"
 
-telemetry:  
+telemetry:
   another_non_existant: 3
   "#,
         )

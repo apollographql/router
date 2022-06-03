@@ -24,8 +24,8 @@ apollo-router = { git="https://github.com/apollographql/router.git", branch="{{b
 apollo-router-core = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
 {{else}}
 # Note if you update these dependencies then also update xtask/Cargo.toml
-apollo-router = { git="https://github.com/apollographql/router.git", tag="v0.9.2" }
-apollo-router-core = { git="https://github.com/apollographql/router.git", tag="v0.9.2" }
+apollo-router = { git="https://github.com/apollographql/router.git", tag="v0.9.3" }
+apollo-router-core = { git="https://github.com/apollographql/router.git", tag="v0.9.3" }
 {{/if}}
 {{/if}}
 async-trait = "0.1.52"

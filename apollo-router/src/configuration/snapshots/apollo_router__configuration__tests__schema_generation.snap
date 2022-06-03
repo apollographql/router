@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 687
+assertion_line: 697
 expression: "&schema"
 ---
 {
@@ -356,7 +356,8 @@ expression: "&schema"
         "cors": null,
         "introspection": true,
         "landing_page": true,
-        "endpoint": "/"
+        "endpoint": "/",
+        "health_check_path": "/.well-known/apollo/server-health"
       },
       "type": "object",
       "properties": {
@@ -422,6 +423,11 @@ expression: "&schema"
         "endpoint": {
           "description": "GraphQL endpoint default: \"/\"",
           "default": "/",
+          "type": "string"
+        },
+        "health_check_path": {
+          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
+          "default": "/.well-known/apollo/server-health",
           "type": "string"
         },
         "introspection": {
