@@ -4368,6 +4368,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "apollo-router-core",
+ "futures",
  "http",
  "serde_json",
  "tokio",
