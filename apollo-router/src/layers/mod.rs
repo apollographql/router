@@ -49,7 +49,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt};
+    /// # use apollo_router::{ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest> + Send>(service: S) {
     /// //TODO This doc has highlighted a couple of issues that need to be resolved
     /// //let _ = ServiceBuilder::new()
@@ -95,7 +95,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{RouterRequest, RouterResponse, ServiceBuilderExt};
+    /// # use apollo_router::{RouterRequest, RouterResponse, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ = ServiceBuilder::new()
     ///             .checkpoint(|req:RouterRequest|{
@@ -155,7 +155,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{RouterRequest, RouterResponse, ServiceBuilderExt};
+    /// # use apollo_router::{RouterRequest, RouterResponse, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ = ServiceBuilder::new()
     ///             .checkpoint_async(|req:RouterRequest| async {
@@ -203,7 +203,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{RouterRequest, ServiceBuilderExt};
+    /// # use apollo_router::{RouterRequest, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
@@ -231,7 +231,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{RouterRequest, ServiceBuilderExt};
+    /// # use apollo_router::{RouterRequest, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest> + Send>(service: S) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
@@ -266,7 +266,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{Context, RouterRequest, RouterResponse, ServiceBuilderExt};
+    /// # use apollo_router::{Context, RouterRequest, RouterResponse, ServiceBuilderExt};
     /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ : BoxService<RouterRequest, S::Response, S::Error> = ServiceBuilder::new()
     ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
@@ -325,7 +325,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router_core::{Context, RouterRequest, RouterResponse, ServiceBuilderExt, ServiceExt as ApolloServiceExt};
+    /// # use apollo_router::{Context, RouterRequest, RouterResponse, ServiceBuilderExt, ServiceExt as ApolloServiceExt};
     /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ : BoxService<RouterRequest, S::Response, S::Error> = service
     ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {

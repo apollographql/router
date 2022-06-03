@@ -9,14 +9,14 @@ use crate::plugins::telemetry::metrics::{
     MetricsExporterHandle,
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::reexports::router_bridge::planner::UsageReporting;
 use crate::subscriber::replace_layer;
-use ::tracing::{info_span, Span};
-use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
-use apollo_router_core::{
+use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
+use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
@@ -712,7 +712,7 @@ fn operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: apollo_router_core::reexports::router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: crate::reexports::router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
@@ -743,7 +743,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use apollo_router_core::{
+    use crate::{
         http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
     };
     use bytes::Bytes;
@@ -754,7 +754,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        crate::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
@@ -764,7 +764,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
-        apollo_router_core::plugins()
+        crate::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
@@ -823,7 +823,7 @@ mod tests {
                 })))
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
@@ -903,7 +903,7 @@ mod tests {
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
-            apollo_router_core::ResponseBody::Text(prom_metrics) => {
+            crate::ResponseBody::Text(prom_metrics) => {
                 assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"}"#));

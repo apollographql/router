@@ -1,4 +1,4 @@
-use apollo_router_core::{
+use apollo_router::{
     register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use futures::{stream::BoxStream, StreamExt};
@@ -90,12 +90,12 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
-// apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
+// apollo_router provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
     use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
-    use apollo_router_core::{
+    use apollo_router::{
         plugin::utils, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
     };
     use futures::{stream::once, StreamExt};
@@ -109,7 +109,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.propagate_status_code")
             .expect("Plugin not found")
             .create_instance(&json!({ "status_codes" : [500, 403, 401] }))

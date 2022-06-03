@@ -13,7 +13,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use tower::util::ServiceExt;
@@ -72,9 +72,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router_core::ResponseBody::GraphQL(response) =
-            service_response.response.body()
-        {
+        if let apollo_router::ResponseBody::GraphQL(response) = service_response.response.body() {
             assert!(response.errors.is_empty());
             assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         } else {

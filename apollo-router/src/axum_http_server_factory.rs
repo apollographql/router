@@ -2,9 +2,9 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::ResponseBody;
-use apollo_router_core::{http_compat, Handler};
-use apollo_router_core::{prelude::*, DEFAULT_BUFFER_SIZE};
+use crate::ResponseBody;
+use crate::{http_compat, Handler};
+use crate::{prelude::*, DEFAULT_BUFFER_SIZE};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
@@ -78,8 +78,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             + Clone
             + 'static,
 
-        <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future:
-            std::marker::Send,
+        <RS as Service<http_compat::Request<crate::Request>>>::Future: std::marker::Send,
     {
         let boxed_service = Buffer::new(service.boxed(), DEFAULT_BUFFER_SIZE);
         Box::pin(async move {
@@ -574,7 +573,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use apollo_router_core::http_compat::Request;
+    use crate::http_compat::Request;
     use futures::stream::once;
     use http::header::{self, CONTENT_TYPE};
     use mockall::mock;

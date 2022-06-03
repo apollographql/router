@@ -1,4 +1,4 @@
-use apollo_router_core::{
+use apollo_router::{
     register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use futures::stream::{BoxStream, StreamExt};

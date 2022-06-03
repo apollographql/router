@@ -1,11 +1,11 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
-use apollo_router_core::prelude::*;
-use apollo_router_core::{
+use crate::prelude::*;
+use crate::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
 };
-use apollo_router_core::{DynPlugin, TowerSubgraphService};
+use crate::{DynPlugin, TowerSubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -85,9 +85,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let (pluggable_router_service, mut plugins) = builder.build().await?;
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(|http_request: Request<apollo_router_core::Request>| {
-                    http_request.into()
-                })
+                .map_request(|http_request: Request<crate::Request>| http_request.into())
                 .map_response(|response| {
                     Box::pin(response.map(|r| r.response))
                         as BoxStream<'static, Response<ResponseBody>>
@@ -114,7 +112,7 @@ async fn create_plugins(
     schema: &Schema,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
-    let plugin_registry = apollo_router_core::plugins();
+    let plugin_registry = crate::plugins();
     let mut plugin_instances = Vec::new();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
@@ -212,8 +210,8 @@ mod test {
     use crate::configuration::Configuration;
     use crate::router_factory::YamlRouterServiceFactory;
     use crate::router_factory::{inject_schema_id, RouterServiceFactory};
-    use apollo_router_core::Schema;
-    use apollo_router_core::{register_plugin, Plugin};
+    use crate::Schema;
+    use crate::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;

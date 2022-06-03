@@ -60,10 +60,8 @@
 //!  - Token refresh
 //!  - ...
 
-use apollo_router_core::Context;
-use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use apollo_router::Context;
+use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
 use futures::stream::{once, BoxStream};
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -233,7 +231,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<BoxStream<'static, RouterResponse>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router_core::Error {
+                        .errors(vec![apollo_router::Error {
                             message: msg,
                             ..Default::default()
                         }])
@@ -378,12 +376,12 @@ register_plugin!("example", "jwt", JwtAuth);
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
-// apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
+// apollo_router provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use futures::StreamExt;
 
     // This test ensures the router will be able to
@@ -392,7 +390,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
@@ -429,7 +427,7 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -468,7 +466,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -507,7 +505,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -550,7 +548,7 @@ mod tests {
         );
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -638,7 +636,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert!(graphql_response.errors.is_empty());
@@ -692,7 +690,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -753,7 +751,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(

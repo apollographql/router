@@ -1,6 +1,6 @@
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use apollo_router_core::{http_compat, ResponseBody};
+use crate::{http_compat, ResponseBody};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;

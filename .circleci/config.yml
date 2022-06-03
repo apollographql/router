@@ -241,7 +241,7 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --locked -p apollo-router -p apollo-router-core
+          crate: --locked -p apollo-router
   build_all_permutations:
     steps:
       - build_common_permutations

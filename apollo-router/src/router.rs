@@ -1,10 +1,10 @@
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::{Configuration, ListenAddr};
+use crate::prelude::*;
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
-use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
@@ -324,7 +324,7 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
-/// use apollo_router_core::prelude::*;
+/// use apollo_router::prelude::*;
 /// use apollo_router::ApolloRouterBuilder;
 /// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
@@ -343,7 +343,7 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router_core::prelude::*;
+/// use apollo_router::prelude::*;
 /// use apollo_router::ApolloRouterBuilder;
 /// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;

@@ -11,7 +11,7 @@
 //! # Examples
 //!
 //! ```ignore
-//! use crate::apollo_telemetry;
+//! use apollo_router::apollo_telemetry;
 //! use opentelemetry::trace::Tracer;
 //! use opentelemetry::global::shutdown_tracer_provider;
 //!

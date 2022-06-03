@@ -1,8 +1,6 @@
 use std::ops::ControlFlow;
 
-use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
 use futures::stream::{once, BoxStream};
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -38,7 +36,7 @@ impl Plugin for ForbidAnonymousOperations {
         ServiceBuilder::new()
             .checkpoint(|req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
-                // Its `body()` is an `apollo_router_core::Request`, that contains:
+                // Its `body()` is an `apollo_router::Request`, that contains:
                 // - Zero or one query
                 // - Zero or one operation_name
                 // - Zero or more variables
@@ -54,7 +52,7 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::error_builder()
-                        .error(apollo_router_core::Error {
+                        .error(apollo_router::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         })
@@ -88,12 +86,12 @@ register_plugin!(
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
-// apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
+// apollo_router provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use serde_json::Value;
@@ -105,7 +103,7 @@ mod tests {
     // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
@@ -143,7 +141,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -183,7 +181,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(
@@ -251,7 +249,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router_core::Response =
+        let graphql_response: apollo_router::Response =
             service_response.response.into_body().try_into().unwrap();
 
         assert_eq!(

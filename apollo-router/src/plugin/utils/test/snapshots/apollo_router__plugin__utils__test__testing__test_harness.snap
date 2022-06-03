@@ -1,5 +1,5 @@
 ---
-source: apollo-router-core/src/plugin/utils/test/mod.rs
+source: apollo-router/src/plugin/utils/test/mod.rs
 assertion_line: 224
 expression: graphql.data
 ---

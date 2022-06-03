@@ -1,8 +1,8 @@
 // this file is shared between the tests and benchmarks, using
 // include!() instead of as a pub module, so it is only compiled
 // in dev mode
-use apollo_router_core::plugin::utils::test::mock::subgraph::MockSubgraph;
-use apollo_router_core::{
+use apollo_router::plugin::utils::test::mock::subgraph::MockSubgraph;
+use apollo_router::{
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
 };
 use once_cell::sync::Lazy;

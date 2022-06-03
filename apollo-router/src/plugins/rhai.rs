@@ -1,6 +1,6 @@
 //! Customization via Rhai.
 
-use apollo_router_core::{
+use crate::{
     http_compat, register_plugin, Context, Error, ExecutionRequest, ExecutionResponse, Object,
     Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
@@ -581,7 +581,7 @@ macro_rules! gen_map_request {
                             status: StatusCode,
                         ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![apollo_router_core::Error {
+                                .errors(vec![crate::Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -636,7 +636,7 @@ macro_rules! gen_map_response {
                             status: StatusCode,
                         ) -> [<$base:camel Response>] {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![apollo_router_core::Error {
+                                .errors(vec![crate::Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -850,7 +850,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = RouterResponse::error_builder()
-                                    .errors(vec![apollo_router_core::Error {
+                                    .errors(vec![crate::Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -921,7 +921,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = ExecutionResponse::error_builder()
-                                    .errors(vec![apollo_router_core::Error {
+                                    .errors(vec![crate::Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -996,7 +996,7 @@ impl ServiceStep {
                                 status: StatusCode,
                             ) -> RouterResponse {
                                 let res = RouterResponse::error_builder()
-                                    .errors(vec![apollo_router_core::Error {
+                                    .errors(vec![crate::Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1067,7 +1067,7 @@ impl ServiceStep {
                                     status: StatusCode,
                                 ) -> ExecutionResponse {
                                     let res = ExecutionResponse::error_builder()
-                                        .errors(vec![apollo_router_core::Error {
+                                        .errors(vec![crate::Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1550,7 +1550,7 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
-    use apollo_router_core::{
+    use crate::{
         http_compat,
         plugin::utils::test::{MockExecutionService, MockRouterService},
         Context, DynPlugin, ResponseBody, RouterRequest, RouterResponse,
@@ -1574,7 +1574,7 @@ mod tests {
                 })))
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
@@ -1642,7 +1642,7 @@ mod tests {
                 })))
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
@@ -1654,11 +1654,7 @@ mod tests {
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
         let fake_req = http_compat::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
-            .body(
-                apollo_router_core::Request::builder()
-                    .query(String::new())
-                    .build(),
-            )
+            .body(crate::Request::builder().query(String::new()).build())
             .build()?;
         let context = Context::new();
         context.insert("test", 5i64).unwrap();

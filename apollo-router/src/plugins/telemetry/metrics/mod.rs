@@ -1,8 +1,8 @@
+use crate::plugin::utils::serde::{deserialize_header_name, deserialize_regex};
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::{http_compat, Handler, ResponseBody};
 use ::serde::Deserialize;
-use apollo_router_core::plugin::utils::serde::{deserialize_header_name, deserialize_regex};
-use apollo_router_core::{http_compat, Handler, ResponseBody};
 use bytes::Bytes;
 use http::header::HeaderName;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
