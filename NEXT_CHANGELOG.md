@@ -43,3 +43,9 @@ By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/
 Force the creation of `SocketAddr` to use a new unused port.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
+
+### Add static skip/include directive support ([PR #1185](https://github.com/apollographql/router/pull/1185))
++ Rewrite the InlineFragment implementation
++ Small optimization: add support of static check for `@include` and `@skip` directives
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
