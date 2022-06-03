@@ -38,7 +38,7 @@ impl ExecutionService {
 }
 
 impl Service<ExecutionRequest> for ExecutionService {
-    type Response = BoxStream<'static, ExecutionResponse>;
+    type Response = ExecutionResponse<()>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -75,13 +75,10 @@ impl Service<ExecutionRequest> for ExecutionService {
                 .in_current_span(),
             );
 
-            Ok(Box::pin(receiver.map(move |response|
-            // Note that request context is not propagated from downstream.
-            // Context contains a mutex for state however so in practice
-            ExecutionResponse::new_from_response(
-                http::Response::new(response).into(),
+            Ok(ExecutionResponse::new_from_response(
+                http::Response::new(receiver).into(),
                 ctx.clone(),
-            ))) as BoxStream<'static, ExecutionResponse>)
+            ))
         }
         .in_current_span();
         Box::pin(fut)

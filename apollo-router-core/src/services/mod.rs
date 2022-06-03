@@ -4,6 +4,7 @@ pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::prelude::graphql::*;
+use futures::Stream;
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use http_compat::IntoHeaderName;
@@ -594,22 +595,19 @@ assert_impl_all!(ExecutionResponse: Send);
 /// [`Context`] and [`http_compat::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
-pub struct ExecutionResponse {
-    pub response: http_compat::Response<Response>,
+pub struct ExecutionResponse<T: Stream<Item = Response>> {
+    pub response: http_compat::Response<T>,
 
     pub context: Context,
 }
 
 #[buildstructor::builder]
-impl ExecutionResponse {
+impl<T: Stream<Item = Response>> ExecutionResponse<T> {
     /// This is the constructor to use when constructing a real ExecutionResponse.
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_from_response(
-        response: http_compat::Response<Response>,
-        context: Context,
-    ) -> ExecutionResponse {
+    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
@@ -625,7 +623,7 @@ impl ExecutionResponse {
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
-    ) -> ExecutionResponse {
+    ) -> Self {
         // Build a response
         let res = Response::builder()
             .label(label)
@@ -665,7 +663,7 @@ impl ExecutionResponse {
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
-    ) -> ExecutionResponse {
+    ) -> Self {
         ExecutionResponse::new(
             label,
             data,
@@ -686,7 +684,7 @@ impl ExecutionResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> Result<ExecutionResponse, BoxError> {
+    ) -> Result<Self, BoxError> {
         Ok(ExecutionResponse::new(
             Default::default(),
             Default::default(),

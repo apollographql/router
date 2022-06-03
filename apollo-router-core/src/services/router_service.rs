@@ -6,13 +6,13 @@ use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
-    RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, Response,
+    ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::stream::BoxStream;
-use futures::StreamExt;
 use futures::{future::BoxFuture, TryFutureExt};
+use futures::{Stream, StreamExt};
 use http::StatusCode;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -59,22 +59,20 @@ impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, E
     }
 }
 
-impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
+impl<ResponseStream, QueryPlannerService, ExecutionService> Service<RouterRequest>
     for RouterService<QueryPlannerService, ExecutionService>
 where
     QueryPlannerService: Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
-    ExecutionService: Service<
-            ExecutionRequest,
-            Response = BoxStream<'static, ExecutionResponse>,
-            Error = BoxError,
-        > + Clone
+    ExecutionService: Service<ExecutionRequest, Response = ExecutionResponse<ResponseStream>, Error = BoxError>
+        + Clone
         + Send
         + 'static,
     QueryPlannerService::Future: Send + 'static,
     ExecutionService::Future: Send + 'static,
+    ResponseStream: Stream<Item = Response>,
 {
     type Response = BoxStream<'static, RouterResponse>;
     type Error = BoxError;

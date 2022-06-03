@@ -3,8 +3,9 @@
 //! See [`Layer`] and [`Service`] for more details.
 
 use crate::sync_checkpoint::CheckpointService;
-use crate::{ExecutionRequest, ExecutionResponse, Object};
-use futures::stream::{once, BoxStream};
+use crate::{ExecutionRequest, ExecutionResponse, Object, Response};
+use futures::stream::once;
+use futures::Stream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -12,11 +13,12 @@ use tower::{BoxError, Layer, Service};
 #[derive(Default)]
 pub struct AllowOnlyHttpPostMutationsLayer {}
 
-impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
+impl<S, ResponseStream> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = BoxStream<'static, ExecutionResponse>> + Send + 'static,
+    S: Service<ExecutionRequest, Response = ExecutionResponse<ResponseStream>> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
     <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
+    ResponseStream: Stream<Item = Response>,
 {
     type Service = CheckpointService<S, ExecutionRequest>;
 
@@ -183,7 +185,10 @@ mod forbid_http_get_mutations_tests {
         }
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, response: crate::ExecutionResponse) {
+    fn assert_error_matches<T>(
+        expected_error: &crate::Error,
+        response: crate::ExecutionResponse<T>,
+    ) {
         assert_eq!(&response.response.body().errors[0], expected_error);
     }
 

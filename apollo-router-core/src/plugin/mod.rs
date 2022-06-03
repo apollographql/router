@@ -19,12 +19,13 @@ pub mod utils;
 use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::Stream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
@@ -124,10 +125,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
+    fn execution_service<Res: Stream<Item = Response>>(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError> {
         service
     }
 
@@ -186,10 +187,10 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
+    fn execution_service<Res: Stream<Item = Response>>(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>;
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -232,10 +233,10 @@ where
         self.query_planning_service(service)
     }
 
-    fn execution_service(
+    fn execution_service<Res: Stream<Item = Response>>(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError>,
+    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse<Res>>, BoxError> {
         self.execution_service(service)
     }
 
