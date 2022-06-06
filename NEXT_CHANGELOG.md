@@ -65,6 +65,22 @@ server:
 
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
+## 🐛 Fixes ( :bug: )
+
+### Fix CORS configuration to eliminate runtime panic on mis-configuration ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime:
+Example:
+```yaml
+server:
+  cors:
+    allow_any_origin: true
+    allow_credentials: true
+```
+Such a configuration would result in a runtime panic. The router will now detect this kind of mis-configuration and report the error
+without panick-ing.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
 ### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
