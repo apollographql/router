@@ -6,6 +6,9 @@ edition = "2021"
 license = "Elastic-2.0"
 publish = false
 
+[build]
+jobs = 4
+
 [[bin]]
 name = "router"
 path = "src/main.rs"
