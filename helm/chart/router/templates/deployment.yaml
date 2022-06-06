@@ -60,13 +60,12 @@ spec:
           {{- end }}
           {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef }}
           env:
-            {{- if not (empty .Values.managedFederation.apiKey) }}
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "router.fullname" . }}
+                  name: {{ template "router.managedFederation.apiSecretName" . }}
                   key: managedFederationApiKey
-            {{- end }}
+                  optional: true
             {{- if not (empty .Values.managedFederation.graphRef) }}
             - name: APOLLO_GRAPH_REF
               value: {{ .Values.managedFederation.graphRef }}

@@ -60,3 +60,11 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Return secret name to be used based on provided values.
+*/}}
+{{- define "router.managedFederation.apiSecretName" -}}
+{{- $fullName := include "router.fullname" . -}}
+{{- default $fullName .Values.managedFederation.apiKeyExistingSecret | quote -}}
+{{- end -}}
