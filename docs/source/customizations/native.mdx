@@ -30,8 +30,8 @@ To demonstrate building a plugin, we'll walk through the [hello world example pl
 Most plugins should start by including the following set of `use` declarations:
 
 ```rust title="hello_world.rs"
-use apollo_router_core::plugin::Plugin;
-use apollo_router_core::{
+use apollo_router::plugin::Plugin;
+use apollo_router::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
     QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
@@ -134,7 +134,7 @@ To define custom logic for a service hook, you can use [`ServiceBuilder`](https:
 ```rust title="hello_world.rs"
 // Replaces the default definition in the example above
 use tower::ServiceBuilderExt;
-use apollo_router_core::ServiceBuilderExt as ApolloServiceBuilderExt;
+use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
 fn router_service(
     &mut self,
@@ -209,7 +209,7 @@ Note: `upsert` requires v to implement `Default`.
 
 To enable the Apollo Router to discover your plugin, you need to **register** the plugin.
 
-To do so, use the `register_plugin!()` macro provided by `apollo-router-core`. This takes 3 arguments:
+To do so, use the `register_plugin!()` macro provided by `apollo-router`. This takes 3 arguments:
 
 * A group name
 * A plugin name

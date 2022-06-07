@@ -33,9 +33,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::{
-        http_compat, plugin::utils, Plugin, SubgraphRequest, SubgraphResponse,
-    };
+    use apollo_router::{http_compat, plugin::utils, Plugin, SubgraphRequest, SubgraphResponse};
     use http::{header::HeaderName, HeaderValue, StatusCode};
     use tower::util::ServiceExt;
 
@@ -117,7 +115,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        let graphql_response: apollo_router_core::Response = service_response.response.into_body();
+        let graphql_response: apollo_router::Response = service_response.response.into_body();
 
         assert!(graphql_response.errors.is_empty());
         assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())

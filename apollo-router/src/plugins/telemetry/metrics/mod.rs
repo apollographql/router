@@ -1,9 +1,14 @@
+use crate::plugin::utils::serde::{deserialize_header_name, deserialize_regex};
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use apollo_router_core::{http_compat, Handler, ResponseBody};
+use crate::{http_compat, Handler, ResponseBody};
+use ::serde::Deserialize;
 use bytes::Bytes;
+use http::header::HeaderName;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
 use opentelemetry::KeyValue;
+use regex::Regex;
+use schemars::JsonSchema;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +22,50 @@ pub(crate) mod prometheus;
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 pub(crate) type CustomEndpoint =
     BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Configuration to add custom attributes/labels on metrics
+pub struct MetricsAttributesConf {
+    /// Configuration to forward header values in metric attributes/labels
+    pub(crate) from_headers: Option<Vec<Forward>>,
+    /// Configuration to insert custom attributes/labels in metrics
+    #[serde(rename = "static")]
+    pub(crate) insert: Option<Vec<Insert>>,
+}
+
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Configuration to insert custom attributes/labels in metrics
+pub(crate) struct Insert {
+    name: String,
+    value: String,
+}
+
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(untagged)]
+/// Configuration to forward header values in metric labels
+pub(crate) enum Forward {
+    /// Using a named header
+    Named {
+        #[schemars(schema_with = "string_schema")]
+        #[serde(deserialize_with = "deserialize_header_name")]
+        named: HeaderName,
+        rename: Option<String>,
+        default: Option<String>,
+    },
+    /// Using a regex on the header name
+    Matching {
+        #[schemars(schema_with = "string_schema")]
+        #[serde(deserialize_with = "deserialize_regex")]
+        matching: Regex,
+    },
+}
+
+fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    String::json_schema(gen)
+}
 
 #[derive(Default)]
 pub(crate) struct MetricsBuilder {

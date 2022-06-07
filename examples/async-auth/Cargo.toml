@@ -7,8 +7,8 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.55"
 apollo-router = { path = "../../apollo-router" }
-apollo-router-core = { path = "../../apollo-router-core" }
 async-trait = "0.1.53"
+futures = "0.3.21"
 http = "0.2.6"
 schemars = { version = "0.8.10", features = ["url"] }
 serde = "1.0.136"
