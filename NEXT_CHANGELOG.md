@@ -37,7 +37,6 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 ```
 
 ## 🚀 Features
-<<<<<<< HEAD
 ### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
 Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
 
@@ -45,7 +44,10 @@ Get rid of duplicated variables in requests and responses of the query planner. 
 plugins:
   experimental.traffic_shaping:
     variables_deduplication: true # Enable the variables deduplication optimization
-=======
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+
 ### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
 Added the ability to add custom attributes/labels on metrics via the configuration file.
 Example:
@@ -64,6 +66,8 @@ telemetry:
           - named: "x-custom-header-to-add"
 >>>>>>> ecb875a36b2fdf88025a1fb571dcd2fb5e009778
 ```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1159
 
 ### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
 Added the possibility to set a custom health check path
