@@ -1,0 +1,51 @@
+---
+source: apollo-router/src/plugin/utils/test/mod.rs
+assertion_line: 224
+expression: graphql.data
+---
+{
+  "topProducts": [
+    {
+      "name": "Table",
+      "reviews": [
+        {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          },
+          "id": "1",
+          "product": {
+            "name": "Table"
+          }
+        },
+        {
+          "author": {
+            "id": "2",
+            "name": "Alan Turing"
+          },
+          "id": "4",
+          "product": {
+            "name": "Table"
+          }
+        }
+      ],
+      "upc": "1"
+    },
+    {
+      "name": "Couch",
+      "reviews": [
+        {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          },
+          "id": "2",
+          "product": {
+            "name": "Couch"
+          }
+        }
+      ],
+      "upc": "2"
+    }
+  ]
+}

@@ -13,9 +13,10 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::utils::test::IntoSchema::Canned;
-    use apollo_router_core::utils::test::PluginTestHarness;
-    use apollo_router_core::{Context, Plugin, RouterRequest};
+    use apollo_router::utils::test::IntoSchema::Canned;
+    use apollo_router::utils::test::PluginTestHarness;
+    use apollo_router::{Context, Plugin, RouterRequest};
+    use futures::StreamExt;
     use http::StatusCode;
 
     #[tokio::test]
@@ -56,6 +57,9 @@ mod tests {
                     .expect("a valid RouterRequest"),
             )
             .await
+            .expect("a router response")
+            .next()
+            .await
             .expect("a router response");
 
         assert_eq!(StatusCode::OK, service_response.response.status());
@@ -65,7 +69,7 @@ mod tests {
 
         /* TBD: Figure out how to run this as a test
         // with the expected message
-        if let apollo_router_core::ResponseBody::GraphQL(response) =
+        if let apollo_router::ResponseBody::GraphQL(response) =
             service_response.response.body()
         {
             assert!(response.errors.is_empty());

@@ -1,0 +1,28 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: result.usage_reporting
+---
+{
+  "statsReportKey": "# -\n{me{name{first last}}}",
+  "referencedFieldsByType": {
+    "Name": {
+      "fieldNames": [
+        "first",
+        "last"
+      ],
+      "isInterface": false
+    },
+    "Query": {
+      "fieldNames": [
+        "me"
+      ],
+      "isInterface": false
+    },
+    "User": {
+      "fieldNames": [
+        "name"
+      ],
+      "isInterface": false
+    }
+  }
+}

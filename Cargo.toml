@@ -1,9 +1,8 @@
 [workspace]
-default-members = ["apollo-router", "apollo-router-core"]
+default-members = ["apollo-router"]
 members = [
     "apollo-spaceport",
     "apollo-router",
-    "apollo-router-core",
     "apollo-router-benchmarks",
     "apollo-router-scaffold",
     "examples/add-timestamp-header",

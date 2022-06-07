@@ -26,7 +26,35 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.9.4] (unreleased) - 2022-mm-dd
 
+## ❗ BREAKING ❗
+### The `apollo-router-core` crate has been merged into `apollo-router`
+
+To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping only the latter), and change imports like so:
+
+```diff
+- use apollo_router_core::prelude::*;
++ use apollo_router::prelude::*;
+```
+
 ## 🚀 Features
+### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
+Added the ability to add custom attributes/labels on metrics via the configuration file.
+Example:
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        static:
+          - name: "version"
+            value: "v1.0.0"
+        from_headers:
+          - named: "content-type"
+            rename: "payload_type"
+            default: "application/json"
+          - named: "x-custom-header-to-add"
+```
+
 ### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
 Added the possibility to set a custom health check path
 ```yaml
