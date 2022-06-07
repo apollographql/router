@@ -461,10 +461,10 @@ impl Cors {
         }
     }
 
-    // This is cribbed from the similarly named function in tower. The version there asserts
-    // that CORS rules are useable, which results in a panic if they aren't. We don't want
-    // the router to panic in such cases, so this function returns an error with a message
-    // describing what the problem is.
+    // This is cribbed from the similarly named function in tower-http. The version there
+    // asserts that CORS rules are useable, which results in a panic if they aren't. We
+    // don't want the router to panic in such cases, so this function returns an error
+    // with a message describing what the problem is.
     fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
         if self.allow_credentials.unwrap_or_default() {
             if let Some(headers) = &self.allow_headers {
