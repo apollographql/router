@@ -90,7 +90,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .cors
                 .clone()
                 .map(|cors_configuration| cors_configuration.into_layer())
-                .unwrap_or_else(|| Cors::builder().build().into_layer());
+                .unwrap_or_else(|| Cors::builder().build().into_layer())
+                .map_err(|e| {
+                    FederatedServerError::ConfigError(
+                        crate::configuration::ConfigurationError::LayerConfiguration {
+                            layer: "Cors".to_string(),
+                            error: e,
+                        },
+                    )
+                })?;
             let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
                 // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
                 format!("{}router_extra_path", configuration.server.endpoint)

@@ -37,6 +37,17 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 ```
 
 ## 🚀 Features
+### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
+Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.traffic_shaping:
+    variables_deduplication: true # Enable the variables deduplication optimization
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+
 ### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
 Added the ability to add custom attributes/labels on metrics via the configuration file.
 Example:
@@ -55,6 +66,8 @@ telemetry:
           - named: "x-custom-header-to-add"
 ```
 
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1159
+
 ### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
 Added the possibility to set a custom health check path
 ```yaml
@@ -65,9 +78,31 @@ server:
 
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
+## 🐛 Fixes ( :bug: )
+
+### Fix CORS configuration to eliminate runtime panic on mis-configuration ([PR #1197](https://github.com/apollographql/router/pull/1197))
+Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime:
+Example:
+```yaml
+server:
+  cors:
+    allow_any_origin: true
+    allow_credentials: true
+```
+Such a configuration would result in a runtime panic. The router will now detect this kind of mis-configuration and report the error
+without panick-ing.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
 ### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
 Force the creation of `SocketAddr` to use a new unused port.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
+
+### Add static skip/include directive support ([PR #1185](https://github.com/apollographql/router/pull/1185))
++ Rewrite the InlineFragment implementation
++ Small optimization: add support of static check for `@include` and `@skip` directives
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185

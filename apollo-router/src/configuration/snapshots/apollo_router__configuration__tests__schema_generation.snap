@@ -318,7 +318,8 @@ expression: "&schema"
             "all": {
               "type": "object",
               "properties": {
-                "dedup": {
+                "query_deduplication": {
+                  "description": "Enable query deduplication",
                   "type": "boolean",
                   "nullable": true
                 }
@@ -330,12 +331,18 @@ expression: "&schema"
               "additionalProperties": {
                 "type": "object",
                 "properties": {
-                  "dedup": {
+                  "query_deduplication": {
+                    "description": "Enable query deduplication",
                     "type": "boolean",
                     "nullable": true
                   }
                 }
               }
+            },
+            "variables_deduplication": {
+              "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+              "type": "boolean",
+              "nullable": true
             }
           }
         }
