@@ -316,6 +316,9 @@ impl Query {
         output: &mut Object,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
+        // For skip and include, using .unwrap_or is legit here because
+        // validate_variables should have already checked that
+        // the variable is present and it is of the correct type
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -327,9 +330,6 @@ impl Query {
                     include,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
                     if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
@@ -382,9 +382,6 @@ impl Query {
                     include,
                     known_type,
                 } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
                     if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
@@ -422,9 +419,6 @@ impl Query {
                     skip,
                     include,
                 } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
                     if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }

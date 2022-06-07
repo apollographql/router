@@ -50,7 +50,7 @@ impl Selection {
                 let skip = field
                     .directives()
                     .map(|directives| {
-                        // skip directives have been validated before, so we re safe here
+                        // skip directives have been validated before, so we're safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -67,7 +67,7 @@ impl Selection {
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
-                            // include directives have been validated before, so we re safe here
+                            // include directives have been validated before, so we're safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
@@ -144,7 +144,7 @@ impl Selection {
                 let skip = inline_fragment
                     .directives()
                     .map(|directives| {
-                        // skip directives have been validated before, so we re safe here
+                        // skip directives have been validated before, so we're safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -161,7 +161,7 @@ impl Selection {
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
-                            // include directives have been validated before, so we re safe here
+                            // include directives have been validated before, so we're safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
@@ -215,7 +215,7 @@ impl Selection {
                 let skip = fragment_spread
                     .directives()
                     .map(|directives| {
-                        // skip directives have been validated before, so we re safe here
+                        // skip directives have been validated before, so we're safe here
                         for directive in directives.directives() {
                             if let Some(skip) = parse_skip(&directive) {
                                 return skip;
@@ -232,7 +232,7 @@ impl Selection {
                     .directives()
                     .map(|directives| {
                         for directive in directives.directives() {
-                            // include directives have been validated before, so we re safe here
+                            // include directives have been validated before, so we're safe here
                             if let Some(include) = parse_include(&directive) {
                                 return include;
                             }
