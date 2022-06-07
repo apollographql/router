@@ -409,7 +409,11 @@ impl Default for Server {
 }
 
 impl Cors {
-    pub fn into_layer(self) -> CorsLayer {
+    pub fn into_layer(self) -> Result<CorsLayer, String> {
+        // Ensure configuration is valid before creating CorsLayer
+
+        self.ensure_usable_cors_rules()?;
+
         let allow_headers = if let Some(headers_to_allow) = self.allow_headers {
             cors::AllowHeaders::list(headers_to_allow.iter().filter_map(|header| {
                 header
@@ -444,17 +448,55 @@ impl Cors {
             )));
 
         if self.allow_any_origin.unwrap_or_default() {
-            cors.allow_origin(cors::Any)
+            Ok(cors.allow_origin(cors::Any))
         } else {
-            cors.allow_origin(cors::AllowOrigin::list(
+            Ok(cors.allow_origin(cors::AllowOrigin::list(
                 self.origins.into_iter().filter_map(|origin| {
                     origin
                         .parse()
                         .map_err(|_| tracing::error!("origin '{origin}' is not valid"))
                         .ok()
                 }),
-            ))
+            )))
         }
+    }
+
+    // This is cribbed from the similarly named function in tower-http. The version there
+    // asserts that CORS rules are useable, which results in a panic if they aren't. We
+    // don't want the router to panic in such cases, so this function returns an error
+    // with a message describing what the problem is.
+    fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
+        if self.allow_credentials.unwrap_or_default() {
+            if let Some(headers) = &self.allow_headers {
+                if headers.iter().any(|x| x == "*") {
+                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                        with `Access-Control-Allow-Headers: *`");
+                }
+            }
+
+            if self.methods.iter().any(|x| x == "*") {
+                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `Access-Control-Allow-Methods: *`");
+            }
+
+            if self.origins.iter().any(|x| x == "*") {
+                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `Access-Control-Allow-Origin: *`");
+            }
+
+            if self.allow_any_origin.unwrap_or_default() {
+                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `Access-Control-Allow-Origin: *`");
+            }
+
+            if let Some(headers) = &self.expose_headers {
+                if headers.iter().any(|x| x == "*") {
+                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                        with `Access-Control-Expose-Headers: *`");
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -919,6 +961,66 @@ server:
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn it_does_not_allow_invalid_cors_headers() {
+        let cfg = validate_configuration(
+            r#"
+server:
+  cors:
+    allow_credentials: true
+    allow_headers: [ "*" ]
+        "#,
+        )
+        .expect("should not have resulted in an error");
+        let error = cfg
+            .server
+            .cors
+            .expect("should not have resulted in an error")
+            .into_layer()
+            .expect_err("should have resulted in an error");
+        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
+    }
+
+    #[test]
+    fn it_does_not_allow_invalid_cors_methods() {
+        let cfg = validate_configuration(
+            r#"
+server:
+  cors:
+    allow_credentials: true
+    methods: [ GET, "*" ]
+        "#,
+        )
+        .expect("should not have resulted in an error");
+        let error = cfg
+            .server
+            .cors
+            .expect("should not have resulted in an error")
+            .into_layer()
+            .expect_err("should have resulted in an error");
+        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
+    }
+
+    #[test]
+    fn it_does_not_allow_invalid_cors_origins() {
+        let cfg = validate_configuration(
+            r#"
+server:
+  cors:
+    allow_credentials: true
+    allow_any_origin: true
+        "#,
+        )
+        .expect("should not have resulted in an error");
+        let error = cfg
+            .server
+            .cors
+            .expect("should not have resulted in an error")
+            .into_layer()
+            .expect_err("should have resulted in an error");
+        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
     }
 
     #[test]
