@@ -117,7 +117,7 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                     if !content_type_str.contains("application/json") {
                         return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
                             service: service_name.clone(),
-                            reason: format!("subgraph doesn't return JSON content (current content-type: {content_type:?})"),
+                            reason: format!("subgraph didn't return JSON (expected content-type: application/json; found content-type: {content_type:?})"),
                         }));
                     }
                 }
