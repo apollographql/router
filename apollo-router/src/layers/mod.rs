@@ -23,7 +23,7 @@ pub mod cache;
 pub mod instrument;
 pub mod sync_checkpoint;
 
-pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 /// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities
 /// (e.g.: checkpoints) to a [`Service`].

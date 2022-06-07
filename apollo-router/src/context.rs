@@ -4,6 +4,7 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use crate::prelude::graphql::*;
+use dashmap::mapref::multiple::{RefMulti, RefMutMulti};
 use dashmap::DashMap;
 use serde::Serialize;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ pub struct Context {
 }
 
 impl Context {
+    /// Create a new context.
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
@@ -28,6 +30,11 @@ impl Context {
 }
 
 impl Context {
+    /// Get a value from the context using the provided key.
+    ///
+    /// Semantics:
+    ///  - If the operation fails, then the key is not present.
+    ///  - If the operation succeeds, the value is an [`Option`].
     pub fn get<K, V>(&self, key: K) -> Result<Option<V>, BoxError>
     where
         K: Into<String>,
@@ -40,6 +47,11 @@ impl Context {
             .map_err(|e| e.into())
     }
 
+    /// Insert a value int the context using the provided key and value.
+    ///
+    /// Semantics:
+    ///  - If the operation fails, then the pair has not been inserted.
+    ///  - If the operation succeeds, the result is the old value as an [`Option`].
     pub fn insert<K, V>(&self, key: K, value: V) -> Result<Option<V>, BoxError>
     where
         K: Into<String>,
@@ -56,6 +68,18 @@ impl Context {
         }
     }
 
+    /// Upsert a value int the context using the provided key and resolving
+    /// function.
+    ///
+    /// The resolving function must yield a value to be used in the context. It
+    /// is provided with the current value to use in evaluating which value to
+    /// yield.
+    ///
+    /// Semantics:
+    ///  - If the operation fails, then the pair has not been inserted (or a current
+    ///    value updated).
+    ///  - If the operation succeeds, the pair have either updated an existing value
+    ///    or been inserted.
     pub fn upsert<K, V>(&self, key: K, upsert: impl Fn(V) -> V) -> Result<(), BoxError>
     where
         K: Into<String>,
@@ -81,6 +105,16 @@ impl Context {
                 }
             });
         result.map_err(|e| e.into())
+    }
+
+    /// Iterate over the entries.
+    pub fn iter(&self) -> impl Iterator<Item = RefMulti<'_, String, Value>> + '_ {
+        self.entries.iter()
+    }
+
+    /// Iterate mutably over the entries.
+    pub fn iter_mut(&self) -> impl Iterator<Item = RefMutMulti<'_, String, Value>> + '_ {
+        self.entries.iter_mut()
     }
 }
 
@@ -124,5 +158,35 @@ mod test {
         let c = Context::new();
         assert!(c.insert("string", "Some value".to_string()).is_ok());
         assert!(c.upsert("string", |v: usize| v + 1).is_err());
+    }
+
+    #[test]
+    fn it_iterates_over_context() {
+        let c = Context::new();
+        assert!(c.insert("one", 1).is_ok());
+        assert!(c.insert("two", 2).is_ok());
+        assert_eq!(c.iter().count(), 2);
+        assert_eq!(
+            c.iter()
+                // Fiddly because of the conversion from bytes to usize, but ...
+                .map(|r| serde_json_bytes::from_value::<usize>(r.value().clone()).unwrap())
+                .sum::<usize>(),
+            3
+        );
+    }
+
+    #[test]
+    fn it_iterates_mutably_over_context() {
+        let c = Context::new();
+        assert!(c.insert("one", 1usize).is_ok());
+        assert!(c.insert("two", 2usize).is_ok());
+        assert_eq!(c.iter().count(), 2);
+        c.iter_mut().for_each(|mut r| {
+            // Fiddly because of the conversion from bytes to usize, but ...
+            let new: usize = serde_json_bytes::from_value::<usize>(r.value().clone()).unwrap() + 1;
+            *r = new.into();
+        });
+        assert_eq!(c.get("one").unwrap(), Some(2));
+        assert_eq!(c.get("two").unwrap(), Some(3));
     }
 }
