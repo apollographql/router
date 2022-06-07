@@ -37,14 +37,14 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 ```
 
 ## 🚀 Features
-### Add iterators to Context ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Add iterators to Context ([PR #1202](https://github.com/apollographql/router/pull/1202))
 Context can now be iterated over, with two new methods:
  - iter()
  - iter_mut()
 
 The implementation leans heavily on the underlying entries [DashMap](https://docs.rs/dashmap/5.3.4/dashmap/struct.DashMap.html#method.iter), so the documentation there will be helpful.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1202
 
 ### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
 Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
