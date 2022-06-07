@@ -64,7 +64,6 @@ telemetry:
             rename: "payload_type"
             default: "application/json"
           - named: "x-custom-header-to-add"
->>>>>>> ecb875a36b2fdf88025a1fb571dcd2fb5e009778
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1159
