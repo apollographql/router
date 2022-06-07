@@ -138,7 +138,7 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                 return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: format!(
-                        "subgraph returns status error '{}': {})",
+                        "subgraph HTTP status error '{}': {})",
                         parts.status,
                         String::from_utf8_lossy(&body)
                     ),
