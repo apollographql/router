@@ -1,6 +1,6 @@
 //! Allows subgraph URLs to be overridden.
 
-use apollo_router_core::{register_plugin, Plugin, SubgraphRequest, SubgraphResponse};
+use crate::{register_plugin, Plugin, SubgraphRequest, SubgraphResponse};
 use http::Uri;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -48,9 +48,7 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::{
-        plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest,
-    };
+    use crate::{plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest};
     use http::Uri;
     use serde_json::Value;
     use std::str::FromStr;
@@ -71,7 +69,7 @@ mod tests {
                     .build())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
             .get("apollo.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(
