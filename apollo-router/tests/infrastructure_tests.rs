@@ -1,4 +1,4 @@
-use apollo_router_core::prelude::*;
+use apollo_router::prelude::*;
 
 #[test]
 fn test_starstuff_supergraph_is_valid() {

@@ -4,7 +4,7 @@
 
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
-use apollo_router_core::{
+use apollo_router::{
     http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
     ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
     ValueExt,
@@ -129,7 +129,6 @@ async fn api_schema_hides_field() {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
-#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -142,7 +141,6 @@ async fn traced_basic_request() {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
-#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -215,7 +213,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error =apollo_router_core::Error {
+    let expected_error =apollo_router::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -297,7 +295,7 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error =apollo_router_core::Error {
+    let expected_error =apollo_router::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
@@ -429,7 +427,7 @@ async fn automated_persisted_queries() {
                 {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
         }),
     );
-    let expected_apq_miss_error = apollo_router_core::Error {
+    let expected_apq_miss_error = apollo_router::Error {
         message: "PersistedQueryNotFound".to_string(),
         extensions,
         ..Default::default()

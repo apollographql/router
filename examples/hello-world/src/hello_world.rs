@@ -1,5 +1,5 @@
-use apollo_router_core::plugin::Plugin;
-use apollo_router_core::{
+use apollo_router::plugin::Plugin;
+use apollo_router::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
     QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
@@ -100,13 +100,13 @@ register_plugin!("example", "hello_world", HelloWorld);
 mod tests {
     use super::{Conf, HelloWorld};
 
-    use apollo_router_core::utils::test::IntoSchema::Canned;
-    use apollo_router_core::utils::test::PluginTestHarness;
-    use apollo_router_core::Plugin;
+    use apollo_router::utils::test::IntoSchema::Canned;
+    use apollo_router::utils::test::PluginTestHarness;
+    use apollo_router::Plugin;
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.hello_world")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"name" : "Bob"}))

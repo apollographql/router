@@ -1,5 +1,5 @@
 ---
-source: apollo-router-core/src/query_planner/bridge_query_planner.rs
+source: apollo-router/src/query_planner/bridge_query_planner.rs
 expression: usage_reporting
 ---
 {

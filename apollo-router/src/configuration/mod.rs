@@ -2,8 +2,8 @@
 // This entire file is license key functionality
 mod yaml;
 
+use crate::plugins;
 use crate::subscriber::is_global_subscriber_set;
-use apollo_router_core::plugins;
 use derivative::Derivative;
 use displaydoc::Display;
 use envmnt::{ExpandOptions, ExpansionType};
@@ -671,8 +671,8 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::prelude::*;
-    use apollo_router_core::SchemaError;
+    use crate::prelude::*;
+    use crate::SchemaError;
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;
