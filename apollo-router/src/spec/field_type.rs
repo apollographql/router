@@ -1,21 +1,30 @@
 use crate::*;
 use apollo_parser::ast;
+use displaydoc::Display;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum FieldType {
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
+pub enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
+    /// Named type {0}_
     Named(String),
+    /// List type {0}_
     List(Box<FieldType>),
+    /// Non null type {0}_
     NonNull(Box<FieldType>),
+    /// String
     String,
+    /// Int
     Int,
+    /// Float
     Float,
+    /// Id
     Id,
+    /// Boolean
     Boolean,
 }
 
