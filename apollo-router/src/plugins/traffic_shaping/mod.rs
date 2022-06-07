@@ -123,6 +123,7 @@ mod test {
     use std::sync::Arc;
 
     use futures::stream::BoxStream;
+    use futures::StreamExt
     use once_cell::sync::Lazy;
     use serde_json_bytes::{ByteString, Value};
     use tower::{util::BoxCloneService, Service};
