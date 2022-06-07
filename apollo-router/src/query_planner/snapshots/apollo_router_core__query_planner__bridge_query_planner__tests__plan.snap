@@ -1,0 +1,20 @@
+---
+source: apollo-router-core/src/query_planner/bridge_query_planner.rs
+assertion_line: 128
+expression: result
+---
+QueryPlan {
+    root: Fetch(
+        FetchNode {
+            service_name: "accounts",
+            requires: [],
+            variable_usages: [],
+            operation: "{me{name{first last}}}",
+            operation_name: None,
+            operation_kind: Query,
+        },
+    ),
+    options: QueryPlanOptions {
+        enable_variable_deduplication: false,
+    },
+}

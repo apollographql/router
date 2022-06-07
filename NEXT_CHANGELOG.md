@@ -37,6 +37,15 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 ```
 
 ## 🚀 Features
+<<<<<<< HEAD
+### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
+Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.traffic_shaping:
+    variables_deduplication: true # Enable the variables deduplication optimization
+=======
 ### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
 Added the ability to add custom attributes/labels on metrics via the configuration file.
 Example:
@@ -53,6 +62,7 @@ telemetry:
             rename: "payload_type"
             default: "application/json"
           - named: "x-custom-header-to-add"
+>>>>>>> ecb875a36b2fdf88025a1fb571dcd2fb5e009778
 ```
 
 ### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
@@ -87,3 +97,9 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 Force the creation of `SocketAddr` to use a new unused port.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
+
+### Add static skip/include directive support ([PR #1185](https://github.com/apollographql/router/pull/1185))
++ Rewrite the InlineFragment implementation
++ Small optimization: add support of static check for `@include` and `@skip` directives
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185

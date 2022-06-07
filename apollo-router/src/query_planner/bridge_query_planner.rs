@@ -53,7 +53,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         "presence of a query has been checked by the RouterService before; qed",
                     ),
                     body.operation_name.to_owned(),
-                    Default::default(),
+                    req.query_plan_options,
                 )
                 .await
             {
@@ -73,7 +73,7 @@ impl QueryPlanner for BridgeQueryPlanner {
         &self,
         query: String,
         operation: Option<String>,
-        _options: QueryPlanOptions,
+        options: QueryPlanOptions,
     ) -> Result<Arc<query_planner::QueryPlan>, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -90,6 +90,7 @@ impl QueryPlanner for BridgeQueryPlanner {
             } => Ok(Arc::new(query_planner::QueryPlan {
                 usage_reporting,
                 root: node,
+                options,
             })),
             PlanSuccess {
                 data: QueryPlan { node: None },
