@@ -10,9 +10,9 @@ use crate::{
     ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
     SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, StreamExt};
+use futures::Stream;
 use futures::{future::BoxFuture, TryFutureExt};
-use futures::{Stream, StreamExt};
 use http::StatusCode;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -72,7 +72,7 @@ where
         + 'static,
     QueryPlannerService::Future: Send + 'static,
     ExecutionService::Future: Send + 'static,
-    ResponseStream: Stream<Item = Response>,
+    ResponseStream: Stream<Item = Response> + Send + 'static,
 {
     type Response = BoxStream<'static, RouterResponse>;
     type Error = BoxError;
@@ -203,36 +203,43 @@ where
                             .build(),
                     )
                     .await?;
-                let response_stream = execution
-                    .call(
-                        ExecutionRequest::builder()
-                            .originating_request(req.originating_request.clone())
-                            .query_plan(planned_query.query_plan)
-                            .context(planned_query.context)
-                            .build(),
-                    )
-                    .await?;
+                let ExecutionResponse { response, context }: ExecutionResponse<ResponseStream> =
+                    execution
+                        .call(
+                            ExecutionRequest::builder()
+                                .originating_request(req.originating_request.clone())
+                                .query_plan(planned_query.query_plan)
+                                .context(planned_query.context)
+                                .build(),
+                        )
+                        .await?;
 
+                // boilerplate to transform from a ExecutionResponse<Stream> to a Stream<RouterResponse>
+                // this will be removed in a follow up commit, once the API stabilizes
+                let (parts, body) = response.into_parts();
+                let clonable_res = crate::http_compat::Response::from_parts(parts, ());
                 Ok(Box::pin(
-                    response_stream
-                        .map(move |mut response| {
-                            if let Some(query) = query.as_ref() {
-                                tracing::debug_span!("format_response").in_scope(|| {
-                                    query.format_response(
-                                        response.response.body_mut(),
-                                        operation_name.as_deref(),
-                                        (*variables).clone(),
-                                        schema.api_schema(),
-                                    )
-                                });
-                            }
+                    body.map(move |mut response: Response| {
+                        if let Some(query) = query.as_ref() {
+                            tracing::debug_span!("format_response").in_scope(|| {
+                                query.format_response(
+                                    &mut response,
+                                    operation_name.as_deref(),
+                                    (*variables).clone(),
+                                    schema.api_schema(),
+                                )
+                            });
+                        }
 
-                            RouterResponse {
-                                context: response.context,
-                                response: response.response.map(ResponseBody::GraphQL),
-                            }
-                        })
-                        .in_current_span(),
+                        RouterResponse {
+                            context: context.clone(),
+                            response: crate::http_compat::Response::from_parts(
+                                clonable_res.clone().into_parts().0,
+                                ResponseBody::GraphQL(response),
+                            ),
+                        }
+                    })
+                    .in_current_span(),
                 ) as BoxStream<RouterResponse>)
             }
         }

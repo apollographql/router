@@ -457,8 +457,13 @@ impl Plugin for Rhai {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -679,12 +684,20 @@ gen_shared_types!(subgraph);
 
 #[allow(dead_code)]
 type SharedExecutionService = Arc<
-    Mutex<Option<BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>>>,
+    Mutex<
+        Option<
+            BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
+        >,
+    >,
 >;
 #[allow(dead_code)]
 type SharedExecutionRequest = Arc<Mutex<Option<ExecutionRequest>>>;
+pub(crate) struct RhaiExecutionResponse {
+    context: Context,
+    response: http_compat::Response<Response>,
+}
 #[allow(dead_code)]
-type SharedExecutionResponse = Arc<Mutex<Option<ExecutionResponse>>>;
+type SharedExecutionResponse = Arc<Mutex<Option<RhaiExecutionResponse>>>;
 impl Accessor<Context> for ExecutionRequest {
     fn accessor(&self) -> &Context {
         &self.context
@@ -693,7 +706,7 @@ impl Accessor<Context> for ExecutionRequest {
         &mut self.context
     }
 }
-impl Accessor<Context> for ExecutionResponse {
+impl Accessor<Context> for ExecutionResponse<BoxStream<'static, Response>> {
     fn accessor(&self) -> &Context {
         &self.context
     }
@@ -710,6 +723,26 @@ impl Accessor<http_compat::Request<Request>> for ExecutionRequest {
     }
 }
 
+impl Accessor<Context> for RhaiExecutionResponse {
+    fn accessor(&self) -> &Context {
+        &self.context
+    }
+
+    fn accessor_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+}
+
+impl Accessor<http_compat::Response<Response>> for RhaiExecutionResponse {
+    fn accessor(&self) -> &http_compat::Response<Response> {
+        &self.response
+    }
+
+    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
+        &mut self.response
+    }
+}
+
 impl Accessor<http_compat::Response<ResponseBody>> for RouterResponse {
     fn accessor(&self) -> &http_compat::Response<ResponseBody> {
         &self.response
@@ -720,12 +753,14 @@ impl Accessor<http_compat::Response<ResponseBody>> for RouterResponse {
     }
 }
 
-impl Accessor<http_compat::Response<Response>> for ExecutionResponse {
-    fn accessor(&self) -> &http_compat::Response<Response> {
+impl Accessor<http_compat::Response<BoxStream<'static, Response>>>
+    for ExecutionResponse<BoxStream<'static, Response>>
+{
+    fn accessor(&self) -> &http_compat::Response<BoxStream<'static, Response>> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
+    fn accessor_mut(&mut self) -> &mut http_compat::Response<BoxStream<'static, Response>> {
         &mut self.response
     }
 }
@@ -915,7 +950,7 @@ impl ServiceStep {
                                 status: StatusCode,
                             ) -> Result<
                                 ControlFlow<
-                                    BoxStream<'static, ExecutionResponse>,
+                                    ExecutionResponse<BoxStream<'static, Response>>,
                                     ExecutionRequest,
                                 >,
                                 BoxError,
@@ -928,9 +963,7 @@ impl ServiceStep {
                                     .status_code(status)
                                     .context(context)
                                     .build()?;
-                                Ok(ControlFlow::Break(
-                                    Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
-                                ))
+                                Ok(ControlFlow::Break(res.boxed()))
                             }
                             let shared_request = Shared::new(Mutex::new(Some(request)));
                             let result: Result<Dynamic, String> = if callback.is_curried() {
@@ -1054,7 +1087,9 @@ impl ServiceStep {
                 service.replace(|service| {
                     service
                         .map_response(
-                            move |response_stream: BoxStream<'static, ExecutionResponse>| {
+                            move |execution_response: ExecutionResponse<
+                                BoxStream<'static, Response>,
+                            >| {
                                 // Let's define a local function to build an error response
                                 // XXX: This isn't ideal. We already have a response, so ideally we'd
                                 // like to append this error into the existing response. However,
@@ -1062,58 +1097,60 @@ impl ServiceStep {
                                 // response types makes this extremely painful. This needs to be
                                 // re-visited at some point post GA.
                                 fn failure_message(
-                                    context: Context,
+                                    //context: Context,
                                     msg: String,
-                                    status: StatusCode,
-                                ) -> ExecutionResponse {
-                                    let res = ExecutionResponse::error_builder()
+                                    // status: StatusCode,
+                                ) -> Response {
+                                    Response::builder()
                                         .errors(vec![crate::Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
-                                        .status_code(status)
-                                        .context(context)
                                         .build()
-                                        .expect("can't fail to build our error message");
-                                    //Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
-                                    res
                                 }
-                                Box::pin(response_stream.map(move |response| {
-                                    let shared_response = Shared::new(Mutex::new(Some(response)));
-                                    let result: Result<Dynamic, String> = if callback.is_curried() {
-                                        callback
-                                            .call(
-                                                &rhai_service.engine,
-                                                &rhai_service.ast,
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    } else {
-                                        let mut scope = rhai_service.scope.clone();
-                                        rhai_service
-                                            .engine
-                                            .call_fn(
-                                                &mut scope,
-                                                &rhai_service.ast,
-                                                callback.fn_name(),
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    };
-                                    if let Err(error) = result {
-                                        tracing::error!("map_response callback failed: {error}");
+                                execution_response.map(move |response_stream| {
+                                    let rhai_service = rhai_service.clone();
+                                    let callback = callback.clone();
+                                    Box::pin(response_stream.map(move |response| {
+                                        let shared_response =
+                                            Shared::new(Mutex::new(Some(response)));
+                                        let result: Result<Dynamic, String> =
+                                            if callback.is_curried() {
+                                                callback
+                                                    .call(
+                                                        &rhai_service.engine,
+                                                        &rhai_service.ast,
+                                                        (shared_response.clone(),),
+                                                    )
+                                                    .map_err(|err| err.to_string())
+                                            } else {
+                                                let mut scope = rhai_service.scope.clone();
+                                                rhai_service
+                                                    .engine
+                                                    .call_fn(
+                                                        &mut scope,
+                                                        &rhai_service.ast,
+                                                        callback.fn_name(),
+                                                        (shared_response.clone(),),
+                                                    )
+                                                    .map_err(|err| err.to_string())
+                                            };
+                                        if let Err(error) = result {
+                                            tracing::error!(
+                                                "map_response callback failed: {error}"
+                                            );
+
+                                            return failure_message(format!(
+                                                "rhai execution error: '{}'",
+                                                error
+                                            ));
+                                        }
                                         let mut guard = shared_response.lock().unwrap();
                                         let response_opt = guard.take();
-                                        return failure_message(
-                                            response_opt.unwrap().context,
-                                            format!("rhai execution error: '{}'", error),
-                                            StatusCode::INTERNAL_SERVER_ERROR,
-                                        );
-                                    }
-                                    let mut guard = shared_response.lock().unwrap();
-                                    let response_opt = guard.take();
-                                    response_opt.unwrap()
-                                })) as BoxStream<ExecutionResponse>
+                                        response_opt.unwrap()
+                                    }))
+                                        as BoxStream<'static, Response>
+                                })
                             },
                         )
                         .boxed()
@@ -1635,11 +1672,10 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: ExecutionRequest| {
-                Ok(Box::pin(once(async {
-                    ExecutionResponse::fake_builder()
-                        .context(req.context)
-                        .build()
-                })))
+                Ok(ExecutionResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .boxed())
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
@@ -1663,14 +1699,11 @@ mod tests {
             .originating_request(fake_req)
             .build();
 
-        let exec_resp = router_service
+        let mut exec_resp = router_service
             .ready()
             .await
             .unwrap()
             .call(exec_req)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
         assert_eq!(
@@ -1678,7 +1711,7 @@ mod tests {
             http::StatusCode::INTERNAL_SERVER_ERROR
         );
         // Check if it fails
-        let body = exec_resp.response.into_body();
+        let body = exec_resp.next_response().await.unwrap();
         if body.errors.is_empty() {
             panic!(
                 "Must contain errors : {}",

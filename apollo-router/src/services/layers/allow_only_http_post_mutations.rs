@@ -4,7 +4,7 @@
 
 use crate::sync_checkpoint::CheckpointService;
 use crate::{ExecutionRequest, ExecutionResponse, Object, Response};
-use futures::Stream;
+use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -12,12 +12,13 @@ use tower::{BoxError, Layer, Service};
 #[derive(Default)]
 pub struct AllowOnlyHttpPostMutationsLayer {}
 
-impl<S, ResponseStream> Layer<S> for AllowOnlyHttpPostMutationsLayer
+impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse<ResponseStream>> + Send + 'static,
+    S: Service<ExecutionRequest, Response = ExecutionResponse<BoxStream<'static, Response>>>
+        + Send
+        + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
     <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
-    ResponseStream: Stream<Item = Response> + Send + 'static,
 {
     type Service = CheckpointService<S, ExecutionRequest>;
 
@@ -43,7 +44,7 @@ where
                         "Allow".parse::<HeaderName>().unwrap(),
                         "POST".parse().unwrap(),
                     );
-                    Ok(ControlFlow::Break(res))
+                    Ok(ControlFlow::Break(res.boxed()))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -55,13 +56,10 @@ where
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-
     use super::*;
     use crate::query_planner::fetch::OperationKind;
     use crate::{http_compat, PlanNode};
     use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
-    use futures::StreamExt;
-    use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -69,11 +67,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                ExecutionResponse::fake_builder().build()
-            })))
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
 
         let mock = mock_service.build();
 
@@ -86,7 +83,7 @@ mod forbid_http_get_mutations_tests {
             .call(http_post_query_plan_request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
     }
@@ -95,11 +92,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                ExecutionResponse::fake_builder().build()
-            })))
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
 
         let mock = mock_service.build();
 
@@ -112,7 +108,7 @@ mod forbid_http_get_mutations_tests {
             .call(http_post_query_plan_request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
     }
@@ -121,11 +117,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_get_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                ExecutionResponse::fake_builder().build()
-            })))
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
 
         let mock = mock_service.build();
 
@@ -138,7 +133,7 @@ mod forbid_http_get_mutations_tests {
             .call(http_post_query_plan_request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
     }
@@ -173,22 +168,19 @@ mod forbid_http_get_mutations_tests {
         let services = service_stack.ready().await.unwrap();
 
         for request in forbidden_requests {
-            let actual_error = services.call(request).await.unwrap().next().await.unwrap();
+            let mut actual_error = services.call(request).await.unwrap();
 
             assert_eq!(expected_status, actual_error.response.status());
             assert_eq!(
                 expected_allow_header,
                 actual_error.response.headers().get("Allow").unwrap()
             );
-            assert_error_matches(&expected_error, actual_error);
+            assert_error_matches(&expected_error, actual_error.next_response().await.unwrap());
         }
     }
 
-    fn assert_error_matches<T>(
-        expected_error: &crate::Error,
-        response: crate::ExecutionResponse<T>,
-    ) {
-        assert_eq!(&response.response.body().errors[0], expected_error);
+    fn assert_error_matches(expected_error: &crate::Error, response: Response) {
+        assert_eq!(&response.errors[0], expected_error);
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> crate::ExecutionRequest {

@@ -2,8 +2,8 @@
 
 use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
-use futures::channel::mpsc::Receiver;
 use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,7 +38,7 @@ impl ExecutionService {
 }
 
 impl Service<ExecutionRequest> for ExecutionService {
-    type Response = ExecutionResponse<Receiver<Response>>;
+    type Response = ExecutionResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -76,7 +76,7 @@ impl Service<ExecutionRequest> for ExecutionService {
             );
 
             Ok(ExecutionResponse::new_from_response(
-                http::Response::new(receiver).into(),
+                http::Response::new(Box::pin(receiver) as BoxStream<'static, Response>).into(),
                 ctx.clone(),
             ))
         }

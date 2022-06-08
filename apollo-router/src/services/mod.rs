@@ -4,11 +4,11 @@ pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::prelude::graphql::*;
-use futures::future::ready;
-use futures::future::Ready;
-use futures::stream::once;
-use futures::stream::Once;
-use futures::Stream;
+use futures::{
+    future::{ready, Ready},
+    stream::{once, BoxStream, Once, StreamExt},
+    Stream,
+};
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use http_compat::IntoHeaderName;
@@ -695,7 +695,7 @@ impl EEE {
     }
 }
 
-impl<T: Stream<Item = Response>> ExecutionResponse<T> {
+impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
     /// This is the constructor to use when constructing a real ExecutionResponse.
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
@@ -704,14 +704,24 @@ impl<T: Stream<Item = Response>> ExecutionResponse<T> {
         Self { response, context }
     }
 
-    pub fn map<F>(self, f: F) -> ExecutionResponse<T>
+    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> ExecutionResponse<U>
     where
-        F: FnMut(Response) -> Response,
+        F: FnMut(T) -> U,
     {
         ExecutionResponse {
             context: self.context,
             response: self.response.map(f),
         }
+    }
+
+    pub fn boxed(self) -> ExecutionResponse<BoxStream<'static, Response>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
+    }
+}
+
+impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
+    pub async fn next_response(&mut self) -> Option<Response> {
+        self.response.body_mut().next().await
     }
 }
 

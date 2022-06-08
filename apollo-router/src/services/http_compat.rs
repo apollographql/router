@@ -257,6 +257,12 @@ impl<T> Response<T> {
         self.inner.into_parts()
     }
 
+    pub fn from_parts(head: http::response::Parts, body: T) -> Response<T> {
+        Response {
+            inner: http::Response::from_parts(head, body),
+        }
+    }
+
     pub fn into_body(self) -> T {
         self.inner.into_body()
     }

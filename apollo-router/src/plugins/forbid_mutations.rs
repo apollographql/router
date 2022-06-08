@@ -2,8 +2,7 @@ use crate::{
     register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, Response,
     ServiceBuilderExt,
 };
-use futures::stream::{once, BoxStream};
-use futures::Stream;
+use futures::stream::BoxStream;
 use http::StatusCode;
 use std::ops::ControlFlow;
 use tower::util::BoxService;
@@ -22,10 +21,15 @@ impl Plugin for ForbidMutations {
         Ok(ForbidMutations { forbid })
     }
 
-    fn execution_service<Res: Stream<Item = Response>>(
+    fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<Res>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         if self.forbid {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
@@ -42,9 +46,7 @@ impl Plugin for ForbidMutations {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build();
-                        Ok(ControlFlow::Break(
-                            res, //Box::pin(once(async { res })) as BoxStream<ExecutionResponse>
-                        ))
+                        Ok(ControlFlow::Break(res.boxed()))
                     } else {
                         Ok(ControlFlow::Continue(req))
                     }
@@ -63,7 +65,6 @@ mod forbid_http_get_mutations_tests {
     use crate::http_compat::Request;
     use crate::query_planner::fetch::OperationKind;
     use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
-    use futures::StreamExt;
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
@@ -72,11 +73,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                ExecutionResponse::fake_builder().build()
-            })))
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
 
         let mock = mock_service.build();
 
@@ -91,7 +91,7 @@ mod forbid_http_get_mutations_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
     }
@@ -113,27 +113,20 @@ mod forbid_http_get_mutations_tests {
             .execution_service(mock.boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
-        let actual_error = service_stack
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next()
-            .await
-            .unwrap();
+        let mut actual_error = service_stack.oneshot(request).await.unwrap();
 
         assert_eq!(expected_status, actual_error.response.status());
-        assert_error_matches(&expected_error, actual_error);
+        assert_error_matches(&expected_error, actual_error.next_response().await.unwrap());
     }
 
     #[tokio::test]
     async fn configuration_set_to_false_lets_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                ExecutionResponse::fake_builder().build()
-            })))
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
 
         let mock = mock_service.build();
 
@@ -148,13 +141,13 @@ mod forbid_http_get_mutations_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, response: crate::ExecutionResponse) {
-        assert_eq!(&response.response.body().errors[0], expected_error);
+    fn assert_error_matches(expected_error: &crate::Error, response: Response) {
+        assert_eq!(&response.errors[0], expected_error);
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> crate::ExecutionRequest {
