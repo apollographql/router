@@ -315,15 +315,16 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
-      - when:
-          condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
-          steps:
-            - run: cargo test --jobs 2 --locked
-          condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
-          steps:
-            - run: cargo test --locked
+      steps: 
+        - when:
+            condition:
+              equal: [*rust_linux_executor, << parameters.platform >>]
+            steps:
+              - run: cargo test --jobs 2 --locked
+            condition:
+              equal: [*rust_macos_executor, << parameters.platform >>]
+            steps:
+              - run: cargo test --locked
 
       - save_cache:
           name: Save .cargo
