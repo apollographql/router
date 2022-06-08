@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.4] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-### The `apollo-router-core` crate has been merged into `apollo-router`
+### The `apollo-router-core` crate has been merged into `apollo-router` ([PR](https://github.com/apollographql/router/pull/1189))
 
 To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping only the latter), and change imports like so:
 
@@ -36,7 +36,18 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 + use apollo_router::prelude::*;
 ```
 
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
+
 ## 🚀 Features
+### Add iterators to Context ([PR #1202](https://github.com/apollographql/router/pull/1202))
+Context can now be iterated over, with two new methods:
+ - iter()
+ - iter_mut()
+
+The implementation leans heavily on the underlying entries [DashMap](https://docs.rs/dashmap/5.3.4/dashmap/struct.DashMap.html#method.iter), so the documentation there will be helpful.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1202
+
 ### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
 Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
 
@@ -106,3 +117,8 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 + Small optimization: add support of static check for `@include` and `@skip` directives
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
+
+### Update buildstructor to 0.3 ([PR #1207](https://github.com/apollographql/router/pull/1207))
+
+Update buildstructor to 0.3.
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207

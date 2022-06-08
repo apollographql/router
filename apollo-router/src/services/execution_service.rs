@@ -21,8 +21,9 @@ pub struct ExecutionService {
     subgraph_services: Arc<ServiceRegistry>,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl ExecutionService {
+    #[builder]
     pub fn new(
         schema: Arc<Schema>,
         subgraph_services: HashMap<
