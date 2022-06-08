@@ -319,7 +319,7 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 2 --locked
+            - run: cargo test --jobs 3 --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
