@@ -18,12 +18,12 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
-pub struct TowerSubgraphService {
+pub struct SubgraphService {
     client: hyper::Client<HttpsConnector<HttpConnector>>,
     service: Arc<String>,
 }
 
-impl TowerSubgraphService {
+impl SubgraphService {
     pub fn new(service: impl Into<String>) -> Self {
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
@@ -39,7 +39,7 @@ impl TowerSubgraphService {
     }
 }
 
-impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
+impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
     type Response = graphql::SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -179,7 +179,7 @@ mod tests {
     use tower::{service_fn, ServiceExt};
 
     use crate::fetch::OperationKind;
-    use crate::{http_compat, Context, Request, Response, SubgraphRequest};
+    use crate::{http_compat, Context, Request, SubgraphRequest};
 
     use super::*;
 
@@ -221,7 +221,7 @@ mod tests {
     async fn test_bad_status_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
-        let subgraph_service = TowerSubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test");
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
@@ -248,7 +248,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph returns status error '400 Bad Request': BAD REQUEST)"
+            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST)"
         );
     }
 
@@ -256,7 +256,7 @@ mod tests {
     async fn test_bad_content_type() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2525").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_response_format(socket_addr));
-        let subgraph_service = TowerSubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test");
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
@@ -283,7 +283,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph doesn't return JSON content (current content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json; found content-type: \"text/html\")"
         );
     }
 }
