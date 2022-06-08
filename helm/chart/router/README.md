@@ -55,8 +55,8 @@ helm show values apollographql/router
 | ingress.hosts[0].paths[0].path | string | `"/"` |  |
 | ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
 | ingress.tls | list | `[]` |  |
-| managedFederation.apiKey | string | `nil` | If using managed federation, the graph API key to identify router to Studio. If set, this parameter takes precedence over `managedFederation.existingSecret` |
-| managedFederation.existingSecret | string | `nil` | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. `managedFederation.apiKey` takes precedence over this parameter |
+| managedFederation.apiKey | string | `nil` | If using managed federation, the graph API key to identify router to Studio |
+| managedFederation.existingSecret | string | `nil` | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter name  |
 | managedFederation.graphRef | string | `""` | If using managed federation, the variant of which graph to use |
 | nameOverride | string | `""` |  |
 | nodeSelector | object | `{}` |  |

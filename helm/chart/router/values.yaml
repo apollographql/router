@@ -13,11 +13,10 @@ router:
   - --hot-reload
 
 managedFederation:
-  # -- If using managed federation, the graph API key to identify router to Studio.
-  # If set, this parameter takes precedence over `managedFederation.existingSecret`
+  # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
   # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
-  # `managedFederation.apiKey` takes precedence over this parameter
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter name 
   existingSecret:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
