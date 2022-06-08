@@ -42,7 +42,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 ### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
 This change allows the use an already existing Secret for the graph API Key.
 
-To use it, updating your values.yaml or specify the value on your helm install command line.
+To use it, update your values.yaml or specify the value on your helm install command line.
 
 e.g.: helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>
 
