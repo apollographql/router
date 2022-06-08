@@ -60,7 +60,7 @@ impl From<IntoSchema> for Schema {
     }
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl PluginTestHarness {
     /// Plugin test harness gives you an easy way to test your plugins against a mock subgraph.
     /// Currently mocking is basic, and only a request for topProducts is supported
@@ -76,6 +76,7 @@ impl PluginTestHarness {
     ///
     /// returns: Result<PluginTestHarness, Box<dyn Error+Send+Sync, Global>>
     ///
+    #[builder]
     pub async fn new<P: Plugin>(
         mut plugin: P,
         schema: IntoSchema,

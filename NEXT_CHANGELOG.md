@@ -108,3 +108,8 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 + Small optimization: add support of static check for `@include` and `@skip` directives
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
+
+### Update buildstructor to 0.3 ([PR #1207](https://github.com/apollographql/router/pull/1207))
+
+Update buildstructor to 0.3.
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207

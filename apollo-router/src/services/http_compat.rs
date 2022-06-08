@@ -80,11 +80,12 @@ pub struct Request<T> {
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
+    #[builder]
     pub fn new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: http::Uri,
@@ -111,6 +112,7 @@ impl<T> Request<T> {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
+    #[builder]
     pub fn fake_new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Option<http::Uri>,

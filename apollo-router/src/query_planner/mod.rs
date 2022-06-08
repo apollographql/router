@@ -28,8 +28,9 @@ pub struct QueryPlan {
 
 /// This default impl is useful for plugin::utils users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl QueryPlan {
+    #[builder]
     pub(crate) fn fake_new(
         root: Option<PlanNode>,
         usage_reporting: Option<UsageReporting>,
