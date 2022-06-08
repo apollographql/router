@@ -91,6 +91,11 @@ By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/
 
 ## 🐛 Fixes ( :bug: )
 
+### Display better error message when on subgraph fetch errors ([PR #1201](https://github.com/apollographql/router/pull/1201))
+Show a helpful error message when a subgraph does not return JSON or bad status code
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1201
+
 ### Fix CORS configuration to eliminate runtime panic on mis-configuration ([PR #1197](https://github.com/apollographql/router/pull/1197))
 Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime:
 Example:

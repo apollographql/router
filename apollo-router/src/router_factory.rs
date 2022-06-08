@@ -5,7 +5,7 @@ use crate::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
 };
-use crate::{DynPlugin, TowerSubgraphService};
+use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -71,7 +71,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxService::new(TowerSubgraphService::new(name.to_string()));
+            let subgraph_service = BoxService::new(SubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
