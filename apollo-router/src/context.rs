@@ -14,6 +14,15 @@ use tower::BoxError;
 pub type Entries = Arc<DashMap<String, Value>>;
 
 /// Context for a [`http_compat::Request`]
+///
+/// Context makes use of [`DashMap`] under the hood which tries to handle concurrency
+/// by allowing concurrency across threads without requiring locking. This is great
+/// for usability but could lead to surprises when updates are highly contested.
+///
+/// Within the router, contention is likely to be highest within plugins which
+/// provide [`SubgraphRequest`] or [`SubgraphResponse`] processing. At such times,
+/// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
+/// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
