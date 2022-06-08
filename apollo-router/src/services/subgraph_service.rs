@@ -114,10 +114,12 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
-                    if !content_type_str.contains("application/json") {
+                    if !content_type_str.contains("application/json")
+                        && !content_type_str.contains("application/graphql+json")
+                    {
                         return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
                             service: service_name.clone(),
-                            reason: format!("subgraph didn't return JSON (expected content-type: application/json; found content-type: {content_type:?})"),
+                            reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
                         }));
                     }
                 }
@@ -283,7 +285,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json; found content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
         );
     }
 }
