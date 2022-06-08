@@ -39,6 +39,15 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
 
 ## 🚀 Features
+### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
+This change allows the use an already existing Secret for the graph API Key.
+
+To use it, updating your values.yaml or specify the value on your helm install command line.
+
+e.g.: helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>
+
+By [@pellizzetti](https://github.com/pellizzetti) in https://github.com/apollographql/router/pull/1196
+
 ### Add iterators to Context ([PR #1202](https://github.com/apollographql/router/pull/1202))
 Context can now be iterated over, with two new methods:
  - iter()
