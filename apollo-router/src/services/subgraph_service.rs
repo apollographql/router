@@ -67,8 +67,11 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
 
             let mut request = http::request::Request::from_parts(parts, body.into());
             let app_json: HeaderValue = HeaderValue::from_static("application/json");
+            let app_graphql_json: HeaderValue =
+                HeaderValue::from_static("application/graphql+json");
             request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
             request.headers_mut().insert(ACCEPT, app_json);
+            request.headers_mut().append(ACCEPT, app_graphql_json);
 
             get_text_map_propagator(|propagator| {
                 propagator.inject_context(
