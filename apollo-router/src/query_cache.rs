@@ -24,14 +24,15 @@ impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
         let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key, &schema))
             .instrument(info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
         let parsed_query = match query_parsing_future.await {
-            Ok(res) => res.map(Arc::new),
+            Ok(res) => Some(Arc::new(res.map_err(QueryPlannerError::from)?)),
             // Silently ignore cancelled tasks (never happen for blocking tasks).
             Err(err) if err.is_cancelled() => None,
             Err(err) => {
                 failfast_debug!("parsing query task failed: {}", err);
-                None
+                return Err(QueryPlannerError::from(err).into());
             }
         };
+
         Ok(parsed_query)
     }
 }

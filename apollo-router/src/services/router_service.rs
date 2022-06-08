@@ -6,9 +6,9 @@ use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, Response,
-    ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
-    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    Introspection, Plugin, QueryCache, QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse,
+    Response, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::stream::{BoxStream, StreamExt};
 use futures::Stream;
@@ -192,13 +192,14 @@ where
                         response: http::Response::new(ResponseBody::GraphQL(err)).into(),
                         context,
                     }
-                })) as BoxStream<RouterResponse>)
+                })))
             } else {
                 let operation_name = body.operation_name.clone();
                 let planned_query = planning
                     .call(
                         QueryPlannerRequest::builder()
                             .originating_request(req.originating_request.clone())
+                            .query_plan_options(QueryPlanOptions::default())
                             .context(context)
                             .build(),
                     )
@@ -354,7 +355,6 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-
         let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone())
             .await
             .map_err(ServiceBuildError::QueryPlannerError)?;

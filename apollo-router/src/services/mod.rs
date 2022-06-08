@@ -324,10 +324,13 @@ impl RouterResponse {
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
-/// [`Context`] for the request.
+/// [`Context`] and [`QueryPlanOptions`] for the request.
+#[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     /// Original request to the Router.
     pub originating_request: http_compat::Request<Request>,
+    /// Query plan options
+    pub query_plan_options: QueryPlanOptions,
 
     pub context: Context,
 }
@@ -339,10 +342,12 @@ impl QueryPlannerRequest {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     pub fn new(
         originating_request: http_compat::Request<Request>,
+        query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
             originating_request,
+            query_plan_options,
             context,
         }
     }

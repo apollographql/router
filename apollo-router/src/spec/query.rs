@@ -89,7 +89,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -100,25 +100,27 @@ impl Query {
             .collect::<Vec<_>>();
 
         if !errors.is_empty() {
-            failfast_debug!("parsing error(s): {}", errors.join(", "));
-            return None;
+            let errors = errors.join(", ");
+            failfast_debug!("parsing error(s): {}", errors);
+            return Err(SpecError::ParsingError(errors));
         }
 
         let document = tree.document();
         let fragments = Fragments::from_ast(&document, schema)?;
 
-        let operations = document
+        let operations: Vec<Operation> = document
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Operation::from_ast(operation, schema)
+                    Some(operation)
                 } else {
                     None
                 }
             })
-            .collect();
+            .map(|operation| Operation::from_ast(operation, schema))
+            .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Some(Query {
+        Ok(Query {
             string,
             fragments,
             operations,
@@ -314,6 +316,9 @@ impl Query {
         output: &mut Object,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
+        // For skip and include, using .unwrap_or is legit here because
+        // validate_variables should have already checked that
+        // the variable is present and it is of the correct type
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -325,21 +330,11 @@ impl Query {
                     include,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -381,30 +376,17 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment {
-                    fragment:
-                        Fragment {
-                            type_condition,
-                            selection_set,
-                            skip,
-                            include,
-                        },
+                    type_condition,
+                    selection_set,
+                    skip,
+                    include,
                     known_type,
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -437,20 +419,11 @@ impl Query {
                     skip,
                     include,
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(false)
-                    {
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -518,21 +491,14 @@ impl Query {
                     skip,
                     include,
                 } => {
-                    if skip
-                        .should_skip(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or_default()
-                    {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include
-                        .should_include(variables)
-                        // validate_variables should have already checked that
-                        // the variable is present and it is of the correct type
-                        .unwrap_or(true)
-                    {
+                    if !include.should_include(variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -572,13 +538,10 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment {
-                    fragment:
-                        Fragment {
-                            type_condition,
-                            selection_set,
-                            skip: _,
-                            include: _,
-                        },
+                    type_condition,
+                    selection_set,
+                    skip: _,
+                    include: _,
                     known_type: _,
                 } => {
                     // top level objects will not provide a __typename field
@@ -694,7 +657,7 @@ impl Operation {
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
+    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
         let name = operation.name().map(|x| x.text().to_string());
 
         let kind = operation
@@ -710,7 +673,7 @@ impl Operation {
         let current_field_type = match kind {
             OperationKind::Query => FieldType::Named("Query".to_string()),
             OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return None,
+            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
         };
 
         let selection_set = operation
@@ -718,7 +681,10 @@ impl Operation {
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
             .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
-            .collect::<Option<_>>()?;
+            .collect::<Result<Vec<Option<_>>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<Selection>>();
 
         let variables = operation
             .variable_definitions()
@@ -745,7 +711,7 @@ impl Operation {
             })
             .collect();
 
-        Some(Operation {
+        Ok(Operation {
             selection_set,
             name,
             variables,
@@ -921,7 +887,6 @@ mod tests {
                 .parse::<Schema>()
                 .expect("could not parse schema");
             let api_schema = schema.api_schema();
-            println!("generated API chema:\n{}", api_schema.as_str());
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
@@ -1198,7 +1163,7 @@ mod tests {
 
             union Element = Baz | Bar
             ",
-            "{get {foo stuff{bar baz} ...fragment array{bar baz} other{bar}}}",
+            "{get {foo stuff{bar baz} array{... on Baz { bar baz } } other{bar}}}",
             json! {{
                 "get": {
                     "foo": "1",
@@ -3093,6 +3058,297 @@ mod tests {
     }
 
     #[test]
+    fn it_statically_includes() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+            name: String
+            review: Review
+            product: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+            review: Review
+        }
+
+        type Review {
+            id: String!
+            body: String
+        }",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+
+        let query = Query::parse(
+            "query  {
+                name @include(if: false)
+                review @include(if: false)
+                product @include(if: true) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 1);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
+            _ => panic!("expected a field"),
+        }
+
+        let query = Query::parse(
+            "query  {
+                name @include(if: false)
+                review
+                product @include(if: true) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 2);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
+            _ => panic!("expected a field"),
+        }
+        match operation.selection_set.get(1).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
+            _ => panic!("expected a field"),
+        }
+
+        // Inline fragment
+        let query = Query::parse(
+            "query  {
+                name @include(if: false)
+                ... @include(if: false) {
+                    review
+                }
+                product @include(if: true) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 1);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field {
+                name,
+                selection_set: Some(selection_set),
+                ..
+            } => {
+                assert_eq!(name, &ByteString::from("product"));
+                assert_eq!(selection_set.len(), 1);
+            }
+            _ => panic!("expected a field"),
+        }
+
+        // Fragment spread
+        let query = Query::parse(
+            "
+            fragment ProductName on Product {
+                name
+            }
+            query  {
+                name @include(if: false)
+                review
+                product @include(if: true) {
+                    ...ProductName @include(if: false)
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 2);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
+            _ => panic!("expected a field"),
+        }
+        match operation.selection_set.get(1).unwrap() {
+            Selection::Field {
+                name,
+                selection_set: Some(selection_set),
+                ..
+            } => {
+                assert_eq!(name, &ByteString::from("product"));
+                assert_eq!(selection_set.len(), 0);
+            }
+            _ => panic!("expected a field"),
+        }
+    }
+
+    #[test]
+    fn it_statically_skips() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+            name: String
+            review: Review
+            product: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+            review: Review
+        }
+
+        type Review {
+            id: String!
+            body: String
+        }",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+
+        let query = Query::parse(
+            "query  {
+                name @skip(if: true)
+                review @skip(if: true)
+                product @skip(if: false) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 1);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
+            _ => panic!("expected a field"),
+        }
+
+        let query = Query::parse(
+            "query  {
+                name @skip(if: true)
+                review
+                product @skip(if: false) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 2);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
+            _ => panic!("expected a field"),
+        }
+        match operation.selection_set.get(1).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("product")),
+            _ => panic!("expected a field"),
+        }
+
+        // Inline fragment
+        let query = Query::parse(
+            "query  {
+                name @skip(if: true)
+                ... @skip(if: true) {
+                    review
+                }
+                product @skip(if: false) {
+                    name
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 1);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field {
+                name,
+                selection_set: Some(selection_set),
+                ..
+            } => {
+                assert_eq!(name, &ByteString::from("product"));
+                assert_eq!(selection_set.len(), 1);
+            }
+            _ => panic!("expected a field"),
+        }
+
+        // Fragment spread
+        let query = Query::parse(
+            "
+            fragment ProductName on Product {
+                name
+            }
+            query  {
+                name @skip(if: true)
+                review
+                product @skip(if: false) {
+                    ...ProductName @skip(if: true)
+                }
+            }",
+            &schema,
+        )
+        .expect("could not parse query");
+
+        assert_eq!(query.operations.len(), 1);
+        let operation = &query.operations[0];
+        assert_eq!(operation.selection_set.len(), 2);
+        match operation.selection_set.get(0).unwrap() {
+            Selection::Field { name, .. } => assert_eq!(name, &ByteString::from("review")),
+            _ => panic!("expected a field"),
+        }
+        match operation.selection_set.get(1).unwrap() {
+            Selection::Field {
+                name,
+                selection_set: Some(selection_set),
+                ..
+            } => {
+                assert_eq!(name, &ByteString::from("product"));
+                assert_eq!(selection_set.len(), 0);
+            }
+            _ => panic!("expected a field"),
+        }
+    }
+
+    #[test]
+    fn it_should_fail_with_empty_selection_set() {
+        let schema = with_supergraph_boilerplate(
+            "type Query {
+            product: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+        }",
+        )
+        .parse::<Schema>()
+        .expect("could not parse schema");
+
+        let _query_error = Query::parse(
+            "query  {
+                product {
+                }
+            }",
+            &schema,
+        )
+        .expect_err("should not parse query");
+    }
+
+    #[test]
     fn skip() {
         let schema = "type Query {
             get: Product
@@ -3650,7 +3906,7 @@ mod tests {
                     name @include(if: false)
                 }
                 get @include(if: true) {
-                    id 
+                    id
                     review {
                         id
                     }

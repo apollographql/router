@@ -87,7 +87,7 @@ where
                 .clone()
                 .expect("presence of a query has been checked by the RouterService before; qed"),
             body.operation_name.to_owned(),
-            QueryPlanOptions::default(),
+            request.query_plan_options,
         );
         let cm = self.cm.clone();
         Box::pin(async move {

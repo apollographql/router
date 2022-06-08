@@ -178,7 +178,6 @@ mod test {
         );
 
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
-
         let builder = builder
             .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
