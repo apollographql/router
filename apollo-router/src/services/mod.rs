@@ -16,14 +16,14 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
+pub use subgraph_service::SubgraphService;
 use tower::BoxError;
-pub use tower_subgraph_service::TowerSubgraphService;
 
 mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
 mod router_service;
-mod tower_subgraph_service;
+mod subgraph_service;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
