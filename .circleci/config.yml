@@ -314,8 +314,17 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
-      # As of rustc 1.61.0, must limit the number of jobs or we run out of memory (large executor/8GB)
-      - run: cargo test --jobs 4 --locked
+      # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
+      - when:
+          condition:
+            equal: [linux, << parameters.os >>]
+          steps:
+            - run: cargo test --jobs 3 --locked
+      - when:
+          condition:
+            equal: [macos, << parameters.os >>]
+          steps:
+            - run: cargo test --locked
 
       - save_cache:
           name: Save .cargo
