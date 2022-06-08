@@ -66,5 +66,9 @@ Return secret name to be used based on provided values.
 */}}
 {{- define "router.managedFederation.apiSecretName" -}}
 {{- $fullName := include "router.fullname" . -}}
-{{- default $fullName .Values.managedFederation.apiKeyExistingSecret | quote -}}
+{{- if .Values.managedFederation.apiKey -}}
+{{- $fullName | quote -}}
+{{- else -}}
+{{- .Values.managedFederation.existingSecret | quote -}}
+{{- end -}}
 {{- end -}}
