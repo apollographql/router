@@ -107,7 +107,7 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
- "buildstructor 0.1.12",
+ "buildstructor",
  "bytes",
  "clap 3.1.18",
  "dashmap 5.2.0",
@@ -577,21 +577,6 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb349df936841e81bbb21ab0305a898c411b99c85a6fe088f8296209f5d821b7"
-dependencies = [
- "lazy_static",
- "proc-macro2",
- "quote",
- "str_inflector",
- "syn",
- "thiserror",
- "try_match",
-]
-
-[[package]]
-name = "buildstructor"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d40602615b158f55f9b0d70ec0e83a98f99c206b1725b095e793f111f7f8d56e"
@@ -731,7 +716,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc14c70a4bb3d18ee69eafc7afc8a3c39e51fcd31e2add965a8f9fba8b8a5450"
 dependencies = [
  "anyhow",
- "buildstructor 0.3.0",
+ "buildstructor",
  "cargo",
  "clap 2.34.0",
  "console 0.12.0",

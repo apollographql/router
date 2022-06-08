@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.4] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-### The `apollo-router-core` crate has been merged into `apollo-router`
+### The `apollo-router-core` crate has been merged into `apollo-router` ([PR](https://github.com/apollographql/router/pull/1189))
 
 To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping only the latter), and change imports like so:
 
@@ -35,6 +35,8 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 - use apollo_router_core::prelude::*;
 + use apollo_router::prelude::*;
 ```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
 
 ## 🚀 Features
 ### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
@@ -106,3 +108,8 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 + Small optimization: add support of static check for `@include` and `@skip` directives
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
+
+### Update buildstructor to 0.3 ([PR #1207](https://github.com/apollographql/router/pull/1207))
+
+Update buildstructor to 0.3.
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207
