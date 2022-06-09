@@ -148,6 +148,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         None
     }
 
+    /// Return the name of the plugin.
     fn name(&self) -> &'static str {
         get_type_of(self)
     }
@@ -204,6 +205,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler>;
 
+    /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 }
 
@@ -279,6 +281,7 @@ macro_rules! register_plugin {
     };
 }
 
+/// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<

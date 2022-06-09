@@ -38,8 +38,9 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
     introspection: Option<Arc<Introspection>>,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, ExecutionService> {
+    #[builder]
     pub fn new(
         query_planner_service: QueryPlannerService,
         query_execution_service: ExecutionService,
