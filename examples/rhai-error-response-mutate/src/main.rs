@@ -16,7 +16,6 @@ mod tests {
     use apollo_router::utils::test::IntoSchema::Canned;
     use apollo_router::utils::test::PluginTestHarness;
     use apollo_router::{Context, Plugin, RouterRequest};
-    use futures::StreamExt;
     use http::StatusCode;
 
     #[tokio::test]
@@ -45,7 +44,7 @@ mod tests {
         let query = "query {topProducts{name}}";
         let operation_name: Option<&str> = None;
         let context: Option<Context> = None;
-        let service_response = test_harness
+        let mut service_response = test_harness
             .call(
                 RouterRequest::fake_builder()
                     .header("name_header", "test_client")
@@ -57,12 +56,10 @@ mod tests {
                     .expect("a valid RouterRequest"),
             )
             .await
-            .expect("a router response")
-            .next()
-            .await
-            .unwrap();
+            .expect("a router response");
 
         assert_eq!(StatusCode::OK, service_response.response.status());
+        let _response = service_response.next_response().await.unwrap();
         /* TBD: Figure out how to run this as a test
         // Rhai should return a 200...
         println!("RESPONSE: {:?}", service_response);

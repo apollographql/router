@@ -1,7 +1,8 @@
 use apollo_router::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
-use futures::{stream::BoxStream, StreamExt};
+use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,21 +65,23 @@ impl Plugin for PropagateStatusCode {
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         service
-            .map_response(move |stream| {
-                Box::pin(stream.map(|mut res| {
-                    if let Some(code) = res
-                        .context
-                        .get::<&String, u16>(&"status_code".to_string())
-                        .expect("couldn't access context")
-                    {
-                        *res.response.status_mut() =
-                            StatusCode::from_u16(code).expect("status code should be valid");
-                    }
-                    res
-                })) as BoxStream<RouterResponse>
+            .map_response(move |mut res| {
+                if let Some(code) = res
+                    .context
+                    .get::<&String, u16>(&"status_code".to_string())
+                    .expect("couldn't access context")
+                {
+                    *res.response.status_mut() =
+                        StatusCode::from_u16(code).expect("status code should be valid");
+                }
+                res
             })
             .boxed()
     }
@@ -98,7 +101,6 @@ mod tests {
     use apollo_router::{
         plugin::utils, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
     };
-    use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -209,12 +211,11 @@ mod tests {
                     .insert(&"status_code".to_string(), json!(500u16))
                     .expect("couldn't insert status_code");
 
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .context(context)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         let mock_service = mock_service.build();
@@ -231,18 +232,14 @@ mod tests {
             .build()
             .expect("expecting valid request");
 
-        let service_response = service_stack
-            .oneshot(router_request)
-            .await
-            .unwrap()
-            .next()
-            .await
-            .unwrap();
+        let mut service_response = service_stack.oneshot(router_request).await.unwrap();
 
         assert_eq!(
             StatusCode::INTERNAL_SERVER_ERROR,
             service_response.response.status()
         );
+
+        let _response = service_response.next_response().await.unwrap();
     }
 
     #[tokio::test]
@@ -255,12 +252,11 @@ mod tests {
             .returning(move |router_request: RouterRequest| {
                 let context = router_request.context;
                 // Don't insert any StatusCode
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .context(context)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         let mock_service = mock_service.build();
@@ -277,14 +273,9 @@ mod tests {
             .build()
             .expect("expecting valid request");
 
-        let service_response = service_stack
-            .oneshot(router_request)
-            .await
-            .unwrap()
-            .next()
-            .await
-            .unwrap();
+        let mut service_response = service_stack.oneshot(router_request).await.unwrap();
 
         assert_eq!(StatusCode::OK, service_response.response.status());
+        let _response = service_response.next_response().await.unwrap();
     }
 }
