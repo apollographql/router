@@ -3,7 +3,7 @@
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
-use crate::prelude::graphql::*;
+use crate::*;
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use http_compat::IntoHeaderName;
@@ -734,7 +734,6 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 
 #[cfg(test)]
 mod test {
-    use crate::prelude::graphql;
     use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
     use http::{HeaderValue, Method, Uri};
     use serde_json::json;
@@ -789,7 +788,7 @@ mod test {
             .clone();
         assert_eq!(
             request.originating_request.body(),
-            &graphql::Request::builder()
+            &crate::Request::builder()
                 .variables(variables)
                 .extensions(extensions)
                 .operation_name(Some("Default".to_string()))
@@ -825,7 +824,7 @@ mod test {
         assert_eq!(
             response.response.body(),
             &ResponseBody::GraphQL(
-                graphql::Response::builder()
+                crate::Response::builder()
                     .extensions(extensions)
                     .data(json!({}))
                     .build()

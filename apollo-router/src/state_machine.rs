@@ -6,7 +6,7 @@ use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
 use crate::Schema;
-use crate::{prelude::*, Handler, Plugins};
+use crate::{Handler, Plugins};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
@@ -21,11 +21,11 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 enum PrivateState<RS> {
     Startup {
         configuration: Option<Configuration>,
-        schema: Option<graphql::Schema>,
+        schema: Option<crate::Schema>,
     },
     Running {
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<crate::Schema>,
         #[derivative(Debug = "ignore")]
         router_service: RS,
         server_handle: HttpServerHandle,
@@ -678,12 +678,12 @@ mod tests {
         #[async_trait::async_trait]
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+            type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
 
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                schema: Arc<graphql::Schema>,
+                schema: Arc<crate::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
             ) -> Result<(MockMyRouter, Plugins), BoxError>;
         }
@@ -693,7 +693,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: Request<graphql::Request>) -> <MockMyRouter as Service<Request<graphql::Request>>>::Future;
+            fn service_call(&mut self, req: Request<crate::Request>) -> <MockMyRouter as Service<Request<crate::Request>>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -702,7 +702,7 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<Request<graphql::Request>> for MockMyRouter {
+    impl Service<Request<crate::Request>> for MockMyRouter {
         type Response = BoxStream<'static, Response<ResponseBody>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -710,7 +710,7 @@ mod tests {
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
+        fn call(&mut self, req: Request<crate::Request>) -> Self::Future {
             self.service_call(req)
         }
     }
@@ -737,7 +737,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
         where
             RS: Service<
-                    Request<graphql::Request>,
+                    Request<crate::Request>,
                     Response = BoxStream<'static, Response<ResponseBody>>,
                     Error = BoxError,
                 > + Send

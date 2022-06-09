@@ -418,7 +418,7 @@ impl PluggableRouterServiceBuilder {
             None
         };
 
-        // Router service takes a graphql::Request and outputs a graphql::Response
+        // Router service takes a crate::Request and outputs a crate::Response
         // NB: Cannot use .buffer() here or the code won't compile...
         let router_service = Buffer::new(
             ServiceBuilder::new()

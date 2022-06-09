@@ -713,7 +713,6 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
     use crate::SchemaError;
     use http::Uri;
     #[cfg(unix)]
@@ -741,7 +740,7 @@ mod tests {
 
     #[test]
     fn routing_url_in_schema() {
-        let schema: graphql::Schema = r#"
+        let schema: crate::Schema = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -815,7 +814,7 @@ mod tests {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#
-        .parse::<graphql::Schema>()
+        .parse::<crate::Schema>()
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
         if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {

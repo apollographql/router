@@ -1,6 +1,5 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
-use crate::prelude::*;
 use crate::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
@@ -25,7 +24,7 @@ use tower_service::Service;
 #[async_trait::async_trait]
 pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
-            Request<graphql::Request>,
+            Request<crate::Request>,
             Response = BoxStream<'static, Response<ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
@@ -38,7 +37,7 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterService>,
     ) -> Result<(Self::RouterService, Plugins), BoxError>;
 }
@@ -51,13 +50,13 @@ pub struct YamlRouterServiceFactory;
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
-            Request<graphql::Request>,
+            Request<crate::Request>,
             BoxStream<'static, Response<ResponseBody>>,
             BoxError,
         >,
-        Request<graphql::Request>,
+        Request<crate::Request>,
     >;
-    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+    type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
 
     async fn create<'a>(
         &'a mut self,

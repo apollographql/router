@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::*;
 use include_dir::include_dir;
 use once_cell::sync::Lazy;
 use router_bridge::introspect::{self, IntrospectionError};

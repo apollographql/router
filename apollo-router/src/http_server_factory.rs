@@ -1,9 +1,6 @@
 use super::FederatedServerError;
 use crate::configuration::{Configuration, ListenAddr};
-use crate::{
-    http_compat::{Request, Response},
-    prelude::*,
-};
+use crate::http_compat::{Request, Response};
 use crate::{Handler, ResponseBody};
 use derivative::Derivative;
 use futures::prelude::*;
@@ -29,7 +26,7 @@ pub(crate) trait HttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                Request<graphql::Request>,
+                Request<crate::Request>,
                 Response = BoxStream<'static, Response<ResponseBody>>,
                 Error = BoxError,
             > + Send
@@ -95,7 +92,7 @@ impl HttpServerHandle {
     where
         SF: HttpServerFactory,
         RS: Service<
-                Request<graphql::Request>,
+                Request<crate::Request>,
                 Response = BoxStream<'static, Response<ResponseBody>>,
                 Error = BoxError,
             > + Send

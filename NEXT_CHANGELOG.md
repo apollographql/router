@@ -38,6 +38,17 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
 
+### The `prelude::graphql` has been removed
+
+After the previous change, it only re-exported the crate root. Use that directly instead:
+
+```diff
+- use apollo_router::prelude::graphql;
+-
+- fn example(schema: Arc<graphql::Schema>) {
++ fn example(schema: Arc<apollo_router::Schema>) {
+```
+
 ## 🚀 Features
 ### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
 This change allows the use an already existing Secret for the graph API Key.

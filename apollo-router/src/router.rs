@@ -1,7 +1,6 @@
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::{Configuration, ListenAddr};
-use crate::prelude::*;
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
@@ -24,7 +23,7 @@ use url::Url;
 use Event::{NoMoreConfiguration, NoMoreSchema};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
+type SchemaStream = Pin<Box<dyn Stream<Item = crate::Schema> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -51,7 +50,7 @@ pub enum FederatedServerError {
     ConfigError(crate::configuration::ConfigurationError),
 
     /// could not read schema: {0}
-    ReadSchemaError(graphql::SchemaError),
+    ReadSchemaError(crate::SchemaError),
 
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(tower::BoxError),
@@ -78,7 +77,7 @@ pub enum FederatedServerError {
 pub enum SchemaKind {
     /// A static schema.
     #[display(fmt = "Instance")]
-    Instance(Box<graphql::Schema>),
+    Instance(Box<crate::Schema>),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -114,8 +113,8 @@ pub enum SchemaKind {
     },
 }
 
-impl From<graphql::Schema> for SchemaKind {
-    fn from(schema: graphql::Schema) -> Self {
+impl From<crate::Schema> for SchemaKind {
+    fn from(schema: crate::Schema) -> Self {
         Self::Instance(Box::new(schema))
     }
 }
@@ -277,8 +276,8 @@ impl ConfigurationKind {
         Ok(config)
     }
 
-    fn read_schema(path: &Path) -> Result<graphql::Schema, FederatedServerError> {
-        graphql::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
+    fn read_schema(path: &Path) -> Result<crate::Schema, FederatedServerError> {
+        crate::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
     }
 }
 
@@ -331,7 +330,7 @@ impl ShutdownKind {
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: graphql::Schema = "schema".parse().unwrap();
+///     let schema: apollo_router::Schema = "schema".parse().unwrap();
 ///     let server = ApolloRouterBuilder::default()
 ///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
 ///             .schema(SchemaKind::Instance(Box::new(schema)))
@@ -350,7 +349,7 @@ impl ShutdownKind {
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: graphql::Schema = "schema".parse().unwrap();
+///     let schema: apollo_router::Schema = "schema".parse().unwrap();
 ///     let server = ApolloRouterBuilder::default()
 ///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
 ///             .schema(SchemaKind::Instance(Box::new(schema)))
@@ -456,7 +455,7 @@ pub(crate) enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(Box<graphql::Schema>),
+    UpdateSchema(Box<crate::Schema>),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -659,7 +658,7 @@ mod tests {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema: crate::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         ApolloRouterBuilder::default()
             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
             .schema(SchemaKind::Instance(Box::new(schema)))
@@ -676,7 +675,7 @@ mod tests {
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = graphql::Request::builder()
+        let request = crate::Request::builder()
             .query(Some(request.to_string()))
             .build();
         let expected = query(listen_addr, &request).await.unwrap();
@@ -687,8 +686,8 @@ mod tests {
 
     async fn query(
         listen_addr: &ListenAddr,
-        request: &graphql::Request,
-    ) -> Result<graphql::Response, graphql::FetchError> {
+        request: &crate::Request,
+    ) -> Result<crate::Response, crate::FetchError> {
         Ok(reqwest::Client::new()
             .post(format!("{}/", listen_addr))
             .json(request)
