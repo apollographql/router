@@ -2,7 +2,7 @@ use futures::stream::BoxStream;
 
 use crate::{
     ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
-    RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 
 /// Build a mock service handler for the router pipeline.
@@ -38,7 +38,11 @@ macro_rules! mock_service {
     };
 }
 
-mock_service!(Router, RouterRequest, BoxStream<'static, RouterResponse>);
+mock_service!(
+    Router,
+    RouterRequest,
+    RouterResponse<BoxStream<'static, ResponseBody>>
+);
 mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(
     Execution,

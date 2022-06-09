@@ -10,7 +10,8 @@ use crate::{
     Response, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
-use futures::stream::{BoxStream, StreamExt};
+use futures::future::ready;
+use futures::stream::{once, BoxStream, StreamExt};
 use futures::Stream;
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -75,7 +76,7 @@ where
     ExecutionService::Future: Send + 'static,
     ResponseStream: Stream<Item = Response> + Send + 'static,
 {
-    type Response = BoxStream<'static, RouterResponse>;
+    type Response = RouterResponse<BoxStream<'static, ResponseBody>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -122,12 +123,11 @@ where
                         )
                         .await
                 {
-                    return Ok(Box::pin(futures::stream::once(async {
-                        RouterResponse {
-                            response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                            context: req.context,
-                        }
-                    })) as BoxStream<RouterResponse>);
+                    return Ok(RouterResponse::new_from_response(
+                        http::Response::new(once(ready(ResponseBody::GraphQL(response)))).into(),
+                        req.context,
+                    )
+                    .boxed());
                 }
             }
 
@@ -152,34 +152,30 @@ where
                             .await
                         {
                             Ok(resp) => {
-                                return Ok(Box::pin(futures::stream::once(async {
-                                    RouterResponse {
-                                        response: http::Response::new(ResponseBody::GraphQL(resp))
-                                            .into(),
-                                        context,
-                                    }
-                                }))
-                                    as BoxStream<RouterResponse>);
+                                return Ok(RouterResponse::new_from_response_body(
+                                    ResponseBody::GraphQL(resp),
+                                    context,
+                                )
+                                .boxed());
                             }
                             Err(err) => return Err(BoxError::from(err)),
                         }
                     }
                     None => {
-                        let mut resp = http::Response::new(ResponseBody::GraphQL(
+                        let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
                             crate::Response::builder()
                                 .errors(vec![crate::Error::builder()
                                     .message(String::from("introspection has been disabled"))
                                     .build()])
                                 .build(),
-                        ));
+                        ))));
                         *resp.status_mut() = StatusCode::BAD_REQUEST;
 
-                        return Ok(Box::pin(futures::stream::once(async {
-                            RouterResponse {
-                                response: resp.into(),
-                                context,
-                            }
-                        })) as BoxStream<RouterResponse>);
+                        return Ok(RouterResponse {
+                            response: resp.into(),
+                            context,
+                        }
+                        .boxed());
                     }
                 }
             }
@@ -188,12 +184,10 @@ where
                 .as_ref()
                 .and_then(|q| q.validate_variables(body, &schema).err())
             {
-                Ok(Box::pin(futures::stream::once(async {
-                    RouterResponse {
-                        response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                        context,
-                    }
-                })))
+                Ok(
+                    RouterResponse::new_from_response_body(ResponseBody::GraphQL(err), context)
+                        .boxed(),
+                )
             } else {
                 let operation_name = body.operation_name.clone();
                 let planned_query = planning
@@ -216,33 +210,29 @@ where
                         )
                         .await?;
 
-                // boilerplate to transform from a ExecutionResponse<Stream> to a Stream<RouterResponse>
-                // this will be removed in a follow up commit, once the API stabilizes
-                let (parts, body) = response.into_parts();
-                let clonable_res = crate::http_compat::Response::from_parts(parts, ());
-                Ok(Box::pin(
-                    body.map(move |mut response: Response| {
-                        if let Some(query) = query.as_ref() {
-                            tracing::debug_span!("format_response").in_scope(|| {
-                                query.format_response(
-                                    &mut response,
-                                    operation_name.as_deref(),
-                                    (*variables).clone(),
-                                    schema.api_schema(),
-                                )
-                            });
-                        }
-
-                        RouterResponse {
-                            context: context.clone(),
-                            response: crate::http_compat::Response::from_parts(
-                                clonable_res.clone().into_parts().0,
-                                ResponseBody::GraphQL(response),
-                            ),
-                        }
-                    })
-                    .in_current_span(),
-                ) as BoxStream<RouterResponse>)
+                let (parts, response_stream) = response.into_parts();
+                Ok(RouterResponse {
+                    context: context.clone(),
+                    response: crate::http_compat::Response::from_parts(
+                        parts,
+                        response_stream
+                            .map(move |mut response: Response| {
+                                if let Some(query) = query.as_ref() {
+                                    tracing::debug_span!("format_response").in_scope(|| {
+                                        query.format_response(
+                                            &mut response,
+                                            operation_name.as_deref(),
+                                            (*variables).clone(),
+                                            schema.api_schema(),
+                                        )
+                                    });
+                                }
+                                ResponseBody::GraphQL(response)
+                            })
+                            .in_current_span(),
+                    ),
+                }
+                .boxed())
             }
         }
         .or_else(|error: BoxError| async move {
@@ -251,14 +241,13 @@ where
                 ..Default::default()
             }];
 
-            Ok(Box::pin(futures::stream::once(async {
-                RouterResponse::builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build()
-                    .expect("building a response like this should not fail")
-            })) as BoxStream<RouterResponse>)
+            Ok(RouterResponse::builder()
+                .errors(errors)
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context_cloned)
+                .build()
+                .expect("building a response like this should not fail")
+                .boxed())
         });
 
         Box::pin(fut)
@@ -338,7 +327,11 @@ impl PluggableRouterServiceBuilder {
         mut self,
     ) -> Result<
         (
-            BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+            BoxCloneService<
+                RouterRequest,
+                RouterResponse<BoxStream<'static, ResponseBody>>,
+                BoxError,
+            >,
             Plugins,
         ),
         crate::ServiceBuildError,

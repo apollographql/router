@@ -4,6 +4,10 @@
 
 use axum::{body::boxed, response::IntoResponse};
 use bytes::Bytes;
+use futures::{
+    future::ready,
+    stream::{once, BoxStream},
+};
 use http::{
     header::{self, HeaderName},
     request::Parts,
@@ -279,6 +283,14 @@ impl<T> Response<T> {
     }
 }
 
+impl Response<BoxStream<'static, ResponseBody>> {
+    pub fn from_response_to_stream(http: http::response::Response<ResponseBody>) -> Self {
+        let (parts, body) = http.into_parts();
+        Response {
+            inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
+        }
+    }
+}
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 
