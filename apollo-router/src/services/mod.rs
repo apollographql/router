@@ -21,14 +21,14 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
+pub use subgraph_service::SubgraphService;
 use tower::BoxError;
-pub use tower_subgraph_service::TowerSubgraphService;
 
 mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
 mod router_service;
-mod tower_subgraph_service;
+mod subgraph_service;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -131,12 +131,13 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl RouterRequest {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// Required parameters are required in non-testing code to create a RouterRequest.
     #[allow(clippy::too_many_arguments)]
+    #[builder]
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
@@ -184,6 +185,7 @@ impl RouterRequest {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
+    #[builder]
     pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
@@ -215,12 +217,13 @@ pub struct RouterResponse {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
     #[allow(clippy::too_many_arguments)]
+    #[builder]
     pub fn new(
         data: Option<Value>,
         path: Option<Path>,
@@ -275,6 +278,7 @@ impl RouterResponse {
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
+    #[builder]
     pub fn fake_new(
         data: Option<Value>,
         path: Option<Path>,
@@ -298,6 +302,7 @@ impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
+    #[builder]
     pub fn error_new(
         errors: Vec<crate::Error>,
         status_code: Option<StatusCode>,
@@ -335,11 +340,12 @@ pub struct QueryPlannerRequest {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl QueryPlannerRequest {
     /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
+    #[builder]
     pub fn new(
         originating_request: http_compat::Request<Request>,
         query_plan_options: QueryPlanOptions,
@@ -361,11 +367,12 @@ pub struct QueryPlannerResponse {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl QueryPlannerResponse {
     /// This is the constructor (or builder) to use when constructing a real QueryPlannerResponse.
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
+    #[builder]
     pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
         Self {
             query_plan,
@@ -377,6 +384,7 @@ impl QueryPlannerResponse {
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
     #[allow(unused_variables)]
+    #[builder]
     pub fn error_new(
         errors: Vec<crate::Error>,
         status_code: Option<StatusCode>,
@@ -404,11 +412,12 @@ pub struct SubgraphRequest {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl SubgraphRequest {
     /// This is the constructor (or builder) to use when constructing a real SubgraphRequest.
     ///
     /// Required parameters are required in non-testing code to create a SubgraphRequest.
+    #[builder]
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
         subgraph_request: http_compat::Request<Request>,
@@ -428,6 +437,7 @@ impl SubgraphRequest {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// SubgraphRequest. It's usually enough for testing, when a fully consructed SubgraphRequest is
     /// difficult to construct and not required for the pusposes of the test.
+    #[builder]
     pub fn fake_new(
         originating_request: Option<Arc<http_compat::Request<Request>>>,
         subgraph_request: Option<http_compat::Request<Request>>,
@@ -454,7 +464,7 @@ pub struct SubgraphResponse {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl SubgraphResponse {
     /// This is the constructor to use when constructing a real SubgraphResponse..
     ///
@@ -471,6 +481,7 @@ impl SubgraphResponse {
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a SubgraphResponse.
+    #[builder]
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -511,6 +522,7 @@ impl SubgraphResponse {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// SubgraphResponse. It's usually enough for testing, when a fully consructed SubgraphResponse is
     /// difficult to construct and not required for the pusposes of the test.
+    #[builder]
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -534,11 +546,10 @@ impl SubgraphResponse {
     /// This is the constructor (or builder) to use when constructing a SubgraphResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
-    #[allow(unused_variables)]
+    #[builder]
     pub fn error_new(
         errors: Vec<crate::Error>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new(
@@ -564,12 +575,13 @@ pub struct ExecutionRequest {
     pub context: Context,
 }
 
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl ExecutionRequest {
     /// This is the constructor (or builder) to use when constructing a real ExecutionRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a ExecutionRequest.
+    #[builder]
     pub fn new(
         originating_request: http_compat::Request<Request>,
         query_plan: Arc<QueryPlan>,
@@ -587,6 +599,7 @@ impl ExecutionRequest {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// ExecutionRequest. It's usually enough for testing, when a fully consructed ExecutionRequest is
     /// difficult to construct and not required for the pusposes of the test.
+    #[builder]
     pub fn fake_new(
         originating_request: Option<http_compat::Request<Request>>,
         query_plan: Option<QueryPlan>,
@@ -612,12 +625,13 @@ pub struct ExecutionResponse<T: Stream<Item = Response>> {
 
 /// welp
 type EEE = ExecutionResponse<Once<Ready<Response>>>;
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl EEE {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a RouterRequest.
+    #[builder]
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -658,6 +672,7 @@ impl EEE {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// ExecutionResponse. It's usually enough for testing, when a fully consructed
     /// ExecutionResponse is difficult to construct and not required for the pusposes of the test.
+    #[builder]
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -682,6 +697,7 @@ impl EEE {
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
     #[allow(unused_variables)]
+    #[builder]
     pub fn error_new(
         errors: Vec<crate::Error>,
         status_code: Option<StatusCode>,

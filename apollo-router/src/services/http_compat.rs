@@ -74,17 +74,19 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
     }
 }
 
+/// Wrap an http Request.
 #[derive(Debug)]
 pub struct Request<T> {
     inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
-#[buildstructor::builder]
+#[buildstructor::buildstructor]
 impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
+    #[builder]
     pub fn new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: http::Uri,
@@ -111,6 +113,7 @@ impl<T> Request<T> {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
+    #[builder]
     pub fn fake_new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Option<http::Uri>,
@@ -247,6 +250,7 @@ impl<T: PartialEq> PartialEq for Request<T> {
 
 impl<T: PartialEq> Eq for Request<T> {}
 
+/// Wrap an http Response.
 #[derive(Debug, Default)]
 pub struct Response<T> {
     pub inner: http::Response<T>,
