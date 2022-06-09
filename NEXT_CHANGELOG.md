@@ -82,6 +82,12 @@ By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/
 
 ## 🐛 Fixes ( :bug: )
 
+### Fix input validation rules ([PR #XXX](https://XXX))
+The graphql specification provides two sets of coercion / validation rules, depending on whether we're dealing with inputs or outputs.
+The spec we were following for query validation used the output coercion rules; which don't match the spec.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/XXX
+
 ### Fix CORS configuration to eliminate runtime panic on mis-configuration ([PR #1197](https://github.com/apollographql/router/pull/1197))
 Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime:
 Example:

@@ -77,6 +77,12 @@ pub trait ValueExt {
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F)
     where
         F: FnMut(Path, &'a Value);
+
+    #[track_caller]
+    fn is_valid_float_input(&self) -> bool;
+
+    #[track_caller]
+    fn is_valid_int_input(&self) -> bool;
 }
 
 impl ValueExt for Value {
@@ -319,6 +325,31 @@ impl ValueExt for Value {
         F: FnMut(Path, &'a Value),
     {
         iterate_path(&Path::default(), &path.0, self, &mut f)
+    }
+
+    #[track_caller]
+    fn is_valid_float_input(&self) -> bool {
+        // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
+        match self {
+            // When expected as an input type, both integer and float input values are accepted.
+            Value::Number(n) if n.is_f64() => true,
+            // The Int scalar type represents a signed 32-bit numeric non-fractional value.
+            Value::Number(n) => n
+                .as_i64()
+                .map(|as_number| i32::try_from(as_number).is_ok())
+                .unwrap_or_default(),
+            // All other input values, including strings with numeric content, must raise a request error indicating an incorrect type.
+            _ => false,
+        }
+    }
+
+    #[track_caller]
+    fn is_valid_int_input(&self) -> bool {
+        //  https://spec.graphql.org/June2018/#sec-Int
+        // When expected as an input type, only integer input values are accepted.
+        // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
+        self.as_i64().and_then(|x| i32::try_from(x).ok()).is_some()
+            || self.as_u64().and_then(|x| i32::try_from(x).ok()).is_some()
     }
 }
 
