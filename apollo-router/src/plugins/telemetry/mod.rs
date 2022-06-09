@@ -1,4 +1,5 @@
 //! Telemetry plugin.
+use crate::configuration::ConfigurationError;
 // This entire file is license key functionality
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
@@ -17,6 +18,7 @@ use crate::{
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use ::tracing::{info_span, Span};
+use access_json::{JSONQuery, QueryParseErr};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
@@ -41,7 +43,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 use self::config::Conf;
-use self::metrics::{Forward, MetricsAttributesConf};
+use self::metrics::{HeaderForward, MetricsAttributesConf};
 
 pub mod apollo;
 pub mod config;
@@ -66,6 +68,7 @@ pub struct Telemetry {
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: metrics::apollo::Sender,
+    metrics_response_queries: Vec<JSONQuery>,
 }
 
 #[derive(Debug)]
@@ -196,6 +199,8 @@ impl Plugin for Telemetry {
         // Don't add anything fallible after the tracer provider has been created.
         let tracer_provider = Self::create_tracer_provider(&config)?;
 
+        let metrics_response_queries = Self::create_metrics_queries(&config)?;
+
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
             tracer_provider: Some(tracer_provider),
@@ -204,6 +209,7 @@ impl Plugin for Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
+            metrics_response_queries,
         });
 
         // We're safe now for shutdown.
@@ -233,6 +239,7 @@ impl Plugin for Telemetry {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.clone();
+        let config_map_res = self.config.clone();
         ServiceBuilder::new()
             .instrument(Self::router_service_span(
                 config.apollo.clone().unwrap_or_default(),
@@ -243,6 +250,7 @@ impl Plugin for Telemetry {
                     req.context.clone()
                 },
                 move |ctx, fut| {
+                    let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -261,7 +269,7 @@ impl Plugin for Telemetry {
                                         start.elapsed(),
                                     );
                                 }
-                                Self::update_metrics(&ctx, metrics, &res);
+                                Self::update_metrics(&config, &ctx, metrics, &res);
                                 Err(res.unwrap_err())
                             }
                             Ok(stream) => Ok(Box::pin(stream.map(move |response| {
@@ -274,7 +282,7 @@ impl Plugin for Telemetry {
                                         start.elapsed(),
                                     );
                                 }
-                                Self::update_metrics(&ctx, metrics.clone(), &res);
+                                Self::update_metrics(&config, &ctx, metrics.clone(), &res);
                                 res.expect("is always Ok")
                             }))
                                 as BoxStream<'static, RouterResponse>),
@@ -444,6 +452,36 @@ impl Telemetry {
         Ok(builder)
     }
 
+    fn create_metrics_queries(config: &config::Conf) -> Result<Vec<JSONQuery>, BoxError> {
+        match &config.metrics {
+            Some(metrics_conf) => {
+                if let Some(MetricsCommon {
+                    attributes:
+                        Some(MetricsAttributesConf {
+                            from_response: Some(from_response),
+                            ..
+                        }),
+                    ..
+                }) = &metrics_conf.common
+                {
+                    let queries = from_response
+                        .iter()
+                        .map(|fr| JSONQuery::parse(&fr.path))
+                        .collect::<Result<Vec<JSONQuery>, QueryParseErr>>()
+                        .map_err(|err| ConfigurationError::InvalidConfiguration {
+                            message: "cannot parse JSON query in plugin telemetry for field metrics.from_response.path",
+                            error: err.to_string()
+                        })?;
+
+                    Ok(queries)
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
     fn not_found_endpoint() -> Handler {
         Handler::new(
             service_fn(|_req: http_compat::Request<Bytes>| async {
@@ -585,6 +623,8 @@ impl Telemetry {
     }
 
     fn update_metrics(
+        // TODO should take an Arc
+        config: &Conf,
         context: &Context,
         metrics: BasicMetrics,
         result: &Result<RouterResponse, BoxError>,
@@ -608,6 +648,24 @@ impl Telemetry {
                     "status",
                     response.response.status().as_u16().to_string(),
                 ));
+
+                // TODO take from_response conf
+                if let Some(MetricsCommon {
+                    attributes:
+                        Some(MetricsAttributesConf {
+                            from_response: Some(from_response),
+                            ..
+                        }),
+                    ..
+                }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
+                {
+                    for from_resp in from_response {
+                        // TODO fetch parsed queries
+                        // execute it on response.response.body...
+                        // If there is something then we push in metric_attrs
+                        // If not we skip
+                    }
+                }
 
                 metrics.http_requests_total.add(1, &metric_attrs);
             }
@@ -665,7 +723,7 @@ impl Telemetry {
             {
                 for propagate_header in from_headers {
                     match propagate_header {
-                        Forward::Named {
+                        HeaderForward::Named {
                             named,
                             rename,
                             default,
@@ -681,7 +739,7 @@ impl Telemetry {
                                 );
                             }
                         }
-                        Forward::Matching { matching } => {
+                        HeaderForward::Matching { matching } => {
                             req.originating_request
                                 .headers()
                                 .iter()

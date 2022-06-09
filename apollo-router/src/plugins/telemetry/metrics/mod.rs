@@ -27,8 +27,11 @@ pub(crate) type CustomEndpoint =
 #[serde(deny_unknown_fields)]
 /// Configuration to add custom attributes/labels on metrics
 pub struct MetricsAttributesConf {
+    /// Configuration to forward response values in metric attributes/labels
+    pub(crate) from_response: Option<Vec<ResponseForward>>,
+    // TODO maybe add by_subgraphs
     /// Configuration to forward header values in metric attributes/labels
-    pub(crate) from_headers: Option<Vec<Forward>>,
+    pub(crate) from_headers: Option<Vec<HeaderForward>>,
     /// Configuration to insert custom attributes/labels in metrics
     #[serde(rename = "static")]
     pub(crate) insert: Option<Vec<Insert>>,
@@ -46,7 +49,7 @@ pub(crate) struct Insert {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Configuration to forward header values in metric labels
-pub(crate) enum Forward {
+pub(crate) enum HeaderForward {
     /// Using a named header
     Named {
         #[schemars(schema_with = "string_schema")]
@@ -61,6 +64,15 @@ pub(crate) enum Forward {
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
+}
+
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Configuration to forward header values in metric labels
+pub(crate) struct ResponseForward {
+    pub(crate) path: String,
+    pub(crate) rename: Option<String>,
+    pub(crate) default: Option<String>,
 }
 
 fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
