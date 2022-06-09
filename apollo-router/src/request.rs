@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::*;
 use bytes::Bytes;
 use derivative::Derivative;
 use serde::{de::Error, Deserialize, Serialize};

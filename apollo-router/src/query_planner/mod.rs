@@ -1,7 +1,7 @@
 mod bridge_query_planner;
 mod caching_query_planner;
 mod selection;
-use crate::prelude::graphql::*;
+use crate::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
 use fetch::OperationKind;
@@ -300,7 +300,7 @@ impl PlanNode {
 
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
-    use crate::prelude::graphql::*;
+    use crate::*;
     use indexmap::IndexSet;
     use serde::Deserialize;
     use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -629,7 +629,7 @@ mod log {
         service_name: &str,
         operation: &str,
         variables: &Map<ByteString, Value>,
-        response: &crate::prelude::graphql::Response,
+        response: &crate::Response,
     ) {
         tracing::trace!(
             "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",

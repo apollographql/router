@@ -1,6 +1,5 @@
 //! Tower fetcher for subgraphs.
 
-use crate::prelude::*;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::{
@@ -39,8 +38,8 @@ impl SubgraphService {
     }
 }
 
-impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
-    type Response = graphql::SubgraphResponse;
+impl tower::Service<crate::SubgraphRequest> for SubgraphService {
+    type Response = crate::SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -50,8 +49,8 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
-        let graphql::SubgraphRequest {
+    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
+        let crate::SubgraphRequest {
             subgraph_request,
             context,
             ..
@@ -106,7 +105,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    graphql::FetchError::SubrequestHttpError {
+                    crate::FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
@@ -120,7 +119,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains("application/json")
                         && !content_type_str.contains("application/graphql+json")
                     {
-                        return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
+                        return Err(BoxError::from(crate::FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
                         }));
@@ -134,13 +133,13 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    graphql::FetchError::SubrequestHttpError {
+                    crate::FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
                 })?;
             if parts.status != StatusCode::OK {
-                return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
+                return Err(BoxError::from(crate::FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: format!(
                         "subgraph HTTP status error '{}': {})",
@@ -150,10 +149,10 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 }));
             }
 
-            let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
+            let graphql: crate::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
-                    graphql::Response::from_bytes(&service_name, body).map_err(|error| {
-                        graphql::FetchError::SubrequestMalformedResponse {
+                    crate::Response::from_bytes(&service_name, body).map_err(|error| {
+                        crate::FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
                         }
@@ -162,7 +161,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
 
             let resp = http::Response::from_parts(parts, graphql);
 
-            Ok(graphql::SubgraphResponse::new_from_response(
+            Ok(crate::SubgraphResponse::new_from_response(
                 resp.into(),
                 context,
             ))
