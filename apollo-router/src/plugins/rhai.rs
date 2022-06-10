@@ -5,7 +5,8 @@ use crate::{
     Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
-use futures::stream::BoxStream;
+use futures::future::ready;
+use futures::stream::{once, BoxStream};
 use futures::StreamExt;
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::uri::{Parts, PathAndQuery};
@@ -1031,74 +1032,89 @@ impl ServiceStep {
             ServiceStep::Router(service) => {
                 // gen_map_response!(router, service, rhai_service, callback);
                 service.replace(|service| {
-                    service
-                        .map_response(
-                            move |router_response: RouterResponse<
+                    BoxService::new(service
+                        .and_then(
+                            |router_response: RouterResponse<
                                 BoxStream<'static, ResponseBody>,
-                            >| {
+                            >| async move {
                                 // Let's define a local function to build an error response
                                 // XXX: This isn't ideal. We already have a response, so ideally we'd
                                 // like to append this error into the existing response. However,
                                 // the significantly different treatment of errors in different
                                 // response types makes this extremely painful. This needs to be
                                 // re-visited at some point post GA.
-                                fn failure_message(msg: String) -> ResponseBody {
-                                    ResponseBody::GraphQL(
-                                        Response::builder()
-                                            .errors(vec![crate::Error {
-                                                message: msg,
-                                                ..Default::default()
-                                            }])
-                                            .build(),
-                                    )
+                                fn failure_message(
+                                    context: Context,
+                                    msg: String,
+                                    status: StatusCode,
+                                ) -> RouterResponse<BoxStream<'static, ResponseBody>>
+                                {
+                                    let res = RouterResponse::error_builder()
+                                        .errors(vec![crate::Error {
+                                            message: msg,
+                                            ..Default::default()
+                                        }])
+                                        .status_code(status)
+                                        .context(context)
+                                        .build()
+                                        .expect("can't fail to build our error message");
+                                    res.boxed()
                                 }
-                                router_response
-                                    .map(move |response_stream| {
-                                        let rhai_service = rhai_service.clone();
-                                        let callback = callback.clone();
 
-                                        Box::pin(response_stream.map(move |response| {
-                                            let shared_response =
-                                                Shared::new(Mutex::new(Some(response)));
-                                            let result: Result<Dynamic, String> =
-                                                if callback.is_curried() {
-                                                    callback
-                                                        .call(
-                                                            &rhai_service.engine,
-                                                            &rhai_service.ast,
-                                                            (shared_response.clone(),),
-                                                        )
-                                                        .map_err(|err| err.to_string())
-                                                } else {
-                                                    let mut scope = rhai_service.scope.clone();
-                                                    rhai_service
-                                                        .engine
-                                                        .call_fn(
-                                                            &mut scope,
-                                                            &rhai_service.ast,
-                                                            callback.fn_name(),
-                                                            (shared_response.clone(),),
-                                                        )
-                                                        .map_err(|err| err.to_string())
-                                                };
-                                            if let Err(error) = result {
-                                                tracing::error!(
-                                                    "map_response callback failed: {error}"
-                                                );
-                                                return failure_message(format!(
-                                                    "rhai execution error: '{}'",
-                                                    error
-                                                ));
-                                            }
-                                            let mut guard = shared_response.lock().unwrap();
-                                            let response_opt = guard.take();
-                                            response_opt.unwrap()
-                                        }))
-                                    })
-                                    .boxed()
+                                // we split the response stream into headers+first response, then a stream of deferred responses
+                                // for which we will implement mapping later
+                                let RouterResponse { response, context } = router_response;
+                                let (parts, stream) = response.into_parts();
+                                let (first, rest) = stream.into_future().await;
+
+                                let response = RhaiRouterResponse {
+                                    context,
+                                    response: http_compat::Response::from_parts(parts, first.expect("FIXME")),
+                                };
+                                let shared_response =
+                                Shared::new(Mutex::new(Some(response)));
+
+                                let result: Result<Dynamic, String> = if callback.is_curried() {
+                                    callback
+                                        .call(
+                                            &rhai_service.engine,
+                                            &rhai_service.ast,
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                } else {
+                                    let mut scope = rhai_service.scope.clone();
+                                    rhai_service
+                                        .engine
+                                        .call_fn(
+                                            &mut scope,
+                                            &rhai_service.ast,
+                                            callback.fn_name(),
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                };
+                                if let Err(error) = result {
+                                    tracing::error!("map_response callback failed: {error}");
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    return Ok(failure_message(
+                                        response_opt.unwrap().context,
+                                        format!("rhai execution error: '{}'", error),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    ));
+                                }
+
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                let RhaiRouterResponse { context, response } = response_opt.unwrap();
+                                let (parts, body)  = response.into_parts();
+
+                                //FIXME we should also map over the stream of future responses
+                                let response = http_compat::Response::from_parts(parts,once(ready(body)).chain(rest).boxed());
+                                Ok(RouterResponse {context, response})
                             },
-                        )
-                        .boxed()
+                        ))
                 })
             }
             ServiceStep::QueryPlanner(service) => {
@@ -1108,10 +1124,10 @@ impl ServiceStep {
                 //gen_map_response!(execution, service, rhai_service, callback);
                 service.replace(|service| {
                     service
-                        .map_response(
-                            move |execution_response: ExecutionResponse<
+                        .and_then(
+                            |execution_response: ExecutionResponse<
                                 BoxStream<'static, Response>,
-                            >| {
+                            >| async move {
                                 // Let's define a local function to build an error response
                                 // XXX: This isn't ideal. We already have a response, so ideally we'd
                                 // like to append this error into the existing response. However,
@@ -1119,60 +1135,80 @@ impl ServiceStep {
                                 // response types makes this extremely painful. This needs to be
                                 // re-visited at some point post GA.
                                 fn failure_message(
-                                    //context: Context,
+                                    context: Context,
                                     msg: String,
-                                    // status: StatusCode,
-                                ) -> Response {
-                                    Response::builder()
+                                    status: StatusCode,
+                                ) -> ExecutionResponse<BoxStream<'static, Response>>
+                                {
+                                    let res = ExecutionResponse::error_builder()
                                         .errors(vec![crate::Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
+                                        .status_code(status)
+                                        .context(context)
                                         .build()
+                                        .expect("can't fail to build our error message");
+                                    res.boxed()
                                 }
-                                execution_response.map(move |response_stream| {
-                                    let rhai_service = rhai_service.clone();
-                                    let callback = callback.clone();
-                                    Box::pin(response_stream.map(move |response| {
-                                        let shared_response =
-                                            Shared::new(Mutex::new(Some(response)));
-                                        let result: Result<Dynamic, String> =
-                                            if callback.is_curried() {
-                                                callback
-                                                    .call(
-                                                        &rhai_service.engine,
-                                                        &rhai_service.ast,
-                                                        (shared_response.clone(),),
-                                                    )
-                                                    .map_err(|err| err.to_string())
-                                            } else {
-                                                let mut scope = rhai_service.scope.clone();
-                                                rhai_service
-                                                    .engine
-                                                    .call_fn(
-                                                        &mut scope,
-                                                        &rhai_service.ast,
-                                                        callback.fn_name(),
-                                                        (shared_response.clone(),),
-                                                    )
-                                                    .map_err(|err| err.to_string())
-                                            };
-                                        if let Err(error) = result {
-                                            tracing::error!(
-                                                "map_response callback failed: {error}"
-                                            );
 
-                                            return failure_message(format!(
-                                                "rhai execution error: '{}'",
-                                                error
-                                            ));
-                                        }
-                                        let mut guard = shared_response.lock().unwrap();
-                                        let response_opt = guard.take();
-                                        response_opt.unwrap()
-                                    }))
-                                        as BoxStream<'static, Response>
-                                })
+                                // we split the response stream into headers+first response, then a stream of deferred responses
+                                // for which we will implement mapping later
+                                let ExecutionResponse { response, context } = execution_response;
+                                let (parts, stream) = response.into_parts();
+                                let (first, rest) = stream.into_future().await;
+
+                                let response = RhaiExecutionResponse {
+                                    context,
+                                    response: http_compat::Response::from_parts(
+                                        parts,
+                                        first.expect("FIXME"),
+                                    ),
+                                };
+                                let shared_response = Shared::new(Mutex::new(Some(response)));
+                                let result: Result<Dynamic, String> = if callback.is_curried() {
+                                    callback
+                                        .call(
+                                            &rhai_service.engine,
+                                            &rhai_service.ast,
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                } else {
+                                    let mut scope = rhai_service.scope.clone();
+                                    rhai_service
+                                        .engine
+                                        .call_fn(
+                                            &mut scope,
+                                            &rhai_service.ast,
+                                            callback.fn_name(),
+                                            (shared_response.clone(),),
+                                        )
+                                        .map_err(|err| err.to_string())
+                                };
+                                if let Err(error) = result {
+                                    tracing::error!("map_response callback failed: {error}");
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    return Ok(failure_message(
+                                        response_opt.unwrap().context,
+                                        format!("rhai execution error: '{}'", error),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    ));
+                                }
+
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                let RhaiExecutionResponse { context, response } =
+                                    response_opt.unwrap();
+                                let (parts, body) = response.into_parts();
+
+                                //FIXME we should also map over the stream of future responses
+                                let response = http_compat::Response::from_parts(
+                                    parts,
+                                    once(ready(body)).chain(rest).boxed(),
+                                );
+                                Ok(ExecutionResponse { context, response })
                             },
                         )
                         .boxed()
