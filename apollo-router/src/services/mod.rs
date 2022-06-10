@@ -217,9 +217,8 @@ pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
     pub context: Context,
 }
 
-type RRR = RouterResponse<Once<Ready<ResponseBody>>>;
 #[buildstructor::buildstructor]
-impl RRR {
+impl RouterResponse<Once<Ready<ResponseBody>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -650,10 +649,8 @@ pub struct ExecutionResponse<T: Stream<Item = Response>> {
     pub context: Context,
 }
 
-/// welp
-type EEE = ExecutionResponse<Once<Ready<Response>>>;
 #[buildstructor::buildstructor]
-impl EEE {
+impl ExecutionResponse<Once<Ready<Response>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
