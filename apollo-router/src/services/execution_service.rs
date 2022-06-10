@@ -78,7 +78,7 @@ impl Service<ExecutionRequest> for ExecutionService {
 
             Ok(ExecutionResponse::new_from_response(
                 http::Response::new(Box::pin(receiver) as BoxStream<'static, Response>).into(),
-                ctx.clone(),
+                ctx,
             ))
         }
         .in_current_span();

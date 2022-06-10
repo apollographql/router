@@ -212,7 +212,7 @@ where
 
                 let (parts, response_stream) = response.into_parts();
                 Ok(RouterResponse {
-                    context: context.clone(),
+                    context: context,
                     response: crate::http_compat::Response::from_parts(
                         parts,
                         response_stream
