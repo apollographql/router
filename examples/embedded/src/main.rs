@@ -23,9 +23,8 @@ async fn main() -> Result<()> {
 
     // ... except the SubgraphServices, so we'll let it know Requests against the `accounts` service
     // can be performed with an http client against the `https://accounts.demo.starstuff.dev` url
-    let subgraph_service = BoxService::new(apollo_router::TowerSubgraphService::new(
-        "accounts".to_string(),
-    ));
+    let subgraph_service =
+        BoxService::new(apollo_router::SubgraphService::new("accounts".to_string()));
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
 
     // We can now build our service stack...

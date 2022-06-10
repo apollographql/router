@@ -6,7 +6,7 @@ use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
     http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
     ValueExt,
 };
 use futures::stream::{BoxStream, StreamExt};
@@ -629,14 +629,13 @@ async fn setup_router_and_registry() -> (
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = TowerSubgraphService::new(name.to_owned()).map_request(
-            move |request: SubgraphRequest| {
+        let service =
+            SubgraphService::new(name.to_owned()).map_request(move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
 
                 request
-            },
-        );
+            });
         builder = builder.with_subgraph_service(name, service);
     }
 

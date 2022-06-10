@@ -53,6 +53,15 @@ This is indicating that the maximum recursion limit is 4096 and that the query w
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
 
+### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
+This change allows the use an already existing Secret for the graph API Key.
+
+To use it, update your values.yaml or specify the value on your helm install command line.
+
+e.g.: helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>
+
+By [@pellizzetti](https://github.com/pellizzetti) in https://github.com/apollographql/router/pull/1196
+
 ### Add iterators to Context ([PR #1202](https://github.com/apollographql/router/pull/1202))
 Context can now be iterated over, with two new methods:
  - iter()
@@ -104,6 +113,11 @@ server:
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
 ## 🐛 Fixes ( :bug: )
+
+### Display better error message when on subgraph fetch errors ([PR #1201](https://github.com/apollographql/router/pull/1201))
+Show a helpful error message when a subgraph does not return JSON or bad status code
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1201
 
 ### Fix CORS configuration to eliminate runtime panic on mis-configuration ([PR #1197](https://github.com/apollographql/router/pull/1197))
 Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime:
