@@ -345,7 +345,8 @@ impl ValueExt for Value {
 
     #[track_caller]
     fn is_valid_int_input(&self) -> bool {
-        //  https://spec.graphql.org/June2018/#sec-Int
+        // https://spec.graphql.org/June2018/#sec-Int
+        // The Int scalar type represents a signed 32‐bit numeric non‐fractional value.
         // When expected as an input type, only integer input values are accepted.
         // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
         self.as_i64().and_then(|x| i32::try_from(x).ok()).is_some()
