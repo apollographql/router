@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;

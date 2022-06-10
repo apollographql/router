@@ -3,8 +3,8 @@ use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
 use crate::ResponseBody;
+use crate::DEFAULT_BUFFER_SIZE;
 use crate::{http_compat, Handler};
-use crate::{prelude::*, DEFAULT_BUFFER_SIZE};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
@@ -50,11 +50,11 @@ impl AxumHttpServerFactory {
 
 type BufferedService = Buffer<
     BoxService<
-        http_compat::Request<graphql::Request>,
+        http_compat::Request<crate::Request>,
         BoxStream<'static, http_compat::Response<ResponseBody>>,
         BoxError,
     >,
-    http_compat::Request<graphql::Request>,
+    http_compat::Request<crate::Request>,
 >;
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -70,7 +70,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                http_compat::Request<graphql::Request>,
+                http_compat::Request<crate::Request>,
                 Response = BoxStream<'static, http_compat::Response<ResponseBody>>,
                 Error = BoxError,
             > + Send
@@ -433,7 +433,7 @@ async fn handle_get(
     if let Some(request) = http_request
         .uri()
         .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+        .and_then(|q| crate::Request::from_urlencoded_query(q.to_string()).ok())
     {
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
@@ -449,7 +449,7 @@ async fn handle_get(
 async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
-    Json(request): Json<graphql::Request>,
+    Json(request): Json<crate::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
@@ -477,7 +477,7 @@ async fn health_check() -> impl IntoResponse {
 
 async fn run_graphql_request(
     service: BufferedService,
-    http_request: Request<graphql::Request>,
+    http_request: Request<crate::Request>,
 ) -> impl IntoResponse {
     match service.ready_oneshot().await {
         Ok(mut service) => {
@@ -640,7 +640,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<BoxStream<'static, http_compat::Response<ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<crate::Request>) -> Result<BoxStream<'static, http_compat::Response<ResponseBody>>, BoxError>;
         }
     }
 
@@ -822,7 +822,7 @@ mod tests {
         // let root_span = info_span!("root");
         // {
         // let _guard = root_span.enter();
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -854,7 +854,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -874,7 +874,7 @@ mod tests {
         );
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -925,7 +925,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_endpoint() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -970,7 +970,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -985,7 +985,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -995,7 +995,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_prefix_endpoint() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1040,7 +1040,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1055,7 +1055,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1065,7 +1065,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_endpoint_wildcard() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1112,7 +1112,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<graphql::Response>().await.unwrap(),
+                response.json::<crate::Response>().await.unwrap(),
                 expected_response,
             );
 
@@ -1127,7 +1127,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<graphql::Response>().await.unwrap(),
+                response.json::<crate::Response>().await.unwrap(),
                 expected_response,
             );
         }
@@ -1149,7 +1149,7 @@ mod tests {
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1189,7 +1189,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1210,7 +1210,7 @@ mod tests {
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1250,7 +1250,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1264,7 +1264,7 @@ mod tests {
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                let example_response = graphql::FetchError::SubrequestHttpError {
+                let example_response = crate::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
@@ -1291,13 +1291,13 @@ mod tests {
             .send()
             .await
             .unwrap()
-            .json::<graphql::Response>()
+            .json::<crate::Response>()
             .await
             .unwrap();
 
         assert_eq!(
             response,
-            graphql::FetchError::SubrequestHttpError {
+            crate::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
@@ -1353,7 +1353,7 @@ mod tests {
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1383,7 +1383,7 @@ mod tests {
         .await;
 
         assert_eq!(
-            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            serde_json::from_slice::<crate::Response>(&output).unwrap(),
             expected_response,
         );
 
@@ -1392,7 +1392,7 @@ mod tests {
             send_to_unix_socket(server.listen_address(), Method::GET, r#"query=query"#).await;
 
         assert_eq!(
-            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            serde_json::from_slice::<crate::Response>(&output).unwrap(),
             expected_response,
         );
 

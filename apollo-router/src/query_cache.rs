@@ -2,8 +2,8 @@
 use opentelemetry::trace::SpanKind;
 use tracing::{info_span, Instrument};
 
-use crate::prelude::graphql::*;
 use crate::CacheResolver;
+use crate::*;
 use std::sync::Arc;
 
 /// A cache for parsed GraphQL queries.

@@ -1,6 +1,6 @@
 //! Calls out to nodejs query planner
 
-use crate::prelude::graphql::*;
+use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use router_bridge::planner::PlanSuccess;

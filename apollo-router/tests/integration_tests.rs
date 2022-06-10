@@ -5,9 +5,8 @@
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
-    http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
-    ValueExt,
+    http_compat, plugins::csrf, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService, ValueExt,
 };
 use futures::stream::{BoxStream, StreamExt};
 use http::Method;
@@ -24,7 +23,7 @@ use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
-        let request = graphql::Request::builder()
+        let request = apollo_router::Request::builder()
             .query(Some($query.to_string()))
             .variables(Arc::new(
                 vec![
@@ -100,7 +99,7 @@ async fn basic_composition() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
         .variables(Arc::new(
             vec![
@@ -178,7 +177,7 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
                 .to_string(),
@@ -221,7 +220,7 @@ async fn simple_queries_should_not_work() {
         ..Default::default()
     };
 
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
                 .to_string(),
@@ -254,7 +253,7 @@ async fn simple_queries_should_not_work() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_post() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
                 .to_string(),
@@ -282,9 +281,9 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = graphql::RouterRequest {
+    let request = apollo_router::RouterRequest {
         originating_request: http_request,
-        context: graphql::Context::new(),
+        context: apollo_router::Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -300,7 +299,7 @@ async fn service_errors_should_be_propagated() {
         ..Default::default()
     };
 
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(r#"{ topProducts { name } }"#.to_string()))
         .operation_name(Some("invalidOperationName".to_string()))
         .build();
@@ -321,7 +320,7 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
@@ -365,7 +364,7 @@ async fn mutation_should_not_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_work_over_post() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
@@ -404,9 +403,9 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = graphql::RouterRequest {
+    let request = apollo_router::RouterRequest {
         originating_request: http_request,
-        context: graphql::Context::new(),
+        context: apollo_router::Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -441,7 +440,7 @@ async fn automated_persisted_queries() {
             "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
         }),
     );
-    let request_builder = graphql::Request::builder().extensions(request_extensions.clone());
+    let request_builder = apollo_router::Request::builder().extensions(request_extensions.clone());
     let apq_only_request = request_builder.clone().build();
 
     // First query, apq hash but no query, it will be a cache miss.
@@ -531,7 +530,7 @@ async fn variables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
-    let request = graphql::Request::builder()
+    let request = apollo_router::Request::builder()
         .query(Some(
             r#"
             query ExampleQuery(
@@ -560,11 +559,11 @@ async fn missing_variables() {
 
     let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
-        graphql::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        graphql::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::FetchError::ValidationInvalidTypeVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
@@ -576,27 +575,31 @@ async fn missing_variables() {
     );
 }
 
-async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
+async fn query_node(
+    request: &apollo_router::Request,
+) -> Result<apollo_router::Response, apollo_router::FetchError> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
         .send()
         .await
-        .map_err(|err| graphql::FetchError::SubrequestHttpError {
+        .map_err(|err| apollo_router::FetchError::SubrequestHttpError {
             service: "test node".to_string(),
             reason: err.to_string(),
         })?
         .json()
         .await
-        .map_err(|err| graphql::FetchError::SubrequestMalformedResponse {
-            service: "test node".to_string(),
-            reason: err.to_string(),
-        })
+        .map_err(
+            |err| apollo_router::FetchError::SubrequestMalformedResponse {
+                service: "test node".to_string(),
+                reason: err.to_string(),
+            },
+        )
 }
 
 async fn query_rust(
-    request: graphql::RouterRequest,
-) -> (graphql::Response, CountingServiceRegistry) {
+    request: apollo_router::RouterRequest,
+) -> (apollo_router::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry().await;
     (query_with_router(router, request).await, counting_registry)
 }
@@ -646,8 +649,8 @@ async fn setup_router_and_registry() -> (
 
 async fn query_with_router(
     router: BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    request: graphql::RouterRequest,
-) -> graphql::Response {
+    request: apollo_router::RouterRequest,
+) -> apollo_router::Response {
     let stream = router.oneshot(request).await.unwrap().next().await.unwrap();
     let (_, response) = stream.response.into_parts();
 
