@@ -39,7 +39,7 @@ To upgrade, remove any dependency on the former in `Cargo.toml` files (keeping o
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
 
 ## 🚀 Features
-### Add trace logs for parsing recursion consumption ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
 Apollo Parser now includes recursion limits which can be examined after parse execution. The router logs these
 out at trace level. You can see them in your logs by searching for "recursion_limit". For example, if json logging,
 and using `jq` to filter the output:
@@ -51,7 +51,7 @@ router -s ../graphql/supergraph.graphql -c ./router.yaml --log trace | jq -c '. 
 ```
 This is indicating that the maximum recursion limit is 4096 and that the query we processed caused us to recurse 4 times.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
 
 ### Add iterators to Context ([PR #1202](https://github.com/apollographql/router/pull/1202))
 Context can now be iterated over, with two new methods:
