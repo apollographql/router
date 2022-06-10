@@ -1067,9 +1067,17 @@ impl ServiceStep {
                                 let (parts, stream) = response.into_parts();
                                 let (first, rest) = stream.into_future().await;
 
+                                if first.is_none() {
+                                    return Ok(failure_message(
+                                        context,
+                                        "rhai execution error: empty response".to_string(),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    ));
+                                }
+
                                 let response = RhaiRouterResponse {
                                     context,
-                                    response: http_compat::Response::from_parts(parts, first.expect("FIXME")),
+                                    response: http_compat::Response::from_parts(parts, first.expect("already checked")),
                                 };
                                 let shared_response =
                                 Shared::new(Mutex::new(Some(response)));
@@ -1158,11 +1166,19 @@ impl ServiceStep {
                                 let (parts, stream) = response.into_parts();
                                 let (first, rest) = stream.into_future().await;
 
+                                if first.is_none() {
+                                    return Ok(failure_message(
+                                        context,
+                                        "rhai execution error: empty response".to_string(),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    ));
+                                }
+
                                 let response = RhaiExecutionResponse {
                                     context,
                                     response: http_compat::Response::from_parts(
                                         parts,
-                                        first.expect("FIXME"),
+                                        first.expect("already checked"),
                                     ),
                                 };
                                 let shared_response = Shared::new(Mutex::new(Some(response)));
