@@ -5,8 +5,8 @@ use crate::instrument::InstrumentLayer;
 use crate::layers::cache::CachingLayer;
 use crate::map_future_with_context::{MapFutureWithContextLayer, MapFutureWithContextService};
 use crate::sync_checkpoint::CheckpointLayer;
-use futures::future::BoxFuture;
 use moka::sync::Cache;
+use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -173,22 +173,16 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///             .service(service);
     /// # }
     /// ```
-    fn checkpoint_async<S, Request>(
+    fn checkpoint_async<F, S, Fut, Request>(
         self,
-        async_checkpoint_fn: impl Fn(
-                Request,
-            ) -> BoxFuture<
-                'static,
-                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
-            > + Send
-            + Sync
-            + 'static,
-    ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Request>, L>>
+        async_checkpoint_fn: F,
+    ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Fut, Request>, L>>
     where
         S: Service<Request, Error = BoxError> + Clone + Send + 'static,
-        Request: Send + 'static,
-        S::Future: Send,
-        S::Response: Send + 'static,
+        Fut: Future<
+            Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
+        >,
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
