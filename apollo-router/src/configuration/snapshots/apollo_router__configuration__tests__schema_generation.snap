@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 697
 expression: "&schema"
 ---
 {
@@ -410,7 +409,9 @@ expression: "&schema"
             },
             "origins": {
               "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
-              "default": [],
+              "default": [
+                "https://studio.apollographql.com"
+              ],
               "type": "array",
               "items": {
                 "type": "string"

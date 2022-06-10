@@ -1,5 +1,5 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::configuration::{Configuration, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
 use crate::ResponseBody;
@@ -89,8 +89,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .server
                 .cors
                 .clone()
-                .map(|cors_configuration| cors_configuration.into_layer())
-                .unwrap_or_else(|| Cors::builder().build().into_layer())
+                .unwrap_or_default()
+                .into_layer()
                 .map_err(|e| {
                     FederatedServerError::ConfigError(
                         crate::configuration::ConfigurationError::LayerConfiguration {
@@ -666,11 +666,11 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .cors(Some(
+                                .cors(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])
                                         .build(),
-                                ))
+                                )
                                 .build(),
                         )
                         .build(),
@@ -750,11 +750,11 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                                .cors(Some(
+                                .cors(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])
                                         .build(),
-                                ))
+                                )
                                 .build(),
                         )
                         .build(),
@@ -947,11 +947,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/graphql"))
                     .build(),
             )
@@ -1017,11 +1017,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/:my_prefix/graphql"))
                     .build(),
             )
@@ -1087,11 +1087,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )
@@ -1529,11 +1529,11 @@ Content-Type: application/json\r
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .landing_page(false)
                     .build(),
             )
@@ -1579,11 +1579,11 @@ Content-Type: application/json\r
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .build(),
             )
             .build();

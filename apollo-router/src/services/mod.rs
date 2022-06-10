@@ -154,8 +154,8 @@ impl RouterRequest {
             .collect();
 
         let gql_request = Request::builder()
-            .query(query)
-            .operation_name(operation_name)
+            .and_query(query)
+            .and_operation_name(operation_name)
             .variables(variables)
             .extensions(extensions)
             .build();
@@ -234,7 +234,7 @@ impl RouterResponse {
             .collect();
         // Build a response
         let b = Response::builder()
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions);
         let res = match data {
@@ -488,9 +488,9 @@ impl SubgraphResponse {
     ) -> SubgraphResponse {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -631,10 +631,7 @@ impl ExecutionResponse {
         Self { response, context }
     }
 
-    /// This is the constructor (or builder) to use when constructing a real RouterRequest.
-    ///
-    /// The parameters are not optional, because in a live situation all of these properties must be
-    /// set and be correct to create a RouterRequest.
+    /// This is the constructor (or builder) to use when constructing ExecutionResponse.
     #[builder]
     pub fn new(
         label: Option<String>,
@@ -647,9 +644,9 @@ impl ExecutionResponse {
     ) -> ExecutionResponse {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -791,8 +788,8 @@ mod test {
             &crate::Request::builder()
                 .variables(variables)
                 .extensions(extensions)
-                .operation_name(Some("Default".to_string()))
-                .query(Some("query { topProducts }".to_string()))
+                .operation_name("Default")
+                .query("query { topProducts }")
                 .build()
         );
     }

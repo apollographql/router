@@ -5,8 +5,9 @@
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
-    http_compat, plugins::csrf, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService, ValueExt,
+    http_compat, plugins::csrf, Object, PluggableRouterServiceBuilder, Plugin, Request,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
+    ValueExt,
 };
 use futures::stream::{BoxStream, StreamExt};
 use http::Method;
@@ -23,16 +24,14 @@ use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
-        let request = apollo_router::Request::builder()
-            .query(Some($query.to_string()))
-            .variables(Arc::new(
+        let request = Request::builder()
+            .query($query)
+            .variables(Object::from_iter(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
                     ("reviewsForAuthorAuthorId".into(), 1.into()),
-                ]
-                .into_iter()
-                .collect(),
-            ))
+                ]),
+            )
             .build();
 
 
@@ -99,16 +98,12 @@ async fn basic_composition() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
-    let request = apollo_router::Request::builder()
-        .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2i32.into()),
-                ("reviewsForAuthorAuthorId".into(), 1i32.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2i32.into()),
+            ("reviewsForAuthorAuthorId".into(), 1i32.into()),
+        ]))
         .build();
 
     let originating_request = http_compat::Request::fake_builder()
@@ -177,19 +172,12 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = apollo_router::Request::builder()
-        .query(Some(
-            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-                .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -220,19 +208,12 @@ async fn simple_queries_should_not_work() {
         ..Default::default()
     };
 
-    let request = apollo_router::Request::builder()
-        .query(Some(
-            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-                .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let originating_request = http_compat::Request::fake_builder()
@@ -253,19 +234,12 @@ async fn simple_queries_should_not_work() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_post() {
-    let request = apollo_router::Request::builder()
-        .query(Some(
-            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-                .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -299,9 +273,9 @@ async fn service_errors_should_be_propagated() {
         ..Default::default()
     };
 
-    let request = apollo_router::Request::builder()
-        .query(Some(r#"{ topProducts { name } }"#.to_string()))
-        .operation_name(Some("invalidOperationName".to_string()))
+    let request = Request::builder()
+        .query(r#"{ topProducts { name } }"#)
+        .operation_name("invalidOperationName")
         .build();
 
     let expected_service_hits = hashmap! {};
@@ -320,8 +294,8 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = apollo_router::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -334,17 +308,12 @@ async fn mutation_should_not_work_over_get() {
                   id
                   body
                 }
-              }"#
-            .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+              }"#,
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     // No services should be queried
@@ -364,8 +333,8 @@ async fn mutation_should_not_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_work_over_post() {
-    let request = apollo_router::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -378,17 +347,12 @@ async fn mutation_should_work_over_post() {
                   id
                   body
                 }
-              }"#
-            .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+              }"#,
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -440,8 +404,10 @@ async fn automated_persisted_queries() {
             "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
         }),
     );
-    let request_builder = apollo_router::Request::builder().extensions(request_extensions.clone());
-    let apq_only_request = request_builder.clone().build();
+    let request_builder = Request::builder().extensions(request_extensions.clone());
+    let apq_only_request = Request::builder()
+        .extensions(request_extensions.clone())
+        .build();
 
     // First query, apq hash but no query, it will be a cache miss.
 
@@ -462,9 +428,9 @@ async fn automated_persisted_queries() {
 
     // Second query, apq hash with corresponding query, it will be inserted into the cache.
 
-    let apq_request_with_query = request_builder
-        .clone()
-        .query(Some("query Query { me { name } }".to_string()))
+    let apq_request_with_query = Request::builder()
+        .extensions(request_extensions.clone())
+        .query("query Query { me { name } }")
         .build();
 
     // Services should have been queried once
@@ -530,8 +496,8 @@ async fn variables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
-    let request = apollo_router::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"
             query ExampleQuery(
                 $missingVariable: Int!,
@@ -545,9 +511,8 @@ async fn missing_variables() {
                     }
                 }
             }
-            "#
-            .to_string(),
-        ))
+            "#,
+        )
         .build();
 
     let originating_request = http_compat::Request::fake_builder()
