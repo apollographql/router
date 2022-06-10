@@ -80,9 +80,9 @@ checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c5b2ba36216775c34e0126ce805752718a8669ea31f2dd9fb2268428178bddf"
+checksum = "85efd09fc4aad19f29c8419215851246444f9b41ffbade7b7eb7f05d8b1f8ab2"
 dependencies = [
  "rowan",
 ]
