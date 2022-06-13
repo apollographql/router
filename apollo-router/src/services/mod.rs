@@ -207,7 +207,7 @@ impl RouterRequest {
     }
 }
 
-//assert_impl_all!(RouterResponse: Send);
+assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
 /// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
@@ -639,7 +639,7 @@ impl ExecutionRequest {
     }
 }
 
-//assert_impl_all!(ExecutionResponse: Send);
+assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
 /// [`Context`] and [`http_compat::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
