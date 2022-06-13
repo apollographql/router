@@ -148,9 +148,7 @@ mod naive_introspection_tests {
     #[tokio::test]
     async fn test_plan() {
         let query_to_test = "this is a test query";
-        let expected_data = Response::builder()
-            .data(serde_json::Value::Number(42.into()))
-            .build();
+        let expected_data = Response::builder().data(42).build();
 
         let cache = [(query_to_test.into(), expected_data.clone())]
             .iter()

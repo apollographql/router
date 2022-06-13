@@ -234,7 +234,7 @@ mod tests {
                     http_compat::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
@@ -242,7 +242,7 @@ mod tests {
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
@@ -269,7 +269,7 @@ mod tests {
                     http_compat::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
@@ -277,7 +277,7 @@ mod tests {
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,

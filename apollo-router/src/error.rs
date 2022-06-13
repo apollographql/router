@@ -8,7 +8,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tracing::level_filters::LevelFilter;
-use typed_builder::TypedBuilder;
 
 /// Error types for execution.
 ///
@@ -112,10 +111,9 @@ impl FetchError {
 }
 
 /// Any error.
-#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default, TypedBuilder)]
+#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[error("{message}")]
 #[serde(rename_all = "camelCase")]
-#[builder(field_defaults(default))]
 pub struct Error {
     /// The error message.
     pub message: String,
@@ -131,7 +129,23 @@ pub struct Error {
     pub extensions: Object,
 }
 
+#[buildstructor::buildstructor]
 impl Error {
+    #[builder]
+    pub fn new(
+        message: String,
+        locations: Vec<Location>,
+        path: Option<Path>,
+        extensions: Option<Object>,
+    ) -> Self {
+        Self {
+            message,
+            locations,
+            path,
+            extensions: extensions.unwrap_or_default(),
+        }
+    }
+
     pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {

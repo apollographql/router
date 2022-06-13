@@ -650,6 +650,7 @@ where
 mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
+    use crate::Request;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
@@ -675,9 +676,7 @@ mod tests {
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = crate::Request::builder()
-            .query(Some(request.to_string()))
-            .build();
+        let request = Request::builder().query(request).build();
         let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();

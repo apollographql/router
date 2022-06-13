@@ -523,7 +523,7 @@ mod test {
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
             ),
@@ -534,7 +534,7 @@ mod test {
                 .header(HOST, "rhost")
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query(Some("query".to_string())).build())
+                .body(Request::builder().query("query").build())
                 .build()
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,

@@ -25,7 +25,7 @@ async-trait = "0.1.53"
 atty = "0.2.14"
 axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.65"
-buildstructor = "0.3.0"
+buildstructor = "0.3.2"
 bytes = "1.1.0"
 clap = { version = "3.1.18", default-features = false, features = [
     "env",
@@ -124,7 +124,6 @@ tracing-core = "0.1.26"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.2"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
-typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"

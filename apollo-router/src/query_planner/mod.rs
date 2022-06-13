@@ -493,9 +493,9 @@ pub(crate) mod fetch {
                         )
                         .body(
                             Request::builder()
-                                .query(Some(operation.to_string()))
-                                .operation_name(operation_name.clone())
-                                .variables(Arc::new(variables.clone()))
+                                .query(operation)
+                                .and_operation_name(operation_name.clone())
+                                .variables(variables.clone())
                                 .build(),
                         )
                         .build()

@@ -1,41 +1,55 @@
 use crate::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use typed_builder::TypedBuilder;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[builder(field_defaults(setter(into)))]
 pub struct Response {
     /// The label that was passed to the defer or stream directive for this patch.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[builder(default)]
     pub label: Option<String>,
 
     /// The response data.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[builder(default, setter(strip_option))]
     pub data: Option<Value>,
 
     /// The path that the data should be merged at.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[builder(default)]
     pub path: Option<Path>,
 
     /// The optional graphql errors encountered.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    #[builder(default)]
     pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
-    #[builder(default)]
     pub extensions: Object,
 }
 
+#[buildstructor::buildstructor]
 impl Response {
+    /// Constructor
+    #[builder]
+    pub fn new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        extensions: Map<ByteString, Value>,
+    ) -> Self {
+        Self {
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+        }
+    }
+
     /// If path is None, this is a primary query.
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
