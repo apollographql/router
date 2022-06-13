@@ -29,55 +29,54 @@ pub enum FieldType {
 }
 
 impl FieldType {
-    pub(crate) fn validate_value(
+    // This function validates input values according to the graphql specification.
+    // Each of the values are validated against the "input coercion" rules.
+    pub(crate) fn validate_input_value(
         &self,
         value: &Value,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         match (self, value) {
-            // Type coercion from string to Int, Float or Boolean
-            (FieldType::Int | FieldType::Float | FieldType::Boolean, Value::String(s)) => {
-                if let Ok(value) = Value::from_bytes(s.inner().clone()) {
-                    self.validate_value(&value, schema)
-                } else {
-                    Err(InvalidValue)
-                }
-            }
             (FieldType::String, Value::String(_)) => Ok(()),
             // Spec: https://spec.graphql.org/June2018/#sec-Int
-            (FieldType::Int, Value::Number(number)) if number.is_i64() || number.is_u64() => {
-                if number
-                    .as_i64()
-                    .and_then(|x| i32::try_from(x).ok())
-                    .is_some()
-                    || number
-                        .as_u64()
-                        .and_then(|x| i32::try_from(x).ok())
-                        .is_some()
-                {
+            (FieldType::Int, maybe_int) => {
+                if maybe_int == &Value::Null || maybe_int.is_valid_int_input() {
                     Ok(())
                 } else {
                     Err(InvalidValue)
                 }
             }
-            // Spec: https://spec.graphql.org/draft/#sec-Float
-            (FieldType::Float, Value::Number(number)) if number.is_f64() => Ok(()),
+            // Spec: https://spec.graphql.org/draft/#sec-Float.Input-Coercion
+            (FieldType::Float, maybe_float) => {
+                if maybe_float == &Value::Null || maybe_float.is_valid_float_input() {
+                    Ok(())
+                } else {
+                    Err(InvalidValue)
+                }
+            }
             // "The ID scalar type represents a unique identifier, often used to refetch an object
             // or as the key for a cache. The ID type is serialized in the same way as a String;
             // however, it is not intended to be human-readable. While it is often numeric, it
             // should always serialize as a String."
             //
             // In practice it seems Int works too
-            (FieldType::Id, Value::String(_) | Value::Number(_)) => Ok(()),
+            (FieldType::Id, Value::String(_)) => Ok(()),
+            (FieldType::Id, maybe_int) => {
+                if maybe_int == &Value::Null || maybe_int.is_valid_int_input() {
+                    Ok(())
+                } else {
+                    Err(InvalidValue)
+                }
+            }
             (FieldType::Boolean, Value::Bool(_)) => Ok(()),
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
-                .try_for_each(|x| inner_ty.validate_value(x, schema)),
+                .try_for_each(|x| inner_ty.validate_input_value(x, schema)),
             (FieldType::NonNull(inner_ty), value) => {
                 if value.is_null() {
                     Err(InvalidValue)
                 } else {
-                    inner_ty.validate_value(value, schema)
+                    inner_ty.validate_input_value(value, schema)
                 }
             }
             (FieldType::Named(name), _)

@@ -49,6 +49,13 @@ After the previous change, it only re-exported the crate root. Use that directly
 + fn example(schema: Arc<apollo_router::Schema>) {
 ```
 
+### Fix input validation rules ([PR #1211](https://github.com/apollographql/router/pull/1211))
+The graphql specification provides two sets of coercion / validation rules, depending on whether we're dealing with inputs or outputs.
+The spec we were following for query validation used the output coercion rules; which don't match the spec.
+This is a breaking change since slightly invalid input might have validated before, and don't anymore.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
+
 ## 🚀 Features
 ### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
 This change allows the use an already existing Secret for the graph API Key.
