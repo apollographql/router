@@ -5,14 +5,17 @@ use crate::FederatedServerError;
 use crate::ResponseBody;
 use crate::{http_compat, Handler};
 use crate::{prelude::*, DEFAULT_BUFFER_SIZE};
+use async_compression::tokio::write::{BrotliDecoder, ZlibDecoder, GzipDecoder};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{channel::oneshot, prelude::*};
+use http::header::CONTENT_ENCODING;
 use http::{HeaderValue, Request, Uri};
 use hyper::server::conn::Http;
 use hyper::Body;
@@ -24,6 +27,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -32,6 +36,7 @@ use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
+use tower_http::compression::CompressionLayer;
 use tower_http::trace::{MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
@@ -118,6 +123,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     })
                     .post(handle_post),
                 )
+                .layer(middleware::from_fn(decompress_request_body))
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(PropagatingMakeSpan::new())
@@ -137,7 +143,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 )
                 .route(&configuration.server.health_check_path, get(health_check))
                 .layer(Extension(boxed_service))
-                .layer(cors);
+                .layer(cors)
+                .layer(CompressionLayer::new()); // To compress response body
 
             for (plugin_name, handler) in plugin_handlers {
                 router = router.route(
@@ -530,6 +537,75 @@ fn prefers_html(accept_header: &HeaderValue) -> bool {
                 .any(|a| a == "text/html")
         })
         .unwrap_or_default()
+}
+
+async fn decompress_request_body(
+    req: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, Response> {
+    let (parts, body) = req.into_parts();
+    let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+    macro_rules! decode_body {
+        ($decoder: ident, $error_message: expr) => {{
+            let body_bytes = hyper::body::to_bytes(body)
+                .map_err(|err| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("cannot read request body: {err}"),
+                    )
+                        .into_response()
+                })
+                .await?;
+            let mut decoder = $decoder::new(Vec::new());
+            decoder
+                .write_all(&body_bytes.to_vec())
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("{}: {err}", $error_message),
+                    )
+                        .into_response()
+                })?;
+            decoder.shutdown().await.map_err(|err| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("{}: {err}", $error_message),
+                )
+                    .into_response()
+            })?;
+
+            Ok(next
+                .run(Request::from_parts(parts, Body::from(decoder.into_inner())))
+                .await)
+        }};
+    }
+
+    match content_encoding {
+        Some(content_encoding) => match content_encoding.to_str() {
+            Ok(content_encoding_str) => match content_encoding_str {
+                "br" => decode_body!(BrotliDecoder, "cannot decompress (brotli) request body"),
+                "gzip" => decode_body!(GzipDecoder, "cannot decompress (gzip) request body"),
+                "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
+                "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
+                unknown => {
+                    tracing::error!("unknown content-encoding header value {:?}", unknown);
+                    Err((
+                        StatusCode::BAD_REQUEST,
+                        format!("unknown content-encoding header value: {unknown:?}"),
+                    )
+                        .into_response())
+                }
+            },
+
+            Err(err) => Err((
+                StatusCode::BAD_REQUEST,
+                format!("cannot read content-encoding header: {err}"),
+            )
+                .into_response()),
+        },
+        None => Ok(next.run(Request::from_parts(parts, body)).await),
+    }
 }
 
 #[derive(Clone)]
@@ -1401,7 +1477,7 @@ mod tests {
 
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest};
+        use tokio::io::{AsyncBufReadExt, BufReader, Interest};
         use tokio::net::UnixStream;
 
         let content = match method {

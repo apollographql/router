@@ -1,25 +1,51 @@
 //! Tower fetcher for subgraphs.
 
 use crate::prelude::*;
+use ::serde::Deserialize;
+use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::{
-    header::{self, ACCEPT, CONTENT_TYPE},
-    HeaderValue, StatusCode,
+    header::{self, ACCEPT, CONTENT_ENCODING, CONTENT_TYPE},
+    HeaderMap, HeaderValue, StatusCode,
 };
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::{global, trace::SpanKind};
-use std::sync::Arc;
+use schemars::JsonSchema;
 use std::task::Poll;
+use std::{fmt::Display, sync::Arc};
+use tokio::io::AsyncWriteExt;
 use tower::{BoxError, ServiceBuilder};
+use tower_http::decompression::{Decompression, DecompressionLayer};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum Compression {
+    /// gzip
+    Gzip,
+    /// deflate
+    Deflate,
+    /// brotli
+    Br,
+}
+
+impl Display for Compression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Compression::Gzip => write!(f, "gzip"),
+            Compression::Deflate => write!(f, "deflate"),
+            Compression::Br => write!(f, "br"),
+        }
+    }
+}
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub struct SubgraphService {
-    client: hyper::Client<HttpsConnector<HttpConnector>>,
+    client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
 }
 
@@ -33,7 +59,9 @@ impl SubgraphService {
             .build();
 
         Self {
-            client: ServiceBuilder::new().service(hyper::Client::builder().build(connector)),
+            client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
         }
     }
@@ -65,7 +93,19 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
-            let mut request = http::request::Request::from_parts(parts, body.into());
+            let compressed_body = compress(body, &parts.headers)
+                .instrument(tracing::debug_span!("body_compression"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(compress_error = format!("{:?}", err).as_str());
+
+                    graphql::FetchError::CompressionError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
+
+            let mut request = http::request::Request::from_parts(parts, compressed_body.into());
             let app_json: HeaderValue = HeaderValue::from_static("application/json");
             let app_graphql_json: HeaderValue =
                 HeaderValue::from_static("application/graphql+json");
@@ -120,6 +160,12 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains("application/json")
                         && !content_type_str.contains("application/graphql+json")
                     {
+                        tracing::error!(
+                            "response body : {:?}",
+                            String::from_utf8_lossy(
+                                &hyper::body::to_bytes(body).await.unwrap().to_vec()
+                            )
+                        );
                         return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
@@ -167,6 +213,44 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 context,
             ))
         })
+    }
+}
+
+pub async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
+    let content_encoding = headers.get(&CONTENT_ENCODING);
+    match content_encoding {
+        Some(content_encoding) => match content_encoding.to_str()? {
+            "br" => {
+                let mut br_encoder = BrotliEncoder::new(Vec::new());
+                br_encoder.write_all(body.as_bytes()).await?;
+                br_encoder.shutdown().await?;
+
+                Ok(br_encoder.into_inner())
+            }
+            "gzip" => {
+                let mut gzip_encoder = GzipEncoder::new(Vec::new());
+                gzip_encoder.write_all(body.as_bytes()).await?;
+                gzip_encoder.shutdown().await?;
+
+                Ok(gzip_encoder.into_inner())
+            }
+            "deflate" => {
+                let mut df_encoder = ZlibEncoder::new(Vec::new());
+                df_encoder.write_all(body.as_bytes()).await?;
+                df_encoder.shutdown().await?;
+
+                Ok(df_encoder.into_inner())
+            }
+            "identity" => Ok(body.into_bytes()),
+            unknown => {
+                tracing::error!("unknown content-encoding value '{:?}'", unknown);
+                Err(BoxError::from(format!(
+                    "unknown content-encoding value '{:?}'",
+                    unknown
+                )))
+            }
+        },
+        None => Ok(body.into_bytes()),
     }
 }
 

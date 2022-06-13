@@ -85,6 +85,13 @@ pub enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
+    /// could not compress request: {reason}
+    CompressionError {
+        /// The service failed.
+        service: String,
+        /// The reason the compression failed.
+        reason: String,
+    },
 }
 
 impl FetchError {

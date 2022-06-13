@@ -13,6 +13,8 @@ mod deduplication;
 
 use std::collections::HashMap;
 
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -21,14 +23,17 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse,
+    register_plugin, Compression, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse,
 };
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
     query_deduplication: Option<bool>,
+    /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
+    compression: Option<Compression>,
 }
 
 impl Shaping {
@@ -37,6 +42,7 @@ impl Shaping {
             None => self.clone(),
             Some(fallback) => Shaping {
                 query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
+                compression: self.compression.or(fallback.compression),
             },
         }
     }
@@ -77,12 +83,22 @@ impl Plugin for TrafficShaping {
         if let Some(config) = final_config {
             ServiceBuilder::new()
                 .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
-                    //Buffer is required because dedup layer requires a clone service.
+                    // Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
                         .buffered()
                 }))
                 .service(service)
+                .map_request(move |mut req: SubgraphRequest| {
+                    let config = config.clone();
+                    if let Some(compression) = config.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, compression_header_val.clone());
+                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+
+                    req
+                })
                 .boxed()
         } else {
             service
