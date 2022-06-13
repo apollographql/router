@@ -527,7 +527,7 @@ macro_rules! implement_input_object_type_or_interface {
                     .iter()
                     .try_for_each(|(name, ty)| {
                         let value = object.get(name.as_str()).unwrap_or(&Value::Null);
-                        ty.validate_value(value, schema)
+                        ty.validate_input_value(value, schema)
                     })
                     .map_err(|_| InvalidObject)
             }
