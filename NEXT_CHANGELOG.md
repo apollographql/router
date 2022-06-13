@@ -113,3 +113,9 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 Update buildstructor to 0.3.
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207
+
+## 📚 Documentation ( :books: )
+
+### Update README link to the configuration file
+
+As the structure of the documentation as changed, the link should point to the `YAML config file` section of the overview.
