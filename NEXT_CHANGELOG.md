@@ -56,6 +56,18 @@ This is a breaking change since slightly invalid input might have validated befo
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
 
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227))
+`ApolloRouterBuilder` has been migrated to `buildstructor` for consistency with other code.
+Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
+`FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
+
+Removed functionality:
+* The ability to supply your own `RouterServiceFactory`. This may be added back if there is a concrete use case for it.
+* `StateListener`. This made the internal state machine unnecessarily complex. `ready()` remains on `ApolloRouterHandle`.
+* `ApolloRouterHandle#shutdown()` has been removed. Instead dropping `ApolloRouterHandle` will cause the router to shutdown.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227
+
 ## 🚀 Features
 ### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
 This change allows the use an already existing Secret for the graph API Key.

@@ -265,15 +265,13 @@ pub async fn rt_main() -> Result<()> {
         }
     };
 
-    let server = ApolloRouter::builder()
+    let router = ApolloRouter::builder()
         .configuration(configuration)
         .schema(schema)
         .shutdown(ShutdownKind::CtrlC)
         .build();
-    let mut server_handle = server.serve();
-    server_handle.with_default_state_receiver().await;
 
-    if let Err(err) = server_handle.await {
+    if let Err(err) = router.serve().await {
         tracing::error!("{}", err);
         return Err(err.into());
     }
