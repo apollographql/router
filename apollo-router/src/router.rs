@@ -376,71 +376,19 @@ where
     pub(crate) router_factory: RF,
 }
 
-/// A builder for an [`ApolloRouter`]
-#[derive(Default)]
-pub struct ApolloRouterBuilder<Factory = ()> {
-    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) configuration: Option<ConfigurationKind>,
-
-    /// The Schema that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) schema: Option<SchemaKind>,
-
-    /// A future that when resolved will shut down the server.
-    pub(crate) shutdown: Option<ShutdownKind>,
-
-    pub(crate) router_factory: Factory,
-}
-
-impl ApolloRouterBuilder {
-    pub fn configuration(mut self, configuration: ConfigurationKind) -> Self {
-        self.configuration = Some(configuration);
-        self
-    }
-
-    pub fn schema(mut self, schema: SchemaKind) -> Self {
-        self.schema = Some(schema);
-        self
-    }
-
-    pub fn shutdown(mut self, shutdown: ShutdownKind) -> Self {
-        self.shutdown = Some(shutdown);
-        self
-    }
-
-    /// Use a custom RouterServiceFactory
-    pub fn with_factory<RF>(self, router_factory: RF) -> ApolloRouterBuilder<RF>
-    where
-        RF: RouterServiceFactory,
-    {
-        ApolloRouterBuilder {
-            configuration: self.configuration,
-            schema: self.schema,
-            shutdown: self.shutdown,
-            router_factory,
-        }
-    }
-
-    pub fn build(self) -> ApolloRouter<YamlRouterServiceFactory> {
+#[buildstructor::buildstructor]
+impl ApolloRouter<YamlRouterServiceFactory> {
+    #[builder]
+    pub fn new(
+        configuration: ConfigurationKind,
+        schema: SchemaKind,
+        shutdown: Option<ShutdownKind>,
+    ) -> ApolloRouter<YamlRouterServiceFactory> {
         ApolloRouter {
-            configuration: self
-                .configuration
-                .expect("Configuration must be set on builder"),
-            schema: self.schema.expect("Schema must be set on builder"),
-            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            configuration,
+            schema,
+            shutdown: shutdown.unwrap_or(ShutdownKind::CtrlC),
             router_factory: YamlRouterServiceFactory::default(),
-        }
-    }
-}
-
-impl<RF: RouterServiceFactory> ApolloRouterBuilder<RF> {
-    pub fn build(self) -> ApolloRouter<RF> {
-        ApolloRouter {
-            configuration: self
-                .configuration
-                .expect("Configuration must be set on builder"),
-            schema: self.schema.expect("Schema must be set on builder"),
-            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: self.router_factory,
         }
     }
 }
@@ -660,7 +608,7 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema: crate::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
-        ApolloRouterBuilder::default()
+        ApolloRouter::builder()
             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
             .schema(SchemaKind::Instance(Box::new(schema)))
             .build()
