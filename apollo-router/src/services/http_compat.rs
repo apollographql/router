@@ -74,6 +74,7 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
     }
 }
 
+/// Wrap an http Request.
 #[derive(Debug)]
 pub struct Request<T> {
     inner: http::Request<T>,
@@ -249,6 +250,7 @@ impl<T: PartialEq> PartialEq for Request<T> {
 
 impl<T: PartialEq> Eq for Request<T> {}
 
+/// Wrap an http Response.
 #[derive(Debug, Default)]
 pub struct Response<T> {
     pub inner: http::Response<T>,
