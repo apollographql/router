@@ -358,7 +358,6 @@ assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
     pub query_plan: Arc<QueryPlan>,
-
     pub context: Context,
 }
 

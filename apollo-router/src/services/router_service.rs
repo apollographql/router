@@ -6,7 +6,7 @@ use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    Introspection, Plugin, QueryCache, QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse,
+    Introspection, Plugin, QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
     SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
@@ -34,7 +34,6 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
     ready_query_planner_service: Option<QueryPlannerService>,
     ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
-    query_cache: Arc<QueryCache>,
     introspection: Option<Arc<Introspection>>,
 }
 
@@ -45,7 +44,6 @@ impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, E
         query_planner_service: QueryPlannerService,
         query_execution_service: ExecutionService,
         schema: Arc<Schema>,
-        query_cache: Arc<QueryCache>,
         introspection: Option<Arc<Introspection>>,
     ) -> RouterService<QueryPlannerService, ExecutionService> {
         RouterService {
@@ -54,7 +52,6 @@ impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, E
             ready_query_planner_service: None,
             ready_query_execution_service: None,
             schema,
-            query_cache,
             introspection,
         }
     }
@@ -109,7 +106,6 @@ where
         let naive_introspection = self.introspection.clone();
 
         let schema = self.schema.clone();
-        let query_cache = self.query_cache.clone();
 
         let context_cloned = req.context.clone();
         let fut = async move {
@@ -136,21 +132,34 @@ where
             let context = req.context;
             let body = req.originating_request.body();
             let variables = body.variables.clone();
-            let query = query_cache
-                .get(
-                    body.query
-                        .as_ref()
-                        .expect("apollo.ensure-query-is-present has checked this already; qed")
-                        .as_str(),
+            let QueryPlannerResponse {
+                query_plan,
+                context,
+            } = planning
+                .call(
+                    QueryPlannerRequest::builder()
+                        .originating_request(req.originating_request.clone())
+                        .query_plan_options(QueryPlanOptions::default())
+                        .context(context)
+                        .build(),
                 )
-                .await;
+                .await?;
+
+            /*let query = query_cache
+            .get(
+                body.query
+                    .as_ref()
+                    .expect("apollo.ensure-query-is-present has checked this already; qed")
+                    .as_str(),
+            )
+            .await;*/
 
             // Check if it's an introspection query
-            if let Some(current_query) = query.as_ref().filter(|q| q.contains_introspection()) {
+            if query_plan.query.contains_introspection() {
                 match naive_introspection.as_ref() {
                     Some(naive_introspection) => {
                         match naive_introspection
-                            .execute(schema.as_str(), current_query.as_str())
+                            .execute(schema.as_str(), query_plan.query.as_str())
                             .await
                         {
                             Ok(resp) => {
@@ -186,10 +195,7 @@ where
                 }
             }
 
-            if let Some(err) = query
-                .as_ref()
-                .and_then(|q| q.validate_variables(body, &schema).err())
-            {
+            if let Some(err) = query_plan.query.validate_variables(body, &schema).err() {
                 Ok(Box::pin(futures::stream::once(async {
                     RouterResponse {
                         response: http::Response::new(ResponseBody::GraphQL(err)).into(),
@@ -198,21 +204,13 @@ where
                 })))
             } else {
                 let operation_name = body.operation_name.clone();
-                let planned_query = planning
-                    .call(
-                        QueryPlannerRequest::builder()
-                            .originating_request(req.originating_request.clone())
-                            .query_plan_options(QueryPlanOptions::default())
-                            .context(context)
-                            .build(),
-                    )
-                    .await?;
+
                 let response_stream = execution
                     .call(
                         ExecutionRequest::builder()
                             .originating_request(req.originating_request.clone())
-                            .query_plan(planned_query.query_plan)
-                            .context(planned_query.context)
+                            .query_plan(query_plan.clone())
+                            .context(context)
                             .build(),
                     )
                     .await?;
@@ -220,16 +218,14 @@ where
                 Ok(Box::pin(
                     response_stream
                         .map(move |mut response| {
-                            if let Some(query) = query.as_ref() {
-                                tracing::debug_span!("format_response").in_scope(|| {
-                                    query.format_response(
-                                        response.response.body_mut(),
-                                        operation_name.as_deref(),
-                                        (*variables).clone(),
-                                        schema.api_schema(),
-                                    )
-                                });
-                            }
+                            tracing::debug_span!("format_response").in_scope(|| {
+                                query_plan.query.format_response(
+                                    response.response.body_mut(),
+                                    operation_name.as_deref(),
+                                    (*variables).clone(),
+                                    schema.api_schema(),
+                                )
+                            });
 
                             RouterResponse {
                                 context: response.context,
@@ -398,12 +394,6 @@ impl PluggableRouterServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-        let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
-
         let introspection = if self.introspection {
             // Introspection instantiation can potentially block for some time
             // We don't need to use the api schema here because on the deno side we always convert to API schema
@@ -430,7 +420,6 @@ impl PluggableRouterServiceBuilder {
                             .query_planner_service(query_planner_service)
                             .query_execution_service(execution_service)
                             .schema(self.schema)
-                            .query_cache(query_cache)
                             .and_introspection(introspection)
                             .build()
                             .boxed(),

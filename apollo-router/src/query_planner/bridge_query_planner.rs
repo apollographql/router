@@ -3,6 +3,7 @@
 use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use opentelemetry::trace::SpanKind;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
@@ -10,6 +11,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tower::BoxError;
 use tower::Service;
+use tracing::Instrument;
 
 pub static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -19,12 +21,14 @@ pub static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
 pub struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlan>>,
+    schema: Arc<Schema>,
 }
 
 impl BridgeQueryPlanner {
     pub async fn new(schema: Arc<Schema>) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+            schema: schema.clone(),
         })
     }
 }
@@ -67,6 +71,18 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 }
 
+async fn parse_selections(schema: Arc<Schema>, query: String) -> Result<Query, QueryPlannerError> {
+    let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+        .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
+    match query_parsing_future.await {
+        Ok(res) => res.map_err(QueryPlannerError::from),
+        Err(err) => {
+            failfast_debug!("parsing query task failed: {}", err);
+            Err(QueryPlannerError::from(err).into())
+        }
+    }
+}
+
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
     async fn get(
@@ -75,6 +91,8 @@ impl QueryPlanner for BridgeQueryPlanner {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<Arc<query_planner::QueryPlan>, QueryPlannerError> {
+        let selections = parse_selections(self.schema.clone(), query.clone()).await?;
+
         let planner_result = self
             .planner
             .plan(query, operation)
@@ -91,6 +109,7 @@ impl QueryPlanner for BridgeQueryPlanner {
                 usage_reporting,
                 root: node,
                 options,
+                query: selections,
             })),
             PlanSuccess {
                 data: QueryPlan { node: None },

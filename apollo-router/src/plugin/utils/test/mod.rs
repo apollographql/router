@@ -9,7 +9,6 @@ use crate::CachingQueryPlanner;
 use crate::ExecutionService;
 use crate::Introspection;
 use crate::Plugin;
-use crate::QueryCache;
 use crate::RouterService;
 use crate::Schema;
 use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
@@ -167,7 +166,6 @@ impl PluginTestHarness {
                                         DEFAULT_BUFFER_SIZE,
                                     ))
                                     .schema(schema.clone())
-                                    .query_cache(Arc::new(QueryCache::new(0, schema.clone())))
                                     .introspection(Arc::new(Introspection::from_schema(&schema)))
                                     .build(),
                             )

@@ -13,7 +13,7 @@ use tracing::level_filters::LevelFilter;
 const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative)]
+#[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
     string: String,

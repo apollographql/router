@@ -24,6 +24,7 @@ pub struct QueryPlan {
     pub usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
     options: QueryPlanOptions,
+    pub query: Query,
 }
 
 /// This default impl is useful for plugin::utils users
@@ -34,6 +35,7 @@ impl QueryPlan {
     pub(crate) fn fake_new(
         root: Option<PlanNode>,
         usage_reporting: Option<UsageReporting>,
+        query: Option<Query>,
     ) -> Self {
         Self {
             usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
@@ -42,6 +44,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             options: QueryPlanOptions::default(),
+            query: query.unwrap_or_default(),
         }
     }
 }
@@ -696,6 +699,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Query::default(),
         };
 
         let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
@@ -737,6 +741,7 @@ mod tests {
                 referenced_fields_by_type: Default::default(),
             },
             options: QueryPlanOptions::default(),
+            query: Query::default(),
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
@@ -784,6 +789,7 @@ mod tests {
                 referenced_fields_by_type: Default::default(),
             },
             options: QueryPlanOptions::default(),
+            query: Query::default(),
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
