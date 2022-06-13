@@ -18,7 +18,7 @@ failfast = []
 
 [dependencies]
 anyhow = "1.0.57"
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", tag = "hotfix_227" }
+apollo-parser = "0.2.8"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
 async-trait = "0.1.53"
