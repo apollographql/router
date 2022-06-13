@@ -110,10 +110,10 @@ impl Plugin for {{pascal_name}} {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
 
         ServiceBuilder::new()
-                    .checkpoint_async(|request : RouterRequest| Box::pin(async {
+                    .checkpoint_async(|request : RouterRequest| async {
                         // Do some async call here to auth, and decide if to continue or not.
                         Ok(ControlFlow::Continue(request))
-                    }))
+                    })
                     .buffered()
                     .service(service)
                     .boxed()
