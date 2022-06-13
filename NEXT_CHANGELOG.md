@@ -118,6 +118,6 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Update README link to the configuration file
 
-As the structure of the documentation as changed, the link should point to the `YAML config file` section of the overview.
+As the structure of the documentation has changed, the link should point to the `YAML config file` section of the overview.
 
 By [@gscheibel](https://github.com/gscheibel in https://github.com/apollographql/router/pull/1208
