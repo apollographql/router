@@ -1,3 +1,4 @@
+use crate::cache::CachingMap;
 use crate::CacheResolver;
 use crate::*;
 use async_trait::async_trait;
