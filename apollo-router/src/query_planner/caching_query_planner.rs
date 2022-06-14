@@ -2,6 +2,8 @@ use crate::CacheResolver;
 use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use router_bridge::planner::UsageReporting;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -116,6 +118,23 @@ where
                             .context
                             .insert(USAGE_REPORTING, pe.usage_reporting.clone())
                         {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                inner_e
+                            );
+                        }
+                    } else if let QueryPlannerError::SpecError(e) = re.deref() {
+                        let error_key = match e {
+                            SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                            _ => "## GraphQLValidationFailure\n",
+                        };
+                        if let Err(inner_e) = request.context.insert(
+                            USAGE_REPORTING,
+                            UsageReporting {
+                                stats_report_key: error_key.to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            },
+                        ) {
                             tracing::error!(
                                 "usage reporting was not serializable to context, {}",
                                 inner_e
