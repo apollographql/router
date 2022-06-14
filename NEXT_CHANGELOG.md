@@ -57,6 +57,20 @@ This is a breaking change since slightly invalid input might have validated befo
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
 
 ## 🚀 Features
+### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
+Apollo Parser now includes recursion limits which can be examined after parse execution. The router logs these
+out at trace level. You can see them in your logs by searching for "recursion_limit". For example, if json logging,
+and using `jq` to filter the output:
+```
+router -s ../graphql/supergraph.graphql -c ./router.yaml --log trace | jq -c '. | select(.fields.message == "recursion limit data")'        
+{"timestamp":"2022-06-10T15:01:02.213447Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:02.261092Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:07.642977Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 4"},"target":"apollo_router::spec::query"}
+```
+This is indicating that the maximum recursion limit is 4096 and that the query we processed caused us to recurse 4 times.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
+
 ### Helm chart now has the option to use an existing Secret for API Key [PR #1196](https://github.com/apollographql/router/pull/1196)
 This change allows the use an already existing Secret for the graph API Key.
 

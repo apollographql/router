@@ -77,9 +77,8 @@ where
 #[cfg(test)]
 mod test {
     use crate::utils::test::MockRouterService;
-    use crate::{RouterRequest, RouterResponse, ServiceBuilderExt};
-    use futures::stream::{once, BoxStream};
-    use futures::StreamExt;
+    use crate::{ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt};
+    use futures::stream::BoxStream;
     use http::HeaderValue;
     use tower::{BoxError, Service};
     use tower::{ServiceBuilder, ServiceExt};
@@ -87,11 +86,10 @@ mod test {
     #[tokio::test]
     async fn test_layer() -> Result<(), BoxError> {
         let mut mock_service = MockRouterService::new();
-        mock_service.expect_call().once().returning(|_| {
-            Ok(Box::pin(once(async {
-                RouterResponse::fake_builder().build().unwrap()
-            })) as BoxStream<RouterResponse>)
-        });
+        mock_service
+            .expect_call()
+            .once()
+            .returning(|_| Ok(RouterResponse::fake_builder().build().unwrap().boxed()));
 
         let mut service = ServiceBuilder::new()
             .map_future_with_context(
@@ -102,13 +100,12 @@ mod test {
                         .cloned()
                         .unwrap()
                 },
-                |ctx: HeaderValue, resp| async {
-                    let resp: Result<BoxStream<RouterResponse>, BoxError> = resp.await;
-                    resp.map(|stream| {
-                        stream.map(move |mut response| {
-                            response.response.headers_mut().insert("hello", ctx.clone());
-                            response
-                        })
+                |ctx: HeaderValue, resp| async move {
+                    let resp: Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> =
+                        resp.await;
+                    resp.map(|mut response| {
+                        response.response.headers_mut().insert("hello", ctx.clone());
+                        response
                     })
                 },
             )
@@ -124,10 +121,7 @@ mod test {
                     .build()
                     .unwrap(),
             )
-            .await?
-            .next()
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(
             result.response.headers().get("hello"),
             Some(&HeaderValue::from_static("world"))

@@ -10,6 +10,7 @@ use crate::ExecutionService;
 use crate::Introspection;
 use crate::Plugin;
 use crate::QueryCache;
+use crate::ResponseBody;
 use crate::RouterService;
 use crate::Schema;
 use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
@@ -28,7 +29,8 @@ use tower::ServiceExt;
 use tower::{BoxError, ServiceBuilder};
 
 pub struct PluginTestHarness {
-    router_service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    router_service:
+        BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
 }
 pub enum IntoSchema {
     String(String),
@@ -182,12 +184,14 @@ impl PluginTestHarness {
     pub async fn call(
         &mut self,
         request: RouterRequest,
-    ) -> Result<BoxStream<'static, RouterResponse>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         self.router_service.ready().await?.call(request).await
     }
 
     /// If using the canned schema this canned request will give a response.
-    pub async fn call_canned(&mut self) -> Result<BoxStream<'static, RouterResponse>, BoxError> {
+    pub async fn call_canned(
+        &mut self,
+    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         self.router_service
             .ready()
             .await?
@@ -204,7 +208,6 @@ impl PluginTestHarness {
 #[cfg(test)]
 mod testing {
     use super::*;
-    use futures::StreamExt;
     use insta::assert_json_snapshot;
 
     struct EmptyPlugin {}
@@ -224,8 +227,8 @@ mod testing {
             .schema(IntoSchema::Canned)
             .build()
             .await?;
-        let result = harness.call_canned().await?.next().await.unwrap();
-        if let crate::ResponseBody::GraphQL(graphql) = result.response.body() {
+        let result = harness.call_canned().await?.next_response().await.unwrap();
+        if let crate::ResponseBody::GraphQL(graphql) = result {
             insta::with_settings!({sort_maps => true}, {
                 assert_json_snapshot!(graphql.data);
             });

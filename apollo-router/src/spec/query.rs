@@ -95,6 +95,11 @@ impl Query {
 
         let parser = apollo_parser::Parser::new(string.as_str());
         let tree = parser.parse();
+
+        // Trace log recursion limit data
+        let recursion_limit = tree.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
         let errors = tree
             .errors()
             .map(|err| format!("{:?}", err))
