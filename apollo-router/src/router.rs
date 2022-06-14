@@ -468,7 +468,7 @@ where
         );
 
         let state_machine = StateMachine::new(server_factory, self.router_factory);
-        let ready = state_machine.listen_address.clone();
+        let listen_address = state_machine.listen_address.clone();
         let result = spawn(async move { state_machine.process_events(event_stream).await })
             .map(|r| match r {
                 Ok(Ok(ok)) => Ok(ok),
@@ -480,7 +480,7 @@ where
         RouterHandle {
             result,
             shutdown_sender: Some(shutdown_sender),
-            listen_address: ready,
+            listen_address,
         }
     }
 
