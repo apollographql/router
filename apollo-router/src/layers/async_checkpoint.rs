@@ -221,15 +221,13 @@ mod async_checkpoint_tests {
 
         let service = router_service.build();
 
-        let service_stack = AsyncCheckpointLayer::new(|_req| {
-            Box::pin(async {
-                Ok(ControlFlow::Break(
-                    ExecutionResponse::fake_builder()
-                        .label("returned_before_mock_service".to_string())
-                        .build()
-                        .boxed(),
-                ))
-            })
+        let service_stack = AsyncCheckpointLayer::new(|_req| async {
+            Ok(ControlFlow::Break(
+                ExecutionResponse::fake_builder()
+                    .label("returned_before_mock_service".to_string())
+                    .build()
+                    .boxed(),
+            ))
         })
         .layer(service);
 
