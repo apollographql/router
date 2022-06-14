@@ -59,7 +59,13 @@ pub use executable::{main, Executable};
 pub use request::Request;
 pub use response::Response;
 pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-pub use services::*;
+pub use services::http_compat;
+pub use services::PluggableRouterServiceBuilder;
+pub use services::ResponseBody;
+pub use services::{ExecutionRequest, ExecutionResponse, ExecutionService};
+pub use services::{QueryPlannerRequest, QueryPlannerResponse};
+pub use services::{RouterRequest, RouterResponse, RouterService};
+pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
 pub use spec::*;
 pub use traits::*;
 

@@ -5,7 +5,7 @@ use super::router_factory::RouterServiceFactory;
 use super::state_machine::State::{Errored, Running, Startup, Stopped};
 use crate::configuration::{Configuration, ListenAddr};
 use crate::plugin::Handler;
-use crate::Plugins;
+use crate::services::Plugins;
 use crate::Schema;
 use futures::prelude::*;
 use std::collections::HashMap;

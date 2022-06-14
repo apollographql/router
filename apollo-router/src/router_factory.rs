@@ -2,10 +2,11 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::services::Plugins;
 use crate::SubgraphService;
 use crate::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, Schema,
 };
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
