@@ -48,6 +48,11 @@ impl std::str::FromStr for Schema {
         fn parse(schema: &str) -> Result<Schema, SchemaError> {
             let parser = apollo_parser::Parser::new(schema);
             let tree = parser.parse();
+
+            // Trace log recursion limit data
+            let recursion_limit = tree.recursion_limit();
+            tracing::trace!(?recursion_limit, "recursion limit data");
+
             let errors = tree.errors().cloned().collect::<Vec<_>>();
 
             if !errors.is_empty() {

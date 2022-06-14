@@ -9,7 +9,7 @@ use apollo_router::{
     ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
     ValueExt,
 };
-use futures::stream::{BoxStream, StreamExt};
+use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -570,7 +570,7 @@ async fn query_rust(
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -613,11 +613,20 @@ async fn setup_router_and_registry() -> (
 }
 
 async fn query_with_router(
-    router: BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    router: BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    >,
     request: apollo_router::RouterRequest,
 ) -> apollo_router::Response {
-    let stream = router.oneshot(request).await.unwrap().next().await.unwrap();
-    let (_, response) = stream.response.into_parts();
+    let response = router
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
 
     match response {
         ResponseBody::GraphQL(response) => response,

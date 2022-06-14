@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
 use apollo_router::{PluggableRouterServiceBuilder, RouterRequest};
-use futures::StreamExt;
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
@@ -41,7 +40,7 @@ async fn main() -> Result<()> {
         .oneshot(request)
         .await
         .map_err(|e| anyhow!("router_service call failed: {}", e))?
-        .next()
+        .next_response()
         .await
         .unwrap();
 
@@ -52,6 +51,6 @@ async fn main() -> Result<()> {
     //     }
     //   }
     // }
-    println!("{}", serde_json::to_string_pretty(res.response.body())?);
+    println!("{}", serde_json::to_string_pretty(&res)?);
     Ok(())
 }

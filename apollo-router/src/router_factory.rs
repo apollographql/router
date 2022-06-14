@@ -8,7 +8,6 @@ use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
-use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +24,7 @@ use tower_service::Service;
 pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<crate::Request>,
-            Response = BoxStream<'static, Response<ResponseBody>>,
+            Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -51,7 +50,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
             Request<crate::Request>,
-            BoxStream<'static, Response<ResponseBody>>,
+            Response<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
         Request<crate::Request>,
@@ -85,10 +84,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
                 .map_request(|http_request: Request<crate::Request>| http_request.into())
-                .map_response(|response| {
-                    Box::pin(response.map(|r| r.response))
-                        as BoxStream<'static, Response<ResponseBody>>
-                })
+                .map_response(|response| response.response)
                 .boxed_clone(),
         );
 
