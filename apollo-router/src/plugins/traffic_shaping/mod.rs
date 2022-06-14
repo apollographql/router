@@ -127,9 +127,10 @@ mod test {
     use serde_json_bytes::{ByteString, Value};
     use tower::{util::BoxCloneService, Service};
 
+    use crate::json_ext::Object;
     use crate::{
-        utils::test::mock::subgraph::MockSubgraph, DynPlugin, Object,
-        PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
+        utils::test::mock::subgraph::MockSubgraph, DynPlugin, PluggableRouterServiceBuilder,
+        ResponseBody, RouterRequest, RouterResponse, Schema,
     };
 
     use super::*;

@@ -1,3 +1,4 @@
+use crate::json_ext::{Value, ValueExt};
 use crate::*;
 use apollo_parser::ast;
 use displaydoc::Display;

@@ -1,8 +1,6 @@
-mod bridge_query_planner;
-mod caching_query_planner;
-mod selection;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::json_ext::{Path, Value, ValueExt};
 use crate::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
@@ -13,6 +11,11 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use std::collections::HashSet;
 use tracing::Instrument;
+
+mod bridge_query_planner;
+mod caching_query_planner;
+mod selection;
+
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {
@@ -303,6 +306,7 @@ impl PlanNode {
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::error::{Error, FetchError};
+    use crate::json_ext::{Object, Path, Value, ValueExt};
     use crate::*;
     use indexmap::IndexSet;
     use serde::Deserialize;

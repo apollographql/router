@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::error::FetchError;
-use crate::*;
+use crate::json_ext::{Object, Path, Value};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;

@@ -8,32 +8,26 @@ use std::fmt;
 /// A JSON object.
 pub type Object = Map<ByteString, Value>;
 
-/// NOT PUBLIC API
-#[doc(hidden)]
-#[macro_export]
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
             Some($pattern) => Ok(Some($var)),
-            None | Some(Value::Null) => Ok(None),
+            None | Some(crate::json_ext::Value::Null) => Ok(None),
             _ => Err(concat!("invalid type for key: ", $key)),
         }
     }};
     ($object:expr, $key:literal) => {{
         match $object.remove($key) {
-            None | Some(Value::Null) => None,
+            None | Some(crate::json_ext::Value::Null) => None,
             Some(value) => Some(value),
         }
     }};
 }
 
-/// NOT PUBLIC API
-#[doc(hidden)]
-#[macro_export]
 macro_rules! ensure_object {
     ($value:expr) => {{
         match $value {
-            Value::Object(o) => Ok(o),
+            crate::json_ext::Value::Object(o) => Ok(o),
             _ => Err("invalid type, expected an object"),
         }
     }};

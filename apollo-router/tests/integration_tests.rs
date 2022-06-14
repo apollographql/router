@@ -2,12 +2,12 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_router::json_ext::{Object, ValueExt};
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
-    http_compat, plugins::csrf, Object, PluggableRouterServiceBuilder, Plugin, Request,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
-    ValueExt,
+    http_compat, plugins::csrf, PluggableRouterServiceBuilder, Plugin, Request, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
 };
 use futures::stream::BoxStream;
 use http::Method;

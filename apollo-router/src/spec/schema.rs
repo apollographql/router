@@ -2,6 +2,7 @@
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::json_ext::{Object, Value};
 use crate::*;
 use apollo_parser::ast;
 use http::Uri;

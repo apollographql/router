@@ -24,6 +24,9 @@ macro_rules! failfast_error {
     }};
 }
 
+#[macro_use]
+pub mod json_ext;
+
 mod axum_http_server_factory;
 mod cache;
 pub mod configuration;
@@ -33,7 +36,6 @@ mod executable;
 mod files;
 mod http_server_factory;
 mod introspection;
-mod json_ext;
 pub mod layers;
 pub mod plugin;
 pub mod plugins;
@@ -53,7 +55,6 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use json_ext::*;
 pub use layers::*;
 pub use plugin::*;
 pub use query_cache::*;

@@ -1,4 +1,5 @@
 use crate::error::FetchError;
+use crate::json_ext::{Object, Value, ValueExt};
 use crate::*;
 use serde::Deserialize;
 use serde_json_bytes::Entry;
@@ -131,6 +132,7 @@ fn select_value(
 mod tests {
     use super::Selection;
     use super::*;
+    use crate::json_ext::Path;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
 

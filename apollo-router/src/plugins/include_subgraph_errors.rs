@@ -68,9 +68,10 @@ impl Plugin for IncludeSubgraphErrors {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::json_ext::Object;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        DynPlugin, Object, PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest,
+        DynPlugin, PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest,
         RouterResponse, Schema,
     };
     use bytes::Bytes;

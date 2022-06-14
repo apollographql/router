@@ -1,10 +1,12 @@
 //! Customization via Rhai.
 
 use crate::error::Error;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Object, Plugin,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
+    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};

@@ -1,7 +1,7 @@
 use crate::error::Error;
+use crate::json_ext::Object;
 use crate::{
-    register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, Response,
-    ServiceBuilderExt,
+    register_plugin, ExecutionRequest, ExecutionResponse, Plugin, Response, ServiceBuilderExt,
 };
 use futures::stream::BoxStream;
 use http::StatusCode;
