@@ -2,7 +2,6 @@ use crate::*;
 use bytes::Bytes;
 use derivative::Derivative;
 use serde::{de::Error, Deserialize, Serialize};
-use std::sync::Arc;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
@@ -23,7 +22,7 @@ pub struct Request {
         default,
         deserialize_with = "deserialize_null_default"
     )]
-    pub variables: Arc<Object>,
+    pub variables: Object,
 
     ///  extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
@@ -52,7 +51,7 @@ impl Request {
         Self {
             query,
             operation_name,
-            variables: Arc::new(variables.unwrap_or_default()),
+            variables: variables.unwrap_or_default(),
             extensions: extensions.unwrap_or_default(),
         }
     }
@@ -126,7 +125,7 @@ impl Request {
         Ok(Request {
             query,
             operation_name,
-            variables: Arc::new(variables),
+            variables,
             extensions,
         })
     }
