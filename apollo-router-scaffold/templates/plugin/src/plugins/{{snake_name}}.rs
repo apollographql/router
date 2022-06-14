@@ -185,7 +185,7 @@ mod tests {
         };
 
         // Build an instance of our plugin to use in the test harness
-        let plugin = ResponseTimings::new(conf).await.expect("created plugin");
+        let plugin = {{pascal_name}}::new(conf).await.expect("created plugin");
 
         // Create the test harness. You can add mocks for individual services, or use prebuilt canned services.
         let mut test_harness = PluginTestHarness::builder()
