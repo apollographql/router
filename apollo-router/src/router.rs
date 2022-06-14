@@ -2,7 +2,7 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::Configuration;
 use crate::configuration::{validate_configuration, ListenAddr};
 use crate::reload::Error as ReloadError;
-use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
+use crate::router_factory::YamlRouterServiceFactory;
 use crate::state_machine::StateMachine;
 use derivative::Derivative;
 use derive_more::{Display, From};
@@ -359,10 +359,7 @@ impl ShutdownKind {
 /// };
 /// ```
 ///
-pub struct ApolloRouter<RF>
-where
-    RF: RouterServiceFactory,
-{
+pub struct ApolloRouter {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     pub(crate) configuration: ConfigurationKind,
 
@@ -372,17 +369,17 @@ where
     /// A future that when resolved will shut down the server.
     pub(crate) shutdown: ShutdownKind,
 
-    pub(crate) router_factory: RF,
+    pub(crate) router_factory: YamlRouterServiceFactory,
 }
 
 #[buildstructor::buildstructor]
-impl ApolloRouter<YamlRouterServiceFactory> {
+impl ApolloRouter {
     #[builder]
     pub fn new(
         configuration: ConfigurationKind,
         schema: SchemaKind,
         shutdown: Option<ShutdownKind>,
-    ) -> ApolloRouter<YamlRouterServiceFactory> {
+    ) -> ApolloRouter {
         ApolloRouter {
             configuration,
             schema,
@@ -447,10 +444,7 @@ impl Future for RouterHandle {
     }
 }
 
-impl<RF> ApolloRouter<RF>
-where
-    RF: RouterServiceFactory,
-{
+impl ApolloRouter {
     /// Start the federated server on a separate thread.
     ///
     /// Dropping the server handle will shutdown the server.
@@ -473,7 +467,10 @@ where
             .map(|r| match r {
                 Ok(Ok(ok)) => Ok(ok),
                 Ok(Err(err)) => Err(err),
-                Err(_err) => Err(ApolloRouterError::StartupError),
+                Err(err) => {
+                    tracing::error!("{}", err);
+                    Err(ApolloRouterError::StartupError)
+                }
             })
             .boxed();
 

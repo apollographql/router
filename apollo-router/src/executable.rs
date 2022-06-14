@@ -122,8 +122,6 @@ impl fmt::Display for ProjectDir {
 
 /// This is the main router entrypoint.
 ///
-/// It effectively builds a tokio runtime and runs `rt_main()`.
-///
 /// Refer to the examples if you would like how to run your own router with plugins.
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -135,104 +133,136 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    runtime.block_on(rt_main())
+    Executable::builder().runtime(runtime).start()
 }
 
-/// If you already have a tokio runtime, you can spawn the router like this:
-///
-/// ```no_run
-/// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
-///   apollo_router::rt_main().await
-/// }
-/// ```
-pub async fn rt_main() -> Result<()> {
-    let opt = Opt::parse();
+/// Entry point into creating a router executable.
+pub struct Executable {}
 
-    if opt.version {
-        println!("{}", std::env!("CARGO_PKG_VERSION"));
-        return Ok(());
+#[buildstructor::buildstructor]
+impl Executable {
+    /// Build an executable which can be blockingly started.
+    /// You may optionally supply a tokio `runtime` and `router_builder_fn` to override building of the router.
+    ///
+    /// ```no_run
+    /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
+    /// # use anyhow::Result;
+    /// # fn main()->Result<()> {
+    /// # let runtime = tokio::runtime::Runtime::new().unwrap();
+    /// Executable::builder()
+    ///   .runtime(runtime)
+    ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
+    ///                 .configuration(configuration)
+    ///                 .schema(schema)
+    ///                 .shutdown(ShutdownKind::CtrlC)
+    ///                 .build())
+    ///   .start()
+    /// # }
+    /// ```
+    /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
+    ///
+    #[builder(entry = "builder", exit = "start")]
+    pub fn build(
+        runtime: Option<tokio::runtime::Runtime>,
+        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+    ) -> Result<()> {
+        match runtime {
+            None => tokio::runtime::Handle::current().block_on(Executable::run(router_builder_fn)),
+            Some(runtime) => runtime.block_on(Executable::run(router_builder_fn)),
+        }
     }
 
-    copy_args_to_env();
+    async fn run(
+        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+    ) -> Result<()> {
+        let opt = Opt::parse();
 
-    if opt.schema {
-        let schema = generate_config_schema();
-        println!("{}", serde_json::to_string_pretty(&schema)?);
-        return Ok(());
-    }
-
-    // This is more complex than I'd like it to be. Really, we just want to pass
-    // a FmtSubscriber to set_global_subscriber(), but we can't because of the
-    // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
-    // for more details.
-    let builder = tracing_subscriber::fmt::fmt().with_env_filter(
-        EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
-    );
-
-    let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
-        RouterSubscriber::TextSubscriber(builder.finish())
-    } else {
-        RouterSubscriber::JsonSubscriber(builder.json().finish())
-    };
-
-    set_global_subscriber(subscriber)?;
-
-    GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
-
-    let current_directory = std::env::current_dir()?;
-
-    let configuration = opt
-        .config_path
-        .as_ref()
-        .map(|path| {
-            let path = if path.is_relative() {
-                current_directory.join(path)
-            } else {
-                path.to_path_buf()
-            };
-
-            ConfigurationKind::File {
-                path,
-                watch: opt.hot_reload,
-                delay: None,
-            }
-        })
-        .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
-    let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
-    let schema = match (opt.supergraph_path, opt.apollo_key) {
-        (Some(supergraph_path), _) => {
-            tracing::info!("{apollo_router_msg}");
-            setup_panic_handler();
-
-            let supergraph_path = if supergraph_path.is_relative() {
-                current_directory.join(supergraph_path)
-            } else {
-                supergraph_path
-            };
-            SchemaKind::File {
-                path: supergraph_path,
-                watch: opt.hot_reload,
-                delay: None,
-            }
+        if opt.version {
+            println!("{}", std::env!("CARGO_PKG_VERSION"));
+            return Ok(());
         }
-        (None, Some(apollo_key)) => {
-            tracing::info!("{apollo_router_msg}");
-            let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-            if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
-                return Err(anyhow!("Apollo poll interval must be at least 10s"));
-            }
 
-            SchemaKind::Registry {
-                apollo_key,
-                apollo_graph_ref,
-                url: opt.apollo_uplink_endpoints,
-                poll_interval: opt.apollo_uplink_poll_interval,
-            }
+        copy_args_to_env();
+
+        if opt.schema {
+            let schema = generate_config_schema();
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
         }
-        _ => {
-            return Err(anyhow!(
-                r#"{apollo_router_msg}
+
+        // This is more complex than I'd like it to be. Really, we just want to pass
+        // a FmtSubscriber to set_global_subscriber(), but we can't because of the
+        // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
+        // for more details.
+        let builder = tracing_subscriber::fmt::fmt().with_env_filter(
+            EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
+        );
+
+        let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
+            RouterSubscriber::TextSubscriber(builder.finish())
+        } else {
+            RouterSubscriber::JsonSubscriber(builder.json().finish())
+        };
+
+        set_global_subscriber(subscriber)?;
+
+        GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
+
+        let current_directory = std::env::current_dir()?;
+
+        let configuration = opt
+            .config_path
+            .as_ref()
+            .map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
+
+                ConfigurationKind::File {
+                    path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                }
+            })
+            .unwrap_or_else(|| {
+                ConfigurationKind::Instance(Configuration::builder().build().boxed())
+            });
+        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+        let schema = match (opt.supergraph_path, opt.apollo_key) {
+            (Some(supergraph_path), _) => {
+                tracing::info!("{apollo_router_msg}");
+                setup_panic_handler();
+
+                let supergraph_path = if supergraph_path.is_relative() {
+                    current_directory.join(supergraph_path)
+                } else {
+                    supergraph_path
+                };
+                SchemaKind::File {
+                    path: supergraph_path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                }
+            }
+            (None, Some(apollo_key)) => {
+                tracing::info!("{apollo_router_msg}");
+                let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
+                if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
+                    return Err(anyhow!("Apollo poll interval must be at least 10s"));
+                }
+
+                SchemaKind::Registry {
+                    apollo_key,
+                    apollo_graph_ref,
+                    url: opt.apollo_uplink_endpoints,
+                    poll_interval: opt.apollo_uplink_poll_interval,
+                }
+            }
+            _ => {
+                return Err(anyhow!(
+                    r#"{apollo_router_msg}
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
@@ -261,22 +291,23 @@ pub async fn rt_main() -> Result<()> {
     $ ./router --supergraph starstuff.graphql
 
     "#
-            ));
+                ));
+            }
+        };
+
+        let router = router_builder_fn.unwrap_or(|configuration, schema| {
+            ApolloRouter::builder()
+                .configuration(configuration)
+                .schema(schema)
+                .shutdown(ShutdownKind::CtrlC)
+                .build()
+        })(configuration, schema);
+        if let Err(err) = router.serve().await {
+            tracing::error!("{}", err);
+            return Err(err.into());
         }
-    };
-
-    let router = ApolloRouter::builder()
-        .configuration(configuration)
-        .schema(schema)
-        .shutdown(ShutdownKind::CtrlC)
-        .build();
-
-    if let Err(err) = router.serve().await {
-        tracing::error!("{}", err);
-        return Err(err.into());
+        Ok(())
     }
-
-    Ok(())
 }
 
 fn setup_panic_handler() {
