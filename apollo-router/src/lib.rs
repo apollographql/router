@@ -56,7 +56,6 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;

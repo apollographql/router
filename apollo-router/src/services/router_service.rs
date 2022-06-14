@@ -6,14 +6,15 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
+use crate::query_cache::QueryCache;
 use crate::services::execution_service::ExecutionService;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
-    BridgeQueryPlanner, CachingQueryPlanner, ExecutionRequest, ExecutionResponse, QueryCache,
-    QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
+    BridgeQueryPlanner, CachingQueryPlanner, ExecutionRequest, ExecutionResponse, QueryPlanOptions,
+    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
+    RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream, StreamExt};
