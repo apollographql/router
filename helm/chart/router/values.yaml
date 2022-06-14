@@ -33,6 +33,9 @@ extraEnvVars: []
 extraEnvVarsConfigMap: []
 extraEnvVarsSecret: []
 
+extraVolumes: []
+extraVolumeMounts: []
+
 image:
   repository: ghcr.io/apollographql/router
   pullPolicy: IfNotPresent

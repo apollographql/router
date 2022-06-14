@@ -97,18 +97,24 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.router.configuration }}
+          {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
           volumeMounts:
             - name: router-configuration
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
               readOnly: true
+          {{- if .Values.extraVolumeMounts }}
+            {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
           {{- end }}
-      {{- if .Values.router.configuration }}
+          {{- end }}
+      {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
+        {{- if .Values.extraVolumes }}
+        {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
