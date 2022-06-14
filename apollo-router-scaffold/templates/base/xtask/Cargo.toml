@@ -16,5 +16,5 @@ apollo-router-scaffold = { git="https://github.com/apollographql/router.git", br
 apollo-router-scaffold = { git="https://github.com/apollographql/router.git", tag="v0.9.3"}
 {{/if}}
 {{/if}}
-anyhow = "1.0.56"
-clap = "3.1.8"
+anyhow = "=1.0.56"
+clap = "=3.1.18"
