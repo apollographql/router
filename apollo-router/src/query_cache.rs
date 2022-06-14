@@ -5,7 +5,7 @@ use tracing::{info_span, Instrument};
 use crate::cache::CachingMap;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
-use crate::CacheResolver;
+use crate::traits::CacheResolver;
 use crate::*;
 use std::sync::Arc;
 

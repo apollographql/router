@@ -1,5 +1,5 @@
 use crate::error::CacheResolverError;
-use crate::CacheResolver;
+use crate::traits::CacheResolver;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use lru::LruCache;

@@ -68,7 +68,6 @@ pub use services::{RouterRequest, RouterResponse, RouterService};
 pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
 pub use spec::Schema;
 pub(crate) use spec::*;
-pub use traits::*;
 
 /// Useful traits.
 pub mod prelude {
