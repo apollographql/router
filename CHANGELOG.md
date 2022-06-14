@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [0.9.4] - 2022-06-14
 
 ## ❗ BREAKING ❗
-### The `apollo-router-core` crate has been merged into `apollo-router` ([PR](https://github.com/apollographql/router/pull/1189))
+### The `apollo-router-core` crate has been merged into `apollo-router` ([PR #1189](https://github.com/apollographql/router/pull/1189))
 
 To upgrade, remove any dependency on the `apollo-router-core` crate from your `Cargo.toml` files and change imports like so:
 
