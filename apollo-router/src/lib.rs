@@ -51,7 +51,7 @@ mod state_machine;
 pub mod subscriber;
 mod traits;
 
-pub use context::*;
+pub use context::Context;
 pub use error::*;
 pub use executable::{main, Executable};
 pub use introspection::*;
