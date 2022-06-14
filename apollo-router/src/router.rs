@@ -28,7 +28,7 @@ type SchemaStream = Pin<Box<dyn Stream<Item = crate::Schema> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
-pub enum FederatedServerError {
+pub enum ApolloRouterError {
     /// failed to start server
     StartupError,
 
@@ -270,15 +270,15 @@ impl ConfigurationKind {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
-        let config = fs::read_to_string(path).map_err(FederatedServerError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(FederatedServerError::ConfigError)?;
+    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
+        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
+        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
 
         Ok(config)
     }
 
-    fn read_schema(path: &Path) -> Result<crate::Schema, FederatedServerError> {
-        crate::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
+    fn read_schema(path: &Path) -> Result<crate::Schema, ApolloRouterError> {
+        crate::Schema::read(path).map_err(ApolloRouterError::ReadSchemaError)
     }
 }
 
@@ -413,19 +413,19 @@ pub(crate) enum Event {
 
 /// A handle that allows the client to await for various server events.
 pub struct RouterHandle {
-    result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
     listen_address: Arc<RwLock<Option<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
 impl RouterHandle {
     /// Returns the listen address when the router is ready to receive requests.
-    pub async fn listen_address(&self) -> Result<ListenAddr, FederatedServerError> {
+    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
         self.listen_address
             .read()
             .await
             .clone()
-            .ok_or(FederatedServerError::StartupError)
+            .ok_or(ApolloRouterError::StartupError)
     }
 }
 
@@ -440,7 +440,7 @@ impl Drop for RouterHandle {
 }
 
 impl Future for RouterHandle {
-    type Output = Result<(), FederatedServerError>;
+    type Output = Result<(), ApolloRouterError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.result.poll_unpin(cx)
@@ -473,7 +473,7 @@ where
             .map(|r| match r {
                 Ok(Ok(ok)) => Ok(ok),
                 Ok(Err(err)) => Err(err),
-                Err(_err) => Err(FederatedServerError::StartupError),
+                Err(_err) => Err(ApolloRouterError::StartupError),
             })
             .boxed();
 

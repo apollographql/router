@@ -1,9 +1,9 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use super::router_factory::RouterServiceFactory;
 use super::state_machine::State::{Errored, Running, Startup, Stopped};
+use super::ApolloRouterError::{NoConfiguration, NoSchema};
 use super::Event::{UpdateConfiguration, UpdateSchema};
-use super::FederatedServerError::{NoConfiguration, NoSchema};
-use super::{Event, FederatedServerError};
+use super::{ApolloRouterError, Event};
 use crate::configuration::{Configuration, ListenAddr};
 use crate::Schema;
 use crate::{Handler, Plugins};
@@ -33,7 +33,7 @@ enum State<RS> {
         plugins: Plugins,
     },
     Stopped,
-    Errored(FederatedServerError),
+    Errored(ApolloRouterError),
 }
 
 impl<T> Display for State<T> {
@@ -85,7 +85,7 @@ where
     pub(crate) async fn process_events(
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
-    ) -> Result<(), FederatedServerError> {
+    ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
         let mut state = Startup {
             configuration: None,
@@ -263,7 +263,7 @@ where
                 .await
                 .map_err(|err| {
                     tracing::error!("cannot create the router: {}", err);
-                    Errored(FederatedServerError::ServiceCreationError(err))
+                    Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
             let plugin_handlers: HashMap<String, Handler> = plugins
                 .iter()
@@ -553,7 +553,7 @@ mod tests {
                 ],
             )
             .await,
-            Err(FederatedServerError::ServiceCreationError(_)),
+            Err(ApolloRouterError::ServiceCreationError(_)),
         ));
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
@@ -645,13 +645,13 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listener: Option<Listener>,) -> Result<HttpServerHandle, FederatedServerError>;
+                listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
         }
     }
 
     impl HttpServerFactory for MockMyHttpServerFactory {
         type Future =
-            Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
+            Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
         fn create<RS>(
             &self,
@@ -659,7 +659,7 @@ mod tests {
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
             _plugin_handlers: HashMap<String, Handler>,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>
         where
             RS: Service<
                     Request<crate::Request>,
@@ -680,7 +680,7 @@ mod tests {
         server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterFactory,
         events: Vec<Event>,
-    ) -> Result<(), FederatedServerError> {
+    ) -> Result<(), ApolloRouterError> {
         let state_machine = StateMachine::new(server_factory, router_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())

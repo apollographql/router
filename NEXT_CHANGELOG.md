@@ -56,7 +56,7 @@ This is a breaking change since slightly invalid input might have validated befo
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
 
-### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227))
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234))
 `ApolloRouterBuilder` has been migrated to `buildstructor` for consistency with other code.
 Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
 `FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
@@ -66,8 +66,9 @@ Migration tips:
 * `StateListener`. This made the internal state machine unnecessarily complex. `listen_address()` remains on `ApolloRouterHandle`.
 * `FederatedServerHandle#shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
 * `FederatedServerHandle#ready()` has been renamed to `FederatedServerHandle#listen_address()`, it will return the address when the router is ready to serve requests.
+* `FederatedServerError` has been renamed to `ApolloRouterError`.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234
 
 ## 🚀 Features
 ### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
