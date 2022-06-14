@@ -24,7 +24,6 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features ( :rocket: )
@@ -40,6 +39,14 @@ export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
 
 ## 🐛 Fixes ( :bug: )
+
+### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
+
+Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
+resulting in some introspection queries not working.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ## 🐛 Fixes ( :bug: )
