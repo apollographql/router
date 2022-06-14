@@ -8,7 +8,7 @@ use apollo_router::{
 use serde_json::Value;
 use tower::ServiceExt;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn all_rhai_callbacks_are_invoked() {
     let env_filter = "apollo_router=info";
     let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
@@ -63,13 +63,13 @@ async fn all_rhai_callbacks_are_invoked() {
         "from_router_request",
         "from_router_response",
         "query_planner_service setup",
-        "from_query_planner_request",
         "from_query_planner_response",
+        "from_query_planner_request",
         "execution_service setup",
         "from_execution_request",
         "from_execution_response",
         "subgraph_service setup",
-        "fromsubgraph_request",
+        "from_subgraph_request",
     ] {
         assert!(tracing_test::internal::logs_with_scope_contain(
             "apollo_router",
