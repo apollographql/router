@@ -8,6 +8,9 @@ use apollo_router::{
 use serde_json::Value;
 use tower::ServiceExt;
 
+// This test will fail if run with the "multi_thread" flavor.
+// This is because tracing_test doesn't set a global subscriber, so logs will be dropped
+// if we're crossing a thread boundary
 #[tokio::test]
 async fn all_rhai_callbacks_are_invoked() {
     let env_filter = "apollo_router=info";

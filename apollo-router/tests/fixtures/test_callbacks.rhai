@@ -2,7 +2,7 @@
 
 fn router_service(service) {
     log_info("router_service setup");
-    service.map_request(|request| {        
+    service.map_request(|request| {
         log_info("from_router_request");
     });
     service.map_response(|response| {
