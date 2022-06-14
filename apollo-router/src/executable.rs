@@ -1,6 +1,6 @@
 //! Main entry point for CLI command to start server.
 
-use crate::configuration::generate_config_schema;
+use crate::configuration::{generate_config_schema, ConfigurationError};
 use crate::{
     configuration::Configuration,
     subscriber::{set_global_subscriber, RouterSubscriber},
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, fmt};
 use tracing_subscriber::EnvFilter;
-use url::Url;
+use url::{ParseError, Url};
 
 static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
@@ -70,9 +70,10 @@ pub struct Opt {
     #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
 
-    /// The endpoint polled to fetch the latest supergraph schema.
-    #[clap(long, env)]
-    apollo_uplink_endpoints: Option<Url>,
+    /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
+    #[clap(long, env, multiple_occurrences(true))]
+    // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
+    apollo_uplink_endpoints: Option<String>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
@@ -199,6 +200,7 @@ pub async fn rt_main() -> Result<()> {
             }
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
+
     let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
@@ -222,11 +224,23 @@ pub async fn rt_main() -> Result<()> {
             if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
             }
+            let uplink_endpoints: Option<Vec<Url>> = opt
+                .apollo_uplink_endpoints
+                .map(|e| {
+                    e.split(',')
+                        .map(|endpoint| Url::parse(endpoint.trim()))
+                        .collect::<Result<Vec<Url>, ParseError>>()
+                })
+                .transpose()
+                .map_err(|err| ConfigurationError::InvalidConfiguration {
+                    message: "bad value for apollo_uplink_endpoints, cannot parse to an url",
+                    error: err.to_string(),
+                })?;
 
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_uplink_endpoints,
+                urls: uplink_endpoints,
                 poll_interval: opt.apollo_uplink_poll_interval,
             }
         }
