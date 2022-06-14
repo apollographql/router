@@ -53,7 +53,6 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use introspection::*;
 pub use json_ext::*;
 pub use layers::*;
 pub use plugin::*;

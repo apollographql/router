@@ -3,11 +3,11 @@
 pub mod mock;
 pub mod service;
 
+use crate::introspection::Introspection;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::CachingQueryPlanner;
 use crate::ExecutionService;
-use crate::Introspection;
 use crate::Plugin;
 use crate::QueryCache;
 use crate::ResponseBody;
