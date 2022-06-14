@@ -1,5 +1,7 @@
 //! Calls out to nodejs query planner
 
+use super::PlanNode;
+use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::*;
 use async_trait::async_trait;

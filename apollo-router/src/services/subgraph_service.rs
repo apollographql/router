@@ -184,7 +184,7 @@ mod tests {
     use hyper::Body;
     use tower::{service_fn, ServiceExt};
 
-    use crate::fetch::OperationKind;
+    use crate::query_planner::fetch::OperationKind;
     use crate::{http_compat, Context, Request, SubgraphRequest};
 
     use super::*;

@@ -12,12 +12,13 @@ use crate::plugins::telemetry::metrics::{
     MetricsExporterHandle,
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::USAGE_REPORTING;
 use crate::reexports::router_bridge::planner::UsageReporting;
 use crate::subscriber::replace_layer;
 use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
     QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;

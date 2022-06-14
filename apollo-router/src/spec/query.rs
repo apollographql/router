@@ -3,8 +3,8 @@
 //! Parsing, formatting and manipulation of queries.
 
 use crate::error::FetchError;
-use crate::fetch::OperationKind;
 use crate::json_ext::{Object, Value};
+use crate::query_planner::fetch::OperationKind;
 use crate::*;
 use apollo_parser::ast;
 use derivative::Derivative;

@@ -305,6 +305,7 @@ impl PlanNode {
 
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
+    use super::QueryPlanOptions;
     use crate::error::{Error, FetchError};
     use crate::json_ext::{Object, Path, Value, ValueExt};
     use crate::*;
@@ -625,7 +626,7 @@ pub(crate) struct FlattenNode {
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
 mod log {
-    use crate::PlanNode;
+    use crate::query_planner::PlanNode;
     use serde_json_bytes::{ByteString, Map, Value};
 
     pub(crate) fn trace_query_plan(plan: &PlanNode) {

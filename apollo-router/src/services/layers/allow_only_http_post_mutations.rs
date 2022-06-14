@@ -60,9 +60,11 @@ where
 mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::error::Error;
+    use crate::http_compat;
+    use crate::plugin::utils::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{http_compat, PlanNode};
-    use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
     use serde_json::json;
     use tower::ServiceExt;
 

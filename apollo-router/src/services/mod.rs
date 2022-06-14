@@ -3,8 +3,10 @@
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::error::Error;
-use crate::fetch::OperationKind;
 use crate::json_ext::{Object, Path, Value};
+use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlanOptions;
 use crate::*;
 use futures::{
     future::{ready, Ready},

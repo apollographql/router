@@ -64,8 +64,10 @@ impl Plugin for ForbidMutations {
 mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::http_compat::Request;
+    use crate::plugin::utils::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
