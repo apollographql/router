@@ -119,7 +119,7 @@ impl Plugin for Csrf {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()?;
-                        Ok(ControlFlow::Break( res.boxed()))
+                        Ok(ControlFlow::Break(res.boxed()))
                     }
                 })
                 .service(service)
