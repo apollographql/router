@@ -1,7 +1,8 @@
-use crate::{
-    register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, Response,
-    ServiceBuilderExt,
-};
+use crate::error::Error;
+use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::{register_plugin, ExecutionRequest, ExecutionResponse, Response};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use std::ops::ControlFlow;
@@ -34,7 +35,7 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let error = crate::Error {
+                        let error = Error {
                             message: "Mutations are forbidden".to_string(),
                             locations: Default::default(),
                             path: Default::default(),
@@ -63,8 +64,10 @@ impl Plugin for ForbidMutations {
 mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::http_compat::Request;
+    use crate::plugin::utils::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
@@ -98,7 +101,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_mutations_pass_through() {
-        let expected_error = crate::Error {
+        let expected_error = Error {
             message: "Mutations are forbidden".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -146,7 +149,7 @@ mod forbid_http_get_mutations_tests {
             .unwrap();
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, response: Response) {
+    fn assert_error_matches(expected_error: &Error, response: Response) {
         assert_eq!(&response.errors[0], expected_error);
     }
 

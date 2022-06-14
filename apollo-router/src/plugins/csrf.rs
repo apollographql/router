@@ -1,6 +1,6 @@
-use crate::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::header;
 use http::{HeaderMap, StatusCode};
@@ -106,7 +106,7 @@ impl Plugin for Csrf {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         tracing::trace!("request is not preflighted");
-                        let error = crate::Error::builder().message(
+                        let error = crate::error::Error::builder().message(
                             format!(
                                 "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                                 Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
@@ -206,14 +206,14 @@ register_plugin!("apollo", "csrf", Csrf);
 mod csrf_tests {
     #[tokio::test]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({}))

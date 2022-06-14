@@ -3,17 +3,18 @@
 pub mod mock;
 pub mod service;
 
+use crate::introspection::Introspection;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Plugin;
+use crate::query_cache::QueryCache;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::CachingQueryPlanner;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::CachingQueryPlanner;
 use crate::ExecutionService;
-use crate::Introspection;
-use crate::Plugin;
-use crate::QueryCache;
 use crate::ResponseBody;
 use crate::RouterService;
 use crate::Schema;
-use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
 use crate::{RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 pub use service::{

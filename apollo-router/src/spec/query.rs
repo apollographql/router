@@ -2,7 +2,9 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::fetch::OperationKind;
+use crate::error::FetchError;
+use crate::json_ext::{Object, Value};
+use crate::query_planner::fetch::OperationKind;
 use crate::*;
 use apollo_parser::ast;
 use derivative::Derivative;
@@ -807,6 +809,7 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json_ext::ValueExt;
     use serde_json_bytes::json;
     use test_log::test;
 

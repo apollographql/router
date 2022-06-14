@@ -1,8 +1,8 @@
 use std::ops::ControlFlow;
 
-use apollo_router::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::plugin::Plugin;
+use apollo_router::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -58,7 +58,7 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::error_builder()
-                        .error(apollo_router::Error {
+                        .error(apollo_router::error::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         })
@@ -95,7 +95,9 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -106,7 +108,7 @@ mod tests {
     // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)

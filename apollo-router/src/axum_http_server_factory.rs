@@ -1,10 +1,11 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, ListenAddr};
+use crate::http_compat;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::ApolloRouterError;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
 use crate::ResponseBody;
-use crate::DEFAULT_BUFFER_SIZE;
-use crate::{http_compat, Handler};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
@@ -1262,7 +1263,7 @@ mod tests {
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                let example_response = crate::FetchError::SubrequestHttpError {
+                let example_response = crate::error::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
@@ -1294,7 +1295,7 @@ mod tests {
 
         assert_eq!(
             response,
-            crate::FetchError::SubrequestHttpError {
+            crate::error::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }

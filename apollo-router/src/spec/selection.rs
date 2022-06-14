@@ -1,4 +1,5 @@
-use crate::{FieldType, Object, Schema, SpecError};
+use crate::json_ext::Object;
+use crate::{FieldType, Schema, SpecError};
 use apollo_parser::ast::{self, Value};
 use serde_json_bytes::ByteString;
 

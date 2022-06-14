@@ -2,7 +2,8 @@
 //!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
-use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
+use crate::query_planner::fetch::OperationKind;
+use crate::{http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tokio::sync::{

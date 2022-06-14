@@ -60,7 +60,7 @@
 //!  We will need to validate that this remains true as the various moving
 //!  parts change (upgrade) over time.
 use crate::reload::{Handle, Layer as ReloadLayer};
-use crate::ApolloRouterError;
+use crate::router::ApolloRouterError;
 use once_cell::sync::OnceCell;
 use std::any::TypeId;
 use tracing::span::{Attributes, Record};

@@ -1,12 +1,12 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use super::router::ApolloRouterError::{self, NoConfiguration, NoSchema};
+use super::router::Event::{self, UpdateConfiguration, UpdateSchema};
 use super::router_factory::RouterServiceFactory;
 use super::state_machine::State::{Errored, Running, Startup, Stopped};
-use super::ApolloRouterError::{NoConfiguration, NoSchema};
-use super::Event::{UpdateConfiguration, UpdateSchema};
-use super::{ApolloRouterError, Event};
 use crate::configuration::{Configuration, ListenAddr};
+use crate::plugin::Handler;
+use crate::services::Plugins;
 use crate::Schema;
-use crate::{Handler, Plugins};
 use futures::prelude::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};

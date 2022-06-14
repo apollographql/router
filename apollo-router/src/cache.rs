@@ -1,4 +1,5 @@
-use crate::{CacheResolver, CacheResolverError};
+use crate::error::CacheResolverError;
+use crate::traits::CacheResolver;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use lru::LruCache;
@@ -154,7 +155,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CacheResolverError;
+    use crate::error::CacheResolverError;
     use async_trait::async_trait;
     use futures::stream::{FuturesUnordered, StreamExt};
     use mockall::mock;

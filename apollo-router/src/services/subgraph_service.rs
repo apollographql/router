@@ -15,6 +15,8 @@ use tower::{BoxError, ServiceBuilder};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::error::FetchError;
+
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub struct SubgraphService {
@@ -105,7 +107,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    crate::FetchError::SubrequestHttpError {
+                    FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
@@ -119,7 +121,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains("application/json")
                         && !content_type_str.contains("application/graphql+json")
                     {
-                        return Err(BoxError::from(crate::FetchError::SubrequestHttpError {
+                        return Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
                         }));
@@ -133,13 +135,13 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    crate::FetchError::SubrequestHttpError {
+                    FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
                 })?;
             if parts.status != StatusCode::OK {
-                return Err(BoxError::from(crate::FetchError::SubrequestHttpError {
+                return Err(BoxError::from(FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: format!(
                         "subgraph HTTP status error '{}': {})",
@@ -152,7 +154,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             let graphql: crate::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
                     crate::Response::from_bytes(&service_name, body).map_err(|error| {
-                        crate::FetchError::SubrequestMalformedResponse {
+                        FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
                         }
@@ -182,7 +184,7 @@ mod tests {
     use hyper::Body;
     use tower::{service_fn, ServiceExt};
 
-    use crate::fetch::OperationKind;
+    use crate::query_planner::fetch::OperationKind;
     use crate::{http_compat, Context, Request, SubgraphRequest};
 
     use super::*;

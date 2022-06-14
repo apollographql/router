@@ -1,6 +1,6 @@
-use apollo_router::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::plugin::Plugin;
+use apollo_router::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -67,7 +67,7 @@ impl Plugin for AllowClientIdFromFile {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     RouterResponse::error_builder()
-                        .error(apollo_router::Error {
+                        .error(apollo_router::error::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         })
@@ -101,7 +101,7 @@ impl Plugin for AllowClientIdFromFile {
                             res = Some(
                                 RouterResponse::builder()
                                     .data(Value::default())
-                                    .error(apollo_router::Error {
+                                    .error(apollo_router::error::Error {
                                         message: "client-id is not allowed".to_string(),
                                         ..Default::default()
                                     })
@@ -116,7 +116,7 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
                             RouterResponse::error_builder()
-                                .error(apollo_router::Error {
+                                .error(apollo_router::error::Error {
                                     message: format!("'{header_key}' value is not a string"),
                                     ..Default::default()
                                 })
@@ -175,7 +175,9 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -186,7 +188,7 @@ mod tests {
     // see router.yaml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.allow_client_id_from_file")
             .expect("Plugin not found")
             .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))

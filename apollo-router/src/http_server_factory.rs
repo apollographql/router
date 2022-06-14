@@ -1,7 +1,8 @@
-use super::ApolloRouterError;
+use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
 use crate::http_compat::{Request, Response};
-use crate::{Handler, ResponseBody};
+use crate::plugin::Handler;
+use crate::ResponseBody;
 use derivative::Derivative;
 use futures::prelude::*;
 use futures::{channel::oneshot, stream::BoxStream};

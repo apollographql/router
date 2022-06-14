@@ -1,7 +1,8 @@
 //! Implements the Execution phase of the request lifecycle.
 
+use crate::service_registry::ServiceRegistry;
+use crate::Schema;
 use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
-use crate::{Schema, ServiceRegistry};
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 

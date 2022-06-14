@@ -2,7 +2,11 @@
 
 pub use self::execution_service::*;
 pub use self::router_service::*;
-use crate::fetch::OperationKind;
+use crate::error::Error;
+use crate::json_ext::{Object, Path, Value};
+use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlanOptions;
 use crate::*;
 use futures::{
     future::{ready, Ready},
@@ -227,7 +231,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -282,7 +286,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn fake_new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -304,7 +308,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -412,7 +416,7 @@ impl QueryPlannerResponse {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -512,7 +516,7 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
@@ -553,7 +557,7 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -574,7 +578,7 @@ impl SubgraphResponse {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -660,7 +664,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
@@ -701,7 +705,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -723,7 +727,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,

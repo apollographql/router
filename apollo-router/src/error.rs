@@ -1,3 +1,6 @@
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};

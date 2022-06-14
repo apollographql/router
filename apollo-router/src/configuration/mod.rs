@@ -2,7 +2,6 @@
 // This entire file is license key functionality
 mod yaml;
 
-use crate::plugins;
 use crate::subscriber::is_global_subscriber_set;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -213,7 +212,7 @@ impl JsonSchema for ApolloPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = plugins()
+        let plugins = crate::plugin::plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
             .filter(|(name, _)| name.starts_with(APOLLO_PLUGIN_PREFIX))
@@ -247,7 +246,7 @@ impl JsonSchema for UserPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = plugins()
+        let plugins = crate::plugin::plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
             .filter(|(name, _)| !name.starts_with(APOLLO_PLUGIN_PREFIX))
@@ -770,7 +769,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SchemaError;
+    use crate::error::SchemaError;
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;

@@ -60,7 +60,9 @@
 //!  - Token refresh
 //!  - ...
 
-use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::plugin::Plugin;
+use apollo_router::{register_plugin, RouterRequest, RouterResponse};
 use apollo_router::{Context, ResponseBody};
 use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
@@ -235,7 +237,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, ResponseBody>>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router::Error {
+                        .errors(vec![apollo_router::error::Error {
                             message: msg,
                             ..Default::default()
                         }])
@@ -385,7 +387,9 @@ register_plugin!("example", "jwt", JwtAuth);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -393,7 +397,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))

@@ -110,13 +110,13 @@ register_plugin!("example", "hello_world", HelloWorld);
 mod tests {
     use super::{Conf, HelloWorld};
 
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::Plugin;
+    use apollo_router::plugin::utils::test::IntoSchema::Canned;
+    use apollo_router::plugin::utils::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.hello_world")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"name" : "Bob"}))

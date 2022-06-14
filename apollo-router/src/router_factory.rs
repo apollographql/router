@@ -1,10 +1,13 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
+use crate::SubgraphService;
 use crate::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
+    PluggableRouterServiceBuilder, ResponseBody, Schema,
 };
-use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -107,7 +110,7 @@ async fn create_plugins(
     schema: &Schema,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugins();
+    let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
@@ -203,10 +206,11 @@ fn visit(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod test {
     use crate::configuration::Configuration;
+    use crate::plugin::Plugin;
+    use crate::register_plugin;
     use crate::router_factory::YamlRouterServiceFactory;
     use crate::router_factory::{inject_schema_id, RouterServiceFactory};
     use crate::Schema;
-    use crate::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;
