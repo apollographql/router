@@ -4598,7 +4598,7 @@ mod tests {
               }
             }
           }}";
-        let _ = Query::parse(query, &api_schema).unwrap();
+        let _ = Query::parse(query, api_schema).unwrap();
 
         let query = "query {
             __schema {
@@ -4608,6 +4608,6 @@ mod tests {
             }
           }";
 
-        let _ = Query::parse(query, &api_schema).unwrap();
+        let _ = Query::parse(query, api_schema).unwrap();
     }
 }
