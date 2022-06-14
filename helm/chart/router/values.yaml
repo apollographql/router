@@ -29,7 +29,9 @@ managedFederation:
 #   - name: APOLLO_ROUTER_LOG
 #     value: debug
 #
-# extraEnvVars:
+extraEnvVars: []
+extraEnvVarsConfigMap: []
+extraEnvVarsSecret: []
 
 image:
   repository: ghcr.io/apollographql/router
