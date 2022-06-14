@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.9.3"
+version = "0.9.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -27,7 +27,7 @@ axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.65"
 buildstructor = "0.3.2"
 bytes = "1.1.0"
-clap = { version = "3.1.18", default-features = false, features = [
+clap = { version = "=3.1.18", default-features = false, features = [
     "env",
     "derive",
     "std",
