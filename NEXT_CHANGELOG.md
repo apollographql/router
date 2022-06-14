@@ -56,6 +56,19 @@ This is a breaking change since slightly invalid input might have validated befo
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
 
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227))
+`ApolloRouterBuilder` has been migrated to `buildstructor` for consistency with other code.
+Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
+`FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
+
+Migration tips:
+* The ability to supply your own `RouterServiceFactory` has been removed.
+* `StateListener`. This made the internal state machine unnecessarily complex. `listen_address()` remains on `ApolloRouterHandle`.
+* `FederatedServerHandle#shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
+* `FederatedServerHandle#ready()` has been renamed to `FederatedServerHandle#listen_address()`, it will return the address when the router is ready to serve requests.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227
+
 ## 🚀 Features
 ### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
 Apollo Parser now includes recursion limits which can be examined after parse execution. The router logs these

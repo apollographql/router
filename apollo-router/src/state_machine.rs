@@ -1,31 +1,31 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use super::router_factory::RouterServiceFactory;
-use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
+use super::state_machine::State::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
-use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use super::{Event, FederatedServerError};
+use crate::configuration::{Configuration, ListenAddr};
 use crate::Schema;
 use crate::{Handler, Plugins};
-use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use tokio::sync::{OwnedRwLockWriteGuard, RwLock};
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
 #[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<RS> {
+enum State<RS> {
     Startup {
         configuration: Option<Configuration>,
-        schema: Option<crate::Schema>,
+        schema: Option<Schema>,
     },
     Running {
         configuration: Arc<Configuration>,
-        schema: Arc<crate::Schema>,
+        schema: Arc<Schema>,
         #[derivative(Debug = "ignore")]
         router_service: RS,
         server_handle: HttpServerHandle,
@@ -36,13 +36,13 @@ enum PrivateState<RS> {
     Errored(FederatedServerError),
 }
 
-impl<T> Display for PrivateState<T> {
+impl<T> Display for State<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PrivateState::Startup { .. } => write!(f, "startup"),
-            PrivateState::Running { .. } => write!(f, "running"),
-            PrivateState::Stopped => write!(f, "stopped"),
-            PrivateState::Errored { .. } => write!(f, "errored"),
+            Startup { .. } => write!(f, "startup"),
+            Running { .. } => write!(f, "running"),
+            Stopped => write!(f, "stopped"),
+            Errored { .. } => write!(f, "errored"),
         }
     }
 }
@@ -59,26 +59,11 @@ where
     FA: RouterServiceFactory,
 {
     http_server_factory: S,
-    state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-}
 
-impl<RS> From<&PrivateState<RS>> for State {
-    fn from(private_state: &PrivateState<RS>) -> Self {
-        match private_state {
-            Startup { .. } => State::Startup,
-            Running {
-                server_handle,
-                schema,
-                ..
-            } => State::Running {
-                address: server_handle.listen_address().to_owned(),
-                schema: schema.as_str().to_string(),
-            },
-            Stopped => State::Stopped,
-            Errored { .. } => State::Errored,
-        }
-    }
+    // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
+    pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -86,15 +71,14 @@ where
     S: HttpServerFactory,
     FA: RouterServiceFactory + Send,
 {
-    pub(crate) fn new(
-        http_server_factory: S,
-        state_listener: Option<mpsc::Sender<State>>,
-        router_factory: FA,
-    ) -> Self {
+    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
+        let ready = Arc::new(RwLock::new(None));
+        let ready_guard = ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
-            state_listener,
             router_factory,
+            listen_address: ready,
+            listen_address_guard: Some(ready_guard),
         }
     }
 
@@ -107,11 +91,7 @@ where
             configuration: None,
             schema: None,
         };
-        let mut state_listener = self.state_listener.take();
-        let initial_state = State::from(&state);
-        <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
-            let last_public_state = State::from(&state);
             let new_state = match (state, message) {
                 // Startup: Handle configuration updates, maybe transition to running.
                 (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
@@ -216,13 +196,11 @@ where
                 }
             };
 
-            let new_public_state = State::from(&new_state);
-            if last_public_state != new_public_state {
-                <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
-                    .await;
-            }
-            tracing::debug!("transitioned to state {}", &new_state);
+            tracing::info!("transitioned to {}", &new_state);
             state = new_state;
+
+            // If we're running then let those waiting proceed.
+            self.maybe_update_listen_address(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -230,6 +208,9 @@ where
             }
         }
         tracing::debug!("stopped");
+
+        // If the listen_address_guard has not been taken, take it so that anything waiting on listen_address will proceed.
+        self.listen_address_guard.take();
 
         match state {
             Stopped => Ok(()),
@@ -240,21 +221,32 @@ where
         }
     }
 
-    async fn notify_state_listener(
-        state_listener: &mut Option<mpsc::Sender<State>>,
-        new_public_state: State,
+    async fn maybe_update_listen_address(
+        &mut self,
+        state: &mut State<<FA as RouterServiceFactory>::RouterService>,
     ) {
-        if let Some(state_listener) = state_listener {
-            let _ = state_listener.send(new_public_state).await;
+        let listen_address = if let Running { server_handle, .. } = &state {
+            let listen_address = server_handle.listen_address().clone();
+            Some(listen_address)
+        } else {
+            None
+        };
+
+        if let Some(listen_address) = listen_address {
+            if let Some(mut listen_address_guard) = self.listen_address_guard.take() {
+                *listen_address_guard = Some(listen_address);
+            } else {
+                *self.listen_address.write().await = Some(listen_address);
+            }
         }
     }
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        state: State<<FA as RouterServiceFactory>::RouterService>,
     ) -> Result<
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -315,8 +307,8 @@ where
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
@@ -421,13 +413,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![NoMoreConfiguration],
-                vec![State::Startup, State::Errored]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
             Err(NoConfiguration),
         ));
     }
@@ -437,13 +423,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![NoMoreSchema],
-                vec![State::Startup, State::Errored]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![NoMoreSchema],).await,
             Err(NoSchema),
         ));
     }
@@ -453,13 +433,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![Shutdown],
-                vec![State::Startup, State::Stopped]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![Shutdown],).await,
             Ok(()),
         ));
     }
@@ -478,14 +452,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -508,18 +474,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: minimal_schema.to_string()
-                    },
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string(),
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -551,18 +505,6 @@ mod tests {
                     ),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -584,14 +526,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -617,7 +551,6 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                 ],
-                vec![State::Startup, State::Errored,]
             )
             .await,
             Err(FederatedServerError::ServiceCreationError(_)),
@@ -656,14 +589,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -755,15 +680,11 @@ mod tests {
         server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterFactory,
         events: Vec<Event>,
-        expected_states: Vec<State>,
     ) -> Result<(), FederatedServerError> {
-        let (state_listener, state_receiver) = mpsc::channel(100);
-        let state_machine = StateMachine::new(server_factory, Some(state_listener), router_factory);
+        let state_machine = StateMachine::new(server_factory, router_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())
             .await;
-        let states = state_receiver.collect::<Vec<State>>().await;
-        assert_eq!(states, expected_states);
         result
     }
 
