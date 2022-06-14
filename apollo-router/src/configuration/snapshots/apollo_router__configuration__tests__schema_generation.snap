@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 697
+assertion_line: 739
 expression: "&schema"
 ---
 {
@@ -318,12 +318,23 @@ expression: "&schema"
             "all": {
               "type": "object",
               "properties": {
+                "compression": {
+                  "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
+                  "type": "string",
+                  "enum": [
+                    "gzip",
+                    "deflate",
+                    "br"
+                  ],
+                  "nullable": true
+                },
                 "query_deduplication": {
                   "description": "Enable query deduplication",
                   "type": "boolean",
                   "nullable": true
                 }
               },
+              "additionalProperties": false,
               "nullable": true
             },
             "subgraphs": {
@@ -331,12 +342,23 @@ expression: "&schema"
               "additionalProperties": {
                 "type": "object",
                 "properties": {
+                  "compression": {
+                    "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
+                    "type": "string",
+                    "enum": [
+                      "gzip",
+                      "deflate",
+                      "br"
+                    ],
+                    "nullable": true
+                  },
                   "query_deduplication": {
                     "description": "Enable query deduplication",
                     "type": "boolean",
                     "nullable": true
                   }
-                }
+                },
+                "additionalProperties": false
               }
             },
             "variables_deduplication": {

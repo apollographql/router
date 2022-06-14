@@ -5,7 +5,7 @@ use crate::FederatedServerError;
 use crate::ResponseBody;
 use crate::{http_compat, Handler};
 use crate::{prelude::*, DEFAULT_BUFFER_SIZE};
-use async_compression::tokio::write::{BrotliDecoder, ZlibDecoder, GzipDecoder};
+use async_compression::tokio::write::{BrotliDecoder, GzipDecoder, ZlibDecoder};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
