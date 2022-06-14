@@ -53,98 +53,91 @@ impl Plugin for AllowClientIdFromFile {
         // see https://rust-lang.github.io/async-book/03_async_await/01_chapter.html#async-lifetimes for more information
         let allowed_ids_path = self.allowed_ids_path.clone();
 
+        let handler =
+            move |req: RouterRequest| {
+                // If we set a res, then we are going to break execution
+                // If not, we are continuing
+                let mut res = None;
+                if !req.originating_request.headers().contains_key(&header_key) {
+                    // Prepare an HTTP 401 response with a GraphQL error message
+                    res = Some(
+                        RouterResponse::error_builder()
+                            .error(apollo_router::Error {
+                                message: format!("Missing '{header_key}' header"),
+                                ..Default::default()
+                            })
+                            .status_code(StatusCode::UNAUTHORIZED)
+                            .context(req.context.clone())
+                            .build()
+                            .expect("response is valid"),
+                    );
+                } else {
+                    // It is best practice to perform checks before we unwrap,
+                    // And to use `expect()` instead of `unwrap()`, with a message
+                    // that explains why the use of `expect()` is safe
+                    let client_id = req
+                        .originating_request
+                        .headers()
+                        .get("x-client-id")
+                        .expect("this cannot fail; we checked for header presence above;qed")
+                        .to_str();
+
+                    match client_id {
+                        Ok(client_id) => {
+                            let allowed_clients: Vec<String> = serde_json::from_str(
+                                std::fs::read_to_string(allowed_ids_path.clone())
+                                    .unwrap()
+                                    .as_str(),
+                            )
+                            .unwrap();
+
+                            if !allowed_clients.contains(&client_id.to_string()) {
+                                // Prepare an HTTP 403 response with a GraphQL error message
+                                res = Some(
+                                    RouterResponse::builder()
+                                        .data(Value::default())
+                                        .error(apollo_router::Error {
+                                            message: "client-id is not allowed".to_string(),
+                                            ..Default::default()
+                                        })
+                                        .status_code(StatusCode::FORBIDDEN)
+                                        .context(req.context.clone())
+                                        .build()
+                                        .expect("response is valid"),
+                                );
+                            }
+                        }
+                        Err(_not_a_string_error) => {
+                            // Prepare an HTTP 400 response with a GraphQL error message
+                            res = Some(
+                                RouterResponse::error_builder()
+                                    .error(apollo_router::Error {
+                                        message: format!("'{header_key}' value is not a string"),
+                                        ..Default::default()
+                                    })
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .context(req.context.clone())
+                                    .build()
+                                    .expect("response is valid"),
+                            );
+                        }
+                    };
+                }
+                async {
+                    // Check to see if we built a response. If we did, we need to Break.
+                    match res {
+                        Some(res) => Ok(ControlFlow::Break(Box::pin(once(async move { res }))
+                            as BoxStream<'static, RouterResponse>)),
+                        None => Ok(ControlFlow::Continue(req)),
+                    }
+                }
+            };
         // `ServiceBuilder` provides us with an `async_checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
-        // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
+        // or ControlFlow::Break(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .checkpoint_async(move |req: RouterRequest| {
-                // The http_request is stored in a `RouterRequest` context.
-                // We are going to check the headers for the presence of the header we're looking for
-                if !req.originating_request.headers().contains_key(&header_key) {
-                    // Prepare an HTTP 401 response with a GraphQL error message
-                    let res = RouterResponse::error_builder()
-                        .error(apollo_router::Error {
-                            message: format!("Missing '{header_key}' header"),
-                            ..Default::default()
-                        })
-                        .status_code(StatusCode::UNAUTHORIZED)
-                        .context(req.context)
-                        .build()
-                        .expect("response is valid");
-                    return Box::pin(async {
-                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                            as BoxStream<'static, RouterResponse>))
-                    });
-                }
-
-                // It is best practice to perform checks before we unwrap,
-                // And to use `expect()` instead of `unwrap()`, with a message
-                // that explains why the use of `expect()` is safe
-                let client_id = req
-                    .originating_request
-                    .headers()
-                    .get("x-client-id")
-                    .expect("this cannot fail; we checked for header presence above;qed")
-                    .to_str();
-
-                let client_id_string = match client_id {
-                    Ok(client_id) => client_id.to_string(),
-                    Err(_not_a_string_error) => {
-                        // Prepare an HTTP 400 response with a GraphQL error message
-                        let res = RouterResponse::error_builder()
-                            .error(apollo_router::Error {
-                                message: format!("'{header_key}' value is not a string"),
-                                ..Default::default()
-                            })
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build()
-                            .expect("response is valid");
-                        return Box::pin(async {
-                            Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                                as BoxStream<'static, RouterResponse>))
-                        });
-                    }
-                };
-
-                // like at the beginning of this function call, we are about to return a future,
-                // which will run whenever the service `await`s it.
-                // we need allowed_ids_path to be available for the spawned future,
-                // but also for any future (pun intended) call / request that will be made against this service
-                //
-                // This is why we will give our future a clone of the allowed ids.
-                //
-                // see https://rust-lang.github.io/async-book/03_async_await/01_chapter.html#async-lifetimes for more information
-                let allowed_ids_path = allowed_ids_path.clone();
-                Box::pin(async move {
-                    let allowed_clients: Vec<String> = serde_json::from_str(
-                        tokio::fs::read_to_string(allowed_ids_path)
-                            .await
-                            .unwrap()
-                            .as_str(),
-                    )
-                    .unwrap();
-
-                    if allowed_clients.contains(&client_id_string) {
-                        Ok(ControlFlow::Continue(req))
-                    } else {
-                        // Prepare an HTTP 403 response with a GraphQL error message
-                        let res = RouterResponse::builder()
-                            .data(Value::default())
-                            .error(apollo_router::Error {
-                                message: "client-id is not allowed".to_string(),
-                                ..Default::default()
-                            })
-                            .status_code(StatusCode::FORBIDDEN)
-                            .context(req.context)
-                            .build()
-                            .expect("response is valid");
-                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                            as BoxStream<'static, RouterResponse>))
-                    }
-                })
-            })
+            .checkpoint_async(handler)
             // Given the async nature of our checkpoint, we need to make sure
             // the underlying service will be available whenever the checkpoint
             // returns ControlFlow::Continue.
