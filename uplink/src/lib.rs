@@ -86,6 +86,9 @@ pub fn stream_supergraph(
                         tracing::trace!("schema did not change");
                     }
                     supergraph_sdl::SupergraphSdlRouterConfig::FetchError(e) => {
+                        if let Some(urls) = &urls {
+                            current_url_idx = (current_url_idx + 1) % urls.len();
+                        }
                         if sender
                             .send(Err(Error::UpLink {
                                 code: e.code,
@@ -100,13 +103,13 @@ pub fn stream_supergraph(
                 },
                 Err(err) => {
                     tracing::error!("error fetching supergraph from Uplink: {:?}", err);
+                    if let Some(urls) = &urls {
+                        current_url_idx = (current_url_idx + 1) % urls.len();
+                    }
                     if sender.send(Err(err)).await.is_err() {
                         break;
                     }
                 }
-            }
-            if let Some(urls) = &urls {
-                current_url_idx = (current_url_idx + 1) % urls.len();
             }
 
             interval.tick().await;

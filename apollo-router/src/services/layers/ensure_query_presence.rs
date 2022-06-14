@@ -5,8 +5,8 @@
 //! If the request does not contain a query, then the request is rejected.
 
 use crate::sync_checkpoint::CheckpointService;
-use crate::{RouterRequest, RouterResponse};
-use futures::stream::{once, BoxStream};
+use crate::{ResponseBody, RouterRequest, RouterResponse};
+use futures::stream::BoxStream;
 use http::StatusCode;
 use serde_json_bytes::Value;
 use std::ops::ControlFlow;
@@ -17,7 +17,9 @@ pub struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = BoxStream<'static, RouterResponse>> + Send + 'static,
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+        + Send
+        + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -44,7 +46,7 @@ where
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    Ok(ControlFlow::Break(Box::pin(once(async { res }))))
+                    Ok(ControlFlow::Break(res.boxed()))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -59,18 +61,16 @@ mod ensure_query_presence_tests {
     use super::*;
     use crate::plugin::utils::test::MockRouterService;
     use crate::ResponseBody;
-    use futures::StreamExt;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_works_with_query() {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_req| {
-            Ok(Box::pin(once(async {
-                RouterResponse::fake_builder()
-                    .build()
-                    .expect("expecting valid request")
-            })))
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request")
+                .boxed())
         });
 
         let mock = mock_service.build();
@@ -102,11 +102,9 @@ mod ensure_query_presence_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
-            .unwrap()
-            .response
-            .into_body();
+            .unwrap();
         let actual_error = if let ResponseBody::GraphQL(b) = response {
             b.errors[0].message.clone()
         } else {
@@ -132,11 +130,9 @@ mod ensure_query_presence_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
-            .unwrap()
-            .response
-            .into_body();
+            .unwrap();
         let actual_error = if let ResponseBody::GraphQL(b) = response {
             b.errors[0].message.clone()
         } else {

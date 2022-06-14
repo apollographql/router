@@ -18,14 +18,14 @@ failfast = []
 
 [dependencies]
 anyhow = "1.0.57"
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", tag = "hotfix_227" }
+apollo-parser = "0.2.8"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
 async-trait = "0.1.53"
 atty = "0.2.14"
 axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.65"
-buildstructor = "0.3.0"
+buildstructor = "0.3.2"
 bytes = "1.1.0"
 clap = { version = "3.1.18", default-features = false, features = [
     "env",

@@ -6,10 +6,10 @@ use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
     http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
     ValueExt,
 };
-use futures::stream::{BoxStream, StreamExt};
+use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -602,7 +602,7 @@ async fn query_rust(
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -629,14 +629,13 @@ async fn setup_router_and_registry() -> (
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = TowerSubgraphService::new(name.to_owned()).map_request(
-            move |request: SubgraphRequest| {
+        let service =
+            SubgraphService::new(name.to_owned()).map_request(move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
 
                 request
-            },
-        );
+            });
         builder = builder.with_subgraph_service(name, service);
     }
 
@@ -646,11 +645,20 @@ async fn setup_router_and_registry() -> (
 }
 
 async fn query_with_router(
-    router: BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    router: BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    >,
     request: graphql::RouterRequest,
 ) -> graphql::Response {
-    let stream = router.oneshot(request).await.unwrap().next().await.unwrap();
-    let (_, response) = stream.response.into_parts();
+    let response = router
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
 
     match response {
         ResponseBody::GraphQL(response) => response,

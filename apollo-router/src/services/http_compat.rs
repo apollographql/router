@@ -4,6 +4,10 @@
 
 use axum::{body::boxed, response::IntoResponse};
 use bytes::Bytes;
+use futures::{
+    future::ready,
+    stream::{once, BoxStream},
+};
 use http::{
     header::{self, HeaderName},
     request::Parts,
@@ -74,6 +78,7 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
     }
 }
 
+/// Wrap an http Request.
 #[derive(Debug)]
 pub struct Request<T> {
     inner: http::Request<T>,
@@ -249,6 +254,7 @@ impl<T: PartialEq> PartialEq for Request<T> {
 
 impl<T: PartialEq> Eq for Request<T> {}
 
+/// Wrap an http Response.
 #[derive(Debug, Default)]
 pub struct Response<T> {
     pub inner: http::Response<T>,
@@ -259,18 +265,32 @@ impl<T> Response<T> {
         self.inner.into_parts()
     }
 
+    pub fn from_parts(head: http::response::Parts, body: T) -> Response<T> {
+        Response {
+            inner: http::Response::from_parts(head, body),
+        }
+    }
+
     pub fn into_body(self) -> T {
         self.inner.into_body()
     }
 
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
-        F: FnOnce(T) -> U,
+        F: FnMut(T) -> U,
     {
         self.inner.map(f).into()
     }
 }
 
+impl Response<BoxStream<'static, ResponseBody>> {
+    pub fn from_response_to_stream(http: http::response::Response<ResponseBody>) -> Self {
+        let (parts, body) = http.into_parts();
+        Response {
+            inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
+        }
+    }
+}
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 

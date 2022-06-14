@@ -362,7 +362,7 @@ mod test {
             )
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
