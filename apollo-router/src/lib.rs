@@ -58,7 +58,7 @@ pub use context::Context;
 pub use executable::{main, Executable};
 pub use request::Request;
 pub use response::Response;
-pub use service_registry::*;
+pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 pub use services::*;
 pub use spec::*;
 pub use traits::*;

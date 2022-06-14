@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::json_ext::{Path, Value, ValueExt};
+use crate::service_registry::ServiceRegistry;
 use crate::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
@@ -308,6 +309,7 @@ pub(crate) mod fetch {
     use super::QueryPlanOptions;
     use crate::error::{Error, FetchError};
     use crate::json_ext::{Object, Path, Value, ValueExt};
+    use crate::service_registry::ServiceRegistry;
     use crate::*;
     use indexmap::IndexSet;
     use serde::Deserialize;
