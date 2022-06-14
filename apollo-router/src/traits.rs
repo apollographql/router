@@ -1,7 +1,6 @@
 use crate::*;
 use async_trait::async_trait;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 /// A cache resolution trait.
 ///
@@ -31,7 +30,7 @@ pub trait QueryPlanner: Send + Sync + Debug {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
+    ) -> Result<QueryPlan, QueryPlannerError>;
 }
 
 /// With caching trait.

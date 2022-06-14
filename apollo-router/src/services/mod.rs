@@ -388,7 +388,7 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
-    pub query_plan: Arc<QueryPlan>,
+    pub query_plan: QueryPlan,
 
     pub context: Context,
 }
@@ -399,7 +399,7 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
+    pub fn new(query_plan: QueryPlan, context: Context) -> QueryPlannerResponse {
         Self {
             query_plan,
             context,
@@ -419,7 +419,7 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(QueryPlan::fake_builder().build()),
+            QueryPlan::fake_builder().build(),
             context,
         ))
     }
@@ -596,7 +596,7 @@ pub struct ExecutionRequest {
     /// Original request to the Router.
     pub originating_request: http_compat::Request<Request>,
 
-    pub query_plan: Arc<QueryPlan>,
+    pub query_plan: QueryPlan,
 
     pub context: Context,
 }
@@ -610,7 +610,7 @@ impl ExecutionRequest {
     #[builder]
     pub fn new(
         originating_request: http_compat::Request<Request>,
-        query_plan: Arc<QueryPlan>,
+        query_plan: QueryPlan,
         context: Context,
     ) -> ExecutionRequest {
         Self {
@@ -633,7 +633,7 @@ impl ExecutionRequest {
     ) -> ExecutionRequest {
         ExecutionRequest::new(
             originating_request.unwrap_or_else(http_compat::Request::mock),
-            Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
+            query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build()),
             context.unwrap_or_default(),
         )
     }

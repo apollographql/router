@@ -19,7 +19,7 @@ pub struct QueryPlanOptions {
 }
 
 /// A plan for a [`crate::Query`]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct QueryPlan {
     pub usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
@@ -47,7 +47,7 @@ impl QueryPlan {
 }
 
 /// Query plans are composed of a set of nodes.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum PlanNode {
     /// These nodes must be executed in order.
@@ -326,7 +326,7 @@ pub(crate) mod fetch {
     }
 
     /// A fetch node.
-    #[derive(Debug, PartialEq, Deserialize)]
+    #[derive(Clone, Debug, PartialEq, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
@@ -604,7 +604,7 @@ pub(crate) mod fetch {
 }
 
 /// A flatten node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlattenNode {
     /// The path when result should be merged.

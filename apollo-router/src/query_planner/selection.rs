@@ -4,7 +4,7 @@ use serde_json_bytes::Entry;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum Selection {
     /// A field selection.
@@ -15,7 +15,7 @@ pub(crate) enum Selection {
 }
 
 /// The field that is used
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Field {
     /// An optional alias for the field.
@@ -31,7 +31,7 @@ pub(crate) struct Field {
 }
 
 /// An inline fragment.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InlineFragment {
     /// The required fragment type.

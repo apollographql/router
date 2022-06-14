@@ -74,7 +74,7 @@ impl QueryPlanner for BridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<Arc<query_planner::QueryPlan>, QueryPlannerError> {
+    ) -> Result<query_planner::QueryPlan, QueryPlannerError> {
         let planner_result = self
             .planner
             .plan(query, operation)
@@ -87,11 +87,11 @@ impl QueryPlanner for BridgeQueryPlanner {
             PlanSuccess {
                 data: QueryPlan { node: Some(node) },
                 usage_reporting,
-            } => Ok(Arc::new(query_planner::QueryPlan {
+            } => Ok(query_planner::QueryPlan {
                 usage_reporting,
                 root: node,
                 options,
-            })),
+            }),
             PlanSuccess {
                 data: QueryPlan { node: None },
                 usage_reporting,

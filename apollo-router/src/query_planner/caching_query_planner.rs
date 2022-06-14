@@ -7,14 +7,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
-type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
+type PlanResult = Result<QueryPlan, QueryPlannerError>;
 
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
-    cm: Arc<CachingMap<QueryKey, Arc<QueryPlan>>>,
+    cm: Arc<CachingMap<QueryKey, QueryPlan>>,
     phantom: PhantomData<T>,
 }
 
@@ -40,8 +40,8 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
 }
 
 #[async_trait]
-impl<T: QueryPlanner> CacheResolver<QueryKey, Arc<QueryPlan>> for CachingQueryPlannerResolver<T> {
-    async fn retrieve(&self, key: QueryKey) -> Result<Arc<QueryPlan>, CacheResolverError> {
+impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlan> for CachingQueryPlannerResolver<T> {
+    async fn retrieve(&self, key: QueryKey) -> Result<QueryPlan, CacheResolverError> {
         self.delegate
             .get(key.0, key.1, key.2)
             .await
