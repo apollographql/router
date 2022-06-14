@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.9.3"
+version = "0.9.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
