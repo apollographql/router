@@ -1,4 +1,6 @@
 use crate::cache::CachingMap;
+use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
 use crate::CacheResolver;
 use crate::*;
 use async_trait::async_trait;

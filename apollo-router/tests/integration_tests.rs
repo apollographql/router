@@ -200,7 +200,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error =apollo_router::Error {
+    let expected_error = apollo_router::error::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -268,7 +268,7 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error =apollo_router::Error {
+    let expected_error = apollo_router::error::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
@@ -390,7 +390,7 @@ async fn automated_persisted_queries() {
                 {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
         }),
     );
-    let expected_apq_miss_error = apollo_router::Error {
+    let expected_apq_miss_error = apollo_router::error::Error {
         message: "PersistedQueryNotFound".to_string(),
         extensions,
         ..Default::default()
@@ -524,11 +524,11 @@ async fn missing_variables() {
 
     let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
-        apollo_router::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        apollo_router::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
@@ -542,20 +542,22 @@ async fn missing_variables() {
 
 async fn query_node(
     request: &apollo_router::Request,
-) -> Result<apollo_router::Response, apollo_router::FetchError> {
+) -> Result<apollo_router::Response, apollo_router::error::FetchError> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
         .send()
         .await
-        .map_err(|err| apollo_router::FetchError::SubrequestHttpError {
-            service: "test node".to_string(),
-            reason: err.to_string(),
-        })?
+        .map_err(
+            |err| apollo_router::error::FetchError::SubrequestHttpError {
+                service: "test node".to_string(),
+                reason: err.to_string(),
+            },
+        )?
         .json()
         .await
         .map_err(
-            |err| apollo_router::FetchError::SubrequestMalformedResponse {
+            |err| apollo_router::error::FetchError::SubrequestMalformedResponse {
                 service: "test node".to_string(),
                 reason: err.to_string(),
             },

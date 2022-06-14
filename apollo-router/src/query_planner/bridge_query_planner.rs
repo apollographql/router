@@ -1,5 +1,6 @@
 //! Calls out to nodejs query planner
 
+use crate::error::QueryPlannerError;
 use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;

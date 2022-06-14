@@ -1,3 +1,5 @@
+use crate::error::Error;
+use crate::error::FetchError;
 use crate::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -118,6 +120,8 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::Location;
+
     use super::*;
     use serde_json::json;
     use serde_json_bytes::json as bjson;

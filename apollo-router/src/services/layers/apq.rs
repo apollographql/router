@@ -5,6 +5,7 @@
 
 use std::ops::ControlFlow;
 
+use crate::error::Error;
 use crate::sync_checkpoint::CheckpointService;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
@@ -89,7 +90,7 @@ where
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
-                            let errors = vec![crate::Error {
+                            let errors = vec![Error {
                                 message: "PersistedQueryNotFound".to_string(),
                                 locations: Default::default(),
                                 path: Default::default(),
@@ -129,6 +130,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
+    use crate::error::Error;
     use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
@@ -141,7 +143,7 @@ mod apq_tests {
         let hash2 = hash.clone();
         let hash3 = hash.clone();
 
-        let expected_apq_miss_error = crate::Error {
+        let expected_apq_miss_error = Error {
             message: "PersistedQueryNotFound".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -259,7 +261,7 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = crate::Error {
+        let expected_apq_miss_error = Error {
             message: "PersistedQueryNotFound".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -367,7 +369,7 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, res: crate::ResponseBody) {
+    fn assert_error_matches(expected_error: &Error, res: crate::ResponseBody) {
         if let ResponseBody::GraphQL(graphql_response) = res {
             assert_eq!(&graphql_response.errors[0], expected_error);
         } else {

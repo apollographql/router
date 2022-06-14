@@ -1,4 +1,4 @@
-use crate::*;
+use crate::error::FetchError;
 use serde::{Deserialize, Serialize};
 pub use serde_json_bytes::Value;
 use serde_json_bytes::{ByteString, Entry, Map};

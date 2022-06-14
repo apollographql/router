@@ -51,7 +51,7 @@ pub enum ApolloRouterError {
     ConfigError(crate::configuration::ConfigurationError),
 
     /// could not read schema: {0}
-    ReadSchemaError(crate::SchemaError),
+    ReadSchemaError(crate::error::SchemaError),
 
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(tower::BoxError),
@@ -547,7 +547,7 @@ mod tests {
     async fn query(
         listen_addr: &ListenAddr,
         request: &crate::Request,
-    ) -> Result<crate::Response, crate::FetchError> {
+    ) -> Result<crate::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
             .post(format!("{}/", listen_addr))
             .json(request)

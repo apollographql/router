@@ -1,6 +1,8 @@
 mod bridge_query_planner;
 mod caching_query_planner;
 mod selection;
+use crate::error::Error;
+use crate::error::FetchError;
 use crate::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
@@ -300,6 +302,7 @@ impl PlanNode {
 
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
+    use crate::error::{Error, FetchError};
     use crate::*;
     use indexmap::IndexSet;
     use serde::Deserialize;

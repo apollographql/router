@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use crate::error::ServiceBuildError;
 use crate::services::execution_service::ExecutionService;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQLayer;
@@ -7,8 +8,8 @@ use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     Introspection, Plugin, QueryCache, QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse,
-    Response, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    Response, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream, StreamExt};
@@ -164,7 +165,7 @@ where
                     None => {
                         let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
                             crate::Response::builder()
-                                .errors(vec![crate::Error::builder()
+                                .errors(vec![crate::error::Error::builder()
                                     .message(String::from("introspection has been disabled"))
                                     .build()])
                                 .build(),
@@ -236,7 +237,7 @@ where
             }
         }
         .or_else(|error: BoxError| async move {
-            let errors = vec![crate::Error {
+            let errors = vec![crate::error::Error {
                 message: error.to_string(),
                 ..Default::default()
             }];
@@ -334,7 +335,7 @@ impl PluggableRouterServiceBuilder {
             >,
             Plugins,
         ),
-        crate::ServiceBuildError,
+        crate::error::ServiceBuildError,
     > {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse

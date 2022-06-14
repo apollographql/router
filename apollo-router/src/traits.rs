@@ -1,3 +1,5 @@
+use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
 use crate::*;
 use async_trait::async_trait;
 use std::fmt::Debug;

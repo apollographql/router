@@ -106,7 +106,7 @@ impl Plugin for Csrf {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         tracing::trace!("request is not preflighted");
-                        let error = crate::Error::builder().message(
+                        let error = crate::error::Error::builder().message(
                             format!(
                                 "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                                 Please either specify a 'content-type' header (with a mime-type that is not one of {}) \

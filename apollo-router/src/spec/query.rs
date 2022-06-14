@@ -2,8 +2,8 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::fetch::OperationKind;
 use crate::*;
+use crate::{error::FetchError, fetch::OperationKind};
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde_json_bytes::ByteString;

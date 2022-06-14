@@ -770,7 +770,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SchemaError;
+    use crate::error::SchemaError;
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;

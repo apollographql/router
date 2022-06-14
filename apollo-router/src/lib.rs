@@ -28,7 +28,7 @@ mod axum_http_server_factory;
 mod cache;
 pub mod configuration;
 mod context;
-mod error;
+pub mod error;
 mod executable;
 mod files;
 mod http_server_factory;
@@ -52,7 +52,6 @@ pub mod subscriber;
 mod traits;
 
 pub use context::Context;
-pub use error::*;
 pub use executable::{main, Executable};
 pub use introspection::*;
 pub use json_ext::*;

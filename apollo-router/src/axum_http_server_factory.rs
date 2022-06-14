@@ -1262,7 +1262,7 @@ mod tests {
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                let example_response = crate::FetchError::SubrequestHttpError {
+                let example_response = crate::error::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
@@ -1294,7 +1294,7 @@ mod tests {
 
         assert_eq!(
             response,
-            crate::FetchError::SubrequestHttpError {
+            crate::error::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }

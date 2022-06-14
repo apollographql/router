@@ -1,9 +1,10 @@
 //! Customization via Rhai.
 
+use crate::error::Error;
 use crate::{
-    http_compat, register_plugin, Context, Error, ExecutionRequest, ExecutionResponse, Object,
-    Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
-    RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Object, Plugin,
+    QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest,
+    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};
@@ -591,7 +592,7 @@ macro_rules! gen_map_request {
                             status: StatusCode,
                         ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![crate::Error {
+                                .errors(vec![Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -646,7 +647,7 @@ macro_rules! gen_map_response {
                             status: StatusCode,
                         ) -> [<$base:camel Response>] {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![crate::Error {
+                                .errors(vec![Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -904,7 +905,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = RouterResponse::error_builder()
-                                    .errors(vec![crate::Error {
+                                    .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -973,7 +974,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = ExecutionResponse::error_builder()
-                                    .errors(vec![crate::Error {
+                                    .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1050,7 +1051,7 @@ impl ServiceStep {
                                 ) -> RouterResponse<BoxStream<'static, ResponseBody>>
                                 {
                                     let res = RouterResponse::error_builder()
-                                        .errors(vec![crate::Error {
+                                        .errors(vec![Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1149,7 +1150,7 @@ impl ServiceStep {
                                 ) -> ExecutionResponse<BoxStream<'static, Response>>
                                 {
                                     let res = ExecutionResponse::error_builder()
-                                        .errors(vec![crate::Error {
+                                        .errors(vec![Error {
                                             message: msg,
                                             ..Default::default()
                                         }])

@@ -1,3 +1,4 @@
+use crate::error::FetchError;
 use crate::*;
 use serde::Deserialize;
 use serde_json_bytes::Entry;

@@ -1,5 +1,7 @@
 //! GraphQL schema.
 
+use crate::error::ParseErrors;
+use crate::error::SchemaError;
 use crate::*;
 use apollo_parser::ast;
 use http::Uri;
