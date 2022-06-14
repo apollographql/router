@@ -56,7 +56,7 @@ impl AxumHttpServerFactory {
 type BufferedService = Buffer<
     BoxService<
         http_compat::Request<graphql::Request>,
-        BoxStream<'static, http_compat::Response<ResponseBody>>,
+        http_compat::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
     http_compat::Request<graphql::Request>,
@@ -76,7 +76,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RS: Service<
                 http_compat::Request<graphql::Request>,
-                Response = BoxStream<'static, http_compat::Response<ResponseBody>>,
+                Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
@@ -502,18 +502,25 @@ async fn run_graphql_request(
                     )
                         .into_response()
                 }
-                Ok(mut stream) => match stream.next().await {
-                    None => {
-                        tracing::error!("router service is not available to process request",);
-                        (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "router service is not available to process request",
-                        )
-                            .into_response()
+                Ok(response) => {
+                    let (parts, mut stream) = response.into_parts();
+                    match stream.next().await {
+                        None => {
+                            tracing::error!("router service is not available to process request",);
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "router service is not available to process request",
+                            )
+                                .into_response()
+                        }
+                        Some(response) => {
+                            tracing::trace_span!("serialize_response").in_scope(|| {
+                                http_compat::Response::from_parts(parts, response).into_response()
+                                //response.into_response()
+                            })
+                        }
                     }
-                    Some(response) => tracing::trace_span!("serialize_response")
-                        .in_scope(|| response.into_response()),
-                },
+                }
             }
         }
         Err(e) => {
@@ -658,7 +665,6 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::http_compat::Request;
-    use futures::stream::once;
     use http::header::{self, CONTENT_TYPE};
     use mockall::mock;
     use reqwest::header::{
@@ -716,7 +722,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<BoxStream<'static, http_compat::Response<ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_compat::Response<BoxStream<'static, ResponseBody>>, BoxError>;
         }
     }
 
@@ -908,13 +914,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1011,13 +1016,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -1081,13 +1085,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -1151,13 +1154,12 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -1244,13 +1246,12 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1305,13 +1306,12 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1345,13 +1345,12 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
 
@@ -1441,13 +1440,12 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(Box::pin(once(async move {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let server = init_unix(expectations, &temp_dir).await;
 
@@ -1716,7 +1714,7 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(Box::pin(once(async move {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::Text(format!(
@@ -1725,9 +1723,8 @@ Content-Type: application/json\r
                             req.uri(),
                             serde_json::to_string(req.body()).unwrap()
                         )))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let query = json!(

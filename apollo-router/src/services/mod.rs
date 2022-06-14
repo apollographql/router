@@ -4,6 +4,11 @@ pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::prelude::graphql::*;
+use futures::{
+    future::{ready, Ready},
+    stream::{once, BoxStream, Once, StreamExt},
+    Stream,
+};
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use http_compat::IntoHeaderName;
@@ -202,18 +207,18 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse: Send);
+assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
 /// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]
-pub struct RouterResponse {
-    pub response: http_compat::Response<ResponseBody>,
+pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
+    pub response: http_compat::Response<T>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse {
+impl RouterResponse<Once<Ready<ResponseBody>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -227,7 +232,7 @@ impl RouterResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> Result<RouterResponse, BoxError> {
+    ) -> Result<Self, BoxError> {
         let extensions: Object = extensions
             .into_iter()
             .map(|(name, value)| (ByteString::from(name), value))
@@ -252,7 +257,7 @@ impl RouterResponse {
             }
         }
 
-        let http_response = builder.body(ResponseBody::GraphQL(res))?;
+        let http_response = builder.body(once(ready(ResponseBody::GraphQL(res))))?;
 
         // Create a compatible Response
         let compat_response = http_compat::Response {
@@ -282,7 +287,7 @@ impl RouterResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
-    ) -> Result<RouterResponse, BoxError> {
+    ) -> Result<Self, BoxError> {
         RouterResponse::new(
             data,
             path,
@@ -303,7 +308,7 @@ impl RouterResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> Result<RouterResponse, BoxError> {
+    ) -> Result<Self, BoxError> {
         RouterResponse::new(
             Default::default(),
             None,
@@ -315,11 +320,37 @@ impl RouterResponse {
         )
     }
 
-    pub fn new_from_response(
-        response: http_compat::Response<ResponseBody>,
-        context: Context,
-    ) -> Self {
+    pub fn new_from_response_body(response: ResponseBody, context: Context) -> Self {
+        Self {
+            response: http::Response::new(once(ready(response))).into(),
+            context,
+        }
+    }
+}
+
+impl<T: Stream<Item = ResponseBody> + Send + Unpin + 'static> RouterResponse<T> {
+    pub async fn next_response(&mut self) -> Option<ResponseBody> {
+        self.response.body_mut().next().await
+    }
+}
+
+impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
+    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
         Self { response, context }
+    }
+
+    pub fn map<F, U: Stream<Item = ResponseBody>>(self, f: F) -> RouterResponse<U>
+    where
+        F: FnMut(T) -> U,
+    {
+        RouterResponse {
+            context: self.context,
+            response: self.response.map(f),
+        }
+    }
+
+    pub fn boxed(self) -> RouterResponse<BoxStream<'static, ResponseBody>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, ResponseBody>)
     }
 }
 
@@ -608,29 +639,18 @@ impl ExecutionRequest {
     }
 }
 
-assert_impl_all!(ExecutionResponse: Send);
+assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
 /// [`Context`] and [`http_compat::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
-pub struct ExecutionResponse {
-    pub response: http_compat::Response<Response>,
+pub struct ExecutionResponse<T: Stream<Item = Response>> {
+    pub response: http_compat::Response<T>,
 
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl ExecutionResponse {
-    /// This is the constructor to use when constructing a real ExecutionResponse.
-    ///
-    /// In this case, you already have a valid request and just wish to associate it with a context
-    /// and create a ExecutionResponse.
-    pub fn new_from_response(
-        response: http_compat::Response<Response>,
-        context: Context,
-    ) -> ExecutionResponse {
-        Self { response, context }
-    }
-
+impl ExecutionResponse<Once<Ready<Response>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
@@ -644,7 +664,7 @@ impl ExecutionResponse {
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
-    ) -> ExecutionResponse {
+    ) -> Self {
         // Build a response
         let res = Response::builder()
             .label(label)
@@ -657,7 +677,7 @@ impl ExecutionResponse {
         // Build an http Response
         let http_response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
-            .body(res)
+            .body(once(ready(res)))
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
@@ -685,7 +705,7 @@ impl ExecutionResponse {
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
-    ) -> ExecutionResponse {
+    ) -> Self {
         ExecutionResponse::new(
             label,
             data,
@@ -707,7 +727,7 @@ impl ExecutionResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> Result<ExecutionResponse, BoxError> {
+    ) -> Result<Self, BoxError> {
         Ok(ExecutionResponse::new(
             Default::default(),
             Default::default(),
@@ -717,6 +737,36 @@ impl ExecutionResponse {
             status_code,
             context,
         ))
+    }
+}
+
+impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
+    /// This is the constructor to use when constructing a real ExecutionResponse.
+    ///
+    /// In this case, you already have a valid request and just wish to associate it with a context
+    /// and create a ExecutionResponse.
+    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+        Self { response, context }
+    }
+
+    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> ExecutionResponse<U>
+    where
+        F: FnMut(T) -> U,
+    {
+        ExecutionResponse {
+            context: self.context,
+            response: self.response.map(f),
+        }
+    }
+
+    pub fn boxed(self) -> ExecutionResponse<BoxStream<'static, Response>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
+    }
+}
+
+impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
+    pub async fn next_response(&mut self) -> Option<Response> {
+        self.response.body_mut().next().await
     }
 }
 
@@ -798,9 +848,9 @@ mod test {
         );
     }
 
-    #[test]
-    fn router_response_builder() {
-        let response = RouterResponse::builder()
+    #[tokio::test]
+    async fn router_response_builder() {
+        let mut response = RouterResponse::builder()
             .header("a", "b")
             .header("a", "c")
             .context(Context::new())
@@ -823,8 +873,8 @@ mod test {
             .unwrap()
             .clone();
         assert_eq!(
-            response.response.body(),
-            &ResponseBody::GraphQL(
+            response.next_response().await.unwrap(),
+            ResponseBody::GraphQL(
                 graphql::Response::builder()
                     .extensions(extensions)
                     .data(json!({}))
