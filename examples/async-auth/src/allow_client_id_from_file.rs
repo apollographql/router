@@ -1,5 +1,7 @@
-use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
-use futures::stream::{once, BoxStream};
+use apollo_router::{
+    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
+};
+use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -40,8 +42,12 @@ impl Plugin for AllowClientIdFromFile {
     // switching the async file read with an async http request
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -72,10 +78,7 @@ impl Plugin for AllowClientIdFromFile {
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    return Box::pin(async {
-                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                            as BoxStream<'static, RouterResponse>))
-                    });
+                    return Box::pin(async { Ok(ControlFlow::Break(res.boxed())) });
                 }
 
                 // It is best practice to perform checks before we unwrap,
@@ -101,10 +104,7 @@ impl Plugin for AllowClientIdFromFile {
                             .context(req.context)
                             .build()
                             .expect("response is valid");
-                        return Box::pin(async {
-                            Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                                as BoxStream<'static, RouterResponse>))
-                        });
+                        return Box::pin(async { Ok(ControlFlow::Break(res.boxed())) });
                     }
                 };
 
@@ -140,8 +140,7 @@ impl Plugin for AllowClientIdFromFile {
                             .context(req.context)
                             .build()
                             .expect("response is valid");
-                        Ok(ControlFlow::Break(Box::pin(once(async move { res }))
-                            as BoxStream<'static, RouterResponse>))
+                        Ok(ControlFlow::Break(res.boxed()))
                     }
                 })
             })
@@ -179,7 +178,6 @@ mod tests {
 
     use super::AllowClientIdFromFile;
     use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use futures::{stream::once, StreamExt};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -221,11 +219,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_without_client_id)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -233,8 +228,12 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "Missing 'x-client-id' header".to_string(),
@@ -266,11 +265,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_unauthorized_client_id)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -278,8 +274,12 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "client-id is not allowed".to_string(),
@@ -313,12 +313,11 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .data(expected_mock_response_data)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -340,11 +339,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_valid_client_id)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -352,8 +348,12 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             // we're allowed to unwrap() here because we know the json is a str()
