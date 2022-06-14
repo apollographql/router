@@ -101,6 +101,15 @@ By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/
 
 ## 🐛 Fixes ( :bug: )
 
+### Pin clap dependency in Cargo.toml ([PR #1232](https://github.com/apollographql/router/pull/1232))
+A minor release of Clap occured yesterday; which introduced a breaking change.
+
+This might lead cargo scaffold users to hit a panic a runtime when the router tries to parse env variables and arguments.
+
+This patch Pins the clap dependency to the version that was available before the release, until the root cause is found and fixed.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1232
+
 ### Display better error message when on subgraph fetch errors ([PR #1201](https://github.com/apollographql/router/pull/1201))
 Show a helpful error message when a subgraph does not return JSON or bad status code
 
