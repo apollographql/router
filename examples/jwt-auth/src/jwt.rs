@@ -60,7 +60,8 @@
 //!  - Token refresh
 //!  - ...
 
-use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse};
 use apollo_router::{Context, ResponseBody};
 use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;

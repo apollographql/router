@@ -1,8 +1,7 @@
 use crate::error::Error;
 use crate::json_ext::Object;
-use crate::{
-    register_plugin, ExecutionRequest, ExecutionResponse, Plugin, Response, ServiceBuilderExt,
-};
+use crate::layers::ServiceBuilderExt;
+use crate::{register_plugin, ExecutionRequest, ExecutionResponse, Plugin, Response};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use std::ops::ControlFlow;

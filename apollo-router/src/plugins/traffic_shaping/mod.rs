@@ -18,11 +18,11 @@ use serde::Deserialize;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse,
+    register_plugin, QueryPlannerRequest, QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
 };
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]

@@ -1,5 +1,6 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
+use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
     SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
@@ -14,7 +15,7 @@ use crate::subscriber::replace_layer;
 use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    RouterResponse, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;

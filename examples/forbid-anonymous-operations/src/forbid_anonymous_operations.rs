@@ -1,8 +1,7 @@
 use std::ops::ControlFlow;
 
-use apollo_router::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::{register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};

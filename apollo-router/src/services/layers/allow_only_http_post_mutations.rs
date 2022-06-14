@@ -4,7 +4,7 @@
 
 use crate::error::Error;
 use crate::json_ext::Object;
-use crate::sync_checkpoint::CheckpointService;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::{ExecutionRequest, ExecutionResponse, Response};
 use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};

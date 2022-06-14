@@ -55,7 +55,6 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use layers::*;
 pub use plugin::*;
 pub use query_cache::*;
 pub use query_planner::*;

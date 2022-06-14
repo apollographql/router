@@ -4,7 +4,7 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::sync_checkpoint::CheckpointService;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;

@@ -3,7 +3,7 @@ use crate::configuration::{Configuration, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::ApolloRouterError;
 use crate::ResponseBody;
-use crate::DEFAULT_BUFFER_SIZE;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::{http_compat, Handler};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};

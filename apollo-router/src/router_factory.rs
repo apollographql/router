@@ -1,8 +1,9 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
+use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
+    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema,
 };
 use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;

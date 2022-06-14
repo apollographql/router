@@ -3,10 +3,11 @@
 use crate::error::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
+use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};

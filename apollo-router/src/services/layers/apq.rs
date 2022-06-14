@@ -6,7 +6,7 @@
 use std::ops::ControlFlow;
 
 use crate::error::Error;
-use crate::sync_checkpoint::CheckpointService;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use moka::sync::Cache;
