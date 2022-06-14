@@ -1,6 +1,6 @@
 use crate::axum_http_server_factory::AxumHttpServerFactory;
-use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
+use crate::configuration::{validate_configuration, ListenAddr};
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
@@ -414,19 +414,18 @@ pub(crate) enum Event {
 /// A handle that allows the client to await for various server events.
 pub struct RouterHandle {
     result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
-    ready: Arc<RwLock<bool>>,
+    listen_address: Arc<RwLock<Option<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
 impl RouterHandle {
-    /// Returns the server handle (self) when the router is ready to receive requests.
-    /// Note that the router may not start
-    pub async fn ready(self) -> Result<Self, FederatedServerError> {
-        if *self.ready.read().await {
-            Ok(self)
-        } else {
-            Err(FederatedServerError::StartupError)
-        }
+    /// Returns the listen address when the router is ready to receive requests.
+    pub async fn listen_address(&self) -> Result<ListenAddr, FederatedServerError> {
+        self.listen_address
+            .read()
+            .await
+            .clone()
+            .ok_or(FederatedServerError::StartupError)
     }
 }
 
@@ -435,7 +434,7 @@ impl Drop for RouterHandle {
         let _ = self
             .shutdown_sender
             .take()
-            .expect("shutdown sender mut be present")
+            .expect("shutdown sender must be present")
             .send(());
     }
 }
@@ -469,7 +468,7 @@ where
         );
 
         let state_machine = StateMachine::new(server_factory, self.router_factory);
-        let ready = state_machine.ready.clone();
+        let ready = state_machine.listen_address.clone();
         let result = spawn(async move { state_machine.process_events(event_stream).await })
             .map(|r| match r {
                 Ok(Ok(ok)) => Ok(ok),
@@ -481,7 +480,7 @@ where
         RouterHandle {
             result,
             shutdown_sender: Some(shutdown_sender),
-            ready,
+            listen_address: ready,
         }
     }
 
@@ -531,26 +530,29 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
-        let router_handle = init_with_server()
-            .ready()
+        let router_handle = init_with_server();
+        let listen_address = router_handle
+            .listen_address()
             .await
             .expect("router failed to start");
-        assert_federated_response(r#"{ topProducts { name } }"#).await;
+        assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         drop(router_handle);
     }
 
-    async fn assert_federated_response(request: &str) {
+    async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = Request::builder().query(request).build();
-        let expected = query(&request).await.unwrap();
+        let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
-    async fn query(request: &crate::Request) -> Result<crate::Response, crate::FetchError> {
+    async fn query(
+        listen_addr: &ListenAddr,
+        request: &crate::Request,
+    ) -> Result<crate::Response, crate::FetchError> {
         Ok(reqwest::Client::new()
-            .post("http://127.0.0.1:4000")
-            .timeout(Duration::from_secs(10))
+            .post(format!("{}/", listen_addr))
             .json(request)
             .send()
             .await

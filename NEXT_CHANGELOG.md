@@ -61,10 +61,11 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
 `FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
 
-Removed functionality:
-* The ability to supply your own `RouterServiceFactory`. This may be added back if there is a concrete use case for it.
-* `StateListener`. This made the internal state machine unnecessarily complex. `ready()` remains on `ApolloRouterHandle`.
-* `ApolloRouterHandle#shutdown()` has been removed. Instead dropping `ApolloRouterHandle` will cause the router to shutdown.
+Migration tips:
+* The ability to supply your own `RouterServiceFactory` has been removed.
+* `StateListener`. This made the internal state machine unnecessarily complex. `listen_address()` remains on `ApolloRouterHandle`.
+* `FederatedServerHandle#shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
+* `FederatedServerHandle#ready()` has been renamed to `FederatedServerHandle#listen_address()`, it will return the address when the router is ready to serve requests.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227
 

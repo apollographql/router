@@ -4,7 +4,7 @@ use super::state_machine::State::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ListenAddr};
 use crate::Schema;
 use crate::{Handler, Plugins};
 use futures::prelude::*;
@@ -60,8 +60,10 @@ where
 {
     http_server_factory: S,
     router_factory: FA,
-    pub(crate) ready: Arc<RwLock<bool>>,
-    ready_guard: Option<OwnedRwLockWriteGuard<bool>>,
+
+    // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
+    pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -70,13 +72,13 @@ where
     FA: RouterServiceFactory + Send,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
-        let ready = Arc::new(RwLock::new(false));
+        let ready = Arc::new(RwLock::new(None));
         let ready_guard = ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
             router_factory,
-            ready,
-            ready_guard: Some(ready_guard),
+            listen_address: ready,
+            listen_address_guard: Some(ready_guard),
         }
     }
 
@@ -198,11 +200,7 @@ where
             state = new_state;
 
             // If we're running then let those waiting proceed.
-            if let Running { .. } = &state {
-                if let Some(mut ready_guard) = self.ready_guard.take() {
-                    *ready_guard = true;
-                }
-            }
+            self.maybe_update_listen_address(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -211,14 +209,34 @@ where
         }
         tracing::debug!("stopped");
 
-        // If the ready guard has not been taken then take it so that if anything is waiting on ready it will proceed.
-        self.ready_guard.take();
+        // If the listen_address_guard has not been taken, take it so that anything waiting on listen_address will proceed.
+        self.listen_address_guard.take();
 
         match state {
             Stopped => Ok(()),
             Errored(err) => Err(err),
             _ => {
                 panic!("must finish on stopped or errored state")
+            }
+        }
+    }
+
+    async fn maybe_update_listen_address(
+        &mut self,
+        state: &mut State<<FA as RouterServiceFactory>::RouterService>,
+    ) {
+        let listen_address = if let Running { server_handle, .. } = &state {
+            let listen_address = server_handle.listen_address().clone();
+            Some(listen_address)
+        } else {
+            None
+        };
+
+        if let Some(listen_address) = listen_address {
+            if let Some(mut listen_address_guard) = self.listen_address_guard.take() {
+                *listen_address_guard = Some(listen_address);
+            } else {
+                *self.listen_address.write().await = Some(listen_address);
             }
         }
     }
