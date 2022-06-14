@@ -139,6 +139,11 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
+### Groundwork for `@defer` support ([PR #1175](https://github.com/apollographql/router/pull/1175)[PR #1206](https://github.com/apollographql/router/pull/1206))
+To prepare for the implementation of the `@defer` directive, the `ExecutionResponse`  and `RouterResponse` types now carry a stream of responses instead of a unique response. For now that stream contains only one item, so there is no change in behaviour.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1206
+
 ### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
 Force the creation of `SocketAddr` to use a new unused port to avoid port collisions during testing.
 
