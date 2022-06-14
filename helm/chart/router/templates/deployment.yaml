@@ -70,6 +70,9 @@ spec:
             - name: APOLLO_GRAPH_REF
               value: {{ .Values.managedFederation.graphRef }}
             {{- end }}
+            {{- if .Values.extraEnvVars }}
+            {{- tpl (toYaml .Values.extraEnvVars) $ | nindent 12 }}
+            {{- end }}
           {{- end }}
           ports:
             - name: http
