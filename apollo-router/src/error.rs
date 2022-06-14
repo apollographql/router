@@ -2,7 +2,10 @@ use crate::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::planner::{PlanError, PlannerError};
-use router_bridge::planner::{PlanErrors, UsageReporting};
+use router_bridge::{
+    introspect::IntrospectionError,
+    planner::{PlanErrors, UsageReporting},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -266,6 +269,9 @@ pub enum QueryPlannerError {
 
     /// spec error: {0}
     SpecError(SpecError),
+
+    /// introspection error: {0}
+    Introspection(IntrospectionError),
 }
 
 #[derive(Clone, Debug, Error)]

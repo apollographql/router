@@ -7,14 +7,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
-type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
+type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
-    cm: Arc<CachingMap<QueryKey, Arc<QueryPlan>>>,
+    cm: Arc<CachingMap<QueryKey, QueryPlannerContent>>,
     phantom: PhantomData<T>,
 }
 
@@ -40,8 +40,10 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
 }
 
 #[async_trait]
-impl<T: QueryPlanner> CacheResolver<QueryKey, Arc<QueryPlan>> for CachingQueryPlannerResolver<T> {
-    async fn retrieve(&self, key: QueryKey) -> Result<Arc<QueryPlan>, CacheResolverError> {
+impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
+    for CachingQueryPlannerResolver<T>
+{
+    async fn retrieve(&self, key: QueryKey) -> Result<QueryPlannerContent, CacheResolverError> {
         self.delegate
             .get(key.0, key.1, key.2)
             .await
@@ -94,11 +96,16 @@ where
             cm.get(key)
                 .await
                 .map(|query_plan| {
-                    if let Err(e) = request
-                        .context
-                        .insert(USAGE_REPORTING, query_plan.usage_reporting.clone())
-                    {
-                        tracing::error!("usage reporting was not serializable to context, {}", e);
+                    if let QueryPlannerContent::Plan { plan, .. } = &query_plan {
+                        if let Err(e) = request
+                            .context
+                            .insert(USAGE_REPORTING, plan.usage_reporting.clone())
+                        {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                e
+                            );
+                        }
                     }
                     query_plan
                 })

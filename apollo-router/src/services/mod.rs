@@ -357,8 +357,20 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
-    pub query_plan: Arc<QueryPlan>,
+    pub content: QueryPlannerContent,
     pub context: Context,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueryPlannerContent {
+    Plan {
+        query: Arc<Query>,
+        plan: Arc<QueryPlan>,
+    },
+    Introspection {
+        response: Response,
+    },
+    IntrospectionDisabled,
 }
 
 #[buildstructor::buildstructor]
@@ -367,11 +379,8 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
-        Self {
-            query_plan,
-            context,
-        }
+    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+        Self { content, context }
     }
 
     /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
@@ -387,7 +396,10 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(QueryPlan::fake_builder().build()),
+            QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_builder().build()),
+                query: Arc::new(Query::default()),
+            },
             context,
         ))
     }

@@ -125,7 +125,11 @@ impl PluginTestHarness {
         let schema = Arc::new(Schema::from(schema));
 
         let query_planner = CachingQueryPlanner::new(
-            BridgeQueryPlanner::new(schema.clone()).await?,
+            BridgeQueryPlanner::new(
+                schema.clone(),
+                Some(Arc::new(Introspection::from_schema(&schema))),
+            )
+            .await?,
             DEFAULT_BUFFER_SIZE,
         )
         .boxed();
@@ -166,7 +170,6 @@ impl PluginTestHarness {
                                         DEFAULT_BUFFER_SIZE,
                                     ))
                                     .schema(schema.clone())
-                                    .introspection(Arc::new(Introspection::from_schema(&schema)))
                                     .build(),
                             )
                         }),
