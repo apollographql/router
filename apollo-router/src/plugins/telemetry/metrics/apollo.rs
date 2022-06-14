@@ -237,10 +237,11 @@ impl managed::Manager for ReporterManager {
 
 #[cfg(test)]
 mod test {
-    use crate::utils::test::IntoSchema::Canned;
-    use crate::utils::test::PluginTestHarness;
+    use crate::plugin::utils::test::IntoSchema::Canned;
+    use crate::plugin::utils::test::PluginTestHarness;
+    use crate::plugin::Plugin;
+    use crate::Context;
     use crate::RouterRequest;
-    use crate::{Context, Plugin};
     use http::header::HeaderName;
     use std::future::Future;
 

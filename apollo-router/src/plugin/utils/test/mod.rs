@@ -5,12 +5,12 @@ pub mod service;
 
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Plugin;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::BridgeQueryPlanner;
 use crate::CachingQueryPlanner;
 use crate::ExecutionService;
-use crate::Plugin;
 use crate::QueryCache;
 use crate::ResponseBody;
 use crate::RouterService;

@@ -37,6 +37,7 @@ mod files;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+#[macro_use]
 pub mod plugin;
 pub mod plugins;
 mod query_cache;
@@ -55,7 +56,6 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use plugin::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;

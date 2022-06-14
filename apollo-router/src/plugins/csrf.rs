@@ -1,5 +1,6 @@
 use crate::layers::ServiceBuilderExt;
-use crate::{register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse};
+use crate::plugin::Plugin;
+use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::header;
 use http::{HeaderMap, StatusCode};
@@ -205,14 +206,14 @@ register_plugin!("apollo", "csrf", Csrf);
 mod csrf_tests {
     #[tokio::test]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({}))

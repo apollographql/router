@@ -70,9 +70,10 @@ mod test {
     use super::*;
     use crate::json_ext::Object;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
+    use crate::plugin::DynPlugin;
     use crate::{
-        DynPlugin, PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest,
-        RouterResponse, Schema,
+        PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest, RouterResponse,
+        Schema,
     };
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -192,7 +193,7 @@ mod test {
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
+        crate::plugin::plugins()
             .get("experimental.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance(config)

@@ -3,10 +3,11 @@
 //!
 
 use apollo_router::json_ext::{Object, ValueExt};
+use apollo_router::plugin::Plugin;
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
-    http_compat, plugins::csrf, PluggableRouterServiceBuilder, Plugin, Request, ResponseBody,
+    http_compat, plugins::csrf, PluggableRouterServiceBuilder, Request, ResponseBody,
     RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
 };
 use futures::stream::BoxStream;

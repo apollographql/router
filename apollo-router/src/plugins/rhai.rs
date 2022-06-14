@@ -4,8 +4,9 @@ use crate::error::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
 use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
     QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest,
     RouterResponse, SubgraphRequest, SubgraphResponse,
 };
@@ -1665,10 +1666,11 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    use crate::plugin::DynPlugin;
     use crate::{
         http_compat,
         plugin::utils::test::{MockExecutionService, MockRouterService},
-        Context, DynPlugin, ResponseBody, RouterRequest, RouterResponse,
+        Context, ResponseBody, RouterRequest, RouterResponse,
     };
     use serde_json::Value;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -1688,7 +1690,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
@@ -1748,7 +1750,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(

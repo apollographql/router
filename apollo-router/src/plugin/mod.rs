@@ -298,11 +298,17 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| Box::pin(async move {
-                let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
-                let plugin = $value::new(configuration).await?;
-                Ok(Box::new(plugin) as Box<dyn $crate::DynPlugin>)
-            }), |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
+            $crate::plugin::register_plugin(
+                qualified_name,
+                $crate::plugin::PluginFactory::new(
+                    |configuration| Box::pin(async move {
+                        let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
+                        let plugin = $value::new(configuration).await?;
+                        Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
+                    }),
+                    |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()
+                )
+            );
         }
     };
 }

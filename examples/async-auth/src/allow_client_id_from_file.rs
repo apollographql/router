@@ -1,5 +1,6 @@
 use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::{register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::plugin::Plugin;
+use apollo_router::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -174,7 +175,9 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -185,7 +188,7 @@ mod tests {
     // see router.yaml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.allow_client_id_from_file")
             .expect("Plugin not found")
             .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))

@@ -128,9 +128,10 @@ mod test {
     use tower::{util::BoxCloneService, Service};
 
     use crate::json_ext::Object;
+    use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
+    use crate::plugin::DynPlugin;
     use crate::{
-        utils::test::mock::subgraph::MockSubgraph, DynPlugin, PluggableRouterServiceBuilder,
-        ResponseBody, RouterRequest, RouterResponse, Schema,
+        PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
     };
 
     use super::*;
@@ -228,7 +229,7 @@ mod test {
 
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
+        crate::plugin::plugins()
             .get("experimental.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)

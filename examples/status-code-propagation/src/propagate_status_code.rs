@@ -1,6 +1,6 @@
+use apollo_router::plugin::Plugin;
 use apollo_router::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
+    register_plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use futures::stream::BoxStream;
 use http::StatusCode;
@@ -98,9 +98,9 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 #[cfg(test)]
 mod tests {
     use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
-    use apollo_router::{
-        plugin::utils, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-    };
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -111,7 +111,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.propagate_status_code")
             .expect("Plugin not found")
             .create_instance(&json!({ "status_codes" : [500, 403, 401] }))

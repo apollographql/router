@@ -12,10 +12,11 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::plugin::utils::test::IntoSchema::Canned;
+    use apollo_router::plugin::utils::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::{Context, Plugin, RouterRequest};
+    use apollo_router::{Context, RouterRequest};
     use http::StatusCode;
 
     #[tokio::test]
