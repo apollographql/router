@@ -56,19 +56,36 @@ This is a breaking change since slightly invalid input might have validated befo
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
 
-### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234))
-`ApolloRouterBuilder` has been migrated to `buildstructor` for consistency with other code.
-Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
-`FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239))
+
+The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required. 
+
+Most users will continue to use:
+```rust
+apollo_router::main()  
+```
+
+However, if you want to specify your own tokio runtime and or provide some extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior. 
+
+```rust
+use apollo_router::Executable;
+Executable::builder()
+  .runtime(runtime) // Optional
+  .router_builder_fn(|configuration, schema| ...) // Optional
+  .start()?
+```
 
 Migration tips:
+* Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
+* `FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
 * The ability to supply your own `RouterServiceFactory` has been removed.
 * `StateListener`. This made the internal state machine unnecessarily complex. `listen_address()` remains on `ApolloRouterHandle`.
-* `FederatedServerHandle#shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
-* `FederatedServerHandle#ready()` has been renamed to `FederatedServerHandle#listen_address()`, it will return the address when the router is ready to serve requests.
+* `FederatedServerHandle::shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
+* `FederatedServerHandle::ready()` has been renamed to `FederatedServerHandle::listen_address()`, it will return the address when the router is ready to serve requests.
 * `FederatedServerError` has been renamed to `ApolloRouterError`.
+* `main_rt` should be migrated to `Executable::builder()`
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239
 
 ## 🚀 Features
 ### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))

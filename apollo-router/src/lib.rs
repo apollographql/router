@@ -54,7 +54,7 @@ mod traits;
 pub use cache::*;
 pub use context::*;
 pub use error::*;
-pub use executable::{main, rt_main};
+pub use executable::{main, Executable};
 pub use introspection::*;
 pub use json_ext::*;
 pub use layers::*;
