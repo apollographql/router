@@ -4,7 +4,7 @@ use crate::configuration::generate_config_schema;
 use crate::{
     configuration::Configuration,
     subscriber::{set_global_subscriber, RouterSubscriber},
-    ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
+    ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
 use clap::{AppSettings, CommandFactory, Parser};
@@ -265,15 +265,13 @@ pub async fn rt_main() -> Result<()> {
         }
     };
 
-    let server = ApolloRouterBuilder::default()
+    let router = ApolloRouter::builder()
         .configuration(configuration)
         .schema(schema)
         .shutdown(ShutdownKind::CtrlC)
         .build();
-    let mut server_handle = server.serve();
-    server_handle.with_default_state_receiver().await;
 
-    if let Err(err) = server_handle.await {
+    if let Err(err) = router.serve().await {
         tracing::error!("{}", err);
         return Err(err.into());
     }
