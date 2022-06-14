@@ -56,8 +56,8 @@ mod traits;
 
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use request::*;
-pub use response::*;
+pub use request::Request;
+pub use response::Response;
 pub use router::*;
 pub use service_registry::*;
 pub use services::*;
