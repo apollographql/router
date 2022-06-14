@@ -50,15 +50,13 @@ async fn all_rhai_callbacks_are_invoked() {
         .build()
         .unwrap();
 
-    let res = router
+    let _ = router
         .oneshot(request.into())
         .await
         .unwrap()
         .next_response()
         .await
         .unwrap();
-
-    dbg!(res);
 
     for expected_log in [
         "router_service setup",

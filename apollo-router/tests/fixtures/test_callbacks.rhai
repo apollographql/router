@@ -31,7 +31,7 @@ fn execution_service(service) {
 }
 
 
-fn subgraph_service(service) {
+fn subgraph_service(service, subgraph) {
     log_info("subgraph_service setup");
     service.map_request(|request| {
         log_info("from_subgraph_request");
