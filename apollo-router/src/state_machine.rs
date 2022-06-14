@@ -703,7 +703,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = BoxStream<'static, Response<ResponseBody>>;
+        type Response = Response<BoxStream<'static, ResponseBody>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -738,7 +738,7 @@ mod tests {
         where
             RS: Service<
                     Request<graphql::Request>,
-                    Response = BoxStream<'static, Response<ResponseBody>>,
+                    Response = Response<BoxStream<'static, ResponseBody>>,
                     Error = BoxError,
                 > + Send
                 + Sync

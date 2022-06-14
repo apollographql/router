@@ -30,7 +30,7 @@ pub(crate) trait HttpServerFactory {
     where
         RS: Service<
                 Request<graphql::Request>,
-                Response = BoxStream<'static, Response<ResponseBody>>,
+                Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
@@ -96,7 +96,7 @@ impl HttpServerHandle {
         SF: HttpServerFactory,
         RS: Service<
                 Request<graphql::Request>,
-                Response = BoxStream<'static, Response<ResponseBody>>,
+                Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
