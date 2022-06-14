@@ -1,11 +1,11 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, ListenAddr};
+use crate::http_compat;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::ApolloRouterError;
-use crate::ResponseBody;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::{http_compat};
 use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
+use crate::ResponseBody;
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;

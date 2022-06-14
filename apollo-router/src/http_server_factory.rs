@@ -1,4 +1,4 @@
-use super::ApolloRouterError;
+use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
 use crate::http_compat::{Request, Response};
 use crate::plugin::Handler;

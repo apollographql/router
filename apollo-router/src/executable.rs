@@ -1,10 +1,13 @@
 //! Main entry point for CLI command to start server.
 
 use crate::configuration::generate_config_schema;
+use crate::router::ApolloRouter;
+use crate::router::ConfigurationKind;
+use crate::router::SchemaKind;
+use crate::router::ShutdownKind;
 use crate::{
     configuration::Configuration,
     subscriber::{set_global_subscriber, RouterSubscriber},
-    ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
 use clap::{AppSettings, CommandFactory, Parser};

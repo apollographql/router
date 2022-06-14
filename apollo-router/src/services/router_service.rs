@@ -9,16 +9,15 @@ use crate::plugin::Plugin;
 use crate::query_cache::QueryCache;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanOptions;
 use crate::services::execution_service::ExecutionService;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Response, ResponseBody, RouterRequest, RouterResponse, Schema,
-    SubgraphRequest, SubgraphResponse,
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
 };
-use crate::query_planner::QueryPlanOptions;
 use futures::future::ready;
 use futures::stream::{once, BoxStream, StreamExt};
 use futures::Stream;
