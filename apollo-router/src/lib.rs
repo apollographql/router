@@ -66,7 +66,8 @@ pub use services::{ExecutionRequest, ExecutionResponse, ExecutionService};
 pub use services::{QueryPlannerRequest, QueryPlannerResponse};
 pub use services::{RouterRequest, RouterResponse, RouterService};
 pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
-pub use spec::*;
+pub use spec::Schema;
+pub(crate) use spec::*;
 pub use traits::*;
 
 /// Useful traits.
