@@ -180,7 +180,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid 1.0.0",
- "walkdir",
+ "walkdir 2.3.2",
  "yaml-rust",
 ]
 
@@ -207,6 +207,7 @@ dependencies = [
  "anyhow",
  "cargo-scaffold",
  "clap 3.1.18",
+ "copy_dir",
  "regex",
  "str_inflector",
  "tempfile",
@@ -688,7 +689,7 @@ dependencies = [
  "unicode-width",
  "unicode-xid",
  "url",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -722,7 +723,7 @@ dependencies = [
  "shell-words",
  "structopt",
  "toml",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -743,7 +744,7 @@ dependencies = [
  "same-file",
  "shell-escape",
  "tempfile",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -1006,6 +1007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "copy_dir"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4281031634644843bd2f5aa9c48cf98fc48d6b083bd90bb11becf10deaf8b0"
+dependencies = [
+ "walkdir 0.1.8",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1084,7 +1094,7 @@ dependencies = [
  "serde_json",
  "tinytemplate",
  "tokio",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -2433,7 +2443,7 @@ dependencies = [
  "regex",
  "same-file",
  "thread_local",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi-util",
 ]
 
@@ -3177,7 +3187,7 @@ dependencies = [
  "libc",
  "mio 0.6.23",
  "mio-extras",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -4875,7 +4885,7 @@ dependencies = [
  "glob",
  "pulldown-cmark",
  "tempfile",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -5973,6 +5983,16 @@ name = "waker-fn"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
+
+[[package]]
+name = "walkdir"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c66c0b9792f0a765345452775f3adbd28dde9d33f30d13e5dcc5ae17cf6f3780"
+dependencies = [
+ "kernel32-sys",
+ "winapi 0.2.8",
+]
 
 [[package]]
 name = "walkdir"

@@ -43,6 +43,7 @@ mod test {
         let temp_dir = tempfile::Builder::new()
             .prefix("router_scaffold")
             .tempdir()?;
+
         let current_dir = env::current_dir()?;
         // Scaffold the main project
         let opts = Opts::builder()
@@ -72,7 +73,14 @@ mod test {
             temp_dir.path().join("src").join("plugins").join("mod.rs"),
             "mod auth;\nmod basic;\nmod tracing;\n",
         )?;
-        test_build(&temp_dir)?;
+
+        test_build(&temp_dir).map_err(|e| {
+            let mut output_dir = std::env::temp_dir();
+            output_dir.push("test_scaffold_output");
+            copy_dir::copy_dir(&temp_dir, output_dir)
+                .expect("couldn't copy test_scaffold_output directory");
+            e
+        })?;
 
         drop(temp_dir);
         Ok(())
