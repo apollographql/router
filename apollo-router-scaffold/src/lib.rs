@@ -74,7 +74,7 @@ mod test {
         )?;
         test_build(&temp_dir)?;
 
-        drop(temp_dir);
+        // drop(temp_dir);
         Ok(())
     }
 
