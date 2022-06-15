@@ -9,11 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-## 🚀 Features ( :rocket: )
-## 🐛 Fixes ( :bug: )
-## 🛠 Maintenance ( :hammer_and_wrench: )
-## 📚 Documentation ( :books: )
-## 🐛 Fixes ( :bug: )
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+## 🐛 Fixes
 
 ## Example section entry format
 
