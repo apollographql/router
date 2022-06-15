@@ -21,13 +21,13 @@ fn subgraph_service(service, subgraph) {
         print(request.uri.path);
         print(request.uri.host);
         print("subgraph request details");
-        print(request.sub.headers);
-        print(request.sub.body.query);
-        print(request.sub.body.operation_name);
-        print(request.sub.body.variables);
-        print(request.sub.body.extensions);
-        print(request.sub.uri.path);
-        print(request.sub.uri.host);
+        print(request.subgraph.headers);
+        print(request.subgraph.body.query);
+        print(request.subgraph.body.operation_name);
+        print(request.subgraph.body.variables);
+        print(request.subgraph.body.extensions);
+        print(request.subgraph.uri.path);
+        print(request.subgraph.uri.host);
     };
     // Map our request using our closure
     service.map_request(f);

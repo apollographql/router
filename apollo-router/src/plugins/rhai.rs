@@ -151,14 +151,14 @@ mod router_plugin_mod {
 
     // The next group of functions are specifically for interacting
     // with the subgraph_request on a SubgraphRequest.
-    #[rhai_fn(get = "sub", pure, return_raw)]
+    #[rhai_fn(get = "subgraph", pure, return_raw)]
     pub(crate) fn get_subgraph(
         obj: &mut SharedSubgraphRequest,
     ) -> Result<http_compat::Request<Request>, Box<EvalAltResult>> {
         obj.with_mut(|request| Ok(request.subgraph_request.clone()))
     }
 
-    #[rhai_fn(set = "sub", return_raw)]
+    #[rhai_fn(set = "subgraph", return_raw)]
     pub(crate) fn set_subgraph(
         obj: &mut SharedSubgraphRequest,
         sub: http_compat::Request<Request>,
