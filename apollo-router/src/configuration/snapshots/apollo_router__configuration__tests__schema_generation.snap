@@ -311,62 +311,6 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
-        },
-        "experimental.traffic_shaping": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "type": "object",
-              "properties": {
-                "compression": {
-                  "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
-                  "type": "string",
-                  "enum": [
-                    "gzip",
-                    "deflate",
-                    "br"
-                  ],
-                  "nullable": true
-                },
-                "query_deduplication": {
-                  "description": "Enable query deduplication",
-                  "type": "boolean",
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "subgraphs": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "compression": {
-                    "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
-                    "type": "string",
-                    "enum": [
-                      "gzip",
-                      "deflate",
-                      "br"
-                    ],
-                    "nullable": true
-                  },
-                  "query_deduplication": {
-                    "description": "Enable query deduplication",
-                    "type": "boolean",
-                    "nullable": true
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "variables_deduplication": {
-              "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-              "type": "boolean",
-              "nullable": true
-            }
-          }
         }
       },
       "additionalProperties": false
@@ -1180,6 +1124,62 @@ expression: "&schema"
       "properties": {
         "name": {
           "type": "string"
+        }
+      }
+    },
+    "traffic_shaping": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "object",
+          "properties": {
+            "compression": {
+              "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
+              "type": "string",
+              "enum": [
+                "gzip",
+                "deflate",
+                "br"
+              ],
+              "nullable": true
+            },
+            "query_deduplication": {
+              "description": "Enable query deduplication",
+              "type": "boolean",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "subgraphs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "compression": {
+                "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
+                "type": "string",
+                "enum": [
+                  "gzip",
+                  "deflate",
+                  "br"
+                ],
+                "nullable": true
+              },
+              "query_deduplication": {
+                "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "variables_deduplication": {
+          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "type": "boolean",
+          "nullable": true
         }
       }
     }

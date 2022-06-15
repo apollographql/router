@@ -132,7 +132,7 @@ impl TrafficShaping {
     }
 }
 
-register_plugin!("experimental", "traffic_shaping", TrafficShaping);
+register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
@@ -231,7 +231,7 @@ mod test {
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         let builder = builder
-            .with_dyn_plugin("experimental.traffic_shaping".to_string(), plugin)
+            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -244,7 +244,7 @@ mod test {
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugins()
-            .get("experimental.traffic_shaping")
+            .get("apollo.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)
             .await

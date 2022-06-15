@@ -5,9 +5,7 @@ description: Configuring traffic shaping
 
 import { Link } from "gatsby";
 
-> ⚠️ Apollo Router support for traffic shaping is currently experimental.
-
-The Apollo Router provides experimental support for traffic shaping.
+The Apollo Router provides support for traffic shaping.
 
 Currently features are limited, but are expected to grow over time:
 
@@ -19,14 +17,13 @@ Currently features are limited, but are expected to grow over time:
 To configure traffic shaping add the `traffic_shaping` plugin to `your router.yaml`:
 
 ```yaml title="router.yaml"
-plugins:
-  experimental.traffic_shaping:
-    variables_deduplication: true # Enable the variables deduplication optimization
-    all:
-      query_deduplication: true # Enable query deduplication for all subgraphs.
-    subgraphs:
-      products:
-        query_deduplication: false # Disable query deduplication for products.
+traffic_shaping:
+  variables_deduplication: true # Enable the variables deduplication optimization
+  all:
+    query_deduplication: true # Enable query deduplication for all subgraphs.
+  subgraphs:
+    products:
+      query_deduplication: false # Disable query deduplication for products.
 ```
 
 Note that configuration in the `subgraphs` section will take precedence over that in the `all` section.
