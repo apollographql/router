@@ -42,6 +42,71 @@ impl BridgeQueryPlanner {
             introspection,
         })
     }
+
+    async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
+        let schema = self.schema.clone();
+        let query_parsing_future =
+            tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+                .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
+        match query_parsing_future.await {
+            Ok(res) => res.map_err(QueryPlannerError::from),
+            Err(err) => {
+                failfast_debug!("parsing query task failed: {}", err);
+                Err(QueryPlannerError::from(err).into())
+            }
+        }
+    }
+
+    async fn introspection(&self, query: &str) -> Result<QueryPlannerContent, QueryPlannerError> {
+        match self.introspection.as_ref() {
+            Some(introspection) => {
+                let response = introspection
+                    .execute(self.schema.as_str(), query)
+                    .await
+                    .map_err(QueryPlannerError::Introspection)?;
+
+                Ok(QueryPlannerContent::Introspection { response })
+            }
+            None => Ok(QueryPlannerContent::IntrospectionDisabled),
+        }
+    }
+
+    async fn plan(
+        &self,
+        query: String,
+        operation: Option<String>,
+        options: QueryPlanOptions,
+        selections: Query,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let planner_result = self
+            .planner
+            .plan(query, operation)
+            .await
+            .map_err(QueryPlannerError::RouterBridgeError)?
+            .into_result()
+            .map_err(QueryPlannerError::from)?;
+
+        match planner_result {
+            PlanSuccess {
+                data: QueryPlan { node: Some(node) },
+                usage_reporting,
+            } => Ok(QueryPlannerContent::Plan {
+                plan: Arc::new(query_planner::QueryPlan {
+                    usage_reporting,
+                    root: node,
+                    options,
+                }),
+                query: Arc::new(selections),
+            }),
+            PlanSuccess {
+                data: QueryPlan { node: None },
+                usage_reporting,
+            } => {
+                failfast_debug!("empty query plan");
+                Err(QueryPlannerError::EmptyPlan(usage_reporting))
+            }
+        }
+    }
 }
 
 impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
@@ -85,18 +150,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 }
 
-async fn parse_selections(schema: Arc<Schema>, query: String) -> Result<Query, QueryPlannerError> {
-    let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(query, &schema))
-        .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
-    match query_parsing_future.await {
-        Ok(res) => res.map_err(QueryPlannerError::from),
-        Err(err) => {
-            failfast_debug!("parsing query task failed: {}", err);
-            Err(QueryPlannerError::from(err).into())
-        }
-    }
-}
-
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
     async fn get(
@@ -105,52 +158,13 @@ impl QueryPlanner for BridgeQueryPlanner {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = parse_selections(self.schema.clone(), query.clone()).await?;
+        let selections = self.parse_selections(query.clone()).await?;
 
         if selections.contains_introspection() {
-            match self.introspection.as_ref() {
-                Some(introspection) => {
-                    let response = introspection
-                        .execute(self.schema.as_str(), query.as_str())
-                        .await
-                        .map_err(QueryPlannerError::Introspection)?;
-
-                    return Ok(QueryPlannerContent::Introspection { response });
-                }
-                None => {
-                    return Ok(QueryPlannerContent::IntrospectionDisabled);
-                }
-            }
+            return self.introspection(query.as_str()).await;
         }
 
-        let planner_result = self
-            .planner
-            .plan(query, operation)
-            .await
-            .map_err(QueryPlannerError::RouterBridgeError)?
-            .into_result()
-            .map_err(QueryPlannerError::from)?;
-
-        match planner_result {
-            PlanSuccess {
-                data: QueryPlan { node: Some(node) },
-                usage_reporting,
-            } => Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(query_planner::QueryPlan {
-                    usage_reporting,
-                    root: node,
-                    options,
-                }),
-                query: Arc::new(selections),
-            }),
-            PlanSuccess {
-                data: QueryPlan { node: None },
-                usage_reporting,
-            } => {
-                failfast_debug!("empty query plan");
-                Err(QueryPlannerError::EmptyPlan(usage_reporting))
-            }
-        }
+        self.plan(query, operation, options, selections).await
     }
 }
 
@@ -244,10 +258,15 @@ mod tests {
         )
         .await
         .unwrap()
-        .get(
+        // test the planning part separately because it is a valid introspection query
+        // it should be caught by the introspection part, but just in case, we check
+        // that the query planner would return an empty plan error if it received an
+        // introspection query
+        .plan(
             include_str!("testdata/unknown_introspection_query.graphql").into(),
             None,
-            Default::default(),
+            QueryPlanOptions::default(),
+            Query::default(),
         )
         .await
         .unwrap_err();
