@@ -22,9 +22,9 @@ fn process_request(request) {
             k_v[0].trim();
             k_v[1].trim();
             // update our headers
-            // Note: we must update sub_headers, since we are
+            // Note: we must update sub.headers, since we are
             // setting a header in our sub graph request
-            request.sub_headers[k_v[0]] = k_v[1];
+            request.sub.headers[k_v[0]] = k_v[1];
         }
     }
 }

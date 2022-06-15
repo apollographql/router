@@ -1,0 +1,3 @@
+plugins:
+  experimental.rhai:
+    filename: src/rhai_subgraph_request_log.rhai
