@@ -47,7 +47,7 @@ extraEnvVars:
     # sets router log level to debug
   - name: APOLLO_ROUTER_LOG
     value: debug
-extraEnvVarsCM: 'some-configmap'
+extraEnvVarsCM: ''
 extraEnvVarsSecret: ''
 
 extraVolumes:
