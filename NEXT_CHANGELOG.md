@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239))
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
 
 The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required. 
 
@@ -36,14 +36,13 @@ Most users will continue to use:
 apollo_router::main()  
 ```
 
-However, if you want to specify your own tokio runtime and or provide some extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior. 
+However, if you want to specify extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior. 
 
 ```rust
 use apollo_router::Executable;
 Executable::builder()
-  .runtime(runtime) // Optional
   .router_builder_fn(|configuration, schema| ...) // Optional
-  .start()?
+  .start().await?
 ```
 
 Migration tips:
@@ -56,7 +55,7 @@ Migration tips:
 * `FederatedServerError` has been renamed to `ApolloRouterError`.
 * `main_rt` should be migrated to `Executable::builder()`
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
 
 ## 🚀 Features ( :rocket: )
 
