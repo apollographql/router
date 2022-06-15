@@ -28,7 +28,7 @@ mod test {
     use inflector::Inflector;
     use std::collections::BTreeMap;
     use std::env;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -48,7 +48,7 @@ mod test {
         let opts = Opts::builder()
             .project_name("temp")
             .target_dir(temp_dir.path())
-            .template_path("templates/base")
+            .template_path(PathBuf::from("templates").join("base"))
             .force(true)
             .build();
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([(
@@ -69,12 +69,12 @@ mod test {
         scaffold_plugin(&current_dir, &temp_dir, "auth")?;
         scaffold_plugin(&current_dir, &temp_dir, "tracing")?;
         std::fs::write(
-            temp_dir.path().join("src/plugins/mod.rs"),
+            temp_dir.path().join("src").join("plugins").join("mod.rs"),
             "mod auth;\nmod basic;\nmod tracing;\n",
         )?;
         test_build(&temp_dir)?;
 
-        // drop(temp_dir);
+        drop(temp_dir);
         Ok(())
     }
 
@@ -83,7 +83,7 @@ mod test {
             .project_name(plugin_type)
             .target_dir(dir.path())
             .append(true)
-            .template_path("templates/plugin")
+            .template_path(PathBuf::from("templates").join("plugin"))
             .build();
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
