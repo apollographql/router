@@ -400,7 +400,10 @@ impl PluggableRouterServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
-        let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
+        let query_cache = Arc::new(QueryCache::new(
+            query_cache_limit,
+            Arc::new((*self.schema.api_schema()).clone()),
+        ));
 
         let introspection = if self.introspection {
             // Introspection instantiation can potentially block for some time

@@ -10,7 +10,7 @@ use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 
 /// A GraphQL schema.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
@@ -446,7 +446,7 @@ pub(crate) struct InvalidObject;
 
 macro_rules! implement_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         $visibility struct $name {
             pub(crate) name: String,
             fields: HashMap<String, FieldType>,
@@ -524,7 +524,7 @@ implement_object_type_or_interface!(
 
 macro_rules! implement_input_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         $visibility struct $name {
             name: String,
             fields: HashMap<String, FieldType>,
