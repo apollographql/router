@@ -137,7 +137,7 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    Executable::builder().runtime(runtime).start()
+    Executable::builder().runtime(runtime).serve()
 }
 
 /// Entry point into creating a router executable.
@@ -145,8 +145,8 @@ pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable which can be blockingly started.
-    /// You may optionally supply a tokio `runtime` and `router_builder_fn` to override building of the router.
+    /// Build an executable which can be awaited.
+    /// You may optionally supply a `router_builder_fn` to override building of the router.
     ///
     /// ```no_run
     /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
@@ -160,20 +160,43 @@ impl Executable {
     ///                 .schema(schema)
     ///                 .shutdown(ShutdownKind::CtrlC)
     ///                 .build())
-    ///   .start()
+    ///   .serve()
     /// # }
     /// ```
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
-    #[builder(entry = "builder", exit = "start")]
+    #[builder(entry = "builder", exit = "serve")]
     pub fn build(
-        runtime: Option<tokio::runtime::Runtime>,
+        runtime: tokio::runtime::Runtime,
         router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
     ) -> Result<()> {
-        match runtime {
-            None => tokio::runtime::Handle::current().block_on(Executable::run(router_builder_fn)),
-            Some(runtime) => runtime.block_on(Executable::run(router_builder_fn)),
-        }
+        runtime.block_on(Executable::run(router_builder_fn))
+    }
+
+    /// Build an executable which can be blockingly started.
+    /// You may optionally supply a tokio `runtime` and `router_builder_fn` to override building of the router.
+    ///
+    /// ```no_run
+    /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
+    /// # use anyhow::Result;
+    /// # #[tokio::main]
+    /// # async fn main()->Result<()> {
+    /// Executable::builder_async()
+    ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
+    ///                 .configuration(configuration)
+    ///                 .schema(schema)
+    ///                 .shutdown(ShutdownKind::CtrlC)
+    ///                 .build())
+    ///   .serve().await
+    /// # }
+    /// ```
+    /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
+    ///
+    #[builder(entry = "builder_async", exit = "serve")]
+    pub async fn build_async(
+        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+    ) -> Result<()> {
+        Executable::run(router_builder_fn).await
     }
 
     async fn run(
