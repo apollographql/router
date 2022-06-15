@@ -13,6 +13,7 @@ pub use query::*;
 pub use schema::*;
 pub(crate) use selection::*;
 
+/// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone)]
 pub enum SpecError {
     /// selection processing recursion limit exceeded

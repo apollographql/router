@@ -5,9 +5,10 @@
 
 use std::ops::ControlFlow;
 
-use crate::sync_checkpoint::CheckpointService;
-use crate::{RouterRequest, RouterResponse};
-use futures::stream::{once, BoxStream};
+use crate::error::Error;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::{ResponseBody, RouterRequest, RouterResponse};
+use futures::stream::BoxStream;
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::{json, Value};
@@ -42,7 +43,9 @@ impl Default for APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = BoxStream<'static, RouterResponse>> + Send + 'static,
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+        + Send
+        + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -87,7 +90,7 @@ where
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
-                            let errors = vec![crate::Error {
+                            let errors = vec![Error {
                                 message: "PersistedQueryNotFound".to_string(),
                                 locations: Default::default(),
                                 path: Default::default(),
@@ -108,7 +111,7 @@ where
                                 .build()
                                 .expect("response is valid");
 
-                            Ok(ControlFlow::Break(Box::pin(once(async { res }))))
+                            Ok(ControlFlow::Break(res.boxed()))
                         }
                     }
                     _ => Ok(ControlFlow::Continue(req)),
@@ -127,8 +130,8 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
+    use crate::error::Error;
     use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
-    use futures::StreamExt;
     use serde_json_bytes::json;
     use std::borrow::Cow;
     use std::collections::HashMap;
@@ -140,7 +143,7 @@ mod apq_tests {
         let hash2 = hash.clone();
         let hash3 = hash.clone();
 
-        let expected_apq_miss_error = crate::Error {
+        let expected_apq_miss_error = Error {
             message: "PersistedQueryNotFound".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -173,11 +176,10 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(Box::pin(once(async {
-                RouterResponse::fake_builder()
-                    .build()
-                    .expect("expecting valid request")
-            })))
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request")
+                .boxed())
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -202,11 +204,10 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(Box::pin(once(async {
-                    RouterResponse::fake_builder()
-                        .build()
-                        .expect("expecting valid request")
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request")
+                    .boxed())
             });
 
         let mock = mock_service.build();
@@ -242,7 +243,7 @@ mod apq_tests {
             .call(hash_only)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
@@ -260,7 +261,7 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = crate::Error {
+        let expected_apq_miss_error = Error {
             message: "PersistedQueryNotFound".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -295,11 +296,10 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(Box::pin(once(async {
-                    RouterResponse::fake_builder()
-                        .build()
-                        .expect("expecting valid request")
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request")
+                    .boxed())
             });
 
         // the last call should be an APQ error.
@@ -345,7 +345,7 @@ mod apq_tests {
             .call(hash_only)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
@@ -362,15 +362,15 @@ mod apq_tests {
             .call(second_hash_only)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, res: crate::RouterResponse) {
-        if let ResponseBody::GraphQL(graphql_response) = res.response.body() {
+    fn assert_error_matches(expected_error: &Error, res: crate::ResponseBody) {
+        if let ResponseBody::GraphQL(graphql_response) = res {
             assert_eq!(&graphql_response.errors[0], expected_error);
         } else {
             panic!("expected a graphql response");

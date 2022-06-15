@@ -233,10 +233,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::fetch::OperationKind;
     use crate::http_compat;
     use crate::plugin::utils::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
+    use crate::query_planner::fetch::OperationKind;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use std::collections::HashSet;
     use std::str::FromStr;

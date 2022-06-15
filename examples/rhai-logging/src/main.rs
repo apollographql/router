@@ -12,9 +12,10 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::plugin::utils;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use futures::{stream::once, StreamExt};
+    use apollo_router::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -30,12 +31,11 @@ mod tests {
         mock.expect_call()
             .once()
             .returning(move |_req: RouterRequest| {
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .data(expected_mock_response_data)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -60,11 +60,8 @@ mod tests {
             .unwrap();
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_appropriate_name)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -72,7 +69,9 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) = service_response.response.body() {
+        if let apollo_router::ResponseBody::GraphQL(response) =
+            service_response.next_response().await.unwrap()
+        {
             assert!(response.errors.is_empty());
             assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         } else {

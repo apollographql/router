@@ -1,6 +1,7 @@
-mod bridge_query_planner;
-mod caching_query_planner;
-mod selection;
+use crate::error::Error;
+use crate::error::FetchError;
+use crate::json_ext::{Path, Value, ValueExt};
+use crate::service_registry::ServiceRegistry;
 use crate::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
@@ -11,6 +12,11 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use std::collections::HashSet;
 use tracing::Instrument;
+
+mod bridge_query_planner;
+mod caching_query_planner;
+mod selection;
+
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {
@@ -300,6 +306,10 @@ impl PlanNode {
 
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
+    use super::QueryPlanOptions;
+    use crate::error::{Error, FetchError};
+    use crate::json_ext::{Object, Path, Value, ValueExt};
+    use crate::service_registry::ServiceRegistry;
     use crate::*;
     use indexmap::IndexSet;
     use serde::Deserialize;
@@ -618,7 +628,7 @@ pub(crate) struct FlattenNode {
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
 mod log {
-    use crate::PlanNode;
+    use crate::query_planner::PlanNode;
     use serde_json_bytes::{ByteString, Map, Value};
 
     pub(crate) fn trace_query_plan(plan: &PlanNode) {

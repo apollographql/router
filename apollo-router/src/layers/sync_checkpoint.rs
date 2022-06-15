@@ -163,12 +163,8 @@ where
 mod checkpoint_tests {
     use super::*;
     use crate::{
-        plugin::utils::test::MockExecutionService, ExecutionRequest, ExecutionResponse,
-        ServiceBuilderExt,
-    };
-    use futures::{
-        stream::{once, BoxStream},
-        StreamExt,
+        layers::ServiceBuilderExt, plugin::utils::test::MockExecutionService, ExecutionRequest,
+        ExecutionResponse,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 
@@ -182,11 +178,10 @@ mod checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req: crate::ExecutionRequest| {
-                Ok(Box::pin(once(async {
-                    ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .build()
-                })))
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .build()
+                    .boxed())
             });
 
         let service = execution_service.build();
@@ -201,11 +196,9 @@ mod checkpoint_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap()
-            .response
-            .into_body()
             .label
             .unwrap();
 
@@ -221,11 +214,10 @@ mod checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req| {
-                Ok(Box::pin(once(async {
-                    ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .build()
-                })))
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .build()
+                    .boxed())
             });
 
         let service = router_service.build();
@@ -239,11 +231,9 @@ mod checkpoint_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap()
-            .response
-            .into_body()
             .label
             .unwrap();
 
@@ -258,12 +248,12 @@ mod checkpoint_tests {
         let service = router_service.build();
 
         let service_stack = CheckpointLayer::new(|_req| {
-            Ok(ControlFlow::Break(Box::pin(once(async {
+            Ok(ControlFlow::Break(
                 ExecutionResponse::fake_builder()
                     .label("returned_before_mock_service".to_string())
                     .build()
-            }))
-                as BoxStream<ExecutionResponse>))
+                    .boxed(),
+            ))
         })
         .layer(service);
 
@@ -273,11 +263,9 @@ mod checkpoint_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap()
-            .response
-            .into_body()
             .label
             .unwrap();
 

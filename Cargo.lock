@@ -80,27 +80,19 @@ checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.5"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3f8fe8c9fb08c1e99bf4a50698adcd807cafba2d2aacc49d8ffc79123fce59"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.2.5"
-source = "git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227#bbfb74c682e86cdefcfcfcd5be9eefafefc796e2"
+checksum = "85efd09fc4aad19f29c8419215851246444f9b41ffbade7b7eb7f05d8b1f8ab2"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5 (git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227)",
+ "apollo-parser",
  "apollo-spaceport",
  "apollo-uplink",
  "async-trait",
@@ -193,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -209,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -227,14 +219,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
  "apollo-encoder 0.3.1",
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
 ]
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "bytes",
  "clap 3.1.18",
@@ -255,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "futures",
  "graphql_client",
@@ -4362,7 +4354,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -6244,7 +6236,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ansi_term",
  "anyhow",

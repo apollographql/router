@@ -18,11 +18,11 @@ use serde::Deserialize;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse,
+    register_plugin, QueryPlannerRequest, QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
 };
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -123,13 +123,14 @@ mod test {
     use std::sync::Arc;
 
     use futures::stream::BoxStream;
-    use futures::StreamExt;
     use once_cell::sync::Lazy;
     use serde_json_bytes::{ByteString, Value};
     use tower::{util::BoxCloneService, Service};
 
+    use crate::json_ext::Object;
+    use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
+    use crate::plugin::DynPlugin;
     use crate::{
-        utils::test::mock::subgraph::MockSubgraph, DynPlugin, Object,
         PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
     };
 
@@ -146,7 +147,7 @@ mod test {
         body: &ResponseBody,
         mut router_service: BoxCloneService<
             RouterRequest,
-            BoxStream<'static, RouterResponse>,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
     ) {
@@ -163,15 +164,16 @@ mod test {
             .call(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
-        assert_eq!(response.response.body(), body);
+        assert_eq!(response, *body);
     }
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>
+    {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -227,7 +229,7 @@ mod test {
 
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
+        crate::plugin::plugins()
             .get("experimental.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)

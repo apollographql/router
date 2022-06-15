@@ -68,14 +68,15 @@ impl Plugin for IncludeSubgraphErrors {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::json_ext::Object;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
+    use crate::plugin::DynPlugin;
     use crate::{
-        DynPlugin, Object, PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest,
-        RouterResponse, Schema,
+        PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest, RouterResponse,
+        Schema,
     };
     use bytes::Bytes;
     use futures::stream::BoxStream;
-    use futures::StreamExt;
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
     use std::sync::Arc;
@@ -113,7 +114,7 @@ mod test {
         body: &ResponseBody,
         mut router_service: BoxCloneService<
             RouterRequest,
-            BoxStream<'static, RouterResponse>,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
     ) {
@@ -130,15 +131,16 @@ mod test {
             .call(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
-        assert_eq!(response.response.body(), body);
+        assert_eq!(response, *body);
     }
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>
+    {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -191,7 +193,7 @@ mod test {
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
+        crate::plugin::plugins()
             .get("experimental.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance(config)

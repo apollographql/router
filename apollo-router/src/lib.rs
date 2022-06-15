@@ -24,17 +24,20 @@ macro_rules! failfast_error {
     }};
 }
 
+#[macro_use]
+pub mod json_ext;
+
 mod axum_http_server_factory;
 mod cache;
 pub mod configuration;
 mod context;
-mod error;
+pub mod error;
 mod executable;
 mod files;
 mod http_server_factory;
 mod introspection;
-mod json_ext;
 pub mod layers;
+#[macro_use]
 pub mod plugin;
 pub mod plugins;
 mod query_cache;
@@ -51,23 +54,20 @@ mod state_machine;
 pub mod subscriber;
 mod traits;
 
-pub use cache::*;
-pub use context::*;
-pub use error::*;
-pub use executable::{main, rt_main};
-pub use introspection::*;
-pub use json_ext::*;
-pub use layers::*;
-pub use plugin::*;
-pub use query_cache::*;
-pub use query_planner::*;
-pub use request::*;
-pub use response::*;
-pub use router::*;
-pub use service_registry::*;
-pub use services::*;
-pub use spec::*;
-pub use traits::*;
+pub use context::Context;
+pub use executable::{main, Executable};
+pub use request::Request;
+pub use response::Response;
+pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
+pub use services::http_compat;
+pub use services::PluggableRouterServiceBuilder;
+pub use services::ResponseBody;
+pub use services::{ExecutionRequest, ExecutionResponse, ExecutionService};
+pub use services::{QueryPlannerRequest, QueryPlannerResponse};
+pub use services::{RouterRequest, RouterResponse, RouterService};
+pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
+pub use spec::Schema;
+pub(crate) use spec::*;
 
 /// Useful traits.
 pub mod prelude {

@@ -1,5 +1,7 @@
-use crate::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
-use futures::stream::{once, BoxStream};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
+use futures::stream::BoxStream;
 use http::header;
 use http::{HeaderMap, StatusCode};
 use schemars::JsonSchema;
@@ -89,8 +91,12 @@ impl Plugin for Csrf {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -100,7 +106,7 @@ impl Plugin for Csrf {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         tracing::trace!("request is not preflighted");
-                        let error = crate::Error::builder().message(
+                        let error = crate::error::Error::builder().message(
                             format!(
                                 "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                                 Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
@@ -113,7 +119,7 @@ impl Plugin for Csrf {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()?;
-                        Ok(ControlFlow::Break(Box::pin(once(async { res})) as BoxStream<RouterResponse>))
+                        Ok(ControlFlow::Break(res.boxed()))
                     }
                 })
                 .service(service)
@@ -200,14 +206,14 @@ register_plugin!("apollo", "csrf", Csrf);
 mod csrf_tests {
     #[tokio::test]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({}))
@@ -217,7 +223,6 @@ mod csrf_tests {
 
     use super::*;
     use crate::{plugin::utils::test::MockRouterService, ResponseBody};
-    use futures::StreamExt;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
@@ -289,12 +294,11 @@ mod csrf_tests {
     async fn assert_accepted(config: CSRFConfig, request: RouterRequest) {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(Box::pin(once(async {
-                RouterResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .build()
-                    .unwrap()
-            })))
+            Ok(RouterResponse::fake_builder()
+                .data(json!({ "test": 1234_u32 }))
+                .build()
+                .unwrap()
+                .boxed())
         });
 
         let mock = mock_service.build();
@@ -306,11 +310,11 @@ mod csrf_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
-        match res.response.into_body() {
+        match res {
             ResponseBody::GraphQL(res) => {
                 assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
             }
@@ -328,11 +332,11 @@ mod csrf_tests {
             .oneshot(request)
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
-        match res.response.into_body() {
+        match res {
             ResponseBody::GraphQL(res) => {
                 assert_eq!(
                     1,

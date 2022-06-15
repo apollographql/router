@@ -1,10 +1,11 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, ListenAddr};
+use crate::http_compat;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::FederatedServerError;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
 use crate::ResponseBody;
-use crate::DEFAULT_BUFFER_SIZE;
-use crate::{http_compat, Handler};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
@@ -51,15 +52,14 @@ impl AxumHttpServerFactory {
 type BufferedService = Buffer<
     BoxService<
         http_compat::Request<crate::Request>,
-        BoxStream<'static, http_compat::Response<ResponseBody>>,
+        http_compat::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
     http_compat::Request<crate::Request>,
 >;
 
 impl HttpServerFactory for AxumHttpServerFactory {
-    type Future =
-        Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
     fn create<RS>(
         &self,
@@ -71,7 +71,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RS: Service<
                 http_compat::Request<crate::Request>,
-                Response = BoxStream<'static, http_compat::Response<ResponseBody>>,
+                Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
@@ -92,7 +92,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .unwrap_or_default()
                 .into_layer()
                 .map_err(|e| {
-                    FederatedServerError::ConfigError(
+                    ApolloRouterError::ConfigError(
                         crate::configuration::ConfigurationError::LayerConfiguration {
                             layer: "Cors".to_string(),
                             error: e,
@@ -168,18 +168,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
-                            .map_err(FederatedServerError::ServerCreationError)?,
+                            .map_err(ApolloRouterError::ServerCreationError)?,
                     ),
                     #[cfg(unix)]
                     ListenAddr::UnixSocket(path) => Listener::Unix(
-                        UnixListener::bind(path)
-                            .map_err(FederatedServerError::ServerCreationError)?,
+                        UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
                     ),
                 }
             };
             let actual_listen_address = listener
                 .local_addr()
-                .map_err(FederatedServerError::ServerCreationError)?;
+                .map_err(ApolloRouterError::ServerCreationError)?;
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
@@ -357,7 +356,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             // Spawn the server into a runtime
             let server_future = tokio::task::spawn(server)
-                .map_err(|_| FederatedServerError::HttpServerLifecycleError)
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
@@ -495,18 +494,25 @@ async fn run_graphql_request(
                     )
                         .into_response()
                 }
-                Ok(mut stream) => match stream.next().await {
-                    None => {
-                        tracing::error!("router service is not available to process request",);
-                        (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "router service is not available to process request",
-                        )
-                            .into_response()
+                Ok(response) => {
+                    let (parts, mut stream) = response.into_parts();
+                    match stream.next().await {
+                        None => {
+                            tracing::error!("router service is not available to process request",);
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "router service is not available to process request",
+                            )
+                                .into_response()
+                        }
+                        Some(response) => {
+                            tracing::trace_span!("serialize_response").in_scope(|| {
+                                http_compat::Response::from_parts(parts, response).into_response()
+                                //response.into_response()
+                            })
+                        }
                     }
-                    Some(response) => tracing::trace_span!("serialize_response")
-                        .in_scope(|| response.into_response()),
-                },
+                }
             }
         }
         Err(e) => {
@@ -582,7 +588,6 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::http_compat::Request;
-    use futures::stream::once;
     use http::header::{self, CONTENT_TYPE};
     use mockall::mock;
     use reqwest::header::{
@@ -640,7 +645,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<crate::Request>) -> Result<BoxStream<'static, http_compat::Response<ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<crate::Request>) -> Result<http_compat::Response<BoxStream<'static, ResponseBody>>, BoxError>;
         }
     }
 
@@ -769,7 +774,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_home_page() -> Result<(), FederatedServerError> {
+    async fn it_display_home_page() -> Result<(), ApolloRouterError> {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
@@ -801,7 +806,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_request() -> Result<(), FederatedServerError> {
+    async fn malformed_request() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
@@ -816,7 +821,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response() -> Result<(), FederatedServerError> {
+    async fn response() -> Result<(), ApolloRouterError> {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
@@ -832,13 +837,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -888,7 +892,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bad_response() -> Result<(), FederatedServerError> {
+    async fn bad_response() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
         let url = format!("{}/test", server.listen_address());
@@ -924,7 +928,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_endpoint() -> Result<(), FederatedServerError> {
+    async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -935,13 +939,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -994,7 +997,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_prefix_endpoint() -> Result<(), FederatedServerError> {
+    async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError> {
         let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -1005,13 +1008,12 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -1064,7 +1066,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_endpoint_wildcard() -> Result<(), FederatedServerError> {
+    async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterError> {
         let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -1075,13 +1077,12 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let conf = Configuration::builder()
             .server(
@@ -1137,8 +1138,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_extracts_query_and_operation_name_on_get_requests(
-    ) -> Result<(), FederatedServerError> {
+    async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), ApolloRouterError>
+    {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
@@ -1168,13 +1169,12 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1203,8 +1203,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_extracts_query_and_operation_name_on_post_requests(
-    ) -> Result<(), FederatedServerError> {
+    async fn it_extracts_query_and_operation_name_on_post_requests() -> Result<(), ApolloRouterError>
+    {
         let query = "query";
         let expected_query = query;
         let operation_name = "operationName";
@@ -1229,13 +1229,12 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/", server.listen_address());
@@ -1258,24 +1257,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_failure() -> Result<(), FederatedServerError> {
+    async fn response_failure() -> Result<(), ApolloRouterError> {
         let mut expectations = MockRouterService::new();
         expectations
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                let example_response = crate::FetchError::SubrequestHttpError {
+                let example_response = crate::error::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(Box::pin(once(async {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
 
@@ -1297,7 +1295,7 @@ mod tests {
 
         assert_eq!(
             response,
-            crate::FetchError::SubrequestHttpError {
+            crate::error::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
@@ -1307,7 +1305,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cors_preflight() -> Result<(), FederatedServerError> {
+    async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
@@ -1365,13 +1363,12 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(Box::pin(once(async move {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let server = init_unix(expectations, &temp_dir).await;
 
@@ -1502,7 +1499,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_send_bad_content_type() -> Result<(), FederatedServerError> {
+    async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
         let query = "query";
         let operation_name = "operationName";
 
@@ -1523,7 +1520,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_doesnt_display_disabled_home_page() -> Result<(), FederatedServerError> {
+    async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let conf = Configuration::builder()
             .server(
@@ -1552,7 +1549,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_answers_to_custom_endpoint() -> Result<(), FederatedServerError> {
+    async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let plugin_handler = Handler::new(
             service_fn(|req: http_compat::Request<Bytes>| async move {
@@ -1634,13 +1631,13 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_checks_the_shape_of_router_request() -> Result<(), FederatedServerError> {
+    async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError> {
         let mut expectations = MockRouterService::new();
         expectations
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(Box::pin(once(async move {
+                Ok(http_compat::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::Text(format!(
@@ -1649,9 +1646,8 @@ Content-Type: application/json\r
                             req.uri(),
                             serde_json::to_string(req.body()).unwrap()
                         )))
-                        .unwrap()
-                        .into()
-                })))
+                        .unwrap(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let query = json!(

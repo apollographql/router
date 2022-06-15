@@ -2,7 +2,9 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::fetch::OperationKind;
+use crate::error::FetchError;
+use crate::json_ext::{Object, Value};
+use crate::query_planner::fetch::OperationKind;
 use crate::*;
 use apollo_parser::ast;
 use derivative::Derivative;
@@ -95,6 +97,11 @@ impl Query {
 
         let parser = apollo_parser::Parser::new(string.as_str());
         let tree = parser.parse();
+
+        // Trace log recursion limit data
+        let recursion_limit = tree.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
         let errors = tree
             .errors()
             .map(|err| format!("{:?}", err))
@@ -802,6 +809,7 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json_ext::ValueExt;
     use serde_json_bytes::json;
     use test_log::test;
 
@@ -4563,5 +4571,47 @@ mod tests {
                 "test_enum2": "Z"
             }},
         );
+    }
+
+    #[test]
+    fn parse_introspection_query() {
+        let schema = "type Query {
+            foo: String
+            stuff: Bar
+            array: [Bar]
+            baz: String
+        }
+        type Bar {
+            bar: String
+            baz: String
+        }";
+
+        let schema = with_supergraph_boilerplate(schema)
+            .parse::<Schema>()
+            .expect("could not parse schema");
+        let api_schema = schema.api_schema();
+
+        let query = "{
+            __type(name: \"Bar\") {
+              name
+              fields {
+                name
+                type {
+                  name
+                }
+              }
+            }
+          }}";
+        let _ = Query::parse(query, api_schema).unwrap();
+
+        let query = "query {
+            __schema {
+              queryType {
+                name
+              }
+            }
+          }";
+
+        let _ = Query::parse(query, api_schema).unwrap();
     }
 }

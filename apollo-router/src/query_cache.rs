@@ -2,7 +2,10 @@
 use opentelemetry::trace::SpanKind;
 use tracing::{info_span, Instrument};
 
-use crate::CacheResolver;
+use crate::cache::CachingMap;
+use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
+use crate::traits::CacheResolver;
 use crate::*;
 use std::sync::Arc;
 

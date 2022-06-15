@@ -3,6 +3,165 @@
 All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+# [0.9.4] - 2022-06-14
+
+## ❗ BREAKING ❗
+### The `apollo-router-core` crate has been merged into `apollo-router` ([PR #1189](https://github.com/apollographql/router/pull/1189))
+
+To upgrade, remove any dependency on the `apollo-router-core` crate from your `Cargo.toml` files and change imports like so:
+
+```diff
+- use apollo_router_core::prelude::*;
++ use apollo_router::prelude::*;
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
+
+
+### Fix input validation rules ([PR #1211](https://github.com/apollographql/router/pull/1211))
+The GraphQL specification provides two sets of coercion / validation rules, depending on whether we're dealing with inputs or outputs.
+We have added validation rules for specified input validations which were not previously implemented.
+This is a breaking change since slightly invalid input may have validated before but will now be guarded by newly-introduced validation rules.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
+
+## 🚀 Features
+### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
+The `apollo-parser` package now implements recursion limits which can be examined after the parsing phase. The router logs these
+out at `trace` level. You can see them in your logs by searching for "`recursion_limit`". For example, when using JSON logging
+and using `jq` to filter the output:
+
+```
+router -s ../graphql/supergraph.graphql -c ./router.yaml --log trace | jq -c '. | select(.fields.message == "recursion limit data")'
+{"timestamp":"2022-06-10T15:01:02.213447Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:02.261092Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:07.642977Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 4"},"target":"apollo_router::spec::query"}
+```
+
+This example output shows that the maximum recursion limit is 4096 and that the query we processed caused us to recurse 4 times.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
+
+### Helm chart now has the option to use an existing secrets for API key [PR #1196](https://github.com/apollographql/router/pull/1196)
+
+This change allows the use of an already existing secret for the graph API key.
+
+To use existing secrets, update your own `values.yaml` file or specify the value on your `helm install` command line.  For example:
+
+```
+helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>`
+```
+
+By [@pellizzetti](https://github.com/pellizzetti) in https://github.com/apollographql/router/pull/1196
+
+### Add iterators to `Context` ([PR #1202](https://github.com/apollographql/router/pull/1202))
+Context can now be iterated over, with two new methods:
+
+ - `iter()`
+ - `iter_mut()`
+
+These implementations lean heavily on an underlying [`DashMap`](https://docs.rs/dashmap/5.3.4/dashmap/struct.DashMap.html#method.iter) implemetation, so refer to its documentation for more usage details.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1202
+
+### Add an experimental optimization to deduplicate variables in query planner ([PR #872](https://github.com/apollographql/router/pull/872))
+Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.traffic_shaping:
+    variables_deduplication: true # Enable the variables deduplication optimization
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+
+### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
+
+Added the ability to apply custom attributes/labels to metrics which are derived from header values using the Router's configuration file.  For example:
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        static:
+          - name: "version"
+            value: "v1.0.0"
+        from_headers:
+          - named: "content-type"
+            rename: "payload_type"
+            default: "application/json"
+          - named: "x-custom-header-to-add"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1159
+
+### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
+Added the possibility to set a custom health check path
+```yaml
+server:
+  # Default is /.well-known/apollo/server-health
+  health_check_path: /health
+```
+
+By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
+
+## 🐛 Fixes ( :bug: )
+
+### Pin `clap` dependency in `Cargo.toml` ([PR #1232](https://github.com/apollographql/router/pull/1232))
+
+A minor release of `Clap` occured yesterday which introduced a breaking change.  This change might lead `cargo scaffold` users to hit a panic a runtime when the router tries to parse environment variables and arguments.
+
+This patch pins the `clap` dependency to the version that was available before the release, until the root cause is found and fixed upstream.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1232
+
+### Display better error message when on subgraph fetch errors ([PR #1201](https://github.com/apollographql/router/pull/1201))
+
+Show a helpful error message when a subgraph does not return JSON or a bad status code
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1201
+
+### Fix CORS configuration to eliminate runtime panic on misconfiguration ([PR #1197](https://github.com/apollographql/router/pull/1197))
+
+Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime.  For example, consider the following *invalid* configuration where the `allow_any_origin` and `allow_credentials` parameters are inherantly incompatible with each other (per the CORS specification):
+
+```yaml
+server:
+  cors:
+    allow_any_origin: true
+    allow_credentials: true
+```
+
+Previously, this would result in a runtime panic. The router will now detect this kind of misconfiguration and report the error without panicking.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
+
+## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Groundwork for `@defer` support ([PR #1175](https://github.com/apollographql/router/pull/1175)[PR #1206](https://github.com/apollographql/router/pull/1206))
+To prepare for the implementation of the `@defer` directive, the `ExecutionResponse`  and `RouterResponse` types now carry a stream of responses instead of a unique response. For now that stream contains only one item, so there is no change in behaviour.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1206
+
+### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
+Force the creation of `SocketAddr` to use a new unused port to avoid port collisions during testing.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
+
+### Add static `@skip`/`@include` directive support ([PR #1185](https://github.com/apollographql/router/pull/1185))
+
+- Rewrite the `InlineFragment` implementation
+- Add support of static check for `@include` and `@skip` directives
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
+
+### Update `buildstructor` to 0.3 ([PR #1207](https://github.com/apollographql/router/pull/1207))
+
+Update `buildstructor` to v0.3.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207
+
 # [0.9.3] - 2022-06-01
 
 ## ❗ BREAKING ❗

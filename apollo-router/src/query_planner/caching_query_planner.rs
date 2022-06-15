@@ -1,4 +1,12 @@
-use crate::CacheResolver;
+use super::QueryPlanOptions;
+use super::USAGE_REPORTING;
+use crate::cache::CachingMap;
+use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
+use crate::services::QueryPlannerContent;
+use crate::traits::CacheResolver;
+use crate::traits::QueryKey;
+use crate::traits::QueryPlanner;
 use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;

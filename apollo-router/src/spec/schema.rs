@@ -1,5 +1,8 @@
 //! GraphQL schema.
 
+use crate::error::ParseErrors;
+use crate::error::SchemaError;
+use crate::json_ext::{Object, Value};
 use crate::*;
 use apollo_parser::ast;
 use http::Uri;
@@ -46,8 +49,14 @@ impl std::str::FromStr for Schema {
         }
 
         fn parse(schema: &str) -> Result<Schema, SchemaError> {
-            let parser = apollo_parser::Parser::new(schema);
+            let schema_with_introspection = Schema::with_introspection(schema);
+            let parser = apollo_parser::Parser::new(&schema_with_introspection);
             let tree = parser.parse();
+
+            // Trace log recursion limit data
+            let recursion_limit = tree.recursion_limit();
+            tracing::trace!(?recursion_limit, "recursion limit data");
+
             let errors = tree.errors().cloned().collect::<Vec<_>>();
 
             if !errors.is_empty() {
@@ -424,6 +433,14 @@ impl Schema {
 
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
+    }
+
+    fn with_introspection(schema: &str) -> String {
+        format!(
+            "{}\n{}",
+            schema,
+            include_str!("introspection_types.graphql")
+        )
     }
 }
 
