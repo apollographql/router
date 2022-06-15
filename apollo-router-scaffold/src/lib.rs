@@ -58,7 +58,8 @@ mod test {
                     .to_str()
                     .expect("current dir must be convertable to string")
                     .to_string()
-                    .replace('\\', "/"),
+                    // windows paths use \
+                    .replace('\\', "\\\\"),
             ),
         )]))?;
         test_build(&temp_dir)?;
@@ -108,7 +109,8 @@ mod test {
                         .to_str()
                         .expect("current dir must be convertable to string")
                         .to_string()
-                        .replace('\\', "/"),
+                        // windows paths use \
+                        .replace('\\', "\\\\"),
                 ),
             ),
         ]))?;
