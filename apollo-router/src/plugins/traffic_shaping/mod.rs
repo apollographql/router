@@ -265,6 +265,46 @@ mod test {
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
 
+    #[tokio::test]
+    async fn it_add_correct_headers_for_compression() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        subgraphs:
+            test:
+                compression: gzip
+        "#,
+        )
+        .unwrap();
+
+        let mut plugin = get_taffic_shaping_plugin(&config).await;
+        let request = SubgraphRequest::fake_builder().build();
+
+        let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&CONTENT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip")
+            );
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&ACCEPT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip")
+            );
+
+            req
+        });
+
+        let _response = plugin
+            .subgraph_service("test", test_service.boxed())
+            .oneshot(request)
+            .await
+            .unwrap();
+    }
+
     #[test]
     fn test_merge_config() {
         let config = serde_yaml::from_str::<Config>(
