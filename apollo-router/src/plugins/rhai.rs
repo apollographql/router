@@ -1398,12 +1398,10 @@ impl Rhai {
             .register_get_result("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
             })
-            /* XXX CANNOT DO BECAUSE variables is Arc
             .register_set_result("variables", |x: &mut Request, om: Map| {
                 x.variables = from_dynamic(&om.into())?;
                 Ok(())
             })
-            */
             // Request.extensions
             .register_get_result("extensions", |x: &mut Request| {
                 to_dynamic(x.extensions.clone())
