@@ -9,11 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-## 🚀 Features ( :rocket: )
-## 🐛 Fixes ( :bug: )
-## 🛠 Maintenance ( :hammer_and_wrench: )
-## 📚 Documentation ( :books: )
-## 🐛 Fixes ( :bug: )
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+## 🐛 Fixes
 
 ## Example section entry format
 
@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
-## 🚀 Features ( :rocket: )
+## 🚀 Features
 
 ### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
 Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
@@ -38,7 +38,7 @@ export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
 
-## 🐛 Fixes ( :bug: )
+## 🐛 Fixes
 
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
@@ -47,8 +47,8 @@ resulting in some introspection queries not working.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
-## 🛠 Maintenance ( :hammer_and_wrench: )
-## 📚 Documentation ( :books: )
+## 🛠 Maintenance
+## 📚 Documentation
 
 ### Update README link to the configuration file  ([PR #1208](https://github.com/apollographql/router/pull/1208))
 
