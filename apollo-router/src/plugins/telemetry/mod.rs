@@ -13,15 +13,14 @@ use crate::reexports::router_bridge::planner::UsageReporting;
 use crate::subscriber::replace_layer;
 use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
+    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
@@ -228,8 +227,12 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.clone();
@@ -247,37 +250,51 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<BoxStream<'static, RouterResponse>, BoxError> =
-                            fut.await;
-
+                        let result: Result<
+                            RouterResponse<BoxStream<'static, ResponseBody>>,
+                            BoxError,
+                        > = fut.await;
+                        Self::update_metrics(&ctx, metrics, &result);
                         match result {
                             Err(e) => {
-                                let res = Err(e);
                                 if !matches!(sender, Sender::Noop) {
                                     Self::update_apollo_metrics(
                                         &ctx,
                                         sender,
-                                        &res,
+                                        true,
                                         start.elapsed(),
                                     );
                                 }
-                                Self::update_metrics(&ctx, metrics, &res);
-                                Err(res.unwrap_err())
+
+                                Err(e)
                             }
-                            Ok(stream) => Ok(Box::pin(stream.map(move |response| {
-                                let res = Ok(response);
-                                if !matches!(sender, Sender::Noop) {
-                                    Self::update_apollo_metrics(
-                                        &ctx,
-                                        sender.clone(),
-                                        &res,
-                                        start.elapsed(),
-                                    );
-                                }
-                                Self::update_metrics(&ctx, metrics.clone(), &res);
-                                res.expect("is always Ok")
-                            }))
-                                as BoxStream<'static, RouterResponse>),
+                            Ok(router_response) => {
+                                let is_not_success =
+                                    !router_response.response.status().is_success();
+                                Ok(router_response
+                                    .map(move |response_stream| {
+                                        let sender = sender.clone();
+                                        let ctx = ctx.clone();
+
+                                        response_stream.map(move |response| {
+                                            let response_has_errors = match &response {
+                                                ResponseBody::GraphQL(r) => !r.errors.is_empty(),
+                                                _ => false,
+                                            };
+
+                                            if !matches!(sender, Sender::Noop) {
+                                                Self::update_apollo_metrics(
+                                                    &ctx,
+                                                    sender.clone(),
+                                                    is_not_success || response_has_errors,
+                                                    start.elapsed(),
+                                                );
+                                            }
+                                            response
+                                        })
+                                    })
+                                    .boxed())
+                            }
                         }
                     }
                 },
@@ -298,8 +315,13 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
@@ -508,7 +530,7 @@ impl Telemetry {
     fn update_apollo_metrics(
         context: &Context,
         sender: Sender,
-        result: &Result<RouterResponse, BoxError>,
+        has_errors: bool,
         duration: Duration,
     ) {
         let metrics = if let Some(usage_reporting) = context
@@ -548,18 +570,7 @@ impl Telemetry {
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
-                                    has_errors: match result {
-                                        Ok(r) => {
-                                            !r.response.status().is_success()
-                                                || match r.response.body() {
-                                                    ResponseBody::GraphQL(r) => {
-                                                        !r.errors.is_empty()
-                                                    }
-                                                    _ => false,
-                                                }
-                                        }
-                                        Err(_) => true,
-                                    },
+                                    has_errors,
                                     persisted_query_hit,
                                     ..Default::default()
                                 },
@@ -587,7 +598,7 @@ impl Telemetry {
     fn update_metrics(
         context: &Context,
         metrics: BasicMetrics,
-        result: &Result<RouterResponse, BoxError>,
+        result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
     ) {
         // Using Instant because it is guaranteed to be monotonically increasing.
         let now = Instant::now();
@@ -747,7 +758,6 @@ mod tests {
         http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
     };
     use bytes::Bytes;
-    use futures::{stream::once, StreamExt};
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -815,12 +825,11 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
-                Ok(Box::pin(once(async {
-                    RouterResponse::fake_builder()
-                        .context(req.context)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
@@ -876,7 +885,7 @@ mod tests {
             .call(router_req.build().unwrap())
             .await
             .unwrap()
-            .next()
+            .next_response()
             .await
             .unwrap();
 
