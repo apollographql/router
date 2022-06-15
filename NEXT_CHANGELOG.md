@@ -26,6 +26,28 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+### Rename `experimental.traffic_shaping` to `apollo.traffic_shaping` [PR #1229](https://github.com/apollographql/router/pull/1229)
+You will need to update your YAML configuration file to use the correct name for `traffic_shaping` plugin.
+
+```diff
+- plugins:
+-   experimental.traffic_shaping:
+-     variables_deduplication: true # Enable the variables deduplication optimization
+-     all:
+-       query_deduplication: true # Enable query deduplication for all subgraphs.
+-     subgraphs:
+-       products:
+-         query_deduplication: false # Disable query deduplication for products.
++ traffic_shaping:
++   variables_deduplication: true # Enable the variables deduplication optimization
++   all:
++     query_deduplication: true # Enable query deduplication for all subgraphs.
++   subgraphs:
++     products:
++       query_deduplication: false # Disable query deduplication for products.
+```
+
 ## 🚀 Features
 
 ### Add support of compression [PR #1229](https://github.com/apollographql/router/pull/1229)
