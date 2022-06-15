@@ -28,6 +28,22 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support of compression [PR #1229](https://github.com/apollographql/router/pull/1229)
+Add support of request and response compression for the router and all subgraphs. The router is now able to handle `Content-Encoding` and `Accept-Encoding` headers properly. Supported algorithms are `gzip`, `br`, `deflate`.
+You can also enable compression on subgraphs requests and responses by updating the `traffic_shaping` configuration:
+
+```yaml
+traffic_shaping:
+  all:
+    compression: br # Enable brotli compression for all subgraphs
+  subgraphs:
+    products:
+      compression: gzip # Enable gzip compression only for subgraph products
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1229
+
+
 ### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
 Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
 
@@ -36,7 +52,7 @@ Example:
 export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1210
 
 ## 🐛 Fixes
 
