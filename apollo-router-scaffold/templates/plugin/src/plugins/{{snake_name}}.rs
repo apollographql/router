@@ -2,7 +2,7 @@ use apollo_router::plugin::Plugin;
 {{#if type_basic}}
 use apollo_router::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Response, SubgraphRequest, SubgraphResponse,
 };
 {{/if}}
 {{#if type_auth}}
