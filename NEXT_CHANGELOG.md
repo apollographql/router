@@ -60,7 +60,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features ( :rocket: )
 
-### Add support for modify variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
+### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
 
 Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported in both Rust and Rhai plugins.
 
