@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.57"
 {{#if integration_test}}
-apollo-router = {path ="{{integration_test}}/../apollo-router" }
+apollo-router = { path ="{{integration_test}}/../apollo-router" }
 {{else}}
 {{#if branch}}
 apollo-router = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }

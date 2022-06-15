@@ -51,7 +51,8 @@ mod test {
                 current_dir
                     .to_str()
                     .expect("current dir must be convertable to string")
-                    .to_string(),
+                    .to_string()
+                    .replace("\\", "/"),
             ),
         )]))?;
         test_build(&temp_dir)?;
@@ -100,7 +101,8 @@ mod test {
                     current_dir
                         .to_str()
                         .expect("current dir must be convertable to string")
-                        .to_string(),
+                        .to_string()
+                        .replace("\\", "/"),
                 ),
             ),
         ]))?;
