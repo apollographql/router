@@ -170,7 +170,7 @@ server:
 
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
-## 🐛 Fixes ( :bug: )
+## 🐛 Fixes
 
 ### Pin `clap` dependency in `Cargo.toml` ([PR #1232](https://github.com/apollographql/router/pull/1232))
 
@@ -201,7 +201,7 @@ Previously, this would result in a runtime panic. The router will now detect thi
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
 
-## 🛠 Maintenance ( :hammer_and_wrench: )
+## 🛠 Maintenance
 
 ### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
 Force the creation of `SocketAddr` to use a new unused port to avoid port collisions during testing.
@@ -473,7 +473,7 @@ In case a subgraph returns an object with a `__typename` field referring to a ty
 
 We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipkin, that can be started with docker-compose.
 
-## 📚 Documentation ( :books: )
+## 📚 Documentation
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
