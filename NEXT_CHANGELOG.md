@@ -60,30 +60,11 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features ( :rocket: )
 
-### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
+### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
 
-Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
+Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported in both Rust and Rhai plugins.
 
-Example: 
-```bash
-export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
-```
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
-
-### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
-Apollo Parser now includes recursion limits which can be examined after parse execution. The router logs these
-out at trace level. You can see them in your logs by searching for "recursion_limit". For example, if json logging,
-and using `jq` to filter the output:
-```
-router -s ../graphql/supergraph.graphql -c ./router.yaml --log trace | jq -c '. | select(.fields.message == "recursion limit data")'        
-{"timestamp":"2022-06-10T15:01:02.213447Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
-{"timestamp":"2022-06-10T15:01:02.261092Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
-{"timestamp":"2022-06-10T15:01:07.642977Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 4"},"target":"apollo_router::spec::query"}
-```
-This is indicating that the maximum recursion limit is 4096 and that the query we processed caused us to recurse 4 times.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
 
 ## 🐛 Fixes ( :bug: )
 
