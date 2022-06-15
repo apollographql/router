@@ -2,8 +2,10 @@
 
 use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
-use futures::future::BoxFuture;
-use futures::stream::BoxStream;
+use futures::future::{ready, BoxFuture};
+use futures::stream::{once, BoxStream};
+use futures::StreamExt;
+use http::StatusCode;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -76,10 +78,27 @@ impl Service<ExecutionRequest> for ExecutionService {
                 .in_current_span(),
             );
 
-            Ok(ExecutionResponse::new_from_response(
-                http::Response::new(Box::pin(receiver) as BoxStream<'static, Response>).into(),
-                ctx,
-            ))
+            let (first, rest) = receiver.into_future().await;
+            match first {
+                None => Ok(ExecutionResponse::error_builder()
+                    .errors(vec![crate::Error {
+                        message: "empty response".to_string(),
+                        ..Default::default()
+                    }])
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(ctx)
+                    .build()
+                    .expect("can't fail to build our error message")
+                    .boxed()),
+                Some(response) => {
+                    let stream = once(ready(response)).chain(rest).boxed();
+
+                    Ok(ExecutionResponse::new_from_response(
+                        http::Response::new(stream as BoxStream<'static, Response>).into(),
+                        ctx,
+                    ))
+                }
+            }
         }
         .in_current_span();
         Box::pin(fut)
