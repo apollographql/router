@@ -130,7 +130,7 @@ where
             match content {
                 QueryPlannerContent::Introspection { response } => {
                     return Ok(RouterResponse::new_from_response_body(
-                        ResponseBody::GraphQL(response),
+                        ResponseBody::GraphQL(*response),
                         context,
                     )
                     .boxed());

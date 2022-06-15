@@ -52,7 +52,7 @@ impl BridgeQueryPlanner {
             Ok(res) => res.map_err(QueryPlannerError::from),
             Err(err) => {
                 failfast_debug!("parsing query task failed: {}", err);
-                Err(QueryPlannerError::from(err).into())
+                Err(QueryPlannerError::from(err))
             }
         }
     }
@@ -65,7 +65,9 @@ impl BridgeQueryPlanner {
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 
-                Ok(QueryPlannerContent::Introspection { response })
+                Ok(QueryPlannerContent::Introspection {
+                    response: Box::new(response),
+                })
             }
             None => Ok(QueryPlannerContent::IntrospectionDisabled),
         }

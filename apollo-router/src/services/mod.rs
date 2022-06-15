@@ -403,7 +403,7 @@ pub enum QueryPlannerContent {
         plan: Arc<QueryPlan>,
     },
     Introspection {
-        response: Response,
+        response: Box<Response>,
     },
     IntrospectionDisabled,
 }
