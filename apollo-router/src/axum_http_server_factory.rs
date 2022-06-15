@@ -665,7 +665,8 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::http_compat::Request;
-    use http::header::{self, CONTENT_TYPE};
+    use async_compression::tokio::write::GzipEncoder;
+    use http::header::{self, ACCEPT_ENCODING, CONTENT_TYPE};
     use mockall::mock;
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -879,6 +880,139 @@ mod tests {
         //     &root_span.id().unwrap(),
         //     &test_span::Filter::new(Level::INFO)
         // ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_compress_response_body() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_req| {
+                let example_response = example_response.clone();
+                Ok(http_compat::Response::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/", server.listen_address());
+
+        // Post query
+        let response = client
+            .post(url.as_str())
+            .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
+            .body(json!({ "query": "query" }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        assert_eq!(
+            response.headers().get(&CONTENT_ENCODING),
+            Some(&HeaderValue::from_static("gzip"))
+        );
+
+        // Decompress body
+        let body_bytes = response.bytes().await.unwrap();
+        let mut decoder = GzipDecoder::new(Vec::new());
+        decoder.write_all(&body_bytes.to_vec()).await.unwrap();
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+        assert_eq!(graphql_resp, expected_response);
+
+        // Get query
+        let response = client
+            .get(url.as_str())
+            .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
+            .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+        assert_eq!(
+            response.headers().get(&CONTENT_ENCODING),
+            Some(&HeaderValue::from_static("gzip"))
+        );
+
+        // Decompress body
+        let body_bytes = response.bytes().await.unwrap();
+        let mut decoder = GzipDecoder::new(Vec::new());
+        decoder.write_all(&body_bytes.to_vec()).await.unwrap();
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+        assert_eq!(graphql_resp, expected_response);
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_decompress_request_body() -> Result<(), FederatedServerError> {
+        let original_body = json!({ "query": "query" });
+        let mut encoder = GzipEncoder::new(Vec::new());
+        encoder
+            .write_all(original_body.to_string().as_bytes())
+            .await
+            .unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed_body = encoder.into_inner();
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(move |req| {
+                assert_eq!(req.body().query.as_ref().unwrap(), "query");
+                true
+            })
+            .returning(move |_req| {
+                let example_response = example_response.clone();
+                Ok(http_compat::Response::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(ResponseBody::GraphQL(example_response))
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/", server.listen_address());
+
+        // Post query
+        let response = client
+            .post(url.as_str())
+            .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+            .body(compressed_body.clone())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await?;
         Ok(())
     }
 
