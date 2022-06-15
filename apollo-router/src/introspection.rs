@@ -3,7 +3,6 @@ use include_dir::include_dir;
 use once_cell::sync::Lazy;
 use router_bridge::introspect::{self, IntrospectionError};
 use std::collections::HashMap;
-use tokio::sync::RwLock;
 
 /// KNOWN_INTROSPECTION_QUERIES we will serve through NaiveIntrospection.
 ///
@@ -27,15 +26,13 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 /// A cache containing our well known introspection queries.
 #[derive(Debug)]
 pub struct Introspection {
-    cache: RwLock<HashMap<String, Response>>,
+    cache: HashMap<String, Response>,
 }
 
 impl Introspection {
     #[cfg(test)]
     pub fn from_cache(cache: HashMap<String, Response>) -> Self {
-        Self {
-            cache: RwLock::new(cache),
-        }
+        Self { cache }
     }
 
     /// Create a `NaiveIntrospection` from a `Schema`.
@@ -89,18 +86,7 @@ impl Introspection {
         })
         .unwrap_or_default();
 
-        Self {
-            cache: RwLock::new(cache),
-        }
-    }
-
-    /// Get a cached response for a query.
-    pub async fn get(&self, query: &str) -> Option<Response> {
-        self.cache
-            .read()
-            .await
-            .get(query)
-            .map(std::clone::Clone::clone)
+        Self { cache }
     }
 
     /// Execute an introspection and cache the response.
@@ -109,6 +95,10 @@ impl Introspection {
         schema_sdl: &str,
         query: &str,
     ) -> Result<Response, IntrospectionError> {
+        if let Some(response) = self.cache.get(query) {
+            return Ok(response.clone());
+        }
+
         // Do the introspection query and cache it
         let mut response = introspect::batch_introspect(schema_sdl, vec![query.to_owned()])
             .map_err(|err| IntrospectionError {
@@ -132,11 +122,6 @@ impl Introspection {
             })?;
         let response = Response::builder().data(introspection_result).build();
 
-        self.cache
-            .write()
-            .await
-            .insert(query.to_string(), response.clone());
-
         Ok(response)
     }
 }
@@ -148,6 +133,7 @@ mod naive_introspection_tests {
     #[tokio::test]
     async fn test_plan() {
         let query_to_test = "this is a test query";
+        let schema = " ";
         let expected_data = Response::builder().data(42).build();
 
         let cache = [(query_to_test.into(), expected_data.clone())]
@@ -158,7 +144,10 @@ mod naive_introspection_tests {
 
         assert_eq!(
             expected_data,
-            naive_introspection.get(query_to_test).await.unwrap()
+            naive_introspection
+                .execute(schema, query_to_test)
+                .await
+                .unwrap()
         );
     }
 
