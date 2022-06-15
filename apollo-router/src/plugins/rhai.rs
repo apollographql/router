@@ -1801,7 +1801,7 @@ mod tests {
     //
     // This is done to avoid using the public interface of tracing_test which installs a global
     // subscriber which breaks other tests in our stack which also insert a global subscriber.
-    // (there can be only one...)
+    // (there can be only one...) which means we cannot test it with #[tokio::test(flavor = "multi_thread")]
     #[test]
     fn it_logs_messages() {
         let env_filter = "apollo_router=trace";
