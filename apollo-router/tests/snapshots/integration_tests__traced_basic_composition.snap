@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 153
+assertion_line: 148
 expression: get_spans()
 ---
 {
@@ -60,29 +60,6 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::query_cache::parse_query": {
-          "name": "apollo_router::query_cache::parse_query",
-          "record": {
-            "entries": [
-              [
-                "otel.kind",
-                "internal"
-              ]
-            ],
-            "metadata": {
-              "name": "parse_query",
-              "target": "apollo_router::query_cache",
-              "level": "INFO",
-              "module_path": "apollo_router::query_cache",
-              "fields": {
-                "names": [
-                  "otel.kind"
-                ]
-              }
-            }
-          },
-          "children": {}
-        },
         "apollo_router::plugins::telemetry::query_planning": {
           "name": "apollo_router::plugins::telemetry::query_planning",
           "record": {
@@ -104,7 +81,31 @@ expression: get_spans()
               }
             }
           },
-          "children": {}
+          "children": {
+            "apollo_router::query_planner::bridge_query_planner::parse_query": {
+              "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
+              "record": {
+                "entries": [
+                  [
+                    "otel.kind",
+                    "internal"
+                  ]
+                ],
+                "metadata": {
+                  "name": "parse_query",
+                  "target": "apollo_router::query_planner::bridge_query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router::query_planner::bridge_query_planner",
+                  "fields": {
+                    "names": [
+                      "otel.kind"
+                    ]
+                  }
+                }
+              },
+              "children": {}
+            }
+          }
         },
         "apollo_router::plugins::telemetry::execution": {
           "name": "apollo_router::plugins::telemetry::execution",
