@@ -70,6 +70,9 @@ Return secret name to be used based on provided values.
 {{- end -}}
 
 {{/*
+Credit to Bitnami
+https://github.com/bitnami/charts/blob/master/bitnami/common/templates/_tplvalues.tpl
+
 Renders a value that contains template.
 Usage:
 {{ include "common.tplvalues.render" ( dict "value" .Values.path.to.the.Value "context" $) }}
