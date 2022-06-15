@@ -30,7 +30,7 @@ managedFederation:
 #     value: debug
 #
 extraEnvVars: []
-extraEnvVarsConfigMap: []
+extraEnvVarsCM: []
 extraEnvVarsSecret: []
 
 extraVolumes: []

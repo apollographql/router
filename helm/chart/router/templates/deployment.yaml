@@ -75,9 +75,9 @@ spec:
             {{- end }}
           {{- end }}
           envFrom:
-            {{- if .Values.extraEnvVarsConfigMap }}
+            {{- if .Values.extraEnvVarsCM }}
             - configMapRef:
-                name: {{ .Values.extraEnvVarsConfigMap }}
+                name: {{ .Values.extraEnvVarsCM }}
             {{- end }}
             {{- if .Values.extraEnvVarsSecret }}
             - secretRef:
