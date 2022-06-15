@@ -47,6 +47,14 @@ resulting in some introspection queries not working.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
+### Create the ExecutionResponse after the primary response was generated ([PR #1259](https://github.com/apollographql/router/pull/1259))
+
+The `@defer` preliminary work has a surprising side effect: when using methods like `RouterResponse::map_response`, they are
+executed before the subgraph responses are received, because they work on the stream of responses.
+This PR goes back to the previous behaviour by awaiting the primary response before creating the ExecutionResponse.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1259
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
