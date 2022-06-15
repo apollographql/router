@@ -90,7 +90,6 @@ impl Plugin for TrafficShaping {
                 }))
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
-                    let config = config.clone();
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, compression_header_val.clone());
