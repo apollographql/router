@@ -49,4 +49,10 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
-## 🐛 Fixes ( :bug: )
+
+### Update README link to the configuration file  ([PR #1208](https://github.com/apollographql/router/pull/1208))
+
+As the structure of the documentation has changed, the link should point to the `YAML config file` section of the overview.
+
+By [@gscheibel](https://github.com/gscheibel in https://github.com/apollographql/router/pull/1208
+
