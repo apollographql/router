@@ -4568,4 +4568,46 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn parse_introspection_query() {
+        let schema = "type Query {
+            foo: String
+            stuff: Bar
+            array: [Bar]
+            baz: String
+        }
+        type Bar {
+            bar: String
+            baz: String
+        }";
+
+        let schema = with_supergraph_boilerplate(schema)
+            .parse::<Schema>()
+            .expect("could not parse schema");
+        let api_schema = schema.api_schema();
+
+        let query = "{
+            __type(name: \"Bar\") {
+              name
+              fields {
+                name
+                type {
+                  name
+                }
+              }
+            }
+          }}";
+        let _ = Query::parse(query, api_schema).unwrap();
+
+        let query = "query {
+            __schema {
+              queryType {
+                name
+              }
+            }
+          }";
+
+        let _ = Query::parse(query, api_schema).unwrap();
+    }
 }

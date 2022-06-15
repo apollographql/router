@@ -15,9 +15,9 @@ Arguments for this command are described below.
 
 ## Environment variables
 
-
 To use [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/)
 set these environment variables when running the router:
+
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 ```
@@ -159,7 +159,7 @@ If provided, the router watches for changes to its schema and configuration file
 
 The Apollo Uplink URL that the Apollo Router should poll to fetch its latest supergraph schema.
 
-Currently, this argument supports providing only a single URL.
+This argument supports providing a comma-separated list of URLs.
 
 For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
 

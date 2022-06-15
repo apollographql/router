@@ -6,6 +6,70 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [0.9.4] - 2022-06-14
 
 ## ❗ BREAKING ❗
+
+
+### Groundwork for `@defer` support ([PR #1175](https://github.com/apollographql/router/pull/1175)[PR #1206](https://github.com/apollographql/router/pull/1206))
+To prepare for the implementation of the `@defer` directive, the `ExecutionResponse`  and `RouterResponse` types now carry a stream of responses instead of a unique response. For now that stream contains only one item, so there is no change in behaviour. However, the Plugin trait changed to accomodate this, so a couple of steps are required to migrate your plugin so it is compatible with router v0.9.4:
+
+- Add a dependency to futures in your Cargo.toml:
+
+```diff
++futures = "0.3.21"
+```
+
+- Import `BoxStream`, and if your Plugin defines a `router_service` behavior, import `ResponseBody`:
+
+```diff
++ use futures::stream::BoxStream;
++ use apollo_router::ResponseBody;
+```
+
+- Update the `router_service` and the `execution_service` sections of your Plugin (if applicable):
+
+```diff
+      fn router_service(
+         &mut self,
+-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
++        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
++    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+
+[...]
+
+     fn execution_service(
+         &mut self,
+-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
++        service: BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
++    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError> {
+```
+
+We can now update our unit tests so they work on a stream of responses instead of a single one:
+
+```diff
+         // Send a request
+-        let result = test_harness.call_canned().await?;
+-        if let ResponseBody::GraphQL(graphql) = result.response.body() {
++        let mut result = test_harness.call_canned().await?;
++
++        let first_response = result
++            .next_response()
++            .await
++            .expect("couldn't get primary response");
++
++        if let ResponseBody::GraphQL(graphql) = first_response {
+             assert!(graphql.data.is_some());
+         } else {
+             panic!("expected graphql response")
+         }
+
++        // You could keep calling result.next_response() until it yields None if you are expexting more parts.
++        assert!(result.next_response().await.is_none());
+         Ok(())
+     }
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1206
 ### The `apollo-router-core` crate has been merged into `apollo-router` ([PR #1189](https://github.com/apollographql/router/pull/1189))
 
 To upgrade, remove any dependency on the `apollo-router-core` crate from your `Cargo.toml` files and change imports like so:
@@ -106,7 +170,7 @@ server:
 
 By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
 
-## 🐛 Fixes ( :bug: )
+## 🐛 Fixes
 
 ### Pin `clap` dependency in `Cargo.toml` ([PR #1232](https://github.com/apollographql/router/pull/1232))
 
@@ -137,12 +201,7 @@ Previously, this would result in a runtime panic. The router will now detect thi
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
 
-## 🛠 Maintenance ( :hammer_and_wrench: )
-
-### Groundwork for `@defer` support ([PR #1175](https://github.com/apollographql/router/pull/1175)[PR #1206](https://github.com/apollographql/router/pull/1206))
-To prepare for the implementation of the `@defer` directive, the `ExecutionResponse`  and `RouterResponse` types now carry a stream of responses instead of a unique response. For now that stream contains only one item, so there is no change in behaviour.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1206
+## 🛠 Maintenance
 
 ### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
 Force the creation of `SocketAddr` to use a new unused port to avoid port collisions during testing.
@@ -414,7 +473,7 @@ In case a subgraph returns an object with a `__typename` field referring to a ty
 
 We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipkin, that can be started with docker-compose.
 
-## 📚 Documentation ( :books: )
+## 📚 Documentation
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
