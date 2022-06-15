@@ -265,10 +265,11 @@ mod tests {
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
+    use serde_json_bytes::{ByteString, Value};
     use tower::{service_fn, ServiceExt};
 
     use crate::fetch::OperationKind;
-    use crate::{http_compat, Context, Request, SubgraphRequest};
+    use crate::{http_compat, Context, Object, Request, Response, SubgraphRequest};
 
     use super::*;
 
@@ -296,6 +297,60 @@ mod tests {
                 .header("Content-Type", "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        if let Err(e) = server.await {
+            eprintln!("server error: {}", e);
+        }
+    }
+
+    // starts a local server emulating a subgraph returning compressed response
+    async fn emulate_subgraph_compressed_response(socket_addr: SocketAddr) {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            // Check the compression of the body
+            let mut encoder = GzipEncoder::new(Vec::new());
+            encoder
+                .write_all(
+                    &serde_json::to_vec(
+                        &Request::builder().query(Some("query".to_string())).build(),
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            encoder.shutdown().await.unwrap();
+            let compressed_body = encoder.into_inner();
+            assert_eq!(
+                compressed_body,
+                hyper::body::to_bytes(request.into_body())
+                    .await
+                    .unwrap()
+                    .to_vec()
+            );
+
+            let original_body = Response {
+                data: Some(Value::String(ByteString::from("test"))),
+                path: None,
+                label: None,
+                errors: vec![],
+                extensions: Object::new(),
+            };
+            let mut encoder = GzipEncoder::new(Vec::new());
+            encoder
+                .write_all(&serde_json::to_vec(&original_body).unwrap())
+                .await
+                .unwrap();
+            encoder.shutdown().await.unwrap();
+            let compressed_body = encoder.into_inner();
+
+            Ok(http::Response::builder()
+                .header("Content-Type", "application/json")
+                .header(CONTENT_ENCODING, "gzip")
+                .status(StatusCode::OK)
+                .body(compressed_body.into())
                 .unwrap())
         }
 
@@ -374,5 +429,47 @@ mod tests {
             err.to_string(),
             "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_compressed_request_response_body() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:2727").unwrap();
+        tokio::task::spawn(emulate_subgraph_compressed_response(socket_addr));
+        let subgraph_service = SubgraphService::new("test");
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let resp = subgraph_service
+            .oneshot(SubgraphRequest {
+                originating_request: Arc::new(
+                    http_compat::Request::fake_builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .build()
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http_compat::Request::fake_builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_ENCODING, "gzip")
+                    .uri(url)
+                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .build()
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+        // Test the right decompression of the body
+        let resp_from_subgraph = Response {
+            data: Some(Value::String(ByteString::from("test"))),
+            path: None,
+            label: None,
+            errors: vec![],
+            extensions: Object::new(),
+        };
+
+        assert_eq!(resp.response.body(), &resp_from_subgraph);
     }
 }
