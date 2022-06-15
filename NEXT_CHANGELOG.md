@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### Rhai plugin `request.sub_headers` renamed to `request.sub.headers` [PR #XXXX](https://github.com/apollographql/router/pull/XXXX)
+### Rhai plugin `request.sub_headers` renamed to `request.sub.headers` [PR #1261](https://github.com/apollographql/router/pull/1261)
 
 Rhai scripts previously supported the `request.sub_headers` attribute so that subgraph request headers could be
 accessed. This is now replaced with an extended interface for subgraph requests:
@@ -42,7 +42,7 @@ request.sub.uri.host
 request.sub.uri.path
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1261
 
 ## 🚀 Features ( :rocket: )
 
