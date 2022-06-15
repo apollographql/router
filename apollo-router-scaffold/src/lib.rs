@@ -33,6 +33,12 @@ mod test {
     use tempfile::TempDir;
 
     #[test]
+    fn the_next_test_takes_a_while_to_pass_do_not_worry() {}
+
+    #[test]
+    // this test takes a while, I hope the function name
+    // let users know they should not worry and wait a bit.
+    // Hang in there!
     fn test_scaffold() -> Result<()> {
         let temp_dir = tempfile::Builder::new()
             .prefix("router_scaffold")
