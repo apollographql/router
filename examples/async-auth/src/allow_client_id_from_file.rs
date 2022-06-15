@@ -175,9 +175,10 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
-    use apollo_router::plugin::utils;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::{
+        plugin::{utils, Plugin},
+        RouterRequest, RouterResponse,
+    };
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;

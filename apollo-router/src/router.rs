@@ -107,7 +107,7 @@ pub enum SchemaKind {
         apollo_graph_ref: String,
 
         /// The endpoint polled to fetch its latest supergraph schema.
-        url: Option<Url>,
+        urls: Option<Vec<Url>>,
 
         /// The duration between polling
         poll_interval: Duration,
@@ -161,27 +161,32 @@ impl SchemaKind {
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url,
+                urls,
                 poll_interval,
-            } => apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, url, poll_interval)
-                .filter_map(|res| {
-                    future::ready(match res {
-                        Ok(schema_result) => schema_result
-                            .schema
-                            .parse()
-                            .map_err(|e| {
-                                tracing::error!("could not parse schema: {:?}", e);
-                            })
-                            .ok(),
+            } => {
+                apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
+                    .filter_map(|res| {
+                        future::ready(match res {
+                            Ok(schema_result) => schema_result
+                                .schema
+                                .parse()
+                                .map_err(|e| {
+                                    tracing::error!("could not parse schema: {:?}", e);
+                                })
+                                .ok(),
 
-                        Err(e) => {
-                            tracing::error!("error downloading the schema from Uplink: {:?}", e);
-                            None
-                        }
+                            Err(e) => {
+                                tracing::error!(
+                                    "error downloading the schema from Uplink: {:?}",
+                                    e
+                                );
+                                None
+                            }
+                        })
                     })
-                })
-                .map(|schema| UpdateSchema(Box::new(schema)))
-                .boxed(),
+                    .map(|schema| UpdateSchema(Box::new(schema)))
+                    .boxed()
+            }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }

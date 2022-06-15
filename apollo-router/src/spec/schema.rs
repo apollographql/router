@@ -49,7 +49,8 @@ impl std::str::FromStr for Schema {
         }
 
         fn parse(schema: &str) -> Result<Schema, SchemaError> {
-            let parser = apollo_parser::Parser::new(schema);
+            let schema_with_introspection = Schema::with_introspection(schema);
+            let parser = apollo_parser::Parser::new(&schema_with_introspection);
             let tree = parser.parse();
 
             // Trace log recursion limit data
@@ -432,6 +433,14 @@ impl Schema {
 
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
+    }
+
+    fn with_introspection(schema: &str) -> String {
+        format!(
+            "{}\n{}",
+            schema,
+            include_str!("introspection_types.graphql")
+        )
     }
 }
 

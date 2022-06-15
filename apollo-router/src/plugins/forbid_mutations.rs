@@ -1,8 +1,7 @@
-use crate::error::Error;
-use crate::json_ext::Object;
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::{register_plugin, ExecutionRequest, ExecutionResponse, Response};
+use crate::{
+    error::Error, json_ext::Object, layers::ServiceBuilderExt, plugin::Plugin, register_plugin,
+    ExecutionRequest, ExecutionResponse, Response,
+};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use std::ops::ControlFlow;
@@ -66,8 +65,7 @@ mod forbid_http_get_mutations_tests {
     use crate::http_compat::Request;
     use crate::plugin::utils::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::query_planner::PlanNode;
-    use crate::query_planner::QueryPlan;
+    use crate::query_planner::{PlanNode, QueryPlan};
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;

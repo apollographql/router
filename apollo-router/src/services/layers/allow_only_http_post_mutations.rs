@@ -2,10 +2,10 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::error::Error;
-use crate::json_ext::Object;
-use crate::layers::sync_checkpoint::CheckpointService;
-use crate::{ExecutionRequest, ExecutionResponse, Response};
+use crate::{
+    error::Error, json_ext::Object, layers::sync_checkpoint::CheckpointService, ExecutionRequest,
+    ExecutionResponse, Response,
+};
 use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
@@ -62,9 +62,8 @@ mod forbid_http_get_mutations_tests {
     use crate::error::Error;
     use crate::http_compat;
     use crate::plugin::utils::test::MockExecutionService;
-    use crate::query_planner::fetch::OperationKind;
-    use crate::query_planner::PlanNode;
-    use crate::query_planner::QueryPlan;
+    use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
+
     use serde_json::json;
     use tower::ServiceExt;
 

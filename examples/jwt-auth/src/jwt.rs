@@ -387,9 +387,10 @@ register_plugin!("example", "jwt", JwtAuth);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router::plugin::utils;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::{
+        plugin::{utils, Plugin},
+        RouterRequest, RouterResponse,
+    };
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,

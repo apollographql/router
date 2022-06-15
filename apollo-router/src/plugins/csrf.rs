@@ -1,6 +1,6 @@
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
+use crate::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::header;
 use http::{HeaderMap, StatusCode};

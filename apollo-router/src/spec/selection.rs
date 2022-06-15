@@ -88,8 +88,10 @@ impl Selection {
 
                 let field_type = if field_name.as_str() == "__typename" {
                     FieldType::String
-                } else if field_name.starts_with("__") {
-                    FieldType::Introspection(field_name.clone())
+                } else if field_name == "__schema" {
+                    FieldType::Introspection("__Schema".to_string())
+                } else if field_name == "__type" {
+                    FieldType::Introspection("__Type".to_string())
                 } else {
                     current_type
                         .inner_type_name()

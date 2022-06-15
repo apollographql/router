@@ -1,6 +1,6 @@
-use apollo_router::plugin::Plugin;
 use apollo_router::{
-    register_plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    plugin::Plugin, register_plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::stream::BoxStream;
 use http::StatusCode;

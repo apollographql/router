@@ -12,10 +12,11 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::utils;
-    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::{
+        plugin::{utils, Plugin},
+        RouterRequest, RouterResponse,
+    };
     use http::StatusCode;
     use tower::util::ServiceExt;
 

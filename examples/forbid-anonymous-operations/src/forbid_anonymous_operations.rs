@@ -1,8 +1,9 @@
 use std::ops::ControlFlow;
 
-use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::plugin::Plugin;
-use apollo_router::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::{
+    layers::ServiceBuilderExt, plugin::Plugin, register_plugin, ResponseBody, RouterRequest,
+    RouterResponse,
+};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -95,9 +96,10 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router::plugin::utils;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::{
+        plugin::{utils, Plugin},
+        RouterRequest, RouterResponse,
+    };
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;

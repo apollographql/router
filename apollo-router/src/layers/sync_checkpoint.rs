@@ -162,8 +162,10 @@ where
 #[cfg(test)]
 mod checkpoint_tests {
     use super::*;
-    use crate::layers::ServiceBuilderExt;
-    use crate::{plugin::utils::test::MockExecutionService, ExecutionRequest, ExecutionResponse};
+    use crate::{
+        layers::ServiceBuilderExt, plugin::utils::test::MockExecutionService, ExecutionRequest,
+        ExecutionResponse,
+    };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 
     #[tokio::test]
