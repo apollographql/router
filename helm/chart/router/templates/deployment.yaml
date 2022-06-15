@@ -109,9 +109,11 @@ spec:
           {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
+        {{- if .Values.router.configuration }}
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
+        {{ -end }}
         {{- if .Values.extraVolumes }}
         {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
