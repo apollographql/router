@@ -15,7 +15,8 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 pub struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
-    /// Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
+    /// Note that setting this to true is deemed unsafe.
+    /// See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.
     #[serde(default)]
     unsafe_disabled: bool,
     /// Override the headers to check for by setting
@@ -54,8 +55,8 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 
 /// The Csrf plugin makes sure any request received would have been preflighted if it was sent by a browser.
 ///
-/// Quoting the great apollo server comment:
-/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26
+/// Quoting the [great apollo server comment](
+/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26):
 ///
 /// We don't want random websites to be able to execute actual GraphQL operations
 /// from a user's browser unless our CORS policy supports it. It's not good
