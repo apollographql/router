@@ -199,8 +199,8 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
 /// under "plugins" as for user plugins.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct ApolloPlugins {
-    pub plugins: Map<String, Value>,
+pub(crate) struct ApolloPlugins {
+    pub(crate) plugins: Map<String, Value>,
 }
 
 impl JsonSchema for ApolloPlugins {
@@ -233,8 +233,8 @@ impl JsonSchema for ApolloPlugins {
 /// under the "plugins" section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct UserPlugins {
-    pub plugins: Option<Map<String, Value>>,
+pub(crate) struct UserPlugins {
+    pub(crate) plugins: Option<Map<String, Value>>,
 }
 
 impl JsonSchema for UserPlugins {
@@ -557,7 +557,7 @@ impl Cors {
 }
 
 /// Generate a JSON schema for the configuration.
-pub fn generate_config_schema() -> RootSchema {
+pub(crate) fn generate_config_schema() -> RootSchema {
     let settings = SchemaSettings::draft07().with(|s| {
         s.option_nullable = true;
         s.option_add_null_type = false;
@@ -581,7 +581,7 @@ pub fn generate_config_schema() -> RootSchema {
 ///
 /// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
 ///
-pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
+pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
     let yaml =
         &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",

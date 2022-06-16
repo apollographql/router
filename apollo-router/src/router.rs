@@ -329,8 +329,11 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
-/// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ConfigurationKind;
+/// use apollo_router::SchemaKind;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
@@ -346,8 +349,11 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ConfigurationKind;
+/// use apollo_router::SchemaKind;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
