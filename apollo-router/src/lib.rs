@@ -74,8 +74,9 @@ pub mod prelude {
     pub use crate::traits::*;
 }
 
-/// Useful reexports.
-pub mod reexports {
+/// Reexports for macros
+#[doc(hidden)]
+pub mod _private {
     pub use router_bridge;
     pub use serde_json;
     pub use startup;
