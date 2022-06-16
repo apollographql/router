@@ -291,7 +291,7 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $value: ident) => {
-        $crate::reexports::startup::on_startup! {
+        $crate::_private::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
             }
@@ -303,7 +303,7 @@ macro_rules! register_plugin {
                 qualified_name,
                 $crate::plugin::PluginFactory::new(
                     |configuration| Box::pin(async move {
-                        let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
+                        let configuration = $crate::_private::serde_json::from_value(configuration.clone())?;
                         let plugin = $value::new(configuration).await?;
                         Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
                     }),
