@@ -1,3 +1,4 @@
+
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
 use crate::cache::CachingMap;
@@ -23,7 +24,7 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 ///
 /// The query planner performs LRU caching.
 #[derive(Debug)]
-pub struct CachingQueryPlanner<T: QueryPlanner> {
+pub(crate) struct CachingQueryPlanner<T: QueryPlanner> {
     cm: Arc<CachingMap<QueryKey, QueryPlannerContent>>,
     phantom: PhantomData<T>,
 }
@@ -35,7 +36,7 @@ struct CachingQueryPlannerResolver<T: QueryPlanner> {
 
 impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
+    pub(crate) fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
         let resolver = CachingQueryPlannerResolver { delegate };
         let cm = Arc::new(CachingMap::new(Box::new(resolver), plan_cache_limit));
         Self {
