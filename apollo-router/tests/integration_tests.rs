@@ -7,7 +7,7 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router::{
-    http_compat, plugins::csrf, PluggableRouterServiceBuilder, Request, ResponseBody,
+    http_compat, plugins::csrf, Context, PluggableRouterServiceBuilder, Request, ResponseBody,
     RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
 };
 use futures::stream::BoxStream;
@@ -231,6 +231,44 @@ async fn simple_queries_should_not_work() {
     );
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queries_should_work_with_compression() {
+    let request = Request::builder()
+        .query(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .header("content-type", "application/json")
+        .header("accept-encoding", "gzip")
+        .body(request)
+        .build()
+        .expect("expecting valid request");
+
+    let request = RouterRequest {
+        originating_request: http_request,
+        context: Context::new(),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
 }
 
 #[tokio::test(flavor = "multi_thread")]

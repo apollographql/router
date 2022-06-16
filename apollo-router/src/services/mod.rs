@@ -32,7 +32,7 @@ mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
 mod router_service;
-mod subgraph_service;
+pub(crate) mod subgraph_service;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]

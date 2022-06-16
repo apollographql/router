@@ -8,7 +8,7 @@ version = "0.1.0"
 # This dependency should stay in line with your router version
 
 {{#if integration_test}}
-apollo-router-scaffold = { path ="{{integration_test}}/../apollo-router-scaffold" }
+apollo-router-scaffold = { path ="{{integration_test}}apollo-router-scaffold" }
 {{else}}
 {{#if branch}}
 apollo-router-scaffold = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
@@ -16,5 +16,5 @@ apollo-router-scaffold = { git="https://github.com/apollographql/router.git", br
 apollo-router-scaffold = { git="https://github.com/apollographql/router.git", tag="v0.9.4"}
 {{/if}}
 {{/if}}
-anyhow = "=1.0.56"
+anyhow = "=1.0.57"
 clap = "=3.1.18"
