@@ -44,10 +44,6 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
             phantom: PhantomData,
         }
     }
-
-    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
-        self.cm.get_hot_keys().await
-    }
 }
 
 #[async_trait]
