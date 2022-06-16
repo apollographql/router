@@ -134,7 +134,7 @@ mod test {
     }
 
     fn test_build_with_backup_folder(temp_dir: &TempDir) -> Result<()> {
-        test_build(&temp_dir).map_err(|e| {
+        test_build(temp_dir).map_err(|e| {
             let mut output_dir = std::env::temp_dir();
             output_dir.push("test_scaffold_output");
 
