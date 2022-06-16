@@ -30,7 +30,7 @@ pub mod json_ext;
 
 mod axum_http_server_factory;
 mod cache;
-pub mod configuration;
+mod configuration;
 mod context;
 pub mod error;
 mod executable;
@@ -54,6 +54,7 @@ mod state_machine;
 pub mod subscriber;
 mod traits;
 
+pub use configuration::Configuration;
 pub use context::Context;
 pub use executable::{main, Executable};
 pub use request::Request;
