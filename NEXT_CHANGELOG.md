@@ -123,6 +123,15 @@ By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollo
 
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
+
+### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
+
+Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
+This Pull request updates the scaffold template so it generates plugins that are compatible with the new Plugin API.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
+
 Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
 resulting in some introspection queries not working.
 
