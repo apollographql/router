@@ -14,13 +14,15 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
-pub mod utils;
+pub mod serde;
+pub mod test;
 
 use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
     Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+use ::serde::{de::DeserializeOwned, Deserialize};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -28,7 +30,6 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::task::{Context, Poll};

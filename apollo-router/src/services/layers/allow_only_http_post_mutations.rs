@@ -61,7 +61,7 @@ mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::error::Error;
     use crate::http_compat;
-    use crate::plugin::utils::test::MockExecutionService;
+    use crate::plugin::test::MockExecutionService;
     use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
 
     use serde_json::json;

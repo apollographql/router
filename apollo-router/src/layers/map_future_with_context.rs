@@ -77,7 +77,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::utils::test::MockRouterService;
+    use crate::plugin::test::MockRouterService;
     use crate::{ResponseBody, RouterRequest, RouterResponse};
     use futures::stream::BoxStream;
     use http::HeaderValue;

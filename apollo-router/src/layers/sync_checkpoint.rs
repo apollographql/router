@@ -163,7 +163,7 @@ where
 mod checkpoint_tests {
     use super::*;
     use crate::{
-        layers::ServiceBuilderExt, plugin::utils::test::MockExecutionService, ExecutionRequest,
+        layers::ServiceBuilderExt, plugin::test::MockExecutionService, ExecutionRequest,
         ExecutionResponse,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};

@@ -132,7 +132,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 mod apq_tests {
     use super::*;
     use crate::error::Error;
-    use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
+    use crate::{plugin::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
     use std::collections::HashMap;

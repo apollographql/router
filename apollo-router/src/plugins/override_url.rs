@@ -50,7 +50,7 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 mod tests {
     use super::*;
     use crate::plugin::DynPlugin;
-    use crate::{plugin::utils::test::MockSubgraphService, Context, SubgraphRequest};
+    use crate::{plugin::test::MockSubgraphService, Context, SubgraphRequest};
     use http::Uri;
     use serde_json::Value;
     use std::str::FromStr;

@@ -175,10 +175,9 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
-    use apollo_router::{
-        plugin::{utils, Plugin},
-        RouterRequest, RouterResponse,
-    };
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -203,7 +202,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = utils::test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
@@ -248,7 +247,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = utils::test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
@@ -293,7 +292,7 @@ mod tests {
         let valid_client_id = "jeremy";
 
         // create a mock service we will use to test our plugin
-        let mut mock = utils::test::MockRouterService::new();
+        let mut mock = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";

@@ -12,8 +12,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::utils::test::IntoSchema::Canned;
-    use apollo_router::plugin::utils::test::PluginTestHarness;
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
     use apollo_router::{Context, RouterRequest};

@@ -708,7 +708,7 @@ mod tests {
             },
         };
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
@@ -752,7 +752,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
@@ -799,7 +799,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)

@@ -134,7 +134,7 @@ where
 mod async_checkpoint_tests {
     use super::*;
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::utils::test::MockExecutionService;
+    use crate::plugin::test::MockExecutionService;
     use crate::{ExecutionRequest, ExecutionResponse};
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 

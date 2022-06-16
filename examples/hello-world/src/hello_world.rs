@@ -110,8 +110,8 @@ register_plugin!("example", "hello_world", HelloWorld);
 mod tests {
     use super::{Conf, HelloWorld};
 
-    use apollo_router::plugin::utils::test::IntoSchema::Canned;
-    use apollo_router::plugin::utils::test::PluginTestHarness;
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
 
     #[tokio::test]

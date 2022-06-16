@@ -166,7 +166,6 @@ where
     }
 }
 
-#[allow(unreachable_pub)] // Not worth making mock_service! support both pub and pub(crate)
 #[cfg(test)]
 mod test {
     use super::*;
@@ -193,12 +192,14 @@ mod test {
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct A {
         key: String,
         value: String,
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct B {
         key: String,
         value: String,
