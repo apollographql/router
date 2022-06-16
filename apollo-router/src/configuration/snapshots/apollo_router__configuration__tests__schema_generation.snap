@@ -23,7 +23,7 @@ expression: "&schema"
           }
         },
         "unsafe_disabled": {
-          "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF",
+          "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe. See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.",
           "default": false,
           "type": "boolean"
         }
