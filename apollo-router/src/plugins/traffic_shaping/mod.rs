@@ -13,6 +13,8 @@ mod deduplication;
 
 use std::collections::HashMap;
 
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -21,14 +23,17 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse,
+    register_plugin, Compression, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse,
 };
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
     query_deduplication: Option<bool>,
+    /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
+    compression: Option<Compression>,
 }
 
 impl Shaping {
@@ -37,6 +42,7 @@ impl Shaping {
             None => self.clone(),
             Some(fallback) => Shaping {
                 query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
+                compression: self.compression.or(fallback.compression),
             },
         }
     }
@@ -77,12 +83,21 @@ impl Plugin for TrafficShaping {
         if let Some(config) = final_config {
             ServiceBuilder::new()
                 .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
-                    //Buffer is required because dedup layer requires a clone service.
+                    // Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
                         .buffered()
                 }))
                 .service(service)
+                .map_request(move |mut req: SubgraphRequest| {
+                    if let Some(compression) = config.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
+                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+
+                    req
+                })
                 .boxed()
         } else {
             service
@@ -116,7 +131,7 @@ impl TrafficShaping {
     }
 }
 
-register_plugin!("experimental", "traffic_shaping", TrafficShaping);
+register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
@@ -215,7 +230,7 @@ mod test {
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         let builder = builder
-            .with_dyn_plugin("experimental.traffic_shaping".to_string(), plugin)
+            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -228,7 +243,7 @@ mod test {
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugins()
-            .get("experimental.traffic_shaping")
+            .get("apollo.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)
             .await
@@ -247,6 +262,46 @@ mod test {
         let plugin = get_taffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+    }
+
+    #[tokio::test]
+    async fn it_add_correct_headers_for_compression() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        subgraphs:
+            test:
+                compression: gzip
+        "#,
+        )
+        .unwrap();
+
+        let mut plugin = get_taffic_shaping_plugin(&config).await;
+        let request = SubgraphRequest::fake_builder().build();
+
+        let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&CONTENT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip")
+            );
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&ACCEPT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip, br, deflate")
+            );
+
+            req
+        });
+
+        let _response = plugin
+            .subgraph_service("test", test_service.boxed())
+            .oneshot(request)
+            .await
+            .unwrap();
     }
 
     #[test]

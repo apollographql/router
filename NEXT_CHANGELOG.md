@@ -27,6 +27,27 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.5] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
+### Rename `experimental.traffic_shaping` to `apollo.traffic_shaping` [PR #1229](https://github.com/apollographql/router/pull/1229)
+You will need to update your YAML configuration file to use the correct name for `traffic_shaping` plugin.
+
+```diff
+- plugins:
+-   experimental.traffic_shaping:
+-     variables_deduplication: true # Enable the variables deduplication optimization
+-     all:
+-       query_deduplication: true # Enable query deduplication for all subgraphs.
+-     subgraphs:
+-       products:
+-         query_deduplication: false # Disable query deduplication for products.
++ traffic_shaping:
++   variables_deduplication: true # Enable the variables deduplication optimization
++   all:
++     query_deduplication: true # Enable query deduplication for all subgraphs.
++   subgraphs:
++     products:
++       query_deduplication: false # Disable query deduplication for products.
+```
+
 ### Rhai plugin `request.sub_headers` renamed to `request.subgraph.headers` [PR #1261](https://github.com/apollographql/router/pull/1261)
 
 Rhai scripts previously supported the `request.sub_headers` attribute so that subgraph request headers could be
@@ -46,6 +67,22 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 
+### Add support of compression [PR #1229](https://github.com/apollographql/router/pull/1229)
+Add support of request and response compression for the router and all subgraphs. The router is now able to handle `Content-Encoding` and `Accept-Encoding` headers properly. Supported algorithms are `gzip`, `br`, `deflate`.
+You can also enable compression on subgraphs requests and responses by updating the `traffic_shaping` configuration:
+
+```yaml
+traffic_shaping:
+  all:
+    compression: br # Enable brotli compression for all subgraphs
+  subgraphs:
+    products:
+      compression: gzip # Enable gzip compression only for subgraph products
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1229
+
+
 ### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
 Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
 
@@ -54,7 +91,7 @@ Example:
 export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1210
 
 ### Add support for adding extra enviromental variables and volumes to helm chart [PR #1245](https://github.com/apollographql/router/pull/1245)
 

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
-pub use subgraph_service::SubgraphService;
+pub use subgraph_service::{Compression, SubgraphService};
 use tower::BoxError;
 
 mod execution_service;
