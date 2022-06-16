@@ -18,7 +18,7 @@ Like the rest of the Apollo Router, Rhai support is in active development. At th
 * Manipulate request/response context
 * Perform `checkpoint`-style short circuiting of requests
 * Modify the status codes of requests/responses
-* Modify the body of requests (excluding variables)
+* Modify the body of requests
 * Modify the body of responses
 
 **What you can't do (yet):**
@@ -158,7 +158,7 @@ In addition, SubgraphRequest, exposes the additional ability to interact with he
 request.sub_headers
 ```
 
-All of the above are read/write *apart* from `request.body.variables` which is read-only.
+All of the above are read/write.
 
 #### request.context
 
@@ -168,7 +168,7 @@ The context is a key/value store which has a lifespan of router request to route
 // You can interact with request.context as an indexed variable
 request.context["contextual"] = 42; // inserts a new key in the context "contextual" with value 42
 print(`${request.context["contextual"]}`); // writes 42 into the router log at info level
-// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.context.contextual = 42;
 ```
 
@@ -202,7 +202,7 @@ The headers of a request are accessible as a read/write indexed variable. The ke
 // You can interact with request.headers as an indexed variable
 request.headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
 print(`${request.headers["x-my-new-header"]}`); // writes "42" into the router log at info level
-// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.headers.x-my-new-header = 42.to_string();
 ```
 
@@ -214,7 +214,7 @@ Only present when processing subgraph requests. The interface is exactly the sam
 // You can interact with request.sub_headers as an indexed variable
 request.sub_headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
 print(`${request.sub_headers["x-my-new-header"]}`); // writes "42" into the router log at info level
-// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+// Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.sub_headers.x-my-new-header = 42.to_string();
 ```
 
@@ -240,7 +240,7 @@ print(`${request.body.operation_name}`); // log the operation_name after modific
 
 #### request.body.variables
 
-Request Variables may be read. They cannot be written (this may change in the future). They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+Request Variables may be read or written. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
 ```javascript
 print(`${request.body.variables}`); // log the variables

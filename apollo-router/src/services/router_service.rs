@@ -184,7 +184,7 @@ where
                                             query.format_response(
                                                 &mut response,
                                                 operation_name.as_deref(),
-                                                (*variables).clone(),
+                                                variables.clone(),
                                                 schema.api_schema(),
                                             )
                                         });

@@ -137,7 +137,7 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    Executable::builder().runtime(runtime).start()
+    runtime.block_on(Executable::builder().start())
 }
 
 /// Entry point into creating a router executable.
@@ -145,38 +145,27 @@ pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable which can be blockingly started.
-    /// You may optionally supply a tokio `runtime` and `router_builder_fn` to override building of the router.
+    /// Build an executable that will parse commandline options and set up logging.
+    /// You may optionally supply a `router_builder_fn` to override building of the router.
     ///
     /// ```no_run
     /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
     /// # use anyhow::Result;
-    /// # fn main()->Result<()> {
-    /// # let runtime = tokio::runtime::Runtime::new().unwrap();
+    /// # #[tokio::main]
+    /// # async fn main()->Result<()> {
     /// Executable::builder()
-    ///   .runtime(runtime)
     ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
     ///                 .configuration(configuration)
     ///                 .schema(schema)
     ///                 .shutdown(ShutdownKind::CtrlC)
     ///                 .build())
-    ///   .start()
+    ///   .start().await
     /// # }
     /// ```
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
     #[builder(entry = "builder", exit = "start")]
-    pub fn build(
-        runtime: Option<tokio::runtime::Runtime>,
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
-    ) -> Result<()> {
-        match runtime {
-            None => tokio::runtime::Handle::current().block_on(Executable::run(router_builder_fn)),
-            Some(runtime) => runtime.block_on(Executable::run(router_builder_fn)),
-        }
-    }
-
-    async fn run(
+    pub async fn start(
         router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
     ) -> Result<()> {
         let opt = Opt::parse();
