@@ -32,7 +32,7 @@ pub struct QueryPlan {
     options: QueryPlanOptions,
 }
 
-/// This default impl is useful for plugin::utils users
+/// This default impl is useful for test users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
 #[buildstructor::buildstructor]
 impl QueryPlan {
