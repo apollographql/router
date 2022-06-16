@@ -28,7 +28,7 @@ mod test {
     use inflector::Inflector;
     use std::collections::BTreeMap;
     use std::env;
-    use std::path::{Path, PathBuf};
+    use std::path::{Path, PathBuf, MAIN_SEPARATOR};
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -58,12 +58,18 @@ mod test {
             .scaffold_with_parameters(BTreeMap::from([(
                 "integration_test".to_string(),
                 toml::Value::String(
-                    current_dir
-                        .to_str()
-                        .expect("current dir must be convertable to string")
-                        .to_string()
-                        // windows paths use \
-                        .replace('\\', "\\\\"),
+                    format!(
+                        "{}{}",
+                        current_dir
+                            .parent()
+                            .expect("current dir cannot be the root")
+                            .to_str()
+                            .expect("current dir must be convertable to string"),
+                        // add / or \ depending on windows or unix
+                        MAIN_SEPARATOR,
+                    )
+                    // we need to double \ so they don't get interpreted as escape characters in TOML
+                    .replace('\\', "\\\\"),
                 ),
             )]))
             .unwrap();
@@ -109,12 +115,18 @@ mod test {
             (
                 "integration_test".to_string(),
                 toml::Value::String(
-                    current_dir
-                        .to_str()
-                        .expect("current dir must be convertable to string")
-                        .to_string()
-                        // windows paths use \
-                        .replace('\\', "\\\\"),
+                    format!(
+                        "{}{}",
+                        current_dir
+                            .parent()
+                            .expect("current dir cannot be the root")
+                            .to_str()
+                            .expect("current dir must be convertable to string"),
+                        // add / or \ depending on windows or unix
+                        MAIN_SEPARATOR,
+                    )
+                    // we need to double \ so they don't get interpreted as escape characters in TOML
+                    .replace('\\', "\\\\"),
                 ),
             ),
         ]))?;
@@ -131,7 +143,7 @@ mod test {
             copy_dir::copy_dir(&temp_dir, &output_dir)
                 .expect("couldn't copy test_scaffold_output directory");
             anyhow::anyhow!(
-                "scaffold test failed: {e}\nYou can find the scaffolded project at\n{}",
+                "scaffold test failed: {e}\nYou can find the scaffolded project at '{}'",
                 output_dir.display()
             )
         })
