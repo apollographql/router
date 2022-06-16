@@ -54,7 +54,10 @@ Example:
 export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
 ```
 
-### Add support for adding extra enviromental variables and volumes to helm chart
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+
+### Add support for adding extra enviromental variables and volumes to helm chart [PR #1245](https://github.com/apollographql/router/pull/1245)
+
 The following example will allow you to mount your supergraph.yaml into the helm deployment using a configmap with a key of supergraph.yaml. Using [Kustomize](https://kustomize.io/) to generate your configmap from your supergraph.yaml is suggested.
 
 Example:
@@ -77,7 +80,7 @@ extraVolumeMounts:
     mountPath: /etc/apollo
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1245
 
 ## 🐛 Fixes
 
