@@ -758,7 +758,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use crate::plugin::utils::test::MockRouterService;
+    use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
     use crate::{http_compat, RouterRequest, RouterResponse};
     use bytes::Bytes;

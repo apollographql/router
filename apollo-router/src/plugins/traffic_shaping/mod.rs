@@ -144,7 +144,7 @@ mod test {
     use tower::{util::BoxCloneService, Service};
 
     use crate::json_ext::Object;
-    use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
+    use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::{
         PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,

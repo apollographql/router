@@ -1,4 +1,4 @@
-use crate::plugin::utils::serde::{deserialize_header_name, deserialize_regex};
+use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;

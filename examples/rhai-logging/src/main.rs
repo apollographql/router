@@ -13,7 +13,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::utils;
+    use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
     use apollo_router::{RouterRequest, RouterResponse};
@@ -23,7 +23,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::test::MockRouterService::new();
+        let mut mock = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
