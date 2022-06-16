@@ -329,7 +329,6 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
-/// use apollo_router::prelude::*;
 /// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///
@@ -347,7 +346,6 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::prelude::*;
 /// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///

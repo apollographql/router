@@ -69,11 +69,6 @@ pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
 pub use spec::Schema;
 pub(crate) use spec::*;
 
-/// Useful traits.
-pub mod prelude {
-    pub use crate::traits::*;
-}
-
 /// Reexports for macros
 #[doc(hidden)]
 pub mod _private {
