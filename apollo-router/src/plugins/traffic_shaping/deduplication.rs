@@ -13,7 +13,7 @@ use tokio::sync::{
 use tower::{BoxError, Layer, ServiceExt};
 
 #[derive(Default)]
-pub struct QueryDeduplicationLayer;
+pub(crate) struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer
 where
@@ -29,7 +29,7 @@ where
 type WaitMap =
     Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
 
-pub struct QueryDeduplicationService<S> {
+pub(crate) struct QueryDeduplicationService<S> {
     service: S,
     wait_map: WaitMap,
 }

@@ -15,18 +15,18 @@ use std::sync::Arc;
 use tower::BoxError;
 use tower::Service;
 
-pub static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
+pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
 #[derive(Debug, Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-pub struct BridgeQueryPlanner {
+pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlan>>,
 }
 
 impl BridgeQueryPlanner {
-    pub async fn new(schema: Arc<Schema>) -> Result<Self, QueryPlannerError> {
+    pub(crate) async fn new(schema: Arc<Schema>) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
         })

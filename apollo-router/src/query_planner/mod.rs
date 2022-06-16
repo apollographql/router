@@ -3,8 +3,8 @@ use crate::error::FetchError;
 use crate::json_ext::{Path, Value, ValueExt};
 use crate::service_registry::ServiceRegistry;
 use crate::*;
-pub use bridge_query_planner::*;
-pub use caching_query_planner::*;
+pub(crate) use bridge_query_planner::*;
+pub(crate) use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
@@ -76,7 +76,7 @@ pub(crate) enum PlanNode {
 }
 
 impl PlanNode {
-    pub fn contains_mutations(&self) -> bool {
+    pub(crate) fn contains_mutations(&self) -> bool {
         match self {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),

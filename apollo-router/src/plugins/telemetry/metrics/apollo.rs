@@ -216,7 +216,7 @@ impl ApolloMetricsExporter {
     }
 }
 
-pub struct ReporterManager {
+pub(crate) struct ReporterManager {
     endpoint: Url,
 }
 

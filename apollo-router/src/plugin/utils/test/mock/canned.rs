@@ -4,7 +4,7 @@ use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
 use serde_json::json;
 
 /// Canned responses for accounts_subgraphs.
-pub fn accounts_subgraph() -> MockSubgraph {
+pub(crate) fn accounts_subgraph() -> MockSubgraph {
     let account_mocks = vec![
         (
             json! {{
@@ -48,7 +48,7 @@ pub fn accounts_subgraph() -> MockSubgraph {
 }
 
 /// Canned responses for reviews_subgraphs.
-pub fn reviews_subgraph() -> MockSubgraph {
+pub(crate) fn reviews_subgraph() -> MockSubgraph {
     let review_mocks = vec![
         (
             json! {{
@@ -120,7 +120,7 @@ pub fn reviews_subgraph() -> MockSubgraph {
 }
 
 /// Canned responses for products_subgraphs.
-pub fn products_subgraph() -> MockSubgraph {
+pub(crate) fn products_subgraph() -> MockSubgraph {
     let product_mocks = vec![
         (
             json!{{

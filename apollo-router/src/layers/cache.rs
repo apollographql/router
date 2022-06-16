@@ -166,6 +166,7 @@ where
     }
 }
 
+#[allow(unreachable_pub)] // Not worth making mock_service! support both pub and pub(crate)
 #[cfg(test)]
 mod test {
     use super::*;

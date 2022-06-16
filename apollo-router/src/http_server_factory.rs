@@ -145,20 +145,20 @@ impl HttpServerHandle {
     }
 }
 
-pub enum Listener {
+pub(crate) enum Listener {
     Tcp(tokio::net::TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener),
 }
 
-pub enum NetworkStream {
+pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
 }
 
 impl Listener {
-    pub fn local_addr(&self) -> std::io::Result<ListenAddr> {
+    pub(crate) fn local_addr(&self) -> std::io::Result<ListenAddr> {
         match self {
             Listener::Tcp(listener) => listener.local_addr().map(Into::into),
             #[cfg(unix)]
@@ -172,7 +172,7 @@ impl Listener {
         }
     }
 
-    pub async fn accept(&mut self) -> std::io::Result<NetworkStream> {
+    pub(crate) async fn accept(&mut self) -> std::io::Result<NetworkStream> {
         match self {
             Listener::Tcp(listener) => listener
                 .accept()
