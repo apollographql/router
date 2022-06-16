@@ -149,13 +149,20 @@ request.body.query
 request.body.operation_name
 request.body.variables
 request.body.extensions
+request.uri.host
 request.uri.path
 ```
 
-In addition, SubgraphRequest, exposes the additional ability to interact with headers sent to subgraphs:
+In addition, SubgraphRequest, exposes the additional ability to interact with requests sent to subgraphs:
 
 ```
-request.sub_headers
+request.subgraph.headers
+request.subgraph.body.query
+request.subgraph.body.operation_name
+request.subgraph.body.variables
+request.subgraph.body.extensions
+request.subgraph.uri.host
+request.subgraph.uri.path
 ```
 
 All of the above are read/write *apart* from `request.body.variables` which is read-only.
@@ -206,16 +213,16 @@ print(`${request.headers["x-my-new-header"]}`); // writes "42" into the router l
 request.headers.x-my-new-header = 42.to_string();
 ```
 
-#### request.sub_headers
+#### request.subgraph.*
 
-Only present when processing subgraph requests. The interface is exactly the same as for request.header.
+Only present when processing subgraph requests. The interface is exactly the same as for request.*.
 
 ```javascript
-// You can interact with request.sub_headers as an indexed variable
-request.sub_headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
-print(`${request.sub_headers["x-my-new-header"]}`); // writes "42" into the router log at info level
+// You can interact with request.subgraph.headers as an indexed variable
+request.subgraph.headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
+print(`${request.subgraph.headers["x-my-new-header"]}`); // writes "42" into the router log at info level
 // Rhai also supports extended dot notation for indexed variables so, this is equivalent
-request.sub_headers.x-my-new-header = 42.to_string();
+request.subgraph.headers.x-my-new-header = 42.to_string();
 ```
 
 #### request.body.query
@@ -252,6 +259,14 @@ Request extensions may be read or modified. They are exposed to Rhai as an [Obje
 
 ```javascript
 print(`${request.body.extensions}`); // log the extensions
+```
+
+#### request.uri.host
+
+Request host may be read or modified. The host is exposed to Rhai as a string and may be set from a string.
+
+```javascript
+print(`${request.uri.host}`); // log the request host
 ```
 
 #### request.uri.path
@@ -419,12 +434,12 @@ fn process_request(request) {
             k_v[0].trim();
             k_v[1].trim();
             // update our headers
-            // Note: we must update sub_headers, since we are
-            // setting a header in our sub graph request
-            request.sub_headers[k_v[0]] = k_v[1];
+            // Note: we must update subgraph.headers, since we are
+            // setting a header in our subgraph request
+            request.subgraph.headers[k_v[0]] = k_v[1];
         }
     }
 }
 ```
 
-There are seven complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
+There are eight complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
