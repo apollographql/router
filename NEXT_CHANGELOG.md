@@ -54,6 +54,29 @@ Example:
 export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
 ```
 
+### Add support for adding extra enviromental variables and volumes to helm chart
+The following example will allow you to mount your supergraph.yaml into the helm deployment using a configmap with a key of supergraph.yaml. Using [Kustomize](https://kustomize.io/) to generate your configmap from your supergraph.yaml is suggested.
+
+Example:
+```yaml
+extraEnvVars:
+  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+    value: /etc/apollo/supergraph.yaml
+    # sets router log level to debug
+  - name: APOLLO_ROUTER_LOG
+    value: debug
+extraEnvVarsCM: ''
+extraEnvVarsSecret: ''
+
+extraVolumes:
+  - name: supergraph-volume
+    configMap:
+      name: some-configmap 
+extraVolumeMounts: 
+  - name: supergraph-volume
+    mountPath: /etc/apollo
+```
+
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
 
 ## 🐛 Fixes
