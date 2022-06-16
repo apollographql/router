@@ -1667,7 +1667,7 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::{
         http_compat,
-        plugin::utils::test::{MockExecutionService, MockRouterService},
+        plugin::test::{MockExecutionService, MockRouterService},
         Context, ResponseBody, RouterRequest, RouterResponse,
     };
     use serde_json::Value;

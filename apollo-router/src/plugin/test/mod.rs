@@ -1,7 +1,12 @@
 //! Utilities which make it easy to test with [`crate::plugin`].
 
-pub mod mock;
-pub mod service;
+mod mock;
+mod service;
+
+pub use mock::subgraph::MockSubgraph;
+pub use service::{
+    MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
+};
 
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -17,9 +22,6 @@ use crate::RouterService;
 use crate::Schema;
 use crate::{RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
-pub use service::{
-    MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
-};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -55,10 +57,10 @@ impl From<IntoSchema> for Schema {
         match s {
             IntoSchema::String(s) => Schema::from_str(&s).expect("test schema must be valid"),
             IntoSchema::Schema(s) => *s,
-            IntoSchema::Canned => Schema::from_str(include_str!(
-                "../../../../../examples/graphql/local.graphql"
-            ))
-            .expect("test schema must be valid"),
+            IntoSchema::Canned => {
+                Schema::from_str(include_str!("../../../../examples/graphql/local.graphql"))
+                    .expect("test schema must be valid")
+            }
         }
     }
 }

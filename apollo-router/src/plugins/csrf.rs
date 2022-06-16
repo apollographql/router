@@ -223,7 +223,7 @@ mod csrf_tests {
     }
 
     use super::*;
-    use crate::{plugin::utils::test::MockRouterService, ResponseBody};
+    use crate::{plugin::test::MockRouterService, ResponseBody};
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
