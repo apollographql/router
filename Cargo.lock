@@ -704,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc14c70a4bb3d18ee69eafc7afc8a3c39e51fcd31e2add965a8f9fba8b8a5450"
+checksum = "2f6232669ff969fc9827d8a47dbc9e128a8eb1c7dffc9bcf1cf71be34dee5ef9"
 dependencies = [
  "anyhow",
  "buildstructor",
