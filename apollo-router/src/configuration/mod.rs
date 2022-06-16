@@ -66,7 +66,7 @@ pub enum ConfigurationError {
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
-    pub server: Server,
+    pub(crate) server: Server,
 
     /// Plugin configuration
     #[serde(default)]
@@ -91,7 +91,7 @@ fn default_listen() -> ListenAddr {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    pub fn new(
+    pub(crate) fn new(
         server: Option<Server>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -111,7 +111,7 @@ impl Configuration {
         Box::new(self)
     }
 
-    pub fn plugins(&self) -> Map<String, Value> {
+    pub(crate) fn plugins(&self) -> Map<String, Value> {
         let mut plugins = Vec::default();
 
         if is_global_subscriber_set() {
@@ -259,41 +259,41 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Server {
+pub(crate) struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_listen")]
-    pub listen: ListenAddr,
+    pub(crate) listen: ListenAddr,
 
     /// Cross origin request headers.
     #[serde(default)]
-    pub cors: Option<Cors>,
+    pub(crate) cors: Option<Cors>,
 
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
-    pub introspection: bool,
+    pub(crate) introspection: bool,
 
     /// display landing page
     /// enabled by default
     #[serde(default = "default_landing_page")]
-    pub landing_page: bool,
+    pub(crate) landing_page: bool,
 
     /// GraphQL endpoint
     /// default: "/"
     #[serde(default = "default_endpoint")]
-    pub endpoint: String,
+    pub(crate) endpoint: String,
 
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
-    pub health_check_path: String,
+    pub(crate) health_check_path: String,
 }
 
 #[buildstructor::buildstructor]
 impl Server {
     #[builder]
-    pub fn new(
+    pub(crate) fn new(
         listen: Option<ListenAddr>,
         cors: Option<Cors>,
         introspection: Option<bool>,
@@ -360,17 +360,17 @@ impl fmt::Display for ListenAddr {
 /// Cross origin request configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Cors {
+pub(crate) struct Cors {
     /// Set to true to allow any origin.
     ///
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
     #[serde(default)]
-    pub allow_any_origin: Option<bool>,
+    pub(crate) allow_any_origin: Option<bool>,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
     #[serde(default)]
-    pub allow_credentials: Option<bool>,
+    pub(crate) allow_credentials: Option<bool>,
 
     /// The headers to allow.
     /// If this is not set, we will default to
@@ -384,21 +384,21 @@ pub struct Cors {
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
     #[serde(default)]
-    pub allow_headers: Option<Vec<String>>,
+    pub(crate) allow_headers: Option<Vec<String>>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
     #[serde(default)]
-    pub expose_headers: Option<Vec<String>>,
+    pub(crate) expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
     /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
     #[serde(default = "default_origins")]
-    pub origins: Vec<String>,
+    pub(crate) origins: Vec<String>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
-    pub methods: Vec<String>,
+    pub(crate) methods: Vec<String>,
 }
 
 impl Default for Cors {
@@ -444,10 +444,11 @@ impl Default for Server {
     }
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
-    pub fn new(
+    pub(crate) fn new(
         allow_any_origin: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
@@ -464,8 +465,10 @@ impl Cors {
             methods: methods.unwrap_or_else(default_cors_methods),
         }
     }
+}
 
-    pub fn into_layer(self) -> Result<CorsLayer, String> {
+impl Cors {
+    pub(crate) fn into_layer(self) -> Result<CorsLayer, String> {
         // Ensure configuration is valid before creating CorsLayer
 
         self.ensure_usable_cors_rules()?;
