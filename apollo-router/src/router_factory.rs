@@ -24,7 +24,7 @@ use tower_service::Service;
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<crate::Request>,
             Response = Response<BoxStream<'static, ResponseBody>>,
@@ -46,7 +46,7 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
 
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default)]
-pub struct YamlRouterServiceFactory;
+pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {

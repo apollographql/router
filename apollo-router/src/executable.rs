@@ -29,7 +29,7 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
     about = "Apollo federation router",
     global_setting(AppSettings::NoAutoVersion)
 )]
-pub struct Opt {
+pub(crate) struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
@@ -84,7 +84,7 @@ pub struct Opt {
 
     /// Display version and exit.
     #[clap(parse(from_flag), long, short = 'V')]
-    pub version: bool,
+    pub(crate) version: bool,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.

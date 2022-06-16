@@ -13,7 +13,7 @@ use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct EnsureQueryPresence {}
+pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where

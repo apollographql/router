@@ -12,7 +12,7 @@ use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct AllowOnlyHttpPostMutationsLayer {}
+pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where

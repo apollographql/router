@@ -17,20 +17,21 @@ use tower::{BoxError, Layer, Service};
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
-pub struct PersistedQuery {
-    pub version: u8,
+struct PersistedQuery {
+    #[allow(unused)]
+    version: u8,
     #[serde(rename = "sha256Hash")]
-    pub sha256hash: String,
+    sha256hash: String,
 }
 
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
-pub struct APQLayer {
+pub(crate) struct APQLayer {
     cache: Cache<Vec<u8>, String>,
 }
 
 impl APQLayer {
-    pub fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
+    pub(crate) fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
         Self { cache }
     }
 }

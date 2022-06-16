@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tower::BoxError;
 
 /// Holds [`Context`] entries.
-pub type Entries = Arc<DashMap<String, Value>>;
+pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
 /// Context for a [`crate::http_compat::Request`]
 ///
