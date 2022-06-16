@@ -564,16 +564,13 @@ async fn decompress_request_body(
                 })
                 .await?;
             let mut decoder = $decoder::new(Vec::new());
-            decoder
-                .write_all(&body_bytes.to_vec())
-                .await
-                .map_err(|err| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!("{}: {err}", $error_message),
-                    )
-                        .into_response()
-                })?;
+            decoder.write_all(&body_bytes).await.map_err(|err| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("{}: {err}", $error_message),
+                )
+                    .into_response()
+            })?;
             decoder.shutdown().await.map_err(|err| {
                 (
                     StatusCode::BAD_REQUEST,

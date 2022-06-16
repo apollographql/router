@@ -92,7 +92,7 @@ impl Plugin for TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, compression_header_val.clone());
+                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -291,7 +291,7 @@ mod test {
                     .headers()
                     .get(&ACCEPT_ENCODING)
                     .unwrap(),
-                HeaderValue::from_static("gzip")
+                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req

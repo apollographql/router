@@ -160,12 +160,6 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains("application/json")
                         && !content_type_str.contains("application/graphql+json")
                     {
-                        tracing::error!(
-                            "response body : {:?}",
-                            String::from_utf8_lossy(
-                                &hyper::body::to_bytes(body).await.unwrap().to_vec()
-                            )
-                        );
                         return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
