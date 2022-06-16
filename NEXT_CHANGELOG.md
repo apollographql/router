@@ -99,6 +99,12 @@ This PR goes back to the previous behaviour by awaiting the primary response bef
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1260
 
+### Use the API schema to generate selections ([PR #1255](https://github.com/apollographql/router/pull/1255))
+
+When parsing the schema to generate selections for response formatting, we should use the API schema instead of the supergraph schema.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1255
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
