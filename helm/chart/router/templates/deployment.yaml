@@ -113,7 +113,7 @@ spec:
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
-        {{ -end }}
+        {{- end }}
         {{- if .Values.extraVolumes }}
         {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
