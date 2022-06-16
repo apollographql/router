@@ -13,10 +13,9 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::utils::test::IntoSchema::Canned;
-    use apollo_router_core::utils::test::PluginTestHarness;
-    use apollo_router_core::{Context, Plugin, RouterRequest};
-    use futures::StreamExt;
+    use apollo_router::utils::test::IntoSchema::Canned;
+    use apollo_router::utils::test::PluginTestHarness;
+    use apollo_router::{Context, Plugin, RouterRequest};
     use http::StatusCode;
 
     #[tokio::test]
@@ -45,7 +44,7 @@ mod tests {
         let query = "query {topProducts{name}}";
         let operation_name: Option<&str> = None;
         let context: Option<Context> = None;
-        let service_response = test_harness
+        let mut service_response = test_harness
             .call(
                 RouterRequest::fake_builder()
                     .header("name_header", "test_client")
@@ -57,22 +56,20 @@ mod tests {
                     .expect("a valid RouterRequest"),
             )
             .await
-            .expect("a router response")
-            .next()
-            .await
-            .unwrap();
+            .expect("a router response");
 
         assert_eq!(
             StatusCode::INTERNAL_SERVER_ERROR,
             service_response.response.status()
         );
+        let _response_body = service_response.next_response().await.unwrap();
         /* TBD: Figure out how to run this as a test
         // Rhai should return a 200...
         println!("RESPONSE: {:?}", service_response);
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router_core::ResponseBody::GraphQL(response) =
+        if let apollo_router::ResponseBody::GraphQL(response) =
             service_response.response.body()
         {
             assert!(response.errors.is_empty());

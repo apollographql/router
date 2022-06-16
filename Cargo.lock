@@ -8,7 +8,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "futures",
  "http",
  "serde_json",
@@ -81,36 +80,29 @@ checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.5"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3f8fe8c9fb08c1e99bf4a50698adcd807cafba2d2aacc49d8ffc79123fce59"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.2.5"
-source = "git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227#bbfb74c682e86cdefcfcfcd5be9eefafefc796e2"
+checksum = "85efd09fc4aad19f29c8419215851246444f9b41ffbade7b7eb7f05d8b1f8ab2"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
- "apollo-router-core",
+ "apollo-parser",
  "apollo-spaceport",
  "apollo-uplink",
  "async-trait",
  "atty",
  "axum",
  "backtrace",
- "buildstructor 0.1.12",
+ "buildstructor",
  "bytes",
  "clap 3.1.18",
+ "dashmap 5.2.0",
  "deadpool",
  "derivative",
  "derive_more",
@@ -118,19 +110,29 @@ dependencies = [
  "displaydoc",
  "envmnt",
  "futures",
+ "hex 0.4.3",
  "hotwatch",
  "http",
+ "http-body",
  "humantime",
  "humantime-serde",
  "hyper",
+ "hyper-rustls",
+ "include_dir",
  "indexmap",
  "insta",
  "itertools",
  "jsonpath_lib",
  "jsonschema",
+ "lazy_static",
  "libc",
+ "lru",
  "maplit",
+ "miette",
+ "mime",
  "mockall",
+ "moka",
+ "multimap",
  "once_cell",
  "opentelemetry",
  "opentelemetry-datadog",
@@ -145,11 +147,16 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
+ "router-bridge",
  "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
+ "serde_urlencoded",
  "serde_yaml",
+ "sha2 0.10.2",
+ "startup",
+ "static_assertions",
  "sys-info",
  "tempfile",
  "test-log",
@@ -164,12 +171,14 @@ dependencies = [
  "tower-test",
  "tracing",
  "tracing-core",
+ "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
  "typed-builder 0.10.0",
  "uname",
  "url",
+ "urlencoding",
  "uuid 1.0.0",
  "walkdir",
  "yaml-rust",
@@ -177,10 +186,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "criterion",
  "futures",
@@ -193,67 +201,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-router-core"
-version = "0.9.3"
-dependencies = [
- "apollo-parser 0.2.5 (git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227)",
- "async-trait",
- "atty",
- "axum",
- "buildstructor 0.1.12",
- "bytes",
- "dashmap 5.2.0",
- "derivative",
- "displaydoc",
- "futures",
- "hex 0.4.3",
- "http",
- "http-body",
- "hyper",
- "hyper-rustls",
- "include_dir",
- "indexmap",
- "insta",
- "itertools",
- "lazy_static",
- "lru",
- "miette",
- "mime",
- "mockall",
- "moka",
- "multimap",
- "once_cell",
- "opentelemetry",
- "opentelemetry-http",
- "paste",
- "regex",
- "router-bridge",
- "schemars",
- "serde",
- "serde_json",
- "serde_json_bytes",
- "serde_urlencoded",
- "serde_yaml",
- "sha2 0.10.2",
- "startup",
- "static_assertions",
- "test-log",
- "thiserror",
- "tokio",
- "tower",
- "tower-service",
- "tower-test",
- "tracing",
- "tracing-futures",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "typed-builder 0.10.0",
- "urlencoding",
-]
-
-[[package]]
 name = "apollo-router-scaffold"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -271,14 +220,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
  "apollo-encoder 0.3.1",
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
 ]
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "bytes",
  "clap 3.1.18",
@@ -299,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "futures",
  "graphql_client",
@@ -339,7 +288,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "http",
@@ -621,24 +569,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.12"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb349df936841e81bbb21ab0305a898c411b99c85a6fe088f8296209f5d821b7"
-dependencies = [
- "lazy_static",
- "proc-macro2",
- "quote",
- "str_inflector",
- "syn",
- "thiserror",
- "try_match",
-]
-
-[[package]]
-name = "buildstructor"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d40602615b158f55f9b0d70ec0e83a98f99c206b1725b095e793f111f7f8d56e"
+checksum = "366e31800cdecf1b0438b21e2d2c9a66e922a26b93fde60bdf6bc16e25f33cc7"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -775,7 +708,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc14c70a4bb3d18ee69eafc7afc8a3c39e51fcd31e2add965a8f9fba8b8a5450"
 dependencies = [
  "anyhow",
- "buildstructor 0.3.0",
+ "buildstructor",
  "cargo",
  "clap 2.34.0",
  "console 0.12.0",
@@ -970,7 +903,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "futures",
  "serde_json",
  "tokio",
@@ -1054,7 +986,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "http",
@@ -1068,7 +999,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "http",
  "serde_json",
  "tokio",
@@ -1796,7 +1726,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "http",
@@ -2275,7 +2204,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "schemars",
@@ -2726,7 +2654,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "hex 0.4.3",
@@ -3417,7 +3344,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "futures",
  "http",
  "serde_json",
@@ -4011,7 +3937,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "async-trait",
  "futures",
  "http",
@@ -4325,7 +4250,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "futures",
  "http",
  "serde_json",
@@ -4339,7 +4263,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
  "futures",
  "http",
  "serde_json",
@@ -4353,7 +4276,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "rhai-subgraph-request-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
  "futures",
  "http",
  "serde_json",
@@ -4367,7 +4302,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "apollo-router-core",
+ "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4433,7 +4368,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -6326,7 +6261,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ansi_term",
  "anyhow",

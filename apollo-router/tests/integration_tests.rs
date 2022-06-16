@@ -4,12 +4,12 @@
 
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
-use apollo_router_core::{
+use apollo_router::{
     http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
     ValueExt,
 };
-use futures::stream::{BoxStream, StreamExt};
+use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -129,7 +129,6 @@ async fn api_schema_hides_field() {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
-#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -142,7 +141,6 @@ async fn traced_basic_request() {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
-#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -215,7 +213,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error =apollo_router_core::Error {
+    let expected_error =apollo_router::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -297,7 +295,7 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error =apollo_router_core::Error {
+    let expected_error =apollo_router::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
@@ -429,7 +427,7 @@ async fn automated_persisted_queries() {
                 {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
         }),
     );
-    let expected_apq_miss_error = apollo_router_core::Error {
+    let expected_apq_miss_error = apollo_router::Error {
         message: "PersistedQueryNotFound".to_string(),
         extensions,
         ..Default::default()
@@ -604,7 +602,7 @@ async fn query_rust(
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -631,14 +629,13 @@ async fn setup_router_and_registry() -> (
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = TowerSubgraphService::new(name.to_owned()).map_request(
-            move |request: SubgraphRequest| {
+        let service =
+            SubgraphService::new(name.to_owned()).map_request(move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
 
                 request
-            },
-        );
+            });
         builder = builder.with_subgraph_service(name, service);
     }
 
@@ -648,11 +645,20 @@ async fn setup_router_and_registry() -> (
 }
 
 async fn query_with_router(
-    router: BoxCloneService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
+    router: BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    >,
     request: graphql::RouterRequest,
 ) -> graphql::Response {
-    let stream = router.oneshot(request).await.unwrap().next().await.unwrap();
-    let (_, response) = stream.response.into_parts();
+    let response = router
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
 
     match response {
         ResponseBody::GraphQL(response) => response,

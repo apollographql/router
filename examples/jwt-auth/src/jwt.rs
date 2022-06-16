@@ -60,11 +60,9 @@
 //!  - Token refresh
 //!  - ...
 
-use apollo_router_core::Context;
-use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
-use futures::stream::{once, BoxStream};
+use apollo_router::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
+use apollo_router::{Context, ResponseBody};
+use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
 use jwt_simple::prelude::*;
@@ -205,8 +203,12 @@ impl Plugin for JwtAuth {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         // We are going to use the `jwt-simple` crate for our JWT verification.
         // The crate provides straightforward support for the popular JWT algorithms.
 
@@ -231,16 +233,16 @@ impl Plugin for JwtAuth {
                     context: Context,
                     msg: String,
                     status: StatusCode,
-                ) -> Result<ControlFlow<BoxStream<'static, RouterResponse>, RouterRequest>, BoxError> {
+                ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, ResponseBody>>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router_core::Error {
+                        .errors(vec![apollo_router::Error {
                             message: msg,
                             ..Default::default()
                         }])
                         .status_code(status)
                         .context(context)
                         .build()?;
-                    Ok(ControlFlow::Break(Box::pin(once(async move {res}))))
+                    Ok(ControlFlow::Break(res.boxed()))
                 }
 
                 // The http_request is stored in a `RouterRequest` context.
@@ -378,13 +380,12 @@ register_plugin!("example", "jwt", JwtAuth);
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
-// apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
+// apollo_router provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use futures::StreamExt;
+    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -392,7 +393,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
@@ -417,11 +418,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_without_any_authorization_header)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -429,8 +427,12 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "Missing 'authorization' header".to_string(),
@@ -456,11 +458,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_no_bearer_in_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -468,8 +467,12 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "'should start with Bearer' is not correctly formatted",
@@ -495,11 +498,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_too_many_spaces_in_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -507,8 +507,12 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "'Bearer  ' is not correctly formatted",
@@ -535,11 +539,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_appropriate_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -550,8 +551,12 @@ mod tests {
         );
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "Only hmac support is implemented. Check configuration for typos",
@@ -581,12 +586,11 @@ mod tests {
                 assert_eq!(claims.subject, Some("subject".to_string()));
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .data(expected_mock_response_data)
-                        .build()
-                        .expect("expecting valid request")
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
+                    .expect("expecting valid request")
+                    .boxed())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -626,11 +630,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_appropriate_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -638,8 +639,12 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert!(graphql_response.errors.is_empty());
         assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())
@@ -680,11 +685,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_appropriate_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -692,8 +694,12 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             format!("{token} is not authorized: expiry period exceeds policy limit"),
@@ -741,11 +747,8 @@ mod tests {
         // Let's sleep until our token has expired
         tokio::time::sleep(tokio::time::Duration::from_secs(tolerance + token_life + 1)).await;
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_appropriate_auth)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -753,8 +756,12 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             format!("{token} is not authorized: Token has expired"),

@@ -1,17 +1,21 @@
-use crate::future::BoxFuture;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use apollo_router_core::{http_compat, ResponseBody};
+use crate::{http_compat, ResponseBody};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use http::StatusCode;
+use opentelemetry::sdk::Resource;
+use opentelemetry::{Key, KeyValue, Value};
 use prometheus::{Encoder, Registry, TextEncoder};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::task::{Context, Poll};
 use tower::{BoxError, ServiceExt};
 use tower_service::Service;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+use super::MetricsAttributesConf;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     enabled: bool,
@@ -21,10 +25,33 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        _metrics_config: &MetricsCommon,
+        metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let exporter = opentelemetry_prometheus::exporter().try_init()?;
+            let mut resources = Resource::default();
+            if let MetricsCommon {
+                attributes:
+                    Some(MetricsAttributesConf {
+                        insert: Some(insert_cfg),
+                        ..
+                    }),
+                ..
+            } = metrics_config
+            {
+                let kvs = insert_cfg
+                    .clone()
+                    .into_iter()
+                    .map(|e| KeyValue::new(Key::from(e.name), Value::from(e.value)))
+                    .collect::<Vec<KeyValue>>();
+                resources = Resource::new(kvs);
+            }
+
+            let exporter = opentelemetry_prometheus::exporter()
+                .with_resource(resources)
+                .with_default_histogram_boundaries(vec![
+                    0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+                ])
+                .try_init()?;
             builder = builder.with_custom_endpoint(
                 "/prometheus",
                 PrometheusService {

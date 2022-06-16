@@ -318,7 +318,8 @@ expression: "&schema"
             "all": {
               "type": "object",
               "properties": {
-                "dedup": {
+                "query_deduplication": {
+                  "description": "Enable query deduplication",
                   "type": "boolean",
                   "nullable": true
                 }
@@ -330,12 +331,18 @@ expression: "&schema"
               "additionalProperties": {
                 "type": "object",
                 "properties": {
-                  "dedup": {
+                  "query_deduplication": {
+                    "description": "Enable query deduplication",
                     "type": "boolean",
                     "nullable": true
                   }
                 }
               }
+            },
+            "variables_deduplication": {
+              "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+              "type": "boolean",
+              "nullable": true
             }
           }
         }
@@ -479,10 +486,81 @@ expression: "&schema"
           "properties": {
             "common": {
               "type": "object",
-              "required": [
-                "delay_interval"
-              ],
               "properties": {
+                "attributes": {
+                  "description": "Configuration to add custom labels/attributes to metrics",
+                  "type": "object",
+                  "properties": {
+                    "from_headers": {
+                      "description": "Configuration to forward header values in metric attributes/labels",
+                      "type": "array",
+                      "items": {
+                        "description": "Configuration to forward header values in metric labels",
+                        "anyOf": [
+                          {
+                            "description": "Using a named header",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "named": {
+                                "type": "string"
+                              },
+                              "rename": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Using a regex on the header name",
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "nullable": true
+                    },
+                    "static": {
+                      "description": "Configuration to insert custom attributes/labels in metrics",
+                      "type": "array",
+                      "items": {
+                        "description": "Configuration to insert custom attributes/labels in metrics",
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
                 "delay_interval": {
                   "type": "object",
                   "required": [
@@ -500,7 +578,8 @@ expression: "&schema"
                       "format": "uint64",
                       "minimum": 0.0
                     }
-                  }
+                  },
+                  "nullable": true
                 }
               },
               "additionalProperties": false,

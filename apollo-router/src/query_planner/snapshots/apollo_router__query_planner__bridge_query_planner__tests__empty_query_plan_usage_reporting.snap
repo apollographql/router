@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: usage_reporting
+---
+{
+  "statsReportKey": "# -\n{__schema{queryType{name}}}",
+  "referencedFieldsByType": {
+    "Query": {
+      "fieldNames": [
+        "__schema"
+      ],
+      "isInterface": false
+    },
+    "__Schema": {
+      "fieldNames": [
+        "queryType"
+      ],
+      "isInterface": false
+    },
+    "__Type": {
+      "fieldNames": [
+        "name"
+      ],
+      "isInterface": false
+    }
+  }
+}

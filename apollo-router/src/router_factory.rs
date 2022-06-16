@@ -1,15 +1,14 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
-use apollo_router_core::prelude::*;
-use apollo_router_core::{
+use crate::prelude::*;
+use crate::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
 };
-use apollo_router_core::{DynPlugin, TowerSubgraphService};
+use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
-use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +25,7 @@ use tower_service::Service;
 pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = BoxStream<'static, Response<ResponseBody>>,
+            Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -52,7 +51,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
             Request<graphql::Request>,
-            BoxStream<'static, Response<ResponseBody>>,
+            Response<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
         Request<graphql::Request>,
@@ -71,7 +70,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxService::new(TowerSubgraphService::new(name.to_string()));
+            let subgraph_service = BoxService::new(SubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -85,13 +84,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let (pluggable_router_service, mut plugins) = builder.build().await?;
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(|http_request: Request<apollo_router_core::Request>| {
-                    http_request.into()
-                })
-                .map_response(|response| {
-                    Box::pin(response.map(|r| r.response))
-                        as BoxStream<'static, Response<ResponseBody>>
-                })
+                .map_request(|http_request: Request<crate::Request>| http_request.into())
+                .map_response(|response| response.response)
                 .boxed_clone(),
         );
 
@@ -114,7 +108,7 @@ async fn create_plugins(
     schema: &Schema,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
-    let plugin_registry = apollo_router_core::plugins();
+    let plugin_registry = crate::plugins();
     let mut plugin_instances = Vec::new();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
@@ -209,10 +203,11 @@ fn visit(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod test {
+    use crate::configuration::Configuration;
+    use crate::router_factory::YamlRouterServiceFactory;
     use crate::router_factory::{inject_schema_id, RouterServiceFactory};
-    use crate::{Configuration, YamlRouterServiceFactory};
-    use apollo_router_core::Schema;
-    use apollo_router_core::{register_plugin, Plugin};
+    use crate::Schema;
+    use crate::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;

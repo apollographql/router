@@ -1,6 +1,5 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
-use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
     SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
@@ -10,19 +9,18 @@ use crate::plugins::telemetry::metrics::{
     MetricsExporterHandle,
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::reexports::router_bridge::planner::UsageReporting;
 use crate::subscriber::replace_layer;
-use ::tracing::{info_span, Span};
-use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
-use apollo_router_core::{
+use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
+    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
+use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
@@ -41,6 +39,9 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
+use self::config::Conf;
+use self::metrics::{Forward, MetricsAttributesConf};
+
 pub mod apollo;
 pub mod config;
 mod metrics;
@@ -50,6 +51,7 @@ mod tracing;
 pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
@@ -225,13 +227,19 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
-        let config = self.config.apollo.clone().unwrap_or_default();
+        let config = self.config.clone();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(config.clone()))
+            .instrument(Self::router_service_span(
+                config.apollo.clone().unwrap_or_default(),
+            ))
             .map_future_with_context(
                 move |req: &RouterRequest| {
                     Self::populate_context(&config, req);
@@ -242,32 +250,51 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<BoxStream<'static, RouterResponse>, BoxError> =
-                            fut.await;
-
+                        let result: Result<
+                            RouterResponse<BoxStream<'static, ResponseBody>>,
+                            BoxError,
+                        > = fut.await;
+                        Self::update_metrics(&ctx, metrics, &result);
                         match result {
                             Err(e) => {
-                                let res = Err(e);
-                                if !matches!(sender, Sender::Noop) {
-                                    Self::update_apollo_metrics(ctx, sender, &res, start.elapsed());
-                                }
-                                Self::update_metrics(metrics, &res);
-                                Err(res.unwrap_err())
-                            }
-                            Ok(stream) => Ok(Box::pin(stream.map(move |response| {
-                                let res = Ok(response);
                                 if !matches!(sender, Sender::Noop) {
                                     Self::update_apollo_metrics(
-                                        ctx.clone(),
-                                        sender.clone(),
-                                        &res,
+                                        &ctx,
+                                        sender,
+                                        true,
                                         start.elapsed(),
                                     );
                                 }
-                                Self::update_metrics(metrics.clone(), &res);
-                                res.expect("is always Ok")
-                            }))
-                                as BoxStream<'static, RouterResponse>),
+
+                                Err(e)
+                            }
+                            Ok(router_response) => {
+                                let is_not_success =
+                                    !router_response.response.status().is_success();
+                                Ok(router_response
+                                    .map(move |response_stream| {
+                                        let sender = sender.clone();
+                                        let ctx = ctx.clone();
+
+                                        response_stream.map(move |response| {
+                                            let response_has_errors = match &response {
+                                                ResponseBody::GraphQL(r) => !r.errors.is_empty(),
+                                                _ => false,
+                                            };
+
+                                            if !matches!(sender, Sender::Noop) {
+                                                Self::update_apollo_metrics(
+                                                    &ctx,
+                                                    sender.clone(),
+                                                    is_not_success || response_has_errors,
+                                                    start.elapsed(),
+                                                );
+                                            }
+                                            response
+                                        })
+                                    })
+                                    .boxed())
+                            }
                         }
                     }
                 },
@@ -288,8 +315,13 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
@@ -496,9 +528,9 @@ impl Telemetry {
     }
 
     fn update_apollo_metrics(
-        context: Context,
+        context: &Context,
         sender: Sender,
-        result: &Result<RouterResponse, BoxError>,
+        has_errors: bool,
         duration: Duration,
     ) {
         let metrics = if let Some(usage_reporting) = context
@@ -538,18 +570,7 @@ impl Telemetry {
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
-                                    has_errors: match result {
-                                        Ok(r) => {
-                                            !r.response.status().is_success()
-                                                || match r.response.body() {
-                                                    ResponseBody::GraphQL(r) => {
-                                                        !r.errors.is_empty()
-                                                    }
-                                                    _ => false,
-                                                }
-                                        }
-                                        Err(_) => true,
-                                    },
+                                    has_errors,
                                     persisted_query_hit,
                                     ..Default::default()
                                 },
@@ -574,18 +595,32 @@ impl Telemetry {
         sender.send(metrics);
     }
 
-    fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
+    fn update_metrics(
+        context: &Context,
+        metrics: BasicMetrics,
+        result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    ) {
         // Using Instant because it is guaranteed to be monotonically increasing.
         let now = Instant::now();
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         match &result {
             Ok(response) => {
-                metrics.http_requests_total.add(
-                    1,
-                    &[KeyValue::new(
-                        "status",
-                        response.response.status().as_u16().to_string(),
-                    )],
-                );
+                metric_attrs.push(KeyValue::new(
+                    "status",
+                    response.response.status().as_u16().to_string(),
+                ));
+
+                metrics.http_requests_total.add(1, &metric_attrs);
             }
             Err(_) => {
                 metrics.http_requests_error_total.add(1, &[]);
@@ -593,15 +628,16 @@ impl Telemetry {
         }
         metrics
             .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &[]);
+            .record(now.elapsed().as_secs_f64(), &metric_attrs);
     }
 
-    fn populate_context(config: &Config, req: &RouterRequest) {
+    fn populate_context(config: &Conf, req: &RouterRequest) {
+        let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
         let headers = http_request.headers();
-        let client_name_header = &config.client_name_header;
-        let client_version_header = &config.client_version_header;
+        let client_name_header = &apollo_config.client_name_header;
+        let client_version_header = &apollo_config.client_version_header;
         let _ = context.insert(
             CLIENT_NAME,
             headers
@@ -622,6 +658,57 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
+        if let Some(metrics_conf) = &config.metrics {
+            // List of custom attributes for metrics
+            let mut attributes: HashMap<String, String> = HashMap::new();
+            if let Some(operation_name) = &req.originating_request.body().operation_name {
+                attributes.insert("operation_name".to_string(), operation_name.clone());
+            }
+
+            if let Some(MetricsCommon {
+                attributes:
+                    Some(MetricsAttributesConf {
+                        from_headers: Some(from_headers),
+                        ..
+                    }),
+                ..
+            }) = &metrics_conf.common
+            {
+                for propagate_header in from_headers {
+                    match propagate_header {
+                        Forward::Named {
+                            named,
+                            rename,
+                            default,
+                        } => {
+                            let value = req.originating_request.headers().get(named);
+                            if let Some(value) = value
+                                .and_then(|v| v.to_str().ok()?.to_string().into())
+                                .or_else(|| default.clone())
+                            {
+                                attributes.insert(
+                                    rename.clone().unwrap_or_else(|| named.to_string()),
+                                    value,
+                                );
+                            }
+                        }
+                        Forward::Matching { matching } => {
+                            req.originating_request
+                                .headers()
+                                .iter()
+                                .filter(|(name, _)| matching.is_match(name.as_str()))
+                                .for_each(|(name, value)| {
+                                    if let Ok(value) = value.to_str() {
+                                        attributes.insert(name.to_string(), value.to_string());
+                                    }
+                                });
+                        }
+                    }
+                }
+            }
+
+            let _ = context.insert(ATTRIBUTES, attributes);
+        }
     }
 }
 
@@ -636,7 +723,7 @@ fn operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: apollo_router_core::reexports::router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: crate::reexports::router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
@@ -665,10 +752,19 @@ register_plugin!("apollo", "telemetry", Telemetry);
 //
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use crate::{
+        http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
+    };
+    use bytes::Bytes;
+    use http::{Method, StatusCode, Uri};
+    use serde_json::Value;
+    use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        crate::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
@@ -678,7 +774,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
-        apollo_router_core::plugins()
+        crate::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
@@ -697,9 +793,143 @@ mod tests {
                             "bool_arr": [true, false]
                             }
                         }
+                    },
+                "metrics": {
+                    "common": {
+                        "attributes": {
+                            "from_headers": [
+                                {
+                                    "named": "test",
+                                    "default": "default_value",
+                                    "rename": "renamed_value",
+                                }
+                            ],
+                            "static": [
+                                {
+                                    "name": "myname",
+                                    "value": "label_value"
+                                }
+                            ]
+                        }
                     }
+                }
             }))
             .await
             .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics() {
+        let mut mock_service = MockRouterService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                Ok(RouterResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap()
+                    .boxed())
+            });
+
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+            .get("apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(
+                &Value::from_str(
+                    r#"{
+                "apollo": {
+                    "client_name_header": "name_header",
+                    "client_version_header": "version_header",
+                    "schema_id": "schema_sha"
+                },
+                "metrics": {
+                    "common": {
+                        "attributes": {
+                            "from_headers": [
+                                {
+                                    "named": "test",
+                                    "default": "default_value",
+                                    "rename": "renamed_value"
+                                },
+                                {
+                                    "named": "another_test",
+                                    "default": "my_default_value"
+                                }
+                            ],
+                            "static": [
+                                {
+                                    "name": "myname",
+                                    "value": "label_value"
+                                }
+                            ]
+                        }
+                    },
+                    "prometheus": {
+                        "enabled": true
+                    }
+                }
+            }"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
+        let router_req = RouterRequest::fake_builder().header("test", "my_value_set");
+
+        let _router_response = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let http_req_prom = http_compat::Request::fake_builder()
+            .uri(Uri::from_static(
+                "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
+            ))
+            .method(Method::GET)
+            .body(Bytes::new())
+            .build()
+            .unwrap();
+        let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let http_req_prom = http_compat::Request::fake_builder()
+            .uri(Uri::from_static(
+                "http://localhost:4000/plugins/apollo.telemetry/prometheus",
+            ))
+            .method(Method::GET)
+            .body(Bytes::new())
+            .build()
+            .unwrap();
+        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        match resp.body() {
+            crate::ResponseBody::Text(prom_metrics) => {
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+            }
+            _ => panic!("body does not have the right format"),
+        }
     }
 }

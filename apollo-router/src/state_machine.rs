@@ -5,8 +5,8 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::Schema;
-use apollo_router_core::{prelude::*, Handler, Plugins};
+use crate::Schema;
+use crate::{prelude::*, Handler, Plugins};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
@@ -396,10 +396,10 @@ impl<T> ResultExt<T> for Result<T, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http_compat::{Request, Response};
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
-    use apollo_router_core::http_compat::{Request, Response};
-    use apollo_router_core::ResponseBody;
+    use crate::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use futures::stream::BoxStream;
@@ -703,7 +703,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = BoxStream<'static, Response<ResponseBody>>;
+        type Response = Response<BoxStream<'static, ResponseBody>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -738,13 +738,13 @@ mod tests {
         where
             RS: Service<
                     Request<graphql::Request>,
-                    Response = BoxStream<'static, Response<ResponseBody>>,
+                    Response = Response<BoxStream<'static, ResponseBody>>,
                     Error = BoxError,
                 > + Send
                 + Sync
                 + Clone
                 + 'static,
-            <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+            <RS as Service<Request<crate::Request>>>::Future: std::marker::Send,
         {
             let res = self.create_server(configuration, listener);
             Box::pin(async move { res })

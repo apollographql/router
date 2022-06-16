@@ -1,9 +1,9 @@
 use std::ops::ControlFlow;
 
-use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+use apollo_router::{
+    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
-use futures::stream::{once, BoxStream};
+use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
@@ -29,8 +29,12 @@ impl Plugin for ForbidAnonymousOperations {
     // We will thus put the logic it in the `router_service` section of our plugin.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
@@ -38,7 +42,7 @@ impl Plugin for ForbidAnonymousOperations {
         ServiceBuilder::new()
             .checkpoint(|req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
-                // Its `body()` is an `apollo_router_core::Request`, that contains:
+                // Its `body()` is an `apollo_router::Request`, that contains:
                 // - Zero or one query
                 // - Zero or one operation_name
                 // - Zero or more variables
@@ -54,16 +58,14 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::error_builder()
-                        .error(apollo_router_core::Error {
+                        .error(apollo_router::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         })
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
                         .build()?;
-                    Ok(ControlFlow::Break(
-                        Box::pin(once(async move { res })) as BoxStream<'static, RouterResponse>
-                    ))
+                    Ok(ControlFlow::Break(res.boxed()))
                 } else {
                     // we're good to go!
                     tracing::info!("operation is allowed!");
@@ -88,13 +90,12 @@ register_plugin!(
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
-// apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
+// apollo_router provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use futures::{stream::once, StreamExt};
+    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -105,7 +106,7 @@ mod tests {
     // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        apollo_router::plugins()
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
@@ -131,11 +132,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_without_any_operation_name)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -143,8 +141,12 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "Anonymous operations are not allowed".to_string(),
@@ -171,11 +173,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_empty_operation_name)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -183,8 +182,12 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             "Anonymous operations are not allowed".to_string(),
@@ -217,12 +220,11 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(Box::pin(once(async move {
-                    RouterResponse::fake_builder()
-                        .data(expected_mock_response_data)
-                        .build()
-                        .unwrap()
-                })))
+                Ok(RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
+                    .unwrap()
+                    .boxed())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -239,11 +241,8 @@ mod tests {
             .expect("expecting valid request");
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = service_stack
             .oneshot(request_with_operation_name)
-            .await
-            .unwrap()
-            .next()
             .await
             .unwrap();
 
@@ -251,8 +250,12 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
+        let graphql_response: apollo_router::Response = service_response
+            .next_response()
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         assert_eq!(
             // we're allowed to unwrap() here because we know the json is a str()

@@ -31,13 +31,6 @@ path = 'LICENSE'
 license = 'LicenseRef-ELv2'
 checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
 
-[apollo-router-core.clarify]
-license = "LicenseRef-ELv2"
-[[apollo-router-core.clarify.files]]
-path = 'LICENSE'
-license = 'LicenseRef-ELv2'
-checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
-
 [router-bridge.clarify]
 license = "LicenseRef-ELv2"
 [[router-bridge.clarify.files]]
