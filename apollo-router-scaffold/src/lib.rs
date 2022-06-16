@@ -126,22 +126,14 @@ mod test {
             let mut output_dir = std::env::temp_dir();
             output_dir.push("test_scaffold_output");
 
-            match std::fs::remove_dir_all(&output_dir) {
-                Ok(_) => {
-                    copy_dir::copy_dir(&temp_dir, &output_dir)
-                        .expect("couldn't copy test_scaffold_output directory");
-                    anyhow::anyhow!(
-                        "scaffold test failed: {e} \nYou can find the scaffolded project at {}",
-                        output_dir.display()
-                    )
-                }
-                Err(rmdir_error) => {
-                    anyhow::anyhow!(
-                        "scaffold test failed: {e} \nWe couldn't prepare an output {}",
-                        rmdir_error
-                    )
-                }
-            }
+            // best effort to prepare the output directory
+            let _ = std::fs::remove_dir_all(&output_dir);
+            copy_dir::copy_dir(&temp_dir, &output_dir)
+                .expect("couldn't copy test_scaffold_output directory");
+            anyhow::anyhow!(
+                "scaffold test failed: {e}\nYou can find the scaffolded project at\n{}",
+                output_dir.display()
+            )
         })
     }
 
