@@ -4335,6 +4335,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rhai-subgraph-request-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rhai-surrogate-cache-key"
 version = "0.1.0"
 dependencies = [

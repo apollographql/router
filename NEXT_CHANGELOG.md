@@ -48,6 +48,23 @@ You will need to update your YAML configuration file to use the correct name for
 +       query_deduplication: false # Disable query deduplication for products.
 ```
 
+### Rhai plugin `request.sub_headers` renamed to `request.subgraph.headers` [PR #1261](https://github.com/apollographql/router/pull/1261)
+
+Rhai scripts previously supported the `request.sub_headers` attribute so that subgraph request headers could be
+accessed. This is now replaced with an extended interface for subgraph requests:
+
+```
+request.subgraph.headers
+request.subgraph.body.query
+request.subgraph.body.operation_name
+request.subgraph.body.variables
+request.subgraph.body.extensions
+request.subgraph.uri.host
+request.subgraph.uri.path
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1261
+
 ## 🚀 Features
 
 ### Add support of compression [PR #1229](https://github.com/apollographql/router/pull/1229)

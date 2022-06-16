@@ -23,6 +23,7 @@ Experimental scripting support.
 * [Logging](./rhai-logging)
 * [Response data modification](./rhai-data-response-mutate)
 * [Response errors modification](./rhai-error-response-mutate)
+* [Subgraph request logging](./rhai-subgraph-request-log)
 * [Surrogate cache key creation](./rhai-surrogate-cache-key)
 
 ### Native Rust Plugins
