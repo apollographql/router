@@ -109,7 +109,7 @@ impl Selection {
                                         .and_then(|ty| ty.field(&field_name))
                                 })
                         })
-                        .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?
+                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?
                         .clone()
                 };
 
@@ -190,7 +190,7 @@ impl Selection {
                     // if we can't get a type name from the current type, that means we're applying
                     // a fragment onto a scalar
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
-                    .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?;
+                    .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
                 let fragment_type = FieldType::Named(type_condition.clone());
 
