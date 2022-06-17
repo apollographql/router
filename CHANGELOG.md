@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [0.9.5] - 2022-06-17
 ## ❗ BREAKING ❗
 
-### Rename `experimental.traffic_shaping` to `apollo.traffic_shaping` [PR #1229](https://github.com/apollographql/router/pull/1229)
+### Move `experimental.traffic_shaping` out of `experimental` [PR #1229](https://github.com/apollographql/router/pull/1229)
 You will need to update your YAML configuration file to use the correct name for `traffic_shaping` plugin.
 
 ```diff
@@ -63,7 +63,6 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1229
 
-
 ### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
 Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
 
@@ -75,7 +74,6 @@ export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1210
 
 ### Add support for adding extra enviromental variables and volumes to helm chart [PR #1245](https://github.com/apollographql/router/pull/1245)
-
 The following example will allow you to mount your supergraph.yaml into the helm deployment using a configmap with a key of supergraph.yaml. Using [Kustomize](https://kustomize.io/) to generate your configmap from your supergraph.yaml is suggested.
 
 Example:
@@ -108,15 +106,13 @@ resulting in some introspection queries not working.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
-### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
-
+### Update the scaffold template so that it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
 Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
-This Pull request updates the scaffold template so it generates plugins that are compatible with the new Plugin API.
+The scaffold template has been updated so that it generates plugins that are compatible with the new Plugin API.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
 ### Create the ExecutionResponse after the primary response was generated ([PR #1260](https://github.com/apollographql/router/pull/1260))
-
 The `@defer` preliminary work has a surprising side effect: when using methods like `RouterResponse::map_response`, they are
 executed before the subgraph responses are received, because they work on the stream of responses.
 This PR goes back to the previous behaviour by awaiting the primary response before creating the ExecutionResponse.
@@ -124,16 +120,13 @@ This PR goes back to the previous behaviour by awaiting the primary response bef
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1260
 
 ### Use the API schema to generate selections ([PR #1255](https://github.com/apollographql/router/pull/1255))
-
 When parsing the schema to generate selections for response formatting, we should use the API schema instead of the supergraph schema.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1255
 
-## 🛠 Maintenance
 ## 📚 Documentation
 
 ### Update README link to the configuration file  ([PR #1208](https://github.com/apollographql/router/pull/1208))
-
 As the structure of the documentation has changed, the link should point to the `YAML config file` section of the overview.
 
 By [@gscheibel](https://github.com/gscheibel in https://github.com/apollographql/router/pull/1208
