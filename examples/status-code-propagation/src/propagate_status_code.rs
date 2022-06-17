@@ -98,7 +98,7 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 #[cfg(test)]
 mod tests {
     use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
-    use apollo_router::plugin::utils;
+    use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::{RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse};
     use http::StatusCode;
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
-        let mut mock_service = utils::test::MockSubgraphService::new();
+        let mut mock_service = test::MockSubgraphService::new();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -162,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
-        let mut mock_service = utils::test::MockSubgraphService::new();
+        let mut mock_service = test::MockSubgraphService::new();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -199,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = utils::test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         mock_service
             .expect_call()
@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = utils::test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         mock_service
             .expect_call()

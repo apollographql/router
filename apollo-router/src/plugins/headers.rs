@@ -1,4 +1,4 @@
-use crate::plugin::utils::serde::{
+use crate::plugin::serde::{
     deserialize_header_name, deserialize_header_value, deserialize_option_header_name,
     deserialize_option_header_value, deserialize_regex,
 };
@@ -234,7 +234,7 @@ where
 mod test {
     use super::*;
     use crate::http_compat;
-    use crate::plugin::utils::test::MockSubgraphService;
+    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::query_planner::fetch::OperationKind;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};

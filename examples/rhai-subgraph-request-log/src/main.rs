@@ -14,16 +14,15 @@ fn main() -> Result<()> {
 mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{Context, RouterRequest};
+    use apollo_router::{plugin::Plugin, Context, RouterRequest};
     use http::StatusCode;
 
     #[tokio::test]
-    async fn test_subgraph_mutates_data() {
+    async fn test_subgraph_logs_data() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_data_response_mutate.rhai",
+            "filename": "src/rhai_subgraph_request_log.rhai",
         }))
         .expect("valid conf supplied");
 
@@ -59,10 +58,7 @@ mod tests {
             .await
             .expect("a router response");
 
-        assert_eq!(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            service_response.response.status()
-        );
+        assert_eq!(StatusCode::OK, service_response.response.status());
         let _response_body = service_response.next_response().await.unwrap();
         /* TBD: Figure out how to run this as a test
         // Rhai should return a 200...

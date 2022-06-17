@@ -194,6 +194,22 @@ expression: get_spans()
                     }
                   },
                   "children": {
+                    "apollo_router::services::subgraph_service::body_compression": {
+                      "name": "apollo_router::services::subgraph_service::body_compression",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "body_compression",
+                          "target": "apollo_router::services::subgraph_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router::services::subgraph_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
+                    },
                     "apollo_router::services::subgraph_service::subgraph_request": {
                       "name": "apollo_router::services::subgraph_service::subgraph_request",
                       "record": {

@@ -14,7 +14,7 @@ use futures::future::ready;
 use futures::stream::{once, BoxStream};
 use futures::StreamExt;
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::uri::{Parts, PathAndQuery};
+use http::uri::{Authority, Parts, PathAndQuery};
 use http::{HeaderMap, StatusCode, Uri};
 use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
@@ -154,23 +154,74 @@ mod router_plugin_mod {
         };
     }
 
-    #[rhai_fn(get = "sub_headers", pure, return_raw)]
-    pub(crate) fn get_subgraph_headers(
+    // The next group of functions are specifically for interacting
+    // with the subgraph_request on a SubgraphRequest.
+    #[rhai_fn(get = "subgraph", pure, return_raw)]
+    pub(crate) fn get_subgraph(
         obj: &mut SharedSubgraphRequest,
-    ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        obj.with_mut(|request| Ok(request.subgraph_request.headers().clone()))
+    ) -> Result<http_compat::Request<Request>, Box<EvalAltResult>> {
+        obj.with_mut(|request| Ok(request.subgraph_request.clone()))
     }
 
-    #[rhai_fn(set = "sub_headers", return_raw)]
-    pub(crate) fn set_subgraph_headers(
+    #[rhai_fn(set = "subgraph", return_raw)]
+    pub(crate) fn set_subgraph(
         obj: &mut SharedSubgraphRequest,
-        headers: HeaderMap,
+        sub: http_compat::Request<Request>,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|request| {
-            *request.subgraph_request.headers_mut() = headers;
+            request.subgraph_request = sub;
             Ok(())
         })
     }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_subgraph_headers(
+        obj: &mut http_compat::Request<Request>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.headers().clone())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_subgraph_headers(
+        obj: &mut http_compat::Request<Request>,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.headers_mut() = headers;
+        Ok(())
+    }
+
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_subgraph_body(
+        obj: &mut http_compat::Request<Request>,
+    ) -> Result<Request, Box<EvalAltResult>> {
+        Ok(obj.body().clone())
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_subgraph_body(
+        obj: &mut http_compat::Request<Request>,
+        body: Request,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.body_mut() = body;
+        Ok(())
+    }
+
+    #[rhai_fn(get = "uri", pure, return_raw)]
+    pub(crate) fn get_subgraph_uri(
+        obj: &mut http_compat::Request<Request>,
+    ) -> Result<Uri, Box<EvalAltResult>> {
+        Ok(obj.uri().clone())
+    }
+
+    #[rhai_fn(set = "uri", return_raw)]
+    pub(crate) fn set_subgraph_uri(
+        obj: &mut http_compat::Request<Request>,
+        uri: Uri,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.uri_mut() = uri;
+        Ok(())
+    }
+    // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_router_response(
@@ -1434,6 +1485,29 @@ impl Rhai {
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
+            // Request.uri.host
+            .register_get_result("host", |x: &mut Uri| to_dynamic(x.host()))
+            .register_set_result("host", |x: &mut Uri, value: &str| {
+                // Because there is no simple way to update parts on an existing
+                // Uri (no parts_mut()), then we need to create a new Uri from our
+                // existing parts, preserving any port, and update our existing
+                // Uri.
+                let mut parts: Parts = x.clone().into_parts();
+                let new_authority = match parts.authority {
+                    Some(old_authority) => {
+                        if let Some(port) = old_authority.port() {
+                            Authority::from_maybe_shared(format!("{}:{}", value, port))
+                                .map_err(|e| e.to_string())?
+                        } else {
+                            Authority::from_maybe_shared(value).map_err(|e| e.to_string())?
+                        }
+                    }
+                    None => Authority::from_maybe_shared(value).map_err(|e| e.to_string())?,
+                };
+                parts.authority = Some(new_authority);
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+                Ok(())
+            })
             // ResponseBody "short-cuts" to bypass the enum
             // ResponseBody.label
             .register_get_result("label", |x: &mut ResponseBody| {
@@ -1667,7 +1741,7 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::{
         http_compat,
-        plugin::utils::test::{MockExecutionService, MockRouterService},
+        plugin::test::{MockExecutionService, MockRouterService},
         Context, ResponseBody, RouterRequest, RouterResponse,
     };
     use serde_json::Value;
@@ -1805,7 +1879,7 @@ mod tests {
     //
     // This is done to avoid using the public interface of tracing_test which installs a global
     // subscriber which breaks other tests in our stack which also insert a global subscriber.
-    // (there can be only one...)
+    // (there can be only one...) which means we cannot test it with #[tokio::test(flavor = "multi_thread")]
     #[test]
     fn it_logs_messages() {
         let env_filter = "apollo_router=trace";

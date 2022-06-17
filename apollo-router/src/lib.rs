@@ -1,6 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
+#![warn(unreachable_pub)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{

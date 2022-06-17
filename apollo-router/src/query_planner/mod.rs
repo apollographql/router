@@ -3,8 +3,8 @@ use crate::error::FetchError;
 use crate::json_ext::{Path, Value, ValueExt};
 use crate::service_registry::ServiceRegistry;
 use crate::*;
-pub use bridge_query_planner::*;
-pub use caching_query_planner::*;
+pub(crate) use bridge_query_planner::*;
+pub(crate) use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
@@ -32,7 +32,7 @@ pub struct QueryPlan {
     options: QueryPlanOptions,
 }
 
-/// This default impl is useful for plugin::utils users
+/// This default impl is useful for test users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
 #[buildstructor::buildstructor]
 impl QueryPlan {
@@ -76,7 +76,7 @@ pub(crate) enum PlanNode {
 }
 
 impl PlanNode {
-    pub fn contains_mutations(&self) -> bool {
+    pub(crate) fn contains_mutations(&self) -> bool {
         match self {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
@@ -708,7 +708,7 @@ mod tests {
             },
         };
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
@@ -752,7 +752,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
@@ -799,7 +799,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)

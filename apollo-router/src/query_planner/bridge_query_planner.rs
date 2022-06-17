@@ -19,20 +19,20 @@ use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
 
-pub static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
+pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
 #[derive(Debug, Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-pub struct BridgeQueryPlanner {
+pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlan>>,
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
 }
 
 impl BridgeQueryPlanner {
-    pub async fn new(
+    pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
     ) -> Result<Self, QueryPlannerError> {

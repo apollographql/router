@@ -9,7 +9,7 @@ use thiserror::Error;
 
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
-pub use query::*;
+pub(crate) use query::*;
 pub use schema::*;
 pub(crate) use selection::*;
 

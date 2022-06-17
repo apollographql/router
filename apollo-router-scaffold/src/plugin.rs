@@ -59,7 +59,11 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
             "https://github.com/apollographql/router.git",
         )))
         .git_ref(version)
-        .repository_template_path("apollo-router-scaffold/templates/plugin")
+        .repository_template_path(
+            PathBuf::from("apollo-router-scaffold")
+                .join("templates")
+                .join("plugin"),
+        )
         .target_dir(".")
         .project_name(name)
         .parameter(format!("name={}", name))
@@ -92,11 +96,12 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         Value::Boolean(true),
     );
 
+    dbg!(&params);
     desc.scaffold_with_parameters(params)?;
 
     let mod_path = mod_path();
     let mut mod_rs = if mod_path.exists() {
-        std::fs::read_to_string(mod_path)?
+        std::fs::read_to_string(&mod_path)?
     } else {
         "".to_string()
     };
@@ -147,8 +152,8 @@ fn remove_plugin(name: &str) -> Result<()> {
 
     // Remove the mod;
     let mod_path = mod_path();
-    if Path::new(mod_path).exists() {
-        let mut mod_rs = std::fs::read_to_string(mod_path)?;
+    if Path::new(&mod_path).exists() {
+        let mut mod_rs = std::fs::read_to_string(&mod_path)?;
         let re = Regex::new(&format!(r"(?m)^mod {};$", snake_name)).unwrap();
         mod_rs = re.replace(&mod_rs, "").to_string();
 
@@ -162,10 +167,12 @@ fn remove_plugin(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn mod_path() -> &'static Path {
-    Path::new("src/plugins/mod.rs")
+fn mod_path() -> PathBuf {
+    PathBuf::from("src").join("plugins").join("mod.rs")
 }
 
 fn plugin_path(name: &str) -> PathBuf {
-    format!("src/plugins/{}.rs", name.to_snake_case()).into()
+    PathBuf::from("src")
+        .join("plugins")
+        .join(format!("{}.rs", name.to_snake_case()))
 }

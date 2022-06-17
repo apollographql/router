@@ -192,12 +192,14 @@ mod test {
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct A {
         key: String,
         value: String,
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct B {
         key: String,
         value: String,

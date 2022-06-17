@@ -13,7 +13,7 @@ use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct EnsureQueryPresence {}
+pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
@@ -59,7 +59,7 @@ where
 #[cfg(test)]
 mod ensure_query_presence_tests {
     use super::*;
-    use crate::plugin::utils::test::MockRouterService;
+    use crate::plugin::test::MockRouterService;
     use crate::ResponseBody;
     use tower::ServiceExt;
 

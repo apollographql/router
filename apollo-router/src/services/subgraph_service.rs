@@ -1,26 +1,51 @@
 //! Tower fetcher for subgraphs.
 
+use crate::error::FetchError;
+use ::serde::Deserialize;
+use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::{
-    header::{self, ACCEPT, CONTENT_TYPE},
-    HeaderValue, StatusCode,
+    header::{self, ACCEPT, CONTENT_ENCODING, CONTENT_TYPE},
+    HeaderMap, HeaderValue, StatusCode,
 };
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::{global, trace::SpanKind};
-use std::sync::Arc;
+use schemars::JsonSchema;
 use std::task::Poll;
+use std::{fmt::Display, sync::Arc};
+use tokio::io::AsyncWriteExt;
 use tower::{BoxError, ServiceBuilder};
+use tower_http::decompression::{Decompression, DecompressionLayer};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::error::FetchError;
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Compression {
+    /// gzip
+    Gzip,
+    /// deflate
+    Deflate,
+    /// brotli
+    Br,
+}
+
+impl Display for Compression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Compression::Gzip => write!(f, "gzip"),
+            Compression::Deflate => write!(f, "deflate"),
+            Compression::Br => write!(f, "br"),
+        }
+    }
+}
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub struct SubgraphService {
-    client: hyper::Client<HttpsConnector<HttpConnector>>,
+    client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
 }
 
@@ -34,7 +59,9 @@ impl SubgraphService {
             .build();
 
         Self {
-            client: ServiceBuilder::new().service(hyper::Client::builder().build(connector)),
+            client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
         }
     }
@@ -66,7 +93,19 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
-            let mut request = http::request::Request::from_parts(parts, body.into());
+            let compressed_body = compress(body, &parts.headers)
+                .instrument(tracing::debug_span!("body_compression"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(compress_error = format!("{:?}", err).as_str());
+
+                    FetchError::CompressionError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
+
+            let mut request = http::request::Request::from_parts(parts, compressed_body.into());
             let app_json: HeaderValue = HeaderValue::from_static("application/json");
             let app_graphql_json: HeaderValue =
                 HeaderValue::from_static("application/graphql+json");
@@ -171,6 +210,44 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
     }
 }
 
+pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
+    let content_encoding = headers.get(&CONTENT_ENCODING);
+    match content_encoding {
+        Some(content_encoding) => match content_encoding.to_str()? {
+            "br" => {
+                let mut br_encoder = BrotliEncoder::new(Vec::new());
+                br_encoder.write_all(body.as_bytes()).await?;
+                br_encoder.shutdown().await?;
+
+                Ok(br_encoder.into_inner())
+            }
+            "gzip" => {
+                let mut gzip_encoder = GzipEncoder::new(Vec::new());
+                gzip_encoder.write_all(body.as_bytes()).await?;
+                gzip_encoder.shutdown().await?;
+
+                Ok(gzip_encoder.into_inner())
+            }
+            "deflate" => {
+                let mut df_encoder = ZlibEncoder::new(Vec::new());
+                df_encoder.write_all(body.as_bytes()).await?;
+                df_encoder.shutdown().await?;
+
+                Ok(df_encoder.into_inner())
+            }
+            "identity" => Ok(body.into_bytes()),
+            unknown => {
+                tracing::error!("unknown content-encoding value '{:?}'", unknown);
+                Err(BoxError::from(format!(
+                    "unknown content-encoding value '{:?}'",
+                    unknown
+                )))
+            }
+        },
+        None => Ok(body.into_bytes()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -182,10 +259,11 @@ mod tests {
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
+    use serde_json_bytes::{ByteString, Value};
     use tower::{service_fn, ServiceExt};
 
     use crate::query_planner::fetch::OperationKind;
-    use crate::{http_compat, Context, Request, SubgraphRequest};
+    use crate::{http_compat, json_ext::Object, Context, Request, Response, SubgraphRequest};
 
     use super::*;
 
@@ -213,6 +291,58 @@ mod tests {
                 .header("Content-Type", "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        if let Err(e) = server.await {
+            eprintln!("server error: {}", e);
+        }
+    }
+
+    // starts a local server emulating a subgraph returning compressed response
+    async fn emulate_subgraph_compressed_response(socket_addr: SocketAddr) {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            // Check the compression of the body
+            let mut encoder = GzipEncoder::new(Vec::new());
+            encoder
+                .write_all(
+                    &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            encoder.shutdown().await.unwrap();
+            let compressed_body = encoder.into_inner();
+            assert_eq!(
+                compressed_body,
+                hyper::body::to_bytes(request.into_body())
+                    .await
+                    .unwrap()
+                    .to_vec()
+            );
+
+            let original_body = Response {
+                data: Some(Value::String(ByteString::from("test"))),
+                path: None,
+                label: None,
+                errors: vec![],
+                extensions: Object::new(),
+            };
+            let mut encoder = GzipEncoder::new(Vec::new());
+            encoder
+                .write_all(&serde_json::to_vec(&original_body).unwrap())
+                .await
+                .unwrap();
+            encoder.shutdown().await.unwrap();
+            let compressed_body = encoder.into_inner();
+
+            Ok(http::Response::builder()
+                .header("Content-Type", "application/json")
+                .header(CONTENT_ENCODING, "gzip")
+                .status(StatusCode::OK)
+                .body(compressed_body.into())
                 .unwrap())
         }
 
@@ -291,5 +421,47 @@ mod tests {
             err.to_string(),
             "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_compressed_request_response_body() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:2727").unwrap();
+        tokio::task::spawn(emulate_subgraph_compressed_response(socket_addr));
+        let subgraph_service = SubgraphService::new("test");
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let resp = subgraph_service
+            .oneshot(SubgraphRequest {
+                originating_request: Arc::new(
+                    http_compat::Request::fake_builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Request::builder().query("query".to_string()).build())
+                        .build()
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http_compat::Request::fake_builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_ENCODING, "gzip")
+                    .uri(url)
+                    .body(Request::builder().query("query".to_string()).build())
+                    .build()
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+        // Test the right decompression of the body
+        let resp_from_subgraph = Response {
+            data: Some(Value::String(ByteString::from("test"))),
+            path: None,
+            label: None,
+            errors: vec![],
+            extensions: Object::new(),
+        };
+
+        assert_eq!(resp.response.body(), &resp_from_subgraph);
     }
 }

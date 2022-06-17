@@ -35,7 +35,7 @@ use tracing_futures::Instrument;
 use super::QueryPlannerContent;
 
 /// An [`IndexMap`] of available plugins.
-pub type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
+pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]

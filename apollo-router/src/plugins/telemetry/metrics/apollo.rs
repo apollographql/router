@@ -216,7 +216,7 @@ impl ApolloMetricsExporter {
     }
 }
 
-pub struct ReporterManager {
+pub(crate) struct ReporterManager {
     endpoint: Url,
 }
 
@@ -237,8 +237,8 @@ impl managed::Manager for ReporterManager {
 
 #[cfg(test)]
 mod test {
-    use crate::plugin::utils::test::IntoSchema::Canned;
-    use crate::plugin::utils::test::PluginTestHarness;
+    use crate::plugin::test::IntoSchema::Canned;
+    use crate::plugin::test::PluginTestHarness;
     use crate::plugin::Plugin;
     use crate::Context;
     use crate::RouterRequest;

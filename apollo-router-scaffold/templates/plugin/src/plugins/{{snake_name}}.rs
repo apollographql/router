@@ -2,26 +2,27 @@ use apollo_router::plugin::Plugin;
 {{#if type_basic}}
 use apollo_router::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Response, SubgraphRequest, SubgraphResponse,
 };
 {{/if}}
 {{#if type_auth}}
 use apollo_router::{
-    register_plugin, RouterRequest, RouterResponse,
+    register_plugin, ResponseBody, RouterRequest, RouterResponse,
 };
 use std::ops::ControlFlow;
-use apollo_router::ServiceBuilderExt;
+use apollo_router::layers::ServiceBuilderExt;
 use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
 {{#if type_tracing}}
 use apollo_router::{
-    register_plugin, RouterRequest, RouterResponse,
+    register_plugin, ResponseBody, RouterRequest, RouterResponse,
 };
-use apollo_router::ServiceBuilderExt;
+use apollo_router::layers::ServiceBuilderExt;
 use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
+use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -54,8 +55,8 @@ impl Plugin for {{pascal_name}} {
     // Delete this function if you are not customizing it.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -78,8 +79,8 @@ impl Plugin for {{pascal_name}} {
     // Delete this function if you are not customizing it.
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError> {
         service
     }
 
@@ -106,8 +107,8 @@ impl Plugin for {{pascal_name}} {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
 
         ServiceBuilder::new()
                     .checkpoint_async(|request : RouterRequest| async {
@@ -133,8 +134,8 @@ impl Plugin for {{pascal_name}} {
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
 
         ServiceBuilder::new()
                     .instrument(|_request| {
@@ -161,14 +162,14 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 mod tests {
     use super::{Conf, {{pascal_name}}};
 
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::{Plugin, ResponseBody};
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
+    use apollo_router::{plugin::Plugin, ResponseBody};
     use tower::BoxError;
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("{{project_name}}.{{snake_name}}")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"message" : "Starting my plugin"}))
@@ -194,13 +195,21 @@ mod tests {
             .await?;
 
         // Send a request
-        let result = test_harness.call_canned().await?;
-        if let ResponseBody::GraphQL(graphql) = result.response.body() {
+        let mut result = test_harness.call_canned().await?;
+
+        let first_response = result
+            .next_response()
+            .await
+            .expect("couldn't get primary response");
+
+        if let ResponseBody::GraphQL(graphql) = first_response {
             assert!(graphql.data.is_some());
         } else {
             panic!("expected graphql response")
         }
 
+        // You could keep calling result.next_response() until it yields None if you're expexting more parts.
+        assert!(result.next_response().await.is_none());
         Ok(())
     }
 }

@@ -308,10 +308,10 @@ impl From<FieldStat> for apollo_spaceport::FieldStat {
     }
 }
 
-pub mod vectorize {
+pub(crate) mod vectorize {
     use serde::{Serialize, Serializer};
 
-    pub fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
+    pub(crate) fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
         T: IntoIterator<Item = (&'a K, &'a V)>,

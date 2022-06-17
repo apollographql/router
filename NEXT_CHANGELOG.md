@@ -9,11 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-## 🚀 Features ( :rocket: )
-## 🐛 Fixes ( :bug: )
-## 🛠 Maintenance ( :hammer_and_wrench: )
-## 📚 Documentation ( :books: )
-## 🐛 Fixes ( :bug: )
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+## 🐛 Fixes
 
 ## Example section entry format
 
@@ -65,9 +65,18 @@ Previously, it was not possible to modify variables in a `Request` from a plugin
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
 
-## 🐛 Fixes ( :bug: )
+## 🐛 Fixes
 
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
+
+
+### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
+
+Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
+This Pull request updates the scaffold template so it generates plugins that are compatible with the new Plugin API.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
 
 Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
 resulting in some introspection queries not working.
