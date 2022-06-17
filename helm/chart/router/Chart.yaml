@@ -1,4 +1,4 @@
-apiVersion: v2
+apiVersion: v3
 name: router
 description: Rust Graph Routing runtime for Apollo Federation
 
