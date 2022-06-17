@@ -38,7 +38,6 @@ mod files;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
-#[macro_use]
 pub mod plugin;
 pub mod plugins;
 pub mod query_planner;
