@@ -1,10 +1,12 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
+use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
-use futures::future::BoxFuture;
-use futures::stream::BoxStream;
+use futures::future::{ready, BoxFuture};
+use futures::stream::{once, BoxStream};
 use futures::StreamExt;
+use http::StatusCode;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -39,7 +41,7 @@ impl ExecutionService {
 }
 
 impl Service<ExecutionRequest> for ExecutionService {
-    type Response = BoxStream<'static, ExecutionResponse>;
+    type Response = ExecutionResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -76,13 +78,27 @@ impl Service<ExecutionRequest> for ExecutionService {
                 .in_current_span(),
             );
 
-            Ok(Box::pin(receiver.map(move |response|
-            // Note that request context is not propagated from downstream.
-            // Context contains a mutex for state however so in practice
-            ExecutionResponse::new_from_response(
-                http::Response::new(response).into(),
-                ctx.clone(),
-            ))) as BoxStream<'static, ExecutionResponse>)
+            let (first, rest) = receiver.into_future().await;
+            match first {
+                None => Ok(ExecutionResponse::error_builder()
+                    .errors(vec![crate::Error {
+                        message: "empty response".to_string(),
+                        ..Default::default()
+                    }])
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(ctx)
+                    .build()
+                    .expect("can't fail to build our error message")
+                    .boxed()),
+                Some(response) => {
+                    let stream = once(ready(response)).chain(rest).boxed();
+
+                    Ok(ExecutionResponse::new_from_response(
+                        http::Response::new(stream as BoxStream<'static, Response>).into(),
+                        ctx,
+                    ))
+                }
+            }
         }
         .in_current_span();
         Box::pin(fut)

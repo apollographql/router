@@ -1,5 +1,5 @@
 [workspace]
-default-members = ["apollo-router"]
+default-members = ["apollo-router", "apollo-router-scaffold"]
 members = [
     "apollo-spaceport",
     "apollo-router",
@@ -17,6 +17,7 @@ members = [
     "examples/rhai-logging",
     "examples/rhai-data-response-mutate",
     "examples/rhai-error-response-mutate",
+    "examples/rhai-subgraph-request-log",
     "examples/rhai-surrogate-cache-key",
     "examples/jwt-auth",
     "fuzz",

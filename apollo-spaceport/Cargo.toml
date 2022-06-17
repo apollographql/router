@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.9.3"
+version = "0.9.5"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 bytes = "1.1.0"
-clap = { version = "3.1.18", default-features = false, features = ["std", "derive"] }
+clap = { version = "=3.1.18", default-features = false, features = ["std", "derive"] }
 flate2 = "1.0.23"
 prost = "0.9.0"
 prost-types = "0.9.0"

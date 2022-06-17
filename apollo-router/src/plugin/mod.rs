@@ -19,7 +19,7 @@ pub mod utils;
 use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -108,8 +108,12 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         service
     }
 
@@ -126,8 +130,13 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         service
     }
 
@@ -148,6 +157,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         None
     }
 
+    /// Return the name of the plugin.
     fn name(&self) -> &'static str {
         get_type_of(self)
     }
@@ -174,8 +184,12 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>;
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
@@ -188,8 +202,12 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>;
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -204,6 +222,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler>;
 
+    /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 }
 
@@ -220,8 +239,12 @@ where
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError>,
-    ) -> BoxService<RouterRequest, BoxStream<'static, RouterResponse>, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, ResponseBody>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         self.router_service(service)
     }
 
@@ -234,8 +257,13 @@ where
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError>,
-    ) -> BoxService<ExecutionRequest, BoxStream<'static, ExecutionResponse>, BoxError> {
+        service: BoxService<
+            ExecutionRequest,
+            ExecutionResponse<BoxStream<'static, Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
+    {
         self.execution_service(service)
     }
 
@@ -279,6 +307,7 @@ macro_rules! register_plugin {
     };
 }
 
+/// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<

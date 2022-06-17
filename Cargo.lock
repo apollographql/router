@@ -64,6 +64,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35ef4730490ad1c4eae5c4325b2a95f521d023e5c885853ff7aca0a6a1631db3"
+
+[[package]]
+name = "alloc-stdlib"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "697ed7edc0f1711de49ce108c541623a0af97c6c60b2f6e2b65229847ac843c2"
+dependencies = [
+ "alloc-no-stdlib",
+]
+
+[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,30 +107,23 @@ checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.5"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3f8fe8c9fb08c1e99bf4a50698adcd807cafba2d2aacc49d8ffc79123fce59"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.2.5"
-source = "git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227#bbfb74c682e86cdefcfcfcd5be9eefafefc796e2"
+checksum = "85efd09fc4aad19f29c8419215851246444f9b41ffbade7b7eb7f05d8b1f8ab2"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-parser 0.2.5 (git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227)",
+ "apollo-parser",
  "apollo-spaceport",
  "apollo-uplink",
+ "async-compression",
  "async-trait",
  "atty",
  "axum",
@@ -201,13 +209,13 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid 1.0.0",
- "walkdir",
+ "walkdir 2.3.2",
  "yaml-rust",
 ]
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -223,11 +231,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
  "clap 3.1.18",
+ "copy_dir",
  "regex",
  "str_inflector",
  "tempfile",
@@ -241,14 +250,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
  "apollo-encoder 0.3.1",
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
 ]
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "bytes",
  "clap 3.1.18",
@@ -269,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "futures",
  "graphql_client",
@@ -329,6 +338,20 @@ dependencies = [
  "concurrent-queue",
  "event-listener",
  "futures-core",
+]
+
+[[package]]
+name = "async-compression"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "345fd392ab01f746c717b1357165b76f0b67a60192007b234058c9045fdcf695"
+dependencies = [
+ "brotli",
+ "flate2",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -577,6 +600,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "brotli"
+version = "3.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a0b1dbcc8ae29329621f8d4f0d835787c1c38bb1401979b49d13b0b305ff68"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+ "brotli-decompressor",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ad2d4653bf5ca36ae797b1f4bb4dbddb60ce49ca4aed8a2ce4829f60425b80"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+]
+
+[[package]]
 name = "bstr"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,9 +634,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d40602615b158f55f9b0d70ec0e83a98f99c206b1725b095e793f111f7f8d56e"
+checksum = "366e31800cdecf1b0438b21e2d2c9a66e922a26b93fde60bdf6bc16e25f33cc7"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -709,7 +753,7 @@ dependencies = [
  "unicode-width",
  "unicode-xid",
  "url",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -724,9 +768,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc14c70a4bb3d18ee69eafc7afc8a3c39e51fcd31e2add965a8f9fba8b8a5450"
+checksum = "2f6232669ff969fc9827d8a47dbc9e128a8eb1c7dffc9bcf1cf71be34dee5ef9"
 dependencies = [
  "anyhow",
  "buildstructor",
@@ -743,7 +787,7 @@ dependencies = [
  "shell-words",
  "structopt",
  "toml",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -764,7 +808,7 @@ dependencies = [
  "same-file",
  "shell-escape",
  "tempfile",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -1027,6 +1071,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "copy_dir"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4281031634644843bd2f5aa9c48cf98fc48d6b083bd90bb11becf10deaf8b0"
+dependencies = [
+ "walkdir 0.1.8",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1105,7 +1158,7 @@ dependencies = [
  "serde_json",
  "tinytemplate",
  "tokio",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -2331,9 +2384,9 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ff4f84919677303da5f147645dbea6b1881f368d03ac84e1dc09031ebd7b2c6"
+checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
  "http",
@@ -2463,7 +2516,7 @@ dependencies = [
  "regex",
  "same-file",
  "thread_local",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi-util",
 ]
 
@@ -3207,7 +3260,7 @@ dependencies = [
  "libc",
  "mio 0.6.23",
  "mio-extras",
- "walkdir",
+ "walkdir 2.3.2",
  "winapi 0.3.9",
 ]
 
@@ -4314,6 +4367,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rhai-subgraph-request-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rhai-surrogate-cache-key"
 version = "0.1.0"
 dependencies = [
@@ -4385,7 +4451,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -4905,7 +4971,7 @@ dependencies = [
  "glob",
  "pulldown-cmark",
  "tempfile",
- "walkdir",
+ "walkdir 2.3.2",
 ]
 
 [[package]]
@@ -5580,6 +5646,7 @@ version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d342c6d58709c0a6d48d48dabbb62d4ef955cf5f0f3bbfd845838e7ae88dbae"
 dependencies = [
+ "async-compression",
  "bitflags",
  "bytes",
  "futures-core",
@@ -5588,6 +5655,8 @@ dependencies = [
  "http-body",
  "http-range-header",
  "pin-project-lite",
+ "tokio",
+ "tokio-util 0.7.1",
  "tower",
  "tower-layer",
  "tower-service",
@@ -6006,6 +6075,16 @@ checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "walkdir"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c66c0b9792f0a765345452775f3adbd28dde9d33f30d13e5dcc5ae17cf6f3780"
+dependencies = [
+ "kernel32-sys",
+ "winapi 0.2.8",
+]
+
+[[package]]
+name = "walkdir"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "808cf2735cd4b6866113f648b791c6adc5714537bc222d9347bb203386ffda56"
@@ -6278,7 +6357,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.3"
+version = "0.9.5"
 dependencies = [
  "ansi_term",
  "anyhow",

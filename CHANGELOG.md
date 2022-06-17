@@ -3,6 +3,361 @@
 All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+
+# [0.9.5] - 2022-06-17
+## ❗ BREAKING ❗
+
+### Move `experimental.traffic_shaping` out of `experimental` [PR #1229](https://github.com/apollographql/router/pull/1229)
+You will need to update your YAML configuration file to use the correct name for `traffic_shaping` plugin.
+
+```diff
+- plugins:
+-   experimental.traffic_shaping:
+-     variables_deduplication: true # Enable the variables deduplication optimization
+-     all:
+-       query_deduplication: true # Enable query deduplication for all subgraphs.
+-     subgraphs:
+-       products:
+-         query_deduplication: false # Disable query deduplication for products.
++ traffic_shaping:
++   variables_deduplication: true # Enable the variables deduplication optimization
++   all:
++     query_deduplication: true # Enable query deduplication for all subgraphs.
++   subgraphs:
++     products:
++       query_deduplication: false # Disable query deduplication for products.
+```
+
+### Rhai plugin `request.sub_headers` renamed to `request.subgraph.headers` [PR #1261](https://github.com/apollographql/router/pull/1261)
+
+Rhai scripts previously supported the `request.sub_headers` attribute so that subgraph request headers could be
+accessed. This is now replaced with an extended interface for subgraph requests:
+
+```
+request.subgraph.headers
+request.subgraph.body.query
+request.subgraph.body.operation_name
+request.subgraph.body.variables
+request.subgraph.body.extensions
+request.subgraph.uri.host
+request.subgraph.uri.path
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1261
+
+## 🚀 Features
+
+### Add support of compression [PR #1229](https://github.com/apollographql/router/pull/1229)
+Add support of request and response compression for the router and all subgraphs. The router is now able to handle `Content-Encoding` and `Accept-Encoding` headers properly. Supported algorithms are `gzip`, `br`, `deflate`.
+You can also enable compression on subgraphs requests and responses by updating the `traffic_shaping` configuration:
+
+```yaml
+traffic_shaping:
+  all:
+    compression: br # Enable brotli compression for all subgraphs
+  subgraphs:
+    products:
+      compression: gzip # Enable gzip compression only for subgraph products
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1229
+
+### Add support of multiple uplink URLs [PR #1210](https://github.com/apollographql/router/pull/1210)
+Add support of multiple uplink URLs with a comma-separated list in `APOLLO_UPLINK_ENDPOINTS` and for `--apollo-uplink-endpoints`
+
+Example:
+```bash
+export APOLLO_UPLINK_ENDPOINTS="https://aws.uplink.api.apollographql.com/, https://uplink.api.apollographql.com/"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1210
+
+### Add support for adding extra environment variables and volumes to helm chart [PR #1245](https://github.com/apollographql/router/pull/1245)
+You can mount your `supergraph.yaml` into the helm deployment via configmap. Using [Kustomize](https://kustomize.io/) to generate your configmap from your supergraph.yaml is suggested.
+
+Example configmap.yaml snippet:
+```yaml
+supergraph.yaml:
+    server:
+        listen: 0.0.0.0:80
+```
+
+Example helm config:
+```yaml
+extraEnvVars:
+  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+    value: /etc/apollo/supergraph.yaml
+    # sets router log level to debug
+  - name: APOLLO_ROUTER_LOG
+    value: debug
+extraEnvVarsCM: ''
+extraEnvVarsSecret: ''
+
+extraVolumes:
+  - name: supergraph-volume
+    configMap:
+      name: some-configmap 
+extraVolumeMounts: 
+  - name: supergraph-volume
+    mountPath: /etc/apollo
+```
+
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1245
+
+## 🐛 Fixes
+
+### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
+Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
+resulting in some introspection queries not working.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
+
+### Update the scaffold template so that it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
+Release v0.9.4 changed the way we deal with `Response` objects, which can now be streams.
+The scaffold template has been updated so that it generates plugins that are compatible with the new Plugin API.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
+### Create the `ExecutionResponse` after the primary response was generated ([PR #1260](https://github.com/apollographql/router/pull/1260))
+The `@defer` preliminary work had a surprising side effect: when using methods like `RouterResponse::map_response`, they were
+executed before the subgraph responses were received, because they work on the stream of responses.
+This PR goes back to the previous behaviour by awaiting the primary response before creating the `ExecutionResponse`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1260
+
+### Use the API schema to generate selections ([PR #1255](https://github.com/apollographql/router/pull/1255))
+When parsing the schema to generate selections for response formatting, we should use the API schema instead of the supergraph schema.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1255
+
+## 📚 Documentation
+
+### Update README link to the configuration file  ([PR #1208](https://github.com/apollographql/router/pull/1208))
+As the structure of the documentation has changed, the link should point to the `YAML config file` section of the overview.
+
+By [@gscheibel](https://github.com/gscheibel in https://github.com/apollographql/router/pull/1208
+
+
+
+# [0.9.4] - 2022-06-14
+
+## ❗ BREAKING ❗
+
+
+### Groundwork for `@defer` support ([PR #1175](https://github.com/apollographql/router/pull/1175)[PR #1206](https://github.com/apollographql/router/pull/1206))
+To prepare for the implementation of the `@defer` directive, the `ExecutionResponse`  and `RouterResponse` types now carry a stream of responses instead of a unique response. For now that stream contains only one item, so there is no change in behaviour. However, the Plugin trait changed to accomodate this, so a couple of steps are required to migrate your plugin so that it is compatible with versions of the router >= v0.9.4:
+
+- Add a dependency to futures in your Cargo.toml:
+
+```diff
++futures = "0.3.21"
+```
+
+- Import `BoxStream`, and if your Plugin defines a `router_service` behavior, import `ResponseBody`:
+
+```diff
++ use futures::stream::BoxStream;
++ use apollo_router::ResponseBody;
+```
+
+- Update the `router_service` and the `execution_service` sections of your Plugin (if applicable):
+
+```diff
+      fn router_service(
+         &mut self,
+-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
++        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
++    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+
+[...]
+
+     fn execution_service(
+         &mut self,
+-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
++        service: BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
++    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError> {
+```
+
+We can now update our unit tests so they work on a stream of responses instead of a single one:
+
+```diff
+         // Send a request
+-        let result = test_harness.call_canned().await?;
+-        if let ResponseBody::GraphQL(graphql) = result.response.body() {
++        let mut result = test_harness.call_canned().await?;
++
++        let first_response = result
++            .next_response()
++            .await
++            .expect("couldn't get primary response");
++
++        if let ResponseBody::GraphQL(graphql) = first_response {
+             assert!(graphql.data.is_some());
+         } else {
+             panic!("expected graphql response")
+         }
+
++        // You could keep calling result.next_response() until it yields None if you are expexting more parts.
++        assert!(result.next_response().await.is_none());
+         Ok(())
+     }
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1206
+### The `apollo-router-core` crate has been merged into `apollo-router` ([PR #1189](https://github.com/apollographql/router/pull/1189))
+
+To upgrade, remove any dependency on the `apollo-router-core` crate from your `Cargo.toml` files and change imports like so:
+
+```diff
+- use apollo_router_core::prelude::*;
++ use apollo_router::prelude::*;
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1189
+
+
+### Fix input validation rules ([PR #1211](https://github.com/apollographql/router/pull/1211))
+The GraphQL specification provides two sets of coercion / validation rules, depending on whether we're dealing with inputs or outputs.
+We have added validation rules for specified input validations which were not previously implemented.
+This is a breaking change since slightly invalid input may have validated before but will now be guarded by newly-introduced validation rules.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1211
+
+## 🚀 Features
+### Add trace logs for parsing recursion consumption ([PR #1222](https://github.com/apollographql/router/pull/1222))
+The `apollo-parser` package now implements recursion limits which can be examined after the parsing phase. The router logs these
+out at `trace` level. You can see them in your logs by searching for "`recursion_limit`". For example, when using JSON logging
+and using `jq` to filter the output:
+
+```
+router -s ../graphql/supergraph.graphql -c ./router.yaml --log trace | jq -c '. | select(.fields.message == "recursion limit data")'
+{"timestamp":"2022-06-10T15:01:02.213447Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:02.261092Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 0"},"target":"apollo_router::spec::schema"}
+{"timestamp":"2022-06-10T15:01:07.642977Z","level":"TRACE","fields":{"message":"recursion limit data","recursion_limit":"recursion limit: 4096, high: 4"},"target":"apollo_router::spec::query"}
+```
+
+This example output shows that the maximum recursion limit is 4096 and that the query we processed caused us to recurse 4 times.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1222
+
+### Helm chart now has the option to use an existing secrets for API key [PR #1196](https://github.com/apollographql/router/pull/1196)
+
+This change allows the use of an already existing secret for the graph API key.
+
+To use existing secrets, update your own `values.yaml` file or specify the value on your `helm install` command line.  For example:
+
+```
+helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>`
+```
+
+By [@pellizzetti](https://github.com/pellizzetti) in https://github.com/apollographql/router/pull/1196
+
+### Add iterators to `Context` ([PR #1202](https://github.com/apollographql/router/pull/1202))
+Context can now be iterated over, with two new methods:
+
+ - `iter()`
+ - `iter_mut()`
+
+These implementations lean heavily on an underlying [`DashMap`](https://docs.rs/dashmap/5.3.4/dashmap/struct.DashMap.html#method.iter) implemetation, so refer to its documentation for more usage details.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1202
+
+### Add an experimental optimization to deduplicate variables in query planner ([PR #872](https://github.com/apollographql/router/pull/872))
+Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.traffic_shaping:
+    variables_deduplication: true # Enable the variables deduplication optimization
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/872
+
+### Add more customizable metrics ([PR #1159](https://github.com/apollographql/router/pull/1159))
+
+Added the ability to apply custom attributes/labels to metrics which are derived from header values using the Router's configuration file.  For example:
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        static:
+          - name: "version"
+            value: "v1.0.0"
+        from_headers:
+          - named: "content-type"
+            rename: "payload_type"
+            default: "application/json"
+          - named: "x-custom-header-to-add"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1159
+
+### Allow to set a custom health check path ([PR #1164](https://github.com/apollographql/router/pull/1164))
+Added the possibility to set a custom health check path
+```yaml
+server:
+  # Default is /.well-known/apollo/server-health
+  health_check_path: /health
+```
+
+By [@jcaromiq](https://github.com/jcaromiq) in https://github.com/apollographql/router/pull/1164
+
+## 🐛 Fixes
+
+### Pin `clap` dependency in `Cargo.toml` ([PR #1232](https://github.com/apollographql/router/pull/1232))
+
+A minor release of `Clap` occured yesterday which introduced a breaking change.  This change might lead `cargo scaffold` users to hit a panic a runtime when the router tries to parse environment variables and arguments.
+
+This patch pins the `clap` dependency to the version that was available before the release, until the root cause is found and fixed upstream.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1232
+
+### Display better error message when on subgraph fetch errors ([PR #1201](https://github.com/apollographql/router/pull/1201))
+
+Show a helpful error message when a subgraph does not return JSON or a bad status code
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1201
+
+### Fix CORS configuration to eliminate runtime panic on misconfiguration ([PR #1197](https://github.com/apollographql/router/pull/1197))
+
+Previously, it was possible to specify a CORS configuration which was syntactically valid, but which could not be enforced at runtime.  For example, consider the following *invalid* configuration where the `allow_any_origin` and `allow_credentials` parameters are inherantly incompatible with each other (per the CORS specification):
+
+```yaml
+server:
+  cors:
+    allow_any_origin: true
+    allow_credentials: true
+```
+
+Previously, this would result in a runtime panic. The router will now detect this kind of misconfiguration and report the error without panicking.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1197
+
+## 🛠 Maintenance
+
+### Fix a flappy test to test custom health check path ([PR #1176](https://github.com/apollographql/router/pull/1176))
+Force the creation of `SocketAddr` to use a new unused port to avoid port collisions during testing.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1176
+
+### Add static `@skip`/`@include` directive support ([PR #1185](https://github.com/apollographql/router/pull/1185))
+
+- Rewrite the `InlineFragment` implementation
+- Add support of static check for `@include` and `@skip` directives
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1185
+
+### Update `buildstructor` to 0.3 ([PR #1207](https://github.com/apollographql/router/pull/1207))
+
+Update `buildstructor` to v0.3.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1207
+
 # [0.9.3] - 2022-06-01
 
 ## ❗ BREAKING ❗
@@ -255,7 +610,7 @@ In case a subgraph returns an object with a `__typename` field referring to a ty
 
 We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipkin, that can be started with docker-compose.
 
-## 📚 Documentation ( :books: )
+## 📚 Documentation
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
