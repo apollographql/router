@@ -3,16 +3,17 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-use std::ops::ControlFlow;
+use std::task::Poll;
 
-use crate::error::Error;
-use crate::layers::sync_checkpoint::CheckpointService;
+use crate::cache::storage::CacheStorage;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::{json, Value};
 use sha2::{Digest, Sha256};
+use tower::buffer::Buffer;
 use tower::{BoxError, Layer, Service};
 
 /// A persisted query.
@@ -27,20 +28,22 @@ struct PersistedQuery {
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
-    cache: Cache<Vec<u8>, String>,
+    cache: CacheStorage<Vec<u8>, String>,
 }
 
 impl APQLayer {
-    pub(crate) fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
+    pub(crate) fn with_cache(cache: CacheStorage<Vec<u8>, String>) -> Self {
         Self { cache }
     }
 }
 
+/*
 impl Default for APQLayer {
     fn default() -> Self {
         Self::with_cache(Cache::new(512))
     }
 }
+*/
 
 impl<S> Layer<S> for APQLayer
 where
@@ -48,80 +51,114 @@ where
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
-    type Service = CheckpointService<S, RouterRequest>;
+    type Service = APQService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        let cache = self.cache.clone();
-        CheckpointService::new(
-            move |mut req| {
-                let maybe_query_hash: Option<Vec<u8>> = req
-                    .originating_request
-                    .body()
-                    .extensions
-                    .get("persistedQuery")
-                    .and_then(|value| {
-                        serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
-                    })
-                    .and_then(|persisted_query| {
-                        hex::decode(persisted_query.sha256hash.as_bytes()).ok()
-                    });
-
-                let body_query = req.originating_request.body().query.clone();
-
-                match (maybe_query_hash, body_query) {
-                    (Some(query_hash), Some(query)) => {
-                        if query_matches_hash(query.as_str(), query_hash.as_slice()) {
-                            tracing::trace!("apq: cache insert");
-                            let _ = req.context.insert("persisted_query_hit", false);
-                            cache.insert(query_hash, query);
-                        } else {
-                            tracing::warn!(
-                                "apq: graphql request doesn't match provided sha256Hash"
-                            );
-                        }
-                        Ok(ControlFlow::Continue(req))
-                    }
-                    (Some(apq_hash), _) => {
-                        if let Some(cached_query) = cache.get(&apq_hash) {
-                            let _ = req.context.insert("persisted_query_hit", true);
-                            tracing::trace!("apq: cache hit");
-                            req.originating_request.body_mut().query = Some(cached_query);
-                            Ok(ControlFlow::Continue(req))
-                        } else {
-                            tracing::trace!("apq: cache miss");
-                            let errors = vec![Error {
-                                message: "PersistedQueryNotFound".to_string(),
-                                locations: Default::default(),
-                                path: Default::default(),
-                                extensions: serde_json_bytes::from_value(json!({
-                                      "code": "PERSISTED_QUERY_NOT_FOUND",
-                                      "exception": {
-                                      "stacktrace": [
-                                          "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                                      ],
-                                  },
-                                }))
-                                .unwrap(),
-                            }];
-                            let res = RouterResponse::builder()
-                                .data(Value::default())
-                                .errors(errors)
-                                .context(req.context)
-                                .build()
-                                .expect("response is valid");
-
-                            Ok(ControlFlow::Break(res.boxed()))
-                        }
-                    }
-                    _ => Ok(ControlFlow::Continue(req)),
-                }
-            },
-            service,
-        )
+        APQService {
+            cache: self.cache.clone(),
+            inner: Buffer::new(service, DEFAULT_BUFFER_SIZE),
+        }
     }
 }
+
+pub struct APQService<S>
+where
+    S: Service<RouterRequest>,
+{
+    cache: CacheStorage<Vec<u8>, String>,
+    inner: Buffer<S, RouterRequest>,
+}
+
+impl<S> Service<RouterRequest> for APQService<S>
+where
+    S: Service<
+            RouterRequest,
+            Response = RouterResponse<BoxStream<'static, ResponseBody>>,
+            Error = BoxError,
+        > + Send
+        + 'static,
+    <S as Service<RouterRequest>>::Future: Send + 'static,
+{
+    type Response = RouterResponse<BoxStream<'static, ResponseBody>>;
+
+    type Error = BoxError;
+
+    type Future =
+        BoxFuture<'static, Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
+        let maybe_query_hash: Option<Vec<u8>> = req
+            .originating_request
+            .body()
+            .extensions
+            .get("persistedQuery")
+            .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
+            .and_then(|persisted_query| hex::decode(persisted_query.sha256hash.as_bytes()).ok());
+
+        let body_query = req.originating_request.body().query.clone();
+
+        let mut cache = self.cache.clone();
+        let mut service = self.inner.clone();
+        Box::pin(async move {
+            match (maybe_query_hash, body_query) {
+                (Some(query_hash), Some(query)) => {
+                    if query_matches_hash(query.as_str(), query_hash.as_slice()) {
+                        tracing::trace!("apq: cache insert");
+                        let _ = req.context.insert("persisted_query_hit", false);
+                        cache.insert(query_hash, query).await;
+                    } else {
+                        tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
+                    }
+
+                    Ok(service.call(req).await?)
+                }
+                (Some(apq_hash), _) => {
+                    if let Some(cached_query) = cache.get(&apq_hash).await {
+                        let _ = req.context.insert("persisted_query_hit", true);
+                        tracing::trace!("apq: cache hit");
+                        req.originating_request.body_mut().query = Some(cached_query);
+                        Ok(service.call(req).await?)
+                    } else {
+                        tracing::trace!("apq: cache miss");
+                        let errors = vec![crate::error::Error {
+                            message: "PersistedQueryNotFound".to_string(),
+                            locations: Default::default(),
+                            path: Default::default(),
+                            extensions: serde_json_bytes::from_value(json!({
+                                  "code": "PERSISTED_QUERY_NOT_FOUND",
+                                  "exception": {
+                                  "stacktrace": [
+                                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                                  ],
+                              },
+                            }))
+                            .unwrap(),
+                        }];
+                        let res = RouterResponse::builder()
+                            .data(Value::default())
+                            .errors(errors)
+                            .context(req.context)
+                            .build()
+                            .expect("response is valid");
+
+                        Ok(res.boxed())
+                    }
+                }
+                _ => Ok(service.call(req).await?),
+            }
+        })
+    }
+}
+
 fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
     let mut digest = Sha256::new();
     digest.update(query.as_bytes());
@@ -213,7 +250,8 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = APQLayer::default().layer(mock);
+        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+        let mut service_stack = apq.layer(mock);
 
         let extensions = HashMap::from([(
             "persistedQuery".to_string(),
@@ -308,7 +346,8 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let mut service_stack = APQLayer::default().layer(mock_service);
+        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+        let mut service_stack = apq.layer(mock_service);
 
         let extensions = HashMap::from([(
             "persistedQuery".to_string(),

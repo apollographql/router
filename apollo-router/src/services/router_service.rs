@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use crate::cache::storage::CacheStorage;
 use crate::error::ServiceBuildError;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
@@ -373,11 +374,13 @@ impl PluggableRouterServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
+        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+
         // Router service takes a crate::Request and outputs a crate::Response
         // NB: Cannot use .buffer() here or the code won't compile...
         let router_service = Buffer::new(
             ServiceBuilder::new()
-                .layer(APQLayer::default())
+                .layer(apq)
                 .layer(EnsureQueryPresence::default())
                 .service(
                     self.plugins.iter_mut().rev().fold(

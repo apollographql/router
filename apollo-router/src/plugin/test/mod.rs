@@ -8,6 +8,7 @@ pub use service::{
     MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
 };
 
+use crate::cache::storage::CacheStorage;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
@@ -156,8 +157,9 @@ impl PluginTestHarness {
                 }),
         );
 
+        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
         let router_service = ServiceBuilder::new()
-            .layer(APQLayer::default())
+            .layer(apq)
             .layer(EnsureQueryPresence::default())
             .service(
                 plugin.router_service(
