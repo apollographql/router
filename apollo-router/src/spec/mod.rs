@@ -9,7 +9,6 @@ pub(crate) use fragments::*;
 pub(crate) use query::*;
 pub(crate) use selection::*;
 
-pub use field_type::FieldType;
 pub use schema::Schema;
 
 use displaydoc::Display;
@@ -21,7 +20,7 @@ pub enum SpecError {
     /// selection processing recursion limit exceeded
     RecursionLimitExceeded,
     /// invalid type error, expected another type than '{0}'
-    InvalidType(FieldType),
+    InvalidType(String),
     /// parsing error: {0}
     ParsingError(String),
     /// subscription operation is not supported

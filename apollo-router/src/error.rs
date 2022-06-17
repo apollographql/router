@@ -14,7 +14,7 @@ use thiserror::Error;
 use tokio::task::JoinError;
 use tracing::level_filters::LevelFilter;
 
-pub use crate::spec::{FieldType, SpecError};
+pub use crate::spec::SpecError;
 pub use router_bridge::planner::{PlanError, PlannerError};
 
 /// Error types for execution.
