@@ -38,7 +38,7 @@ impl BridgeQueryPlanner {
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
-            schema: schema.clone(),
+            schema,
             introspection,
         })
     }
