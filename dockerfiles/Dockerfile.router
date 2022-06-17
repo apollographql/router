@@ -19,7 +19,7 @@ RUN mkdir /dist/config && mkdir /dist/schema
 COPY dockerfiles/router.yaml /dist/config
 
 # Required so we can copy in libz.so.1
-FROM --platform=linux/amd64 debian:stable-slim as libz-required
+FROM --platform=linux/amd64 gcr.io/distroless/java17-debian11${DEBUG_IMAGE} as libz-required
 
 # Final image uses distroless
 FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11${DEBUG_IMAGE}
