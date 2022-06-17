@@ -24,7 +24,7 @@ pub struct QueryPlanOptions {
     pub enable_variable_deduplication: bool,
 }
 
-/// A plan for a [`crate::Query`]
+/// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {
     pub usage_reporting: UsageReporting,
