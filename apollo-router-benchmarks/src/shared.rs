@@ -2,9 +2,9 @@
 // include!() instead of as a pub module, so it is only compiled
 // in dev mode
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::{
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
-};
+use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::Schema;
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::sync::Arc;

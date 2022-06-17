@@ -48,7 +48,7 @@ mod response;
 mod router;
 mod router_factory;
 mod service_registry;
-mod services;
+pub mod services;
 mod spec;
 mod state_machine;
 pub mod subscriber;
@@ -61,13 +61,10 @@ pub use request::Request;
 pub use response::Response;
 pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 pub use services::http_compat;
-pub use services::PluggableRouterServiceBuilder;
-pub use services::ResponseBody;
-pub use services::{ExecutionRequest, ExecutionResponse, ExecutionService};
-pub use services::{QueryPlannerRequest, QueryPlannerResponse};
-pub use services::{RouterRequest, RouterResponse, RouterService};
-pub use services::{SubgraphRequest, SubgraphResponse, SubgraphService};
 pub use spec::Schema;
+
+// TODO: clean these up and import from relevant modules instead
+pub(crate) use services::*;
 pub(crate) use spec::*;
 
 /// Reexports for macros

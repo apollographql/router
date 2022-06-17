@@ -1,6 +1,7 @@
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
-use apollo_router::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::register_plugin;
+use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -177,7 +178,7 @@ mod tests {
     use super::AllowClientIdFromFile;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::services::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;

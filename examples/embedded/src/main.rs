@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::SubgraphService;
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
-use apollo_router::{PluggableRouterServiceBuilder, RouterRequest};
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
@@ -22,8 +24,7 @@ async fn main() -> Result<()> {
 
     // ... except the SubgraphServices, so we'll let it know Requests against the `accounts` service
     // can be performed with an http client against the `https://accounts.demo.starstuff.dev` url
-    let subgraph_service =
-        BoxService::new(apollo_router::SubgraphService::new("accounts".to_string()));
+    let subgraph_service = BoxService::new(SubgraphService::new("accounts".to_string()));
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
 
     // We can now build our service stack...
