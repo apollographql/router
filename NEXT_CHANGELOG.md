@@ -121,6 +121,11 @@ By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollo
 
 ## 🐛 Fixes
 
+### Deny unknown fields on configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
+Do not silently skip some bad configuration, now if you add an unknown configuration field at the root of your configuration file it will return an error.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1278
+
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
 
