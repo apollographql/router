@@ -675,6 +675,33 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
     let config: Configuration =
         serde_yaml::from_str(raw_yaml).map_err(ConfigurationError::DeserializeConfigError)?;
 
+    // ------------- Check for unknown fields at runtime ----------------
+    // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
+    let registered_plugins = plugins();
+    let apollo_plugin_names: Vec<&str> = registered_plugins
+        .keys()
+        .filter_map(|n| n.strip_prefix(APOLLO_PLUGIN_PREFIX))
+        .collect();
+    let unknown_fields: Vec<&String> = config
+        .apollo_plugins
+        .plugins
+        .keys()
+        .filter(|ap_name| {
+            let ap_name = ap_name.as_str();
+            ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
+        })
+        .collect();
+
+    if !unknown_fields.is_empty() {
+        return Err(ConfigurationError::InvalidConfiguration {
+            message: "unknown fields",
+            error: format!(
+                "additional properties are not allowed ('{}' was/were unexpected)",
+                unknown_fields.iter().join(", ")
+            ),
+        });
+    }
+
     // Custom validations
     if !config.server.endpoint.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
@@ -869,6 +896,20 @@ server:
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    }
+
+    #[test]
+    fn unknown_fields() {
+        let error = validate_configuration(
+            r#"
+server:
+  endpoint: /
+subgraphs:
+  account: true
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
     }
 
     #[test]
