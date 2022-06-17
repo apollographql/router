@@ -1,28 +1,30 @@
-use super::QueryPlan;
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
 use crate::cache::CachingMap;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::services::QueryPlannerContent;
 use crate::traits::CacheResolver;
 use crate::traits::QueryKey;
 use crate::traits::QueryPlanner;
 use crate::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use router_bridge::planner::UsageReporting;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
-type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
+type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
-    cm: Arc<CachingMap<QueryKey, Arc<QueryPlan>>>,
+    cm: Arc<CachingMap<QueryKey, QueryPlannerContent>>,
     phantom: PhantomData<T>,
 }
 
@@ -48,8 +50,10 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
 }
 
 #[async_trait]
-impl<T: QueryPlanner> CacheResolver<QueryKey, Arc<QueryPlan>> for CachingQueryPlannerResolver<T> {
-    async fn retrieve(&self, key: QueryKey) -> Result<Arc<QueryPlan>, CacheResolverError> {
+impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
+    for CachingQueryPlannerResolver<T>
+{
+    async fn retrieve(&self, key: QueryKey) -> Result<QueryPlannerContent, CacheResolverError> {
         self.delegate
             .get(key.0, key.1, key.2)
             .await
@@ -101,14 +105,19 @@ where
         Box::pin(async move {
             cm.get(key)
                 .await
-                .map(|query_plan| {
-                    if let Err(e) = request
-                        .context
-                        .insert(USAGE_REPORTING, query_plan.usage_reporting.clone())
-                    {
-                        tracing::error!("usage reporting was not serializable to context, {}", e);
+                .map(|query_planner_content| {
+                    if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
+                        if let Err(e) = request
+                            .context
+                            .insert(USAGE_REPORTING, plan.usage_reporting.clone())
+                        {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                e
+                            );
+                        }
                     }
-                    query_plan
+                    query_planner_content
                 })
                 .map_err(|e| {
                     let CacheResolverError::RetrievalError(re) = &e;
@@ -117,6 +126,23 @@ where
                             .context
                             .insert(USAGE_REPORTING, pe.usage_reporting.clone())
                         {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                inner_e
+                            );
+                        }
+                    } else if let QueryPlannerError::SpecError(e) = re.deref() {
+                        let error_key = match e {
+                            SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                            _ => "## GraphQLValidationFailure\n",
+                        };
+                        if let Err(inner_e) = request.context.insert(
+                            USAGE_REPORTING,
+                            UsageReporting {
+                                stats_report_key: error_key.to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            },
+                        ) {
                             tracing::error!(
                                 "usage reporting was not serializable to context, {}",
                                 inner_e

@@ -11,7 +11,6 @@ pub use service::{
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
-use crate::query_cache::QueryCache;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::services::layers::apq::APQLayer;
@@ -131,7 +130,11 @@ impl PluginTestHarness {
         let schema = Arc::new(Schema::from(schema));
 
         let query_planner = CachingQueryPlanner::new(
-            BridgeQueryPlanner::new(schema.clone()).await?,
+            BridgeQueryPlanner::new(
+                schema.clone(),
+                Some(Arc::new(Introspection::from_schema(&schema))),
+            )
+            .await?,
             DEFAULT_BUFFER_SIZE,
         )
         .boxed();
@@ -172,8 +175,6 @@ impl PluginTestHarness {
                                         DEFAULT_BUFFER_SIZE,
                                     ))
                                     .schema(schema.clone())
-                                    .query_cache(Arc::new(QueryCache::new(0, schema.clone())))
-                                    .introspection(Arc::new(Introspection::from_schema(&schema)))
                                     .build(),
                             )
                         }),

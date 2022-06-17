@@ -541,7 +541,6 @@ async fn missing_variables() {
             query ExampleQuery(
                 $missingVariable: Int!,
                 $yetAnotherMissingVariable: ID!,
-                $notRequiredVariable: Int,
             ) {
                 topProducts(first: $missingVariable) {
                     name
