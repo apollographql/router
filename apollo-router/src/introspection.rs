@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use router_bridge::introspect::{self, IntrospectionError};
 use std::collections::HashMap;
 
-/// KNOWN_INTROSPECTION_QUERIES we will serve through NaiveIntrospection.
+/// KNOWN_INTROSPECTION_QUERIES we will serve through Introspection.
 ///
 /// If you would like to add one, put it in the "well_known_introspection_queries" folder.
 static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
@@ -35,12 +35,12 @@ impl Introspection {
         Self { cache }
     }
 
-    /// Create a `NaiveIntrospection` from a `Schema`.
+    /// Create a `Introspection` from a `Schema`.
     ///
     /// This function will populate a cache in a blocking manner.
-    /// This is why `NaiveIntrospection` instanciation happens in a spawn_blocking task on the state_machine side.
+    /// This is why `Introspection` instanciation happens in a spawn_blocking task on the state_machine side.
     pub(crate) fn from_schema(schema: &Schema) -> Self {
-        let span = tracing::trace_span!("naive_introspection_population");
+        let span = tracing::trace_span!("introspection_population");
         let _guard = span.enter();
 
         let cache = introspect::batch_introspect(
@@ -127,7 +127,7 @@ impl Introspection {
 }
 
 #[cfg(test)]
-mod naive_introspection_tests {
+mod introspection_tests {
     use super::*;
 
     #[tokio::test]
@@ -140,14 +140,11 @@ mod naive_introspection_tests {
             .iter()
             .cloned()
             .collect();
-        let naive_introspection = Introspection::from_cache(cache);
+        let introspection = Introspection::from_cache(cache);
 
         assert_eq!(
             expected_data,
-            naive_introspection
-                .execute(schema, query_to_test)
-                .await
-                .unwrap()
+            introspection.execute(schema, query_to_test).await.unwrap()
         );
     }
 
