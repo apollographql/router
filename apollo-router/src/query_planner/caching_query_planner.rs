@@ -105,8 +105,8 @@ where
         Box::pin(async move {
             cm.get(key)
                 .await
-                .map(|query_plan| {
-                    if let QueryPlannerContent::Plan { plan, .. } = &query_plan {
+                .map(|query_planner_content| {
+                    if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
                         if let Err(e) = request
                             .context
                             .insert(USAGE_REPORTING, plan.usage_reporting.clone())
@@ -117,7 +117,7 @@ where
                             );
                         }
                     }
-                    query_plan
+                    query_planner_content
                 })
                 .map_err(|e| {
                     let CacheResolverError::RetrievalError(re) = &e;
