@@ -41,7 +41,7 @@ pub mod layers;
 #[macro_use]
 pub mod plugin;
 pub mod plugins;
-mod query_planner;
+pub mod query_planner;
 mod reload;
 mod request;
 mod response;
