@@ -107,15 +107,15 @@ resulting in some introspection queries not working.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
 ### Update the scaffold template so that it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
-Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
+Release v0.9.4 changed the way we deal with `Response` objects, which can now be streams.
 The scaffold template has been updated so that it generates plugins that are compatible with the new Plugin API.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
-### Create the ExecutionResponse after the primary response was generated ([PR #1260](https://github.com/apollographql/router/pull/1260))
-The `@defer` preliminary work has a surprising side effect: when using methods like `RouterResponse::map_response`, they are
-executed before the subgraph responses are received, because they work on the stream of responses.
-This PR goes back to the previous behaviour by awaiting the primary response before creating the ExecutionResponse.
+### Create the `ExecutionResponse` after the primary response was generated ([PR #1260](https://github.com/apollographql/router/pull/1260))
+The `@defer` preliminary work had a surprising side effect: when using methods like `RouterResponse::map_response`, they were
+executed before the subgraph responses were received, because they work on the stream of responses.
+This PR goes back to the previous behaviour by awaiting the primary response before creating the `ExecutionResponse`.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1260
 
