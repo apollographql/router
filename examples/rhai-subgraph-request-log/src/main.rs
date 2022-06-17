@@ -14,8 +14,10 @@ fn main() -> Result<()> {
 mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{plugin::Plugin, Context, RouterRequest};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::Context;
     use http::StatusCode;
 
     #[tokio::test]

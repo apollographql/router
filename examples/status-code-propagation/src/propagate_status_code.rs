@@ -1,7 +1,8 @@
 use apollo_router::plugin::Plugin;
-use apollo_router::{
-    register_plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
+use apollo_router::register_plugin;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::{SubgraphRequest, SubgraphResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -100,7 +101,8 @@ mod tests {
     use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse};
+    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::{SubgraphRequest, SubgraphResponse};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;

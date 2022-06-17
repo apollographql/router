@@ -1,9 +1,11 @@
 use apollo_router::plugin::Plugin;
-use apollo_router::{
-    register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use apollo_router::register_plugin;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{ExecutionRequest, ExecutionResponse};
+use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::{SubgraphRequest, SubgraphResponse};
+use apollo_router::Response;
 use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;

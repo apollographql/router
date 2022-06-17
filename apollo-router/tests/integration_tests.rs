@@ -2,14 +2,18 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_router::http_compat;
 use apollo_router::json_ext::{Object, ValueExt};
 use apollo_router::plugin::Plugin;
+use apollo_router::plugins::csrf;
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
-use apollo_router::{
-    http_compat, plugins::csrf, Context, PluggableRouterServiceBuilder, Request, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
-};
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::{SubgraphRequest, SubgraphService};
+use apollo_router::Context;
+use apollo_router::Request;
+use apollo_router::Schema;
 use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
@@ -294,9 +298,9 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = apollo_router::RouterRequest {
+    let request = RouterRequest {
         originating_request: http_request,
-        context: apollo_router::Context::new(),
+        context: Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -406,9 +410,9 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = apollo_router::RouterRequest {
+    let request = RouterRequest {
         originating_request: http_request,
-        context: apollo_router::Context::new(),
+        context: Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -602,9 +606,7 @@ async fn query_node(
         )
 }
 
-async fn query_rust(
-    request: apollo_router::RouterRequest,
-) -> (apollo_router::Response, CountingServiceRegistry) {
+async fn query_rust(request: RouterRequest) -> (apollo_router::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry().await;
     (query_with_router(router, request).await, counting_registry)
 }
@@ -658,7 +660,7 @@ async fn query_with_router(
         RouterResponse<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
-    request: apollo_router::RouterRequest,
+    request: RouterRequest,
 ) -> apollo_router::Response {
     let response = router
         .oneshot(request)

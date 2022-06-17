@@ -1,7 +1,7 @@
-use apollo_router::{
-    plugin::Plugin, register_plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use apollo_router::plugin::Plugin;
+use apollo_router::register_plugin;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};

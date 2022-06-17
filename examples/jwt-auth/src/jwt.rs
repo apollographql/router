@@ -62,8 +62,10 @@
 
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
-use apollo_router::{register_plugin, RouterRequest, RouterResponse};
-use apollo_router::{Context, ResponseBody};
+use apollo_router::register_plugin;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::Context;
 use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -389,7 +391,7 @@ mod tests {
     use super::*;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::services::{RouterRequest, RouterResponse};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
