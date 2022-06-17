@@ -1,6 +1,6 @@
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
-use crate::cache::CachingMap;
+use crate::cache::coalescing::CachingMap;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
