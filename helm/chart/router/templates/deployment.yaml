@@ -103,7 +103,7 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
           volumeMounts:
-            {{- if or .Values.router.configuration }}
+            {{- if .Values.router.configuration }}
             - name: router-configuration
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
