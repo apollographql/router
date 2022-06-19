@@ -28,6 +28,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
+
+You will now be able to actually use the helm chart without being on a managed graph. 
+
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🐛 Fixes
