@@ -727,7 +727,12 @@ impl Operation {
 
     fn is_introspection(&self) -> bool {
         self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => name.as_str().starts_with("__"),
+            Selection::Field { name, .. } => {
+                let name = name.as_str();
+                // `__typename` can only be resolved in runtime,
+                // so this query cannot be seen as an introspection query
+                name == "__schema" || name == "__type"
+            }
             _ => false,
         })
     }
