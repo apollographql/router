@@ -2,15 +2,17 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::sync_checkpoint::CheckpointService;
-use crate::{ExecutionRequest, ExecutionResponse, Object, Response};
+use crate::{
+    error::Error, json_ext::Object, layers::sync_checkpoint::CheckpointService, ExecutionRequest,
+    ExecutionResponse, Response,
+};
 use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct AllowOnlyHttpPostMutationsLayer {}
+pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
@@ -28,7 +30,7 @@ where
                 if req.originating_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
-                    let errors = vec![crate::Error {
+                    let errors = vec![Error {
                         message: "Mutations can only be sent over HTTP POST".to_string(),
                         locations: Default::default(),
                         path: Default::default(),
@@ -57,9 +59,11 @@ where
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
     use super::*;
-    use crate::query_planner::fetch::OperationKind;
-    use crate::{http_compat, PlanNode};
-    use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
+    use crate::error::Error;
+    use crate::http_compat;
+    use crate::plugin::test::MockExecutionService;
+    use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
+
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -140,7 +144,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_non_http_post_mutations_pass_through() {
-        let expected_error = crate::Error {
+        let expected_error = Error {
             message: "Mutations can only be sent over HTTP POST".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -179,7 +183,7 @@ mod forbid_http_get_mutations_tests {
         }
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, response: Response) {
+    fn assert_error_matches(expected_error: &Error, response: Response) {
         assert_eq!(&response.errors[0], expected_error);
     }
 

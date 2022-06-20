@@ -1,7 +1,8 @@
-use crate::plugin::utils::serde::{deserialize_header_name, deserialize_regex};
+use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
+use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::{http_compat, Handler, ResponseBody};
+use crate::{http_compat, ResponseBody};
 use ::serde::Deserialize;
 use bytes::Bytes;
 use http::header::HeaderName;
@@ -127,13 +128,13 @@ pub(crate) trait MetricsConfigurator {
 
 #[derive(Clone)]
 pub(crate) struct BasicMetrics {
-    pub http_requests_total: AggregateCounter<u64>,
-    pub http_requests_error_total: AggregateCounter<u64>,
-    pub http_requests_duration: AggregateValueRecorder<f64>,
+    pub(crate) http_requests_total: AggregateCounter<u64>,
+    pub(crate) http_requests_error_total: AggregateCounter<u64>,
+    pub(crate) http_requests_duration: AggregateValueRecorder<f64>,
 }
 
 impl BasicMetrics {
-    pub fn new(meter_provider: &AggregateMeterProvider) -> BasicMetrics {
+    pub(crate) fn new(meter_provider: &AggregateMeterProvider) -> BasicMetrics {
         let meter = meter_provider.meter("apollo/router", None);
         BasicMetrics {
             http_requests_total: meter.build_counter(|m| {
@@ -158,13 +159,13 @@ impl BasicMetrics {
 #[derive(Clone, Default)]
 pub(crate) struct AggregateMeterProvider(Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>);
 impl AggregateMeterProvider {
-    pub fn new(
+    pub(crate) fn new(
         meters: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
     ) -> AggregateMeterProvider {
         AggregateMeterProvider(meters)
     }
 
-    pub fn meter(
+    pub(crate) fn meter(
         &self,
         instrumentation_name: &'static str,
         instrumentation_version: Option<&'static str>,
@@ -179,16 +180,16 @@ impl AggregateMeterProvider {
 }
 
 #[derive(Clone)]
-pub struct AggregateMeter(Vec<Arc<Meter>>);
+pub(crate) struct AggregateMeter(Vec<Arc<Meter>>);
 impl AggregateMeter {
-    pub fn build_counter<T: Into<Number> + Copy>(
+    pub(crate) fn build_counter<T: Into<Number> + Copy>(
         &self,
         build: fn(&Meter) -> Counter<T>,
     ) -> AggregateCounter<T> {
         AggregateCounter(self.0.iter().map(|m| build(m)).collect())
     }
 
-    pub fn build_value_recorder<T: Into<Number> + Copy>(
+    pub(crate) fn build_value_recorder<T: Into<Number> + Copy>(
         &self,
         build: fn(&Meter) -> ValueRecorder<T>,
     ) -> AggregateValueRecorder<T> {
@@ -197,12 +198,12 @@ impl AggregateMeter {
 }
 
 #[derive(Clone)]
-pub struct AggregateCounter<T: Into<Number> + Copy>(Vec<Counter<T>>);
+pub(crate) struct AggregateCounter<T: Into<Number> + Copy>(Vec<Counter<T>>);
 impl<T> AggregateCounter<T>
 where
     T: Into<Number> + Copy,
 {
-    pub fn add(&self, value: T, attributes: &[KeyValue]) {
+    pub(crate) fn add(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.0 {
             counter.add(value, attributes)
         }
@@ -210,12 +211,12 @@ where
 }
 
 #[derive(Clone)]
-pub struct AggregateValueRecorder<T: Into<Number> + Copy>(Vec<ValueRecorder<T>>);
+pub(crate) struct AggregateValueRecorder<T: Into<Number> + Copy>(Vec<ValueRecorder<T>>);
 impl<T> AggregateValueRecorder<T>
 where
     T: Into<Number> + Copy,
 {
-    pub fn record(&self, value: T, attributes: &[KeyValue]) {
+    pub(crate) fn record(&self, value: T, attributes: &[KeyValue]) {
         for value_recorder in &self.0 {
             value_recorder.record(value, attributes)
         }

@@ -1,4 +1,4 @@
-//! Provides a CachingLayer used to implement the cache functionality of [`crate::ServiceBuilderExt`].
+//! Provides a CachingLayer used to implement the cache functionality of [`crate::layers::ServiceBuilderExt`].
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -192,12 +192,14 @@ mod test {
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct A {
         key: String,
         value: String,
     }
 
     #[derive(Clone, Eq, PartialEq, Debug)]
+    #[allow(unreachable_pub)]
     pub struct B {
         key: String,
         value: String,

@@ -3,7 +3,7 @@
 //! Router plugins accept a mutable [`Context`] when invoked and this contains a DashMap which
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
-use crate::prelude::graphql::*;
+use crate::json_ext::Value;
 use dashmap::mapref::multiple::{RefMulti, RefMutMulti};
 use dashmap::DashMap;
 use serde::Serialize;
@@ -11,16 +11,16 @@ use std::sync::Arc;
 use tower::BoxError;
 
 /// Holds [`Context`] entries.
-pub type Entries = Arc<DashMap<String, Value>>;
+pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
-/// Context for a [`http_compat::Request`]
+/// Context for a [`crate::http_compat::Request`]
 ///
 /// Context makes use of [`DashMap`] under the hood which tries to handle concurrency
 /// by allowing concurrency across threads without requiring locking. This is great
 /// for usability but could lead to surprises when updates are highly contested.
 ///
 /// Within the router, contention is likely to be highest within plugins which
-/// provide [`SubgraphRequest`] or [`SubgraphResponse`] processing. At such times,
+/// provide [`crate::SubgraphRequest`] or [`crate::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Debug)]

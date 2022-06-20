@@ -12,15 +12,17 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::services::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_router_service_adds_timestamp_header() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::test::MockRouterService::new();
+        let mut mock = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -76,7 +78,7 @@ mod tests {
             .expect("x-elapsed-time is present");
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) =
+        if let apollo_router::services::ResponseBody::GraphQL(response) =
             service_response.next_response().await.unwrap()
         {
             assert!(response.errors.is_empty());

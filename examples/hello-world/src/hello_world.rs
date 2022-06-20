@@ -1,9 +1,11 @@
 use apollo_router::plugin::Plugin;
-use apollo_router::{
-    register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use apollo_router::register_plugin;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{ExecutionRequest, ExecutionResponse};
+use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::{SubgraphRequest, SubgraphResponse};
+use apollo_router::Response;
 use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -110,13 +112,13 @@ register_plugin!("example", "hello_world", HelloWorld);
 mod tests {
     use super::{Conf, HelloWorld};
 
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::Plugin;
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.hello_world")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"name" : "Bob"}))

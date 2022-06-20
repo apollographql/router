@@ -26,8 +26,35 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.9.6] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
-## 🚀 Features
-## 🐛 Fixes
+
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
+
+The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required. 
+Most users will continue to use:
+```rust
+apollo_router::main()  
+```
+
+However, if you want to specify extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior. 
+
+```rust
+use apollo_router::Executable;
+Executable::builder()
+  .router_builder_fn(|configuration, schema| ...) // Optional
+  .start().await?
+```
+
+Migration tips:
+* Calls to `ApolloRouterBuilder::default()` should be migrated to `ApolloRouter::builder`.
+* `FederatedServerHandle` has been renamed to `ApolloRouterHandle`.
+* The ability to supply your own `RouterServiceFactory` has been removed.
+* `StateListener`. This made the internal state machine unnecessarily complex. `listen_address()` remains on `ApolloRouterHandle`.
+* `FederatedServerHandle::shutdown()` has been removed. Instead, dropping `ApolloRouterHandle` will cause the router to shutdown.
+* `FederatedServerHandle::ready()` has been renamed to `FederatedServerHandle::listen_address()`, it will return the address when the router is ready to serve requests.
+* `FederatedServerError` has been renamed to `ApolloRouterError`.
+* `main_rt` should be migrated to `Executable::builder()`
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
 
 ### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
 
@@ -35,6 +62,36 @@ You will now be able to actually use the helm chart without being on a managed g
 
 By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
-## 🛠 Maintenance
-## 📚 Documentation
+## 🚀 Features ( :rocket: )
+
+### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
+
+Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported in both Rust and Rhai plugins.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
+
 ## 🐛 Fixes
+
+### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
+
+
+### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
+
+Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
+This Pull request updates the scaffold template so it generates plugins that are compatible with the new Plugin API.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
+
+Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
+resulting in some introspection queries not working.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
+
+## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
+Migrate all typed-builders code to buildstructor
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
+## 📚 Documentation ( :books: )
+

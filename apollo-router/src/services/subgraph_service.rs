@@ -1,6 +1,6 @@
 //! Tower fetcher for subgraphs.
 
-use crate::prelude::*;
+use crate::error::FetchError;
 use ::serde::Deserialize;
 use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
 use futures::future::BoxFuture;
@@ -23,7 +23,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
-pub enum Compression {
+pub(crate) enum Compression {
     /// gzip
     Gzip,
     /// deflate
@@ -67,8 +67,8 @@ impl SubgraphService {
     }
 }
 
-impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
-    type Response = graphql::SubgraphResponse;
+impl tower::Service<crate::SubgraphRequest> for SubgraphService {
+    type Response = crate::SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -78,8 +78,8 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
-        let graphql::SubgraphRequest {
+    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
+        let crate::SubgraphRequest {
             subgraph_request,
             context,
             ..
@@ -99,7 +99,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(compress_error = format!("{:?}", err).as_str());
 
-                    graphql::FetchError::CompressionError {
+                    FetchError::CompressionError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
@@ -146,7 +146,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    graphql::FetchError::SubrequestHttpError {
+                    FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
@@ -160,7 +160,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains("application/json")
                         && !content_type_str.contains("application/graphql+json")
                     {
-                        return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
+                        return Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
                         }));
@@ -174,13 +174,13 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-                    graphql::FetchError::SubrequestHttpError {
+                    FetchError::SubrequestHttpError {
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }
                 })?;
             if parts.status != StatusCode::OK {
-                return Err(BoxError::from(graphql::FetchError::SubrequestHttpError {
+                return Err(BoxError::from(FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: format!(
                         "subgraph HTTP status error '{}': {})",
@@ -190,10 +190,10 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
                 }));
             }
 
-            let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
+            let graphql: crate::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
-                    graphql::Response::from_bytes(&service_name, body).map_err(|error| {
-                        graphql::FetchError::SubrequestMalformedResponse {
+                    crate::Response::from_bytes(&service_name, body).map_err(|error| {
+                        FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
                         }
@@ -202,7 +202,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
 
             let resp = http::Response::from_parts(parts, graphql);
 
-            Ok(graphql::SubgraphResponse::new_from_response(
+            Ok(crate::SubgraphResponse::new_from_response(
                 resp.into(),
                 context,
             ))
@@ -210,7 +210,7 @@ impl tower::Service<graphql::SubgraphRequest> for SubgraphService {
     }
 }
 
-pub async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
+pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
     let content_encoding = headers.get(&CONTENT_ENCODING);
     match content_encoding {
         Some(content_encoding) => match content_encoding.to_str()? {
@@ -262,8 +262,8 @@ mod tests {
     use serde_json_bytes::{ByteString, Value};
     use tower::{service_fn, ServiceExt};
 
-    use crate::fetch::OperationKind;
-    use crate::{http_compat, Context, Object, Request, Response, SubgraphRequest};
+    use crate::query_planner::fetch::OperationKind;
+    use crate::{http_compat, json_ext::Object, Context, Request, Response, SubgraphRequest};
 
     use super::*;
 
@@ -308,10 +308,8 @@ mod tests {
             let mut encoder = GzipEncoder::new(Vec::new());
             encoder
                 .write_all(
-                    &serde_json::to_vec(
-                        &Request::builder().query(Some("query".to_string())).build(),
-                    )
-                    .unwrap(),
+                    &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
+                        .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -368,7 +366,7 @@ mod tests {
                     http_compat::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
@@ -376,7 +374,7 @@ mod tests {
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
@@ -403,7 +401,7 @@ mod tests {
                     http_compat::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
@@ -411,7 +409,7 @@ mod tests {
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
@@ -438,7 +436,7 @@ mod tests {
                     http_compat::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Request::builder().query(Some("query".to_string())).build())
+                        .body(Request::builder().query("query".to_string()).build())
                         .build()
                         .expect("expecting valid request"),
                 ),
@@ -447,7 +445,7 @@ mod tests {
                     .header(CONTENT_TYPE, "application/json")
                     .header(CONTENT_ENCODING, "gzip")
                     .uri(url)
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query".to_string()).build())
                     .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,

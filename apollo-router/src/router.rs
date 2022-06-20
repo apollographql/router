@@ -1,34 +1,34 @@
 use crate::axum_http_server_factory::AxumHttpServerFactory;
-use crate::configuration::validate_configuration;
-use crate::configuration::{Configuration, ListenAddr};
-use crate::prelude::*;
+use crate::configuration::Configuration;
+use crate::configuration::{validate_configuration, ListenAddr};
 use crate::reload::Error as ReloadError;
-use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
+use crate::router_factory::YamlRouterServiceFactory;
 use crate::state_machine::StateMachine;
 use derivative::Derivative;
 use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
-use futures::channel::{mpsc, oneshot};
+use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
-use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
 use url::Url;
 use Event::{NoMoreConfiguration, NoMoreSchema};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
+type SchemaStream = Pin<Box<dyn Stream<Item = crate::Schema> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
-pub enum FederatedServerError {
+pub enum ApolloRouterError {
     /// failed to start server
     StartupError,
 
@@ -51,7 +51,7 @@ pub enum FederatedServerError {
     ConfigError(crate::configuration::ConfigurationError),
 
     /// could not read schema: {0}
-    ReadSchemaError(graphql::SchemaError),
+    ReadSchemaError(crate::error::SchemaError),
 
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(tower::BoxError),
@@ -78,7 +78,7 @@ pub enum FederatedServerError {
 pub enum SchemaKind {
     /// A static schema.
     #[display(fmt = "Instance")]
-    Instance(Box<graphql::Schema>),
+    Instance(Box<crate::Schema>),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -114,8 +114,8 @@ pub enum SchemaKind {
     },
 }
 
-impl From<graphql::Schema> for SchemaKind {
-    fn from(schema: graphql::Schema) -> Self {
+impl From<crate::Schema> for SchemaKind {
+    fn from(schema: crate::Schema) -> Self {
         Self::Instance(Box::new(schema))
     }
 }
@@ -275,15 +275,15 @@ impl ConfigurationKind {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
-        let config = fs::read_to_string(path).map_err(FederatedServerError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(FederatedServerError::ConfigError)?;
+    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
+        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
+        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
 
         Ok(config)
     }
 
-    fn read_schema(path: &Path) -> Result<graphql::Schema, FederatedServerError> {
-        graphql::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
+    fn read_schema(path: &Path) -> Result<crate::Schema, ApolloRouterError> {
+        crate::Schema::read(path).map_err(ApolloRouterError::ReadSchemaError)
     }
 }
 
@@ -329,17 +329,16 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
-/// use apollo_router::prelude::*;
-/// use apollo_router::ApolloRouterBuilder;
-/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = ApolloRouterBuilder::default()
-///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-///             .schema(SchemaKind::Instance(Box::new(schema)))
+///     let schema: apollo_router::Schema = "schema".parse().unwrap();
+///     let server = ApolloRouter::builder()
+///             .configuration(configuration)
+///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     server.serve().await;
@@ -348,28 +347,24 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::prelude::*;
-/// use apollo_router::ApolloRouterBuilder;
-/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = ApolloRouterBuilder::default()
-///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-///             .schema(SchemaKind::Instance(Box::new(schema)))
+///     let schema: apollo_router::Schema = "schema".parse().unwrap();
+///     let server = ApolloRouter::builder()
+///             .configuration(configuration)
+///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     let handle = server.serve();
-///     handle.shutdown().await;
+///     drop(handle);
 /// };
 /// ```
 ///
-pub struct ApolloRouter<RF>
-where
-    RF: RouterServiceFactory,
-{
+pub struct ApolloRouter {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     pub(crate) configuration: ConfigurationKind,
 
@@ -379,74 +374,25 @@ where
     /// A future that when resolved will shut down the server.
     pub(crate) shutdown: ShutdownKind,
 
-    pub(crate) router_factory: RF,
+    pub(crate) router_factory: YamlRouterServiceFactory,
 }
 
-/// A builder for an [`ApolloRouter`]
-#[derive(Default)]
-pub struct ApolloRouterBuilder<Factory = ()> {
-    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) configuration: Option<ConfigurationKind>,
-
-    /// The Schema that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) schema: Option<SchemaKind>,
-
-    /// A future that when resolved will shut down the server.
-    pub(crate) shutdown: Option<ShutdownKind>,
-
-    pub(crate) router_factory: Factory,
-}
-
-impl ApolloRouterBuilder {
-    pub fn configuration(mut self, configuration: ConfigurationKind) -> Self {
-        self.configuration = Some(configuration);
-        self
-    }
-
-    pub fn schema(mut self, schema: SchemaKind) -> Self {
-        self.schema = Some(schema);
-        self
-    }
-
-    pub fn shutdown(mut self, shutdown: ShutdownKind) -> Self {
-        self.shutdown = Some(shutdown);
-        self
-    }
-
-    /// Use a custom RouterServiceFactory
-    pub fn with_factory<RF>(self, router_factory: RF) -> ApolloRouterBuilder<RF>
-    where
-        RF: RouterServiceFactory,
-    {
-        ApolloRouterBuilder {
-            configuration: self.configuration,
-            schema: self.schema,
-            shutdown: self.shutdown,
-            router_factory,
-        }
-    }
-
-    pub fn build(self) -> ApolloRouter<YamlRouterServiceFactory> {
+#[buildstructor::buildstructor]
+impl ApolloRouter {
+    /// Build a new Apollo router.
+    ///
+    /// This must only be called in the context of Executable::builder() because it relies on custom logging setup to support hot reload.
+    #[builder]
+    pub fn new(
+        configuration: ConfigurationKind,
+        schema: SchemaKind,
+        shutdown: Option<ShutdownKind>,
+    ) -> ApolloRouter {
         ApolloRouter {
-            configuration: self
-                .configuration
-                .expect("Configuration must be set on builder"),
-            schema: self.schema.expect("Schema must be set on builder"),
-            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            configuration,
+            schema,
+            shutdown: shutdown.unwrap_or(ShutdownKind::CtrlC),
             router_factory: YamlRouterServiceFactory::default(),
-        }
-    }
-}
-
-impl<RF: RouterServiceFactory> ApolloRouterBuilder<RF> {
-    pub fn build(self) -> ApolloRouter<RF> {
-        ApolloRouter {
-            configuration: self
-                .configuration
-                .expect("Configuration must be set on builder"),
-            schema: self.schema.expect("Schema must be set on builder"),
-            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: self.router_factory,
         }
     }
 }
@@ -461,7 +407,7 @@ pub(crate) enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(Box<graphql::Schema>),
+    UpdateSchema(Box<crate::Schema>),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -470,139 +416,50 @@ pub(crate) enum Event {
     Shutdown,
 }
 
-/// Public state that the client can be notified with via state listener
-/// This is useful for waiting until the server is actually serving requests.
-#[derive(Debug, PartialEq)]
-pub enum State {
-    /// The server is starting up.
-    Startup,
-
-    /// The server is running on a particular address.
-    Running { address: ListenAddr, schema: String },
-
-    /// The server has stopped.
-    Stopped,
-
-    /// The server has errored.
-    Errored,
-}
-
-impl Display for State {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            State::Startup => write!(f, "startup"),
-            State::Running { .. } => write!(f, "running"),
-            State::Stopped => write!(f, "stopped"),
-            State::Errored => write!(f, "errored"),
-        }
-    }
-}
-
 /// A handle that allows the client to await for various server events.
-pub struct FederatedServerHandle {
-    pub(crate) result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
-    pub(crate) shutdown_sender: oneshot::Sender<()>,
-    pub(crate) state_receiver: Option<mpsc::Receiver<State>>,
+pub struct RouterHandle {
+    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
+    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
-impl FederatedServerHandle {
-    /// Wait until the server is ready and return the socket address that it is listening on.
-    /// If the socket address has been configured to port zero the OS will choose the port.
-    /// The socket address returned is the actual port that was bound.
-    ///
-    /// This method can only be called once, and is not designed for use in dynamic configuration
-    /// scenarios.
-    ///
-    /// returns: Option<SocketAddr>
-    pub async fn ready(&mut self) -> Option<ListenAddr> {
-        self.state_receiver()
-            .map(|state| {
-                if let State::Running { address, .. } = state {
-                    Some(address)
-                } else {
-                    None
-                }
-            })
-            .filter(|socket| future::ready(socket != &None))
-            .map(|s| s.unwrap())
-            .next()
-            .boxed()
+impl RouterHandle {
+    /// Returns the listen address when the router is ready to receive requests.
+    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
+        self.listen_address
+            .read()
             .await
-    }
-
-    /// Return a receiver of lifecycle events for the server. This method may only be called once.
-    ///
-    /// returns: mspc::Receiver<State>
-    pub fn state_receiver(&mut self) -> mpsc::Receiver<State> {
-        self.state_receiver.take().expect(
-            "State listener has already been taken. 'ready' or 'state' may be called once only.",
-        )
-    }
-
-    /// Trigger and wait until the server has shut down.
-    ///
-    /// returns: Result<(), FederatedServerError>
-    pub async fn shutdown(mut self) -> Result<(), FederatedServerError> {
-        self.maybe_close_state_receiver();
-        if self.shutdown_sender.send(()).is_err() {
-            tracing::error!("Failed to send shutdown event")
-        }
-        self.result.await
-    }
-
-    /// If the state receiver has not been set it must be closed otherwise it'll block the
-    /// state machine from progressing.
-    fn maybe_close_state_receiver(&mut self) {
-        if let Some(mut state_receiver) = self.state_receiver.take() {
-            state_receiver.close();
-        }
-    }
-
-    /// State receiver that prints out basic lifecycle events.
-    pub async fn with_default_state_receiver(&mut self) {
-        self.state_receiver()
-            .for_each(|state| {
-                match state {
-                    State::Startup => {
-                        tracing::info!("starting Apollo Router")
-                    }
-                    State::Running { .. } => {}
-                    State::Stopped => {
-                        tracing::info!("stopped")
-                    }
-                    State::Errored => {
-                        tracing::info!("stopped with error")
-                    }
-                }
-                future::ready(())
-            })
-            .await
+            .clone()
+            .ok_or(ApolloRouterError::StartupError)
     }
 }
 
-impl Future for FederatedServerHandle {
-    type Output = Result<(), FederatedServerError>;
+impl Drop for RouterHandle {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_sender
+            .take()
+            .expect("shutdown sender must be present")
+            .send(());
+    }
+}
+
+impl Future for RouterHandle {
+    type Output = Result<(), ApolloRouterError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.maybe_close_state_receiver();
         self.result.poll_unpin(cx)
     }
 }
 
-impl<RF> ApolloRouter<RF>
-where
-    RF: RouterServiceFactory,
-{
+impl ApolloRouter {
     /// Start the federated server on a separate thread.
     ///
-    /// The returned handle allows the user to await until the server is ready and shutdown.
-    /// Alternatively the user can await on the server handle itself to wait for shutdown via the
-    /// configured shutdown mechanism.
+    /// Dropping the server handle will shutdown the server.
     ///
-    /// returns: FederatedServerHandle
+    /// returns: RouterHandle
     ///
-    pub fn serve(self) -> FederatedServerHandle {
-        let (state_listener, state_receiver) = mpsc::channel::<State>(1);
+    pub fn serve(self) -> RouterHandle {
         let server_factory = AxumHttpServerFactory::new();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = Self::generate_event_stream(
@@ -612,20 +469,23 @@ where
             shutdown_receiver,
         );
 
-        let state_machine =
-            StateMachine::new(server_factory, Some(state_listener), self.router_factory);
+        let state_machine = StateMachine::new(server_factory, self.router_factory);
+        let listen_address = state_machine.listen_address.clone();
         let result = spawn(async move { state_machine.process_events(event_stream).await })
             .map(|r| match r {
                 Ok(Ok(ok)) => Ok(ok),
                 Ok(Err(err)) => Err(err),
-                Err(_err) => Err(FederatedServerError::StartupError),
+                Err(err) => {
+                    tracing::error!("{}", err);
+                    Err(ApolloRouterError::StartupError)
+                }
             })
             .boxed();
 
-        FederatedServerHandle {
+        RouterHandle {
             result,
-            shutdown_sender,
-            state_receiver: Some(state_receiver),
+            shutdown_sender: Some(shutdown_sender),
+            listen_address,
         }
     }
 
@@ -656,34 +516,36 @@ where
 mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
+    use crate::Request;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
 
-    fn init_with_server() -> FederatedServerHandle {
+    fn init_with_server() -> RouterHandle {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
-        ApolloRouterBuilder::default()
-            .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-            .schema(SchemaKind::Instance(Box::new(schema)))
+        let schema: crate::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        ApolloRouter::builder()
+            .configuration(configuration)
+            .schema(schema)
             .build()
             .serve()
     }
 
-    #[test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
-        let mut server_handle = init_with_server();
-        let listen_addr = server_handle.ready().await.expect("Server never ready");
-        assert_federated_response(&listen_addr, r#"{ topProducts { name } }"#).await;
-        server_handle.shutdown().await.expect("Could not shutdown");
+        let router_handle = init_with_server();
+        let listen_address = router_handle
+            .listen_address()
+            .await
+            .expect("router failed to start");
+        assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
+        drop(router_handle);
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = graphql::Request::builder()
-            .query(Some(request.to_string()))
-            .build();
+        let request = Request::builder().query(request).build();
         let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
@@ -692,8 +554,8 @@ mod tests {
 
     async fn query(
         listen_addr: &ListenAddr,
-        request: &graphql::Request,
-    ) -> Result<graphql::Response, graphql::FetchError> {
+        request: &crate::Request,
+    ) -> Result<crate::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
             .post(format!("{}/", listen_addr))
             .json(request)

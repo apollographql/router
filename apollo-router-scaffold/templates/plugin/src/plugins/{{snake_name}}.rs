@@ -1,24 +1,25 @@
 use apollo_router::plugin::Plugin;
+use apollo_router::register_plugin;
 {{#if type_basic}}
-use apollo_router::{
-    register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Response, SubgraphRequest, SubgraphResponse,
-};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{ExecutionRequest, ExecutionResponse};
+use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::{SubgraphRequest, SubgraphResponse};
+use apollo_router::Response;
 {{/if}}
 {{#if type_auth}}
-use apollo_router::{
-    register_plugin, ResponseBody, RouterRequest, RouterResponse,
-};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::layers::ServiceBuilderExt;
 use std::ops::ControlFlow;
-use apollo_router::ServiceBuilderExt;
 use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
 {{#if type_tracing}}
-use apollo_router::{
-    register_plugin, ResponseBody, RouterRequest, RouterResponse,
-};
-use apollo_router::ServiceBuilderExt;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::layers::ServiceBuilderExt;
 use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
@@ -111,10 +112,10 @@ impl Plugin for {{pascal_name}} {
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
 
         ServiceBuilder::new()
-                    .checkpoint_async(|request : RouterRequest| Box::pin(async {
+                    .checkpoint_async(|request : RouterRequest| async {
                         // Do some async call here to auth, and decide if to continue or not.
                         Ok(ControlFlow::Continue(request))
-                    }))
+                    })
                     .buffered()
                     .service(service)
                     .boxed()
@@ -162,14 +163,15 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 mod tests {
     use super::{Conf, {{pascal_name}}};
 
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::{Plugin, ResponseBody};
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::services::ResponseBody;
     use tower::BoxError;
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("{{project_name}}.{{snake_name}}")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"message" : "Starting my plugin"}))

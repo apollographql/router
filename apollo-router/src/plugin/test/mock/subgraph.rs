@@ -1,6 +1,7 @@
 //! Mock subgraph implementation
 
-use crate::{Object, Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::json_ext::Object;
+use crate::{Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
 use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};
@@ -55,7 +56,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
             SubgraphResponse::new_from_response(compat_response, req.context)
         } else {
-            let error = crate::Error::builder()
+            let error = crate::error::Error::builder()
                 .message("couldn't find mock for query".to_string())
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();

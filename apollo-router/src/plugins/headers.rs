@@ -1,4 +1,4 @@
-use crate::plugin::utils::serde::{
+use crate::plugin::serde::{
     deserialize_header_name, deserialize_header_value, deserialize_option_header_name,
     deserialize_option_header_value, deserialize_regex,
 };
@@ -233,10 +233,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::fetch::OperationKind;
     use crate::http_compat;
-    use crate::plugin::utils::test::MockSubgraphService;
+    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
+    use crate::query_planner::fetch::OperationKind;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use std::collections::HashSet;
     use std::str::FromStr;
@@ -523,7 +523,7 @@ mod test {
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
             ),
@@ -534,7 +534,7 @@ mod test {
                 .header(HOST, "rhost")
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query(Some("query".to_string())).build())
+                .body(Request::builder().query("query").build())
                 .build()
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,

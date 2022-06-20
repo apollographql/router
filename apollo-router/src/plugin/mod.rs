@@ -14,13 +14,15 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
-pub mod utils;
+pub mod serde;
+pub mod test;
 
 use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
     Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+use ::serde::{de::DeserializeOwned, Deserialize};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -28,7 +30,6 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::task::{Context, Poll};
@@ -290,7 +291,7 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $value: ident) => {
-        $crate::reexports::startup::on_startup! {
+        $crate::_private::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
             }
@@ -298,11 +299,17 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| Box::pin(async move {
-                let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
-                let plugin = $value::new(configuration).await?;
-                Ok(Box::new(plugin) as Box<dyn $crate::DynPlugin>)
-            }), |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
+            $crate::plugin::register_plugin(
+                qualified_name,
+                $crate::plugin::PluginFactory::new(
+                    |configuration| Box::pin(async move {
+                        let configuration = $crate::_private::serde_json::from_value(configuration.clone())?;
+                        let plugin = $value::new(configuration).await?;
+                        Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
+                    }),
+                    |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()
+                )
+            );
         }
     };
 }

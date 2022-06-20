@@ -32,15 +32,18 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::http_compat;
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{http_compat, plugin::utils, Plugin, SubgraphRequest, SubgraphResponse};
+    use apollo_router::services::{SubgraphRequest, SubgraphResponse};
     use http::{header::HeaderName, HeaderValue, StatusCode};
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::test::MockSubgraphService::new();
+        let mut mock = test::MockSubgraphService::new();
 
         // The expected reply is going to be JSON returned in the SubgraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
