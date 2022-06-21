@@ -392,7 +392,7 @@ async fn custom_plugin_handler(
         .map_err(|err| err.to_string())?;
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
-    let req = http_compat::Request::from_parts(head, body);
+    let req = Request::from_parts(head, body).into();
     let res = handler.oneshot(req).await.map_err(|err| err.to_string())?;
 
     let is_json = matches!(
@@ -489,10 +489,7 @@ async fn run_graphql_request(
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
 
-            match service
-                .call(http_compat::Request::from_parts(head, body))
-                .await
-            {
+            match service.call(Request::from_parts(head, body).into()).await {
                 Err(e) => {
                     tracing::error!("router service call failed: {}", e);
                     (
@@ -514,8 +511,10 @@ async fn run_graphql_request(
                         }
                         Some(response) => {
                             tracing::trace_span!("serialize_response").in_scope(|| {
-                                http_compat::Response::from_parts(parts, response).into_response()
-                                //response.into_response()
+                                http_compat::Response::from(http::Response::from_parts(
+                                    parts, response,
+                                ))
+                                .into_response()
                             })
                         }
                     }

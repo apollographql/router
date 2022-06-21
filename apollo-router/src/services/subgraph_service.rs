@@ -89,7 +89,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, body) = subgraph_request.into_parts();
+            let (parts, body) = http::Request::from(subgraph_request).into_parts();
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
