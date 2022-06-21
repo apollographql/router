@@ -219,9 +219,7 @@ impl Executable {
                     delay: None,
                 }
             })
-            .unwrap_or_else(|| {
-                ConfigurationKind::Instance(Configuration::builder().build().boxed())
-            });
+            .unwrap_or_else(|| Configuration::builder().build().into());
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
         let schema = match (opt.supergraph_path, opt.apollo_key) {
             (Some(supergraph_path), _) => {

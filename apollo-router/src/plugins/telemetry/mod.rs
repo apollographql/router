@@ -13,7 +13,6 @@ use crate::plugins::telemetry::metrics::{
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
-use crate::reexports::router_bridge::planner::UsageReporting;
 use crate::subscriber::replace_layer;
 use crate::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
@@ -34,6 +33,7 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
+use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -727,7 +727,7 @@ fn operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: crate::reexports::router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,

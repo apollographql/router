@@ -15,7 +15,7 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{RouterRequest, RouterResponse};
+    use apollo_router::services::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -78,7 +78,7 @@ mod tests {
             .expect("x-elapsed-time is present");
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) =
+        if let apollo_router::services::ResponseBody::GraphQL(response) =
             service_response.next_response().await.unwrap()
         {
             assert!(response.errors.is_empty());

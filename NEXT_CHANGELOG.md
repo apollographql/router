@@ -24,13 +24,12 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.9.5] (unreleased) - 2022-mm-dd
+# [0.9.6] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
 ### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
 
 The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required. 
-
 Most users will continue to use:
 ```rust
 apollo_router::main()  
@@ -56,6 +55,12 @@ Migration tips:
 * `main_rt` should be migrated to `Executable::builder()`
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
+
+### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
+
+You will now be able to actually use the helm chart without being on a managed graph. 
+
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
 ## 🚀 Features ( :rocket: )
 
