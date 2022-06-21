@@ -29,6 +29,7 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
@@ -444,4 +445,30 @@ impl RouterServiceFactory for MakeARouter {
     type Future = <<MakeARouter as NewService<Request<crate::Request>>>::Service as Service<
         Request<crate::Request>,
     >>::Future;
+}
+
+//#[cfg(test)]
+impl MakeARouter {
+    pub fn test_service(
+        &self,
+    ) -> tower::util::BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    > {
+        Buffer::new(
+            ServiceBuilder::new()
+                .layer(APQLayer::default())
+                .layer(EnsureQueryPresence::default())
+                .service(
+                    RouterService::builder()
+                        .query_planner_service(self.query_planner_service.clone())
+                        .query_execution_service(self.execution_service.clone())
+                        .schema(self.schema.clone())
+                        .build(),
+                ),
+            512,
+        )
+        .boxed_clone()
+    }
 }

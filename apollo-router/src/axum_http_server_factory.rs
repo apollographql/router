@@ -676,6 +676,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::http_compat::Request;
+    use crate::new_service::NewService;
     use async_compression::tokio::write::GzipEncoder;
     use http::header::{self, ACCEPT_ENCODING, CONTENT_TYPE};
     use mockall::mock;
@@ -691,6 +692,7 @@ mod tests {
     use std::str::FromStr;
     use test_log::test;
     use tower::service_fn;
+    use tower_test::mock::Spawn;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -738,6 +740,36 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct TestRouterServiceFactory {
+        inner: tower_test::mock::Mock<
+            http_compat::Request<crate::Request>,
+            http_compat::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+        >,
+    }
+
+    impl NewService<Request<crate::Request>> for TestRouterServiceFactory {
+        type Service = tower_test::mock::Mock<
+            http_compat::Request<crate::Request>,
+            http_compat::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+        >;
+
+        fn new_service(&self) -> Self::Service {
+            self.inner.clone()
+        }
+    }
+
+    impl RouterServiceFactory for TestRouterServiceFactory {
+        type RouterService = tower_test::mock::Mock<
+            http_compat::Request<crate::Request>,
+            http_compat::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+        >;
+
+        type Future = <<TestRouterServiceFactory as NewService<
+            http_compat::Request<crate::Request>,
+        >>::Service as Service<http_compat::Request<crate::Request>>>::Future;
+    }
+
     async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
@@ -754,7 +786,9 @@ mod tests {
         });
         let server = server_factory
             .create(
-                service.into_inner(),
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
                 Arc::new(
                     Configuration::builder()
                         .server(
@@ -804,7 +838,14 @@ mod tests {
             }
         });
         let server = server_factory
-            .create(service.into_inner(), Arc::new(conf), None, plugin_handlers)
+            .create(
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
+                Arc::new(conf),
+                None,
+                plugin_handlers,
+            )
             .await
             .expect("Failed to create server factory");
         let mut default_headers = HeaderMap::new();
@@ -838,7 +879,9 @@ mod tests {
         });
         let server = server_factory
             .create(
-                service.into_inner(),
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
                 Arc::new(
                     Configuration::builder()
                         .server(
