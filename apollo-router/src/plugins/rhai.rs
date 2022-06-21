@@ -1133,7 +1133,7 @@ impl ServiceStep {
 
                                 let response = RhaiRouterResponse {
                                     context,
-                                    response: http_compat::Response::from_parts(parts, first.expect("already checked")),
+                                    response: http::Response::from_parts(parts, first.expect("already checked")).into(),
                                 };
                                 let shared_response =
                                 Shared::new(Mutex::new(Some(response)));
@@ -1175,7 +1175,7 @@ impl ServiceStep {
                                 let (parts, body)  = response.into_parts();
 
                                 //FIXME we should also map over the stream of future responses
-                                let response = http_compat::Response::from_parts(parts,once(ready(body)).chain(rest).boxed());
+                                let response = http::Response::from_parts(parts,once(ready(body)).chain(rest).boxed()).into();
                                 Ok(RouterResponse {context, response})
                             },
                         ))
@@ -1232,10 +1232,11 @@ impl ServiceStep {
 
                                 let response = RhaiExecutionResponse {
                                     context,
-                                    response: http_compat::Response::from_parts(
+                                    response: http::Response::from_parts(
                                         parts,
                                         first.expect("already checked"),
-                                    ),
+                                    )
+                                    .into(),
                                 };
                                 let shared_response = Shared::new(Mutex::new(Some(response)));
                                 let result: Result<Dynamic, String> = if callback.is_curried() {
@@ -1276,10 +1277,11 @@ impl ServiceStep {
                                 let (parts, body) = response.into_parts();
 
                                 //FIXME we should also map over the stream of future responses
-                                let response = http_compat::Response::from_parts(
+                                let response = http::Response::from_parts(
                                     parts,
                                     once(ready(body)).chain(rest).boxed(),
-                                );
+                                )
+                                .into();
                                 Ok(ExecutionResponse { context, response })
                             },
                         )

@@ -10,8 +10,6 @@ use futures::{
 };
 use http::{
     header::{self, HeaderName},
-    request::Parts,
-    uri::InvalidUri,
     HeaderValue, Method,
 };
 use multimap::MultiMap;
@@ -24,7 +22,7 @@ use std::{
 use crate::ResponseBody;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
-/// because header name creation is faillable.
+/// because header name creation is fallible.
 #[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderName {
     String(String),
@@ -32,7 +30,7 @@ pub enum IntoHeaderName {
 }
 
 /// Temporary holder of header value while for use while building requests and responses. Required
-/// because header value creation is faillable.
+/// because header value creation is fallible.
 #[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderValue {
     String(String),
@@ -131,33 +129,6 @@ impl<T> Request<T> {
             body,
         )
     }
-
-    /// Update the associated URL
-    pub fn from_parts(head: Parts, body: T) -> Request<T> {
-        Request {
-            inner: http::Request::from_parts(head, body),
-        }
-    }
-
-    /// Consumes the request, returning just the body.
-    pub fn into_body(self) -> T {
-        self.inner.into_body()
-    }
-
-    /// Consumes the request returning the head and body parts.
-    pub fn into_parts(self) -> (http::request::Parts, T) {
-        self.inner.into_parts()
-    }
-
-    /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
-    pub fn map<F, U>(self, f: F) -> Result<Request<U>, InvalidUri>
-    where
-        F: FnOnce(T) -> U,
-    {
-        Ok(Request {
-            inner: self.inner.map(f),
-        })
-    }
 }
 
 impl<T> Request<T>
@@ -183,6 +154,18 @@ impl<T> Deref for Request<T> {
 impl<T> DerefMut for Request<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl<T> From<http::Request<T>> for Request<T> {
+    fn from(inner: http::Request<T>) -> Self {
+        Request { inner }
+    }
+}
+
+impl<T> From<Request<T>> for http::Request<T> {
+    fn from(request: Request<T>) -> http::Request<T> {
+        request.inner
     }
 }
 
@@ -252,7 +235,7 @@ impl<T: PartialEq> PartialEq for Request<T> {
     }
 }
 
-impl<T: PartialEq> Eq for Request<T> {}
+impl<T: Eq> Eq for Request<T> {}
 
 /// Wrap an http Response.
 #[derive(Debug, Default)]
@@ -265,11 +248,13 @@ impl<T> Response<T> {
         self.inner.into_parts()
     }
 
+    /*
     pub fn from_parts(head: http::response::Parts, body: T) -> Response<T> {
         Response {
             inner: http::Response::from_parts(head, body),
         }
     }
+    */
 
     pub fn into_body(self) -> T {
         self.inner.into_body()
