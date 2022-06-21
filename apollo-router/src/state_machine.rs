@@ -1,7 +1,7 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use super::router::ApolloRouterError::{self, NoConfiguration, NoSchema};
 use super::router::Event::{self, UpdateConfiguration, UpdateSchema};
-use super::router_factory::RouterServiceFactory;
+use super::router_factory::RouterServiceConfigurator;
 use super::state_machine::State::{Errored, Running, Startup, Stopped};
 use crate::configuration::{Configuration, ListenAddr};
 use crate::plugin::Handler;
@@ -27,7 +27,7 @@ enum State<RS> {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         #[derivative(Debug = "ignore")]
-        router_service: RS,
+        router_service_factory: RS,
         server_handle: HttpServerHandle,
         #[derivative(Debug = "ignore")]
         plugins: Plugins,
@@ -56,10 +56,10 @@ impl<T> Display for State<T> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory,
+    FA: RouterServiceConfigurator,
 {
     http_server_factory: S,
-    router_factory: FA,
+    router_configurator: FA,
 
     // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
     pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
@@ -69,14 +69,14 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory + Send,
+    FA: RouterServiceConfigurator + Send,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         let ready = Arc::new(RwLock::new(None));
         let ready_guard = ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
-            router_factory,
+            router_configurator: router_factory,
             listen_address: ready,
             listen_address_guard: Some(ready_guard),
         }
@@ -140,7 +140,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        router_service,
+                        router_service_factory: router_service,
                         server_handle,
                         plugins,
                     },
@@ -165,7 +165,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        router_service,
+                        router_service_factory: router_service,
                         server_handle,
                         plugins,
                     },
@@ -223,7 +223,7 @@ where
 
     async fn maybe_update_listen_address(
         &mut self,
-        state: &mut State<<FA as RouterServiceFactory>::RouterService>,
+        state: &mut State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     ) {
         let listen_address = if let Running { server_handle, .. } = &state {
             let listen_address = server_handle.listen_address().clone();
@@ -243,10 +243,10 @@ where
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: State<<FA as RouterServiceFactory>::RouterService>,
+        state: State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     ) -> Result<
-        State<<FA as RouterServiceFactory>::RouterService>,
-        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -257,8 +257,8 @@ where
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
 
-            let (router, plugins) = self
-                .router_factory
+            let (router_factory, plugins) = self
+                .router_configurator
                 .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
@@ -277,7 +277,12 @@ where
 
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None, plugin_handlers)
+                .create(
+                    router_factory.clone(),
+                    configuration.clone(),
+                    None,
+                    plugin_handlers,
+                )
                 .await
                 .map_err(|err| {
                     tracing::error!("cannot start the router: {}", err);
@@ -287,7 +292,7 @@ where
             Ok(Running {
                 configuration,
                 schema,
-                router_service: router,
+                router_service_factory: router_factory,
                 server_handle,
                 plugins,
             })
@@ -301,20 +306,20 @@ where
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        router_service: <FA as RouterServiceFactory>::RouterService,
+        router_service: <FA as RouterServiceConfigurator>::RouterServiceFactory,
         server_handle: HttpServerHandle,
         plugins: Plugins,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        State<<FA as RouterServiceFactory>::RouterService>,
-        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
 
         match self
-            .router_factory
+            .router_configurator
             .create(
                 new_configuration.clone(),
                 new_schema.clone(),
@@ -349,7 +354,7 @@ where
                 Ok(Running {
                     configuration: new_configuration,
                     schema: new_schema,
-                    router_service: new_router_service,
+                    router_service_factory: new_router_service,
                     server_handle,
                     plugins,
                 })
@@ -362,7 +367,7 @@ where
                 Err(Running {
                     configuration,
                     schema,
-                    router_service,
+                    router_service_factory: router_service,
                     server_handle,
                     plugins,
                 })
@@ -390,7 +395,7 @@ mod tests {
     use super::*;
     use crate::http_compat::{Request, Response};
     use crate::http_server_factory::Listener;
-    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::RouterServiceConfigurator;
     use crate::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
@@ -601,9 +606,9 @@ mod tests {
         MyRouterFactory {}
 
         #[async_trait::async_trait]
-        impl RouterServiceFactory for MyRouterFactory {
-            type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
+        impl RouterServiceConfigurator for MyRouterFactory {
+            type RouterServiceFactory = MockMyRouter;
+            type Future = <Self::RouterServiceFactory as Service<Request<crate::Request>>>::Future;
 
             async fn create<'a>(
                 &'a mut self,

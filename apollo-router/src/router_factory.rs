@@ -2,7 +2,8 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
-use crate::services::Plugins;
+use crate::services::new_service::NewService;
+use crate::services::{MakeARouter, Plugins};
 use crate::SubgraphService;
 use crate::{
     http_compat::{Request, Response},
@@ -11,6 +12,7 @@ use crate::{
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
+use indexmap::IndexMap;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,27 +23,35 @@ use tower_service::Service;
 
 /// Factory for creating a RouterService
 ///
-/// Instances of this traits are used by the StateMachine to generate a new
-/// RouterService from configuration when it changes
-#[async_trait::async_trait]
-pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
+/// Instances of this traits are used by the HTTP server to generate a new
+/// RouterService on each request
+pub(crate) trait RouterServiceFactory:
+    NewService<Request<crate::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+{
     type RouterService: Service<
             Request<crate::Request>,
             Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
-        + Sync
-        + Clone
         + 'static;
     type Future: Send;
+}
+
+/// Factory for creating a RouterServiceFactory
+///
+/// Instances of this traits are used by the StateMachine to generate a new
+/// RouterServiceFactory from configuration when it changes
+#[async_trait::async_trait]
+pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
+    type RouterServiceFactory: RouterServiceFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Plugins), BoxError>;
+        previous_router: Option<&'a Self::RouterServiceFactory>,
+    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -49,59 +59,56 @@ pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
 pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceFactory for YamlRouterServiceFactory {
-    type RouterService = Buffer<
-        BoxCloneService<
-            Request<crate::Request>,
-            Response<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-        Request<crate::Request>,
-    >;
-    type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
+impl RouterServiceConfigurator for YamlRouterServiceFactory {
+    type RouterServiceFactory = MakeARouter;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Plugins), BoxError> {
+        _previous_router: Option<&'a Self::RouterServiceFactory>,
+    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxService::new(SubgraphService::new(name.to_string()));
+            let subgraph_service = BoxCloneService::new(SubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
+
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema).await?;
 
-        for (plugin_name, plugin) in plugins {
+        /*for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
         let (pluggable_router_service, mut plugins) = builder.build().await?;
-        let service = ServiceBuilder::new().buffered().service(
+        */
+        let pluggable_router_service = builder.build().await?;
+
+        /*let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
                 .map_request(|http_request: Request<crate::Request>| http_request.into())
                 .map_response(|response| response.response)
                 .boxed_clone(),
-        );
+        );*/
 
         // We're good to go with the new service. Let the plugins know that this is about to happen.
         // This is needed so that the Telemetry plugin can swap in the new propagator.
         // The alternative is that we introduce another service on Plugin that wraps the request
         // at a much earlier stage.
-        for (_, plugin) in &mut plugins {
-            tracing::debug!("activating plugin {}", plugin.name());
-            plugin.activate();
-            tracing::debug!("activated plugin {}", plugin.name());
-        }
-
-        Ok((service, plugins))
+        /*        for (_, plugin) in &mut plugins {
+                    tracing::debug!("activating plugin {}", plugin.name());
+                    plugin.activate();
+                    tracing::debug!("activated plugin {}", plugin.name());
+                }
+        */
+        /*Ok((service, plugins))*/
+        Ok((pluggable_router_service, IndexMap::new()))
     }
 }
 
@@ -209,7 +216,7 @@ mod test {
     use crate::plugin::Plugin;
     use crate::register_plugin;
     use crate::router_factory::YamlRouterServiceFactory;
-    use crate::router_factory::{inject_schema_id, RouterServiceFactory};
+    use crate::router_factory::{inject_schema_id, RouterServiceConfigurator};
     use crate::Schema;
     use schemars::JsonSchema;
     use serde::Deserialize;

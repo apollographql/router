@@ -146,6 +146,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::services::new_service::NewService;
     use crate::{
         PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
     };
@@ -233,17 +234,22 @@ mod test {
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         let builder = builder
-            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
+            //.with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let (router, _) = builder.build().await.expect("should build");
+        let router = builder
+            .build()
+            .await
+            .expect("should build")
+            .new_service()
+            .boxed_clone();
 
         router
     }
 
-    async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
+    async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
@@ -262,7 +268,7 @@ mod test {
         )
         .unwrap();
         // Build a redacting plugin
-        let plugin = get_taffic_shaping_plugin(&config).await;
+        let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
@@ -278,7 +284,7 @@ mod test {
         )
         .unwrap();
 
-        let mut plugin = get_taffic_shaping_plugin(&config).await;
+        let mut plugin = get_traffic_shaping_plugin(&config).await;
         let request = SubgraphRequest::fake_builder().build();
 
         let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {

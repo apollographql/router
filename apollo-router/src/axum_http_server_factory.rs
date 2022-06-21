@@ -2,9 +2,9 @@
 use crate::configuration::{Configuration, ListenAddr};
 use crate::http_compat;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
 use crate::router::ApolloRouterError;
+use crate::router_factory::RouterServiceFactory;
 use crate::ResponseBody;
 use async_compression::tokio::write::{BrotliDecoder, GzipDecoder, ZlibDecoder};
 use axum::extract::{Extension, Host, OriginalUri};
@@ -33,7 +33,6 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
-use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
@@ -54,38 +53,19 @@ impl AxumHttpServerFactory {
     }
 }
 
-type BufferedService = Buffer<
-    BoxService<
-        http_compat::Request<crate::Request>,
-        http_compat::Response<BoxStream<'static, ResponseBody>>,
-        BoxError,
-    >,
-    http_compat::Request<crate::Request>,
->;
-
 impl HttpServerFactory for AxumHttpServerFactory {
     type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
-    fn create<RS>(
+    fn create<RF>(
         &self,
-        service: RS,
+        service_factory: RF,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RS: Service<
-                http_compat::Request<crate::Request>,
-                Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
-                Error = BoxError,
-            > + Send
-            + Sync
-            + Clone
-            + 'static,
-
-        <RS as Service<http_compat::Request<crate::Request>>>::Future: std::marker::Send,
+        RF: RouterServiceFactory,
     {
-        let boxed_service = Buffer::new(service.boxed(), DEFAULT_BUFFER_SIZE);
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -116,12 +96,31 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     get({
                         let display_landing_page = configuration.server.landing_page;
                         move |host: Host,
-                              service: Extension<BufferedService>,
+                              Extension(service): Extension<RF>,
                               http_request: Request<Body>| {
-                            handle_get(host, service, http_request, display_landing_page)
+                            handle_get(
+                                host,
+                                service.new_service().boxed(),
+                                http_request,
+                                display_landing_page,
+                            )
                         }
                     })
-                    .post(handle_post),
+                    .post({
+                        move |host: Host,
+                              uri: OriginalUri,
+                              request: Json<crate::Request>,
+                              Extension(service): Extension<RF>,
+                              header_map: HeaderMap| {
+                            handle_post(
+                                host,
+                                uri,
+                                request,
+                                service.new_service().boxed(),
+                                header_map,
+                            )
+                        }
+                    }),
                 )
                 .layer(middleware::from_fn(decompress_request_body))
                 .layer(
@@ -142,7 +141,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         }),
                 )
                 .route(&configuration.server.health_check_path, get(health_check))
-                .layer(Extension(boxed_service))
+                .layer(Extension(service_factory))
                 .layer(cors)
                 .layer(CompressionLayer::new()); // To compress response body
 
@@ -422,7 +421,11 @@ async fn custom_plugin_handler(
 
 async fn handle_get(
     Host(host): Host,
-    Extension(service): Extension<BufferedService>,
+    service: BoxService<
+        http_compat::Request<crate::Request>,
+        http_compat::Response<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    >,
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
@@ -456,7 +459,11 @@ async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<crate::Request>,
-    Extension(service): Extension<BufferedService>,
+    service: BoxService<
+        http_compat::Request<crate::Request>,
+        http_compat::Response<BoxStream<'static, ResponseBody>>,
+        BoxError,
+    >,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     let mut http_request = Request::post(
@@ -481,10 +488,18 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
-async fn run_graphql_request(
-    service: BufferedService,
+async fn run_graphql_request<RS>(
+    service: RS,
     http_request: Request<crate::Request>,
-) -> impl IntoResponse {
+) -> impl IntoResponse
+where
+    RS: Service<
+            http_compat::Request<crate::Request>,
+            Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
+            Error = BoxError,
+        > + Send
+        + 'static,
+{
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();

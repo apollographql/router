@@ -31,6 +31,7 @@ use tower::BoxError;
 mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
+pub(crate) mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
 

@@ -1,15 +1,12 @@
 use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
-use crate::http_compat::{Request, Response};
 use crate::plugin::Handler;
-use crate::ResponseBody;
+use crate::router_factory::RouterServiceFactory;
 use derivative::Derivative;
+use futures::channel::oneshot;
 use futures::prelude::*;
-use futures::{channel::oneshot, stream::BoxStream};
 use std::sync::Arc;
 use std::{collections::HashMap, pin::Pin};
-use tower::BoxError;
-use tower::Service;
 
 /// Factory for creating the http server component.
 ///
@@ -18,23 +15,15 @@ use tower::Service;
 pub(crate) trait HttpServerFactory {
     type Future: Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send;
 
-    fn create<RS>(
+    fn create<RF>(
         &self,
-        service: RS,
+        service_factory: RF,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RS: Service<
-                Request<crate::Request>,
-                Response = Response<BoxStream<'static, ResponseBody>>,
-                Error = BoxError,
-            > + Send
-            + Sync
-            + Clone
-            + 'static,
-        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send;
+        RF: RouterServiceFactory;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -83,24 +72,16 @@ impl HttpServerHandle {
         Ok(())
     }
 
-    pub(crate) async fn restart<RS, SF>(
+    pub(crate) async fn restart<RF, SF>(
         self,
         factory: &SF,
-        router: RS,
+        router: RF,
         configuration: Arc<Configuration>,
         plugin_handlers: HashMap<String, Handler>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
-        RS: Service<
-                Request<crate::Request>,
-                Response = Response<BoxStream<'static, ResponseBody>>,
-                Error = BoxError,
-            > + Send
-            + Sync
-            + Clone
-            + 'static,
-        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send,
+        RF: RouterServiceFactory,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {
