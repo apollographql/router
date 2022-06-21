@@ -257,6 +257,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Fix scaffold support ([PR #1293](https://github.com/apollographql/router/pull/1293))
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1293
+
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
 
