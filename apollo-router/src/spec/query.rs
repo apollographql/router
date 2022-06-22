@@ -561,24 +561,11 @@ impl Query {
                 }
                 Selection::FragmentSpread {
                     name,
-                    known_type,
+                    known_type: _,
                     skip: _,
                     include: _,
                 } => {
-                    println!(
-                        "trying fragment '{}' at root with condition {:?}",
-                        name, known_type
-                    );
-
                     if let Some(fragment) = self.fragments.get(name) {
-                        println!(
-                            "operation kind: {:?}, RootOpName: {}, fragment type condition: {}, known_type: {:?}",
-                            operation.kind,
-                            schema.root_operation_name(operation.kind),
-                            fragment.type_condition,
-                            known_type
-                        );
-
                         let operation_type_name = schema.root_operation_name(operation.kind);
                         let is_apply = {
                             // First determine if the fragment is for zn interface
@@ -753,32 +740,6 @@ impl Operation {
         })
     }
 }
-
-/*
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-enum OperationType {
-    Query,
-    Mutation,
-    Subscription,
-}
-
-impl From<ast::OperationType> for OperationType {
-    // Spec: https://spec.graphql.org/draft/#OperationType
-    fn from(operation_type: ast::OperationType) -> Self {
-        if operation_type.query_token().is_some() {
-            Self::Query
-        } else if operation_type.mutation_token().is_some() {
-            Self::Mutation
-        } else if operation_type.subscription_token().is_some() {
-            Self::Subscription
-        } else {
-            unreachable!(
-                "either the `query` token is provided, either the `mutation` token, \
-                either the `subscription` token; qed"
-            )
-        }
-    }
-}*/
 
 impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
@@ -4672,7 +4633,6 @@ mod tests {
         let schema = schema.parse::<Schema>().expect("could not parse schema");
         let api_schema = schema.api_schema();
         let query = Query::parse(query, &schema).expect("could not parse query");
-        println!("parsed query:\n{:#?}", query);
         let mut response = Response::builder()
             .data(json! {{
                 "object": {
@@ -4692,32 +4652,6 @@ mod tests {
                 }
             }}
         );
-
-        /*assert_format_response_fed2!(
-            schema,
-            "{
-                ...FragmentTest
-            }
-            fragment FragmentTest on Interface {
-                object {
-                    data
-                }
-            }",
-            json! {{
-                "object": {
-                    "__typename": "MyObject",
-                    "data": "a",
-                    "foo": "bar"
-                }
-            }},
-            None,
-            json! {{
-                "object": {
-                    "__typename": "MyObject",
-                    "data": "a"
-                }
-            }},
-        );*/
     }
 
     #[test]

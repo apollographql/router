@@ -73,6 +73,7 @@ impl std::str::FromStr for Schema {
             let document = tree.document();
             let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
             let mut subgraphs = HashMap::new();
+            let mut root_operations = HashMap::new();
 
             // the logic of this algorithm is inspired from the npm package graphql:
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
@@ -219,18 +220,7 @@ impl std::str::FromStr for Schema {
                     }
                     // Spec: https://spec.graphql.org/draft/#SchemaDefinition
                     ast::Definition::SchemaDefinition(schema) => {
-                        println!("parsing schema extension");
                         for operation in schema.root_operation_type_definitions() {
-                            println!(
-                                "parsing operation: {:?} -> {:?}",
-                                operation.operation_type(),
-                                operation.named_type().map(|n| {
-                                    n.name()
-                                        .expect("the node Name is not optional in the spec; qed")
-                                        .text()
-                                        .to_string()
-                                })
-                            );
                             match (
                                 operation.operation_type(),
                                 operation.named_type().map(|n| {
