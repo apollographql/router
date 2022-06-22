@@ -234,7 +234,7 @@ impl std::str::FromStr for Schema {
                                     root_operations.insert(optype.into(), name);
                                 }
                                 _ => {
-                                    return Err(SchemaError::Api(format!("a field on the schema definition should have a name and operation type")));
+                                    return Err(SchemaError::Api("a field on the schema definition should have a name and operation type".to_string()));
                                 }
                             }
                         }
