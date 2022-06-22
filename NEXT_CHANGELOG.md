@@ -13,7 +13,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
-## 🐛 Fixes
 
 ## Example section entry format
 
@@ -263,6 +262,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
+Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
+resulting in some introspection queries not working.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
 ### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
 
@@ -272,10 +275,12 @@ This Pull request updates the scaffold template so it generates plugins that are
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
 
-Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
-resulting in some introspection queries not working.
+### Fix fragment selection on interfaces ([PR #1295](https://github.com/apollographql/router/pull/1295))
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
+Fragments type conditions were not checked correctly on interfaces, resulting in invalid null fields added to the response
+or valid data being nullified.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1295
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
