@@ -80,32 +80,24 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         }
 
         // Process the plugins.
-        let mut plugins = create_plugins(&configuration, &schema).await?;
+        let plugins = create_plugins(&configuration, &schema).await?;
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        let pluggable_router_service = builder.build().await?;
-
-        /*let service = ServiceBuilder::new().buffered().service(
-            pluggable_router_service
-                .map_request(|http_request: Request<crate::Request>| http_request.into())
-                .map_response(|response| response.response)
-                .boxed_clone(),
-        );*/
-
         // We're good to go with the new service. Let the plugins know that this is about to happen.
         // This is needed so that the Telemetry plugin can swap in the new propagator.
         // The alternative is that we introduce another service on Plugin that wraps the request
         // at a much earlier stage.
-        /*        for (_, plugin) in &mut plugins {
-                    tracing::debug!("activating plugin {}", plugin.name());
-                    plugin.activate();
-                    tracing::debug!("activated plugin {}", plugin.name());
-                }
-        */
-        /*Ok((service, plugins))*/
+        for (_, plugin) in builder.plugins() {
+            tracing::debug!("activating plugin {}", plugin.name());
+            plugin.activate();
+            tracing::debug!("activated plugin {}", plugin.name());
+        }
+
+        let pluggable_router_service = builder.build().await?;
+
         Ok((pluggable_router_service, IndexMap::new()))
     }
 }

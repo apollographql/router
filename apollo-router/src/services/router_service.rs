@@ -291,6 +291,10 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    pub(crate) fn plugins(&mut self) -> &mut Plugins {
+        &mut self.plugins
+    }
+
     pub async fn build(mut self) -> Result<MakeARouter, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
