@@ -173,7 +173,7 @@ where
                             )
                             .await?;
 
-                        let (parts, response_stream) = response.into_parts();
+                        let (parts, response_stream) = http::Response::from(response).into_parts();
                         Ok(RouterResponse {
                             context,
                             response: http::Response::from_parts(

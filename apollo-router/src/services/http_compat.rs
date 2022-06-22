@@ -36,6 +36,7 @@ pub enum IntoHeaderValue {
     String(String),
     HeaderValue(HeaderValue),
 }
+
 impl<T> From<T> for IntoHeaderName
 where
     T: std::fmt::Display,
@@ -128,18 +129,6 @@ impl<T> Request<T> {
             method.unwrap_or(Method::GET),
             body,
         )
-    }
-}
-
-impl<T> Request<T>
-where
-    T: Default,
-{
-    // Only used for tests
-    pub fn mock() -> Request<T> {
-        Request {
-            inner: http::Request::default(),
-        }
     }
 }
 
@@ -244,22 +233,6 @@ pub struct Response<T> {
 }
 
 impl<T> Response<T> {
-    pub fn into_parts(self) -> (http::response::Parts, T) {
-        self.inner.into_parts()
-    }
-
-    /*
-    pub fn from_parts(head: http::response::Parts, body: T) -> Response<T> {
-        Response {
-            inner: http::Response::from_parts(head, body),
-        }
-    }
-    */
-
-    pub fn into_body(self) -> T {
-        self.inner.into_body()
-    }
-
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
         F: FnMut(T) -> U,
@@ -276,6 +249,7 @@ impl Response<BoxStream<'static, ResponseBody>> {
         }
     }
 }
+
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 
@@ -326,7 +300,7 @@ impl<T: Clone> Clone for Response<T> {
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
-        let (mut parts, body) = self.into_parts();
+        let (mut parts, body) = http::Response::from(self).into_parts();
         let json_body_bytes =
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
         parts.headers.insert(
@@ -341,7 +315,7 @@ impl IntoResponse for Response<ResponseBody> {
 impl IntoResponse for Response<Bytes> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
-        let (parts, body) = self.into_parts();
+        let (parts, body) = http::Response::from(self).into_parts();
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
     }
