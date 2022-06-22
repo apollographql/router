@@ -499,7 +499,7 @@ async fn run_graphql_request(
                         .into_response()
                 }
                 Ok(response) => {
-                    let (parts, mut stream) = response.into_parts();
+                    let (parts, mut stream) = http::Response::from(response).into_parts();
                     match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);

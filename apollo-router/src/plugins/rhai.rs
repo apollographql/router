@@ -1120,7 +1120,7 @@ impl ServiceStep {
                                 // we split the response stream into headers+first response, then a stream of deferred responses
                                 // for which we will implement mapping later
                                 let RouterResponse { response, context } = router_response;
-                                let (parts, stream) = response.into_parts();
+                                let (parts, stream) = http::Response::from(response).into_parts();
                                 let (first, rest) = stream.into_future().await;
 
                                 if first.is_none() {
@@ -1172,7 +1172,7 @@ impl ServiceStep {
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
                                 let RhaiRouterResponse { context, response } = response_opt.unwrap();
-                                let (parts, body)  = response.into_parts();
+                                let (parts, body)  = http::Response::from(response).into_parts();
 
                                 //FIXME we should also map over the stream of future responses
                                 let response = http::Response::from_parts(parts,once(ready(body)).chain(rest).boxed()).into();
@@ -1219,7 +1219,7 @@ impl ServiceStep {
                                 // we split the response stream into headers+first response, then a stream of deferred responses
                                 // for which we will implement mapping later
                                 let ExecutionResponse { response, context } = execution_response;
-                                let (parts, stream) = response.into_parts();
+                                let (parts, stream) = http::Response::from(response).into_parts();
                                 let (first, rest) = stream.into_future().await;
 
                                 if first.is_none() {
@@ -1274,7 +1274,7 @@ impl ServiceStep {
                                 let response_opt = guard.take();
                                 let RhaiExecutionResponse { context, response } =
                                     response_opt.unwrap();
-                                let (parts, body) = response.into_parts();
+                                let (parts, body) = http::Response::from(response).into_parts();
 
                                 //FIXME we should also map over the stream of future responses
                                 let response = http::Response::from_parts(

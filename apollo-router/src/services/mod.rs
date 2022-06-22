@@ -486,8 +486,22 @@ impl SubgraphRequest {
         context: Option<Context>,
     ) -> SubgraphRequest {
         SubgraphRequest::new(
-            originating_request.unwrap_or_else(|| Arc::new(http_compat::Request::mock())),
-            subgraph_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                Arc::new(
+                    http_compat::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                )
+            }),
+            subgraph_request.unwrap_or_else(|| {
+                http_compat::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
         )
@@ -647,7 +661,13 @@ impl ExecutionRequest {
         context: Option<Context>,
     ) -> ExecutionRequest {
         ExecutionRequest::new(
-            originating_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                http_compat::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
