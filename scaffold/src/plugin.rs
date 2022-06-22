@@ -59,11 +59,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
             "https://github.com/apollographql/router.git",
         )))
         .git_ref(version)
-        .repository_template_path(
-            PathBuf::from("scaffold")
-                .join("templates")
-                .join("plugin"),
-        )
+        .repository_template_path(PathBuf::from("scaffold").join("templates").join("plugin"))
         .target_dir(".")
         .project_name(name)
         .parameter(format!("name={}", name))
