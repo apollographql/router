@@ -4593,6 +4593,15 @@ mod tests {
             object: MyObject
         }";
 
+        let query = "{
+            ...FragmentTest
+        }
+        fragment FragmentTest on Interface {
+            object {
+                data
+            }
+        }";
+
         let schema = schema.parse::<Schema>().expect("could not parse schema");
         let api_schema = schema.api_schema();
         let query = Query::parse(query, &schema).expect("could not parse query");
