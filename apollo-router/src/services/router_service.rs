@@ -230,7 +230,7 @@ where
 //#[derive(Clone)]
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
-    //plugins: Plugins,
+    plugins: Plugins,
     subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
@@ -242,13 +242,13 @@ impl PluggableRouterServiceBuilder {
     pub fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
-            //plugins: Default::default(),
+            plugins: Default::default(),
             subgraph_services: Default::default(),
             introspection: false,
         }
     }
 
-    /*pub fn with_plugin<E: DynPlugin + Plugin>(mut self, plugin_name: String, plugin: E) -> Self {
+    pub fn with_plugin<E: DynPlugin + Plugin>(mut self, plugin_name: String, plugin: E) -> Self {
         self.plugins.insert(plugin_name, Box::new(plugin));
         self
     }
@@ -256,7 +256,7 @@ impl PluggableRouterServiceBuilder {
     pub fn with_dyn_plugin(mut self, plugin_name: String, plugin: Box<dyn DynPlugin>) -> Self {
         self.plugins.insert(plugin_name, plugin);
         self
-    }*/
+    }
 
     pub fn with_subgraph_service<
         S: Service<
@@ -315,28 +315,26 @@ impl PluggableRouterServiceBuilder {
         let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
             .await
             .map_err(ServiceBuildError::QueryPlannerError)?;
-        /*let query_planner_service =
-        ServiceBuilder::new()
-            .buffered()
-            .service(self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ));*/
         let query_planner_service =
-            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit);
+            ServiceBuilder::new()
+                .buffered()
+                .service(self.plugins.iter_mut().rev().fold(
+                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
+                    |acc, (_, e)| e.query_planning_service(acc),
+                ));
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
             .subgraph_services
             .into_iter()
             .map(|(name, s)| {
-                /*let service = self
-                .plugins
-                .iter_mut()
-                .rev()
-                .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));*/
+                let service = self
+                    .plugins
+                    .iter_mut()
+                    .rev()
+                    .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
 
-                let service = ServiceBuilder::new().buffered().service(s);
+                let service = ServiceBuilder::new().buffered().service(service);
 
                 (name.clone(), service)
             })
@@ -348,18 +346,14 @@ impl PluggableRouterServiceBuilder {
             ServiceBuilder::new()
                 .layer(AllowOnlyHttpPostMutationsLayer::default())
                 .service(
-                    ExecutionService::builder()
-                        .schema(self.schema.clone())
-                        .subgraph_services(subgraphs)
-                        .build()
-                        .boxed(), /*self.plugins.iter_mut().rev().fold(
-                                      ExecutionService::builder()
-                                          .schema(self.schema.clone())
-                                          .subgraph_services(subgraphs)
-                                          .build()
-                                          .boxed(),
-                                      |acc, (_, e)| e.execution_service(acc),
-                                  ),*/
+                    self.plugins.iter_mut().rev().fold(
+                        ExecutionService::builder()
+                            .schema(self.schema.clone())
+                            .subgraph_services(subgraphs)
+                            .build()
+                            .boxed(),
+                        |acc, (_, e)| e.execution_service(acc),
+                    ),
                 )
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
@@ -394,21 +388,26 @@ impl PluggableRouterServiceBuilder {
 
         Ok(router_service.boxed_clone())*/
         Ok(MakeARouter {
-            query_planner_service: Buffer::new(query_planner_service, DEFAULT_BUFFER_SIZE),
+            query_planner_service,
             execution_service,
             schema: self.schema,
+            plugins: Arc::new(self.plugins),
         })
     }
 }
 
 #[derive(Clone)]
 pub struct MakeARouter {
+    query_planner_service: Buffer<
+        BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+        QueryPlannerRequest,
+    >,
     execution_service: Buffer<
         BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
         ExecutionRequest,
     >,
-    query_planner_service: Buffer<CachingQueryPlanner<BridgeQueryPlanner>, QueryPlannerRequest>,
     schema: Arc<Schema>,
+    plugins: Arc<Plugins>,
 }
 
 impl NewService<Request<crate::Request>> for MakeARouter {
@@ -419,16 +418,7 @@ impl NewService<Request<crate::Request>> for MakeARouter {
     >;
     fn new_service(&self) -> Self::Service {
         BoxService::new(
-            ServiceBuilder::new()
-                .layer(APQLayer::default())
-                .layer(EnsureQueryPresence::default())
-                .service(
-                    RouterService::builder()
-                        .query_planner_service(self.query_planner_service.clone())
-                        .query_execution_service(self.execution_service.clone())
-                        .schema(self.schema.clone())
-                        .build(),
-                )
+            self.make()
                 .map_request(|http_request: Request<crate::Request>| http_request.into())
                 .map_response(|response| response.response),
         )
@@ -449,6 +439,39 @@ impl RouterServiceFactory for MakeARouter {
 
 //#[cfg(test)]
 impl MakeARouter {
+    fn make(
+        &self,
+    ) -> impl Service<
+        RouterRequest,
+        Response = RouterResponse<BoxStream<'static, ResponseBody>>,
+        Error = BoxError,
+        Future = BoxFuture<
+            'static,
+            Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        >,
+    > + Send
+           + 'static {
+        ServiceBuilder::new()
+            .layer(APQLayer::default())
+            .layer(EnsureQueryPresence::default())
+            .service(
+                /*self.plugins.iter_mut().rev().fold(
+                    RouterService::builder()
+                        .query_planner_service(self.query_planner_service.clone())
+                        .query_execution_service(self.execution_service.clone())
+                        .schema(self.schema.clone())
+                        .build()
+                        .boxed(),
+                    |acc, (_, e)| e.router_service(acc),
+                ),*/
+                RouterService::builder()
+                    .query_planner_service(self.query_planner_service.clone())
+                    .query_execution_service(self.execution_service.clone())
+                    .schema(self.schema.clone())
+                    .build(),
+            )
+    }
+
     pub fn test_service(
         &self,
     ) -> tower::util::BoxCloneService<
@@ -456,19 +479,6 @@ impl MakeARouter {
         RouterResponse<BoxStream<'static, ResponseBody>>,
         BoxError,
     > {
-        Buffer::new(
-            ServiceBuilder::new()
-                .layer(APQLayer::default())
-                .layer(EnsureQueryPresence::default())
-                .service(
-                    RouterService::builder()
-                        .query_planner_service(self.query_planner_service.clone())
-                        .query_execution_service(self.execution_service.clone())
-                        .schema(self.schema.clone())
-                        .build(),
-                ),
-            512,
-        )
-        .boxed_clone()
+        Buffer::new(self.make(), 512).boxed_clone()
     }
 }
