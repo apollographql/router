@@ -553,14 +553,10 @@ impl Query {
                     known_type: _,
                 } => {
                     // top level objects will not provide a __typename field
-                    //FIXME
-                    match (type_condition.as_str(), operation.kind) {
-                        ("Query", OperationKind::Query) | ("Mutation", OperationKind::Mutation) => {
-                        }
-                        _ => {
-                            return Err(InvalidValue);
-                        }
+                    if type_condition.as_str() != schema.root_operation_name(operation.kind) {
+                        return Err(InvalidValue);
                     }
+
                     self.apply_selection_set(selection_set, variables, input, output, schema)?;
                 }
                 Selection::FragmentSpread {
@@ -576,50 +572,30 @@ impl Query {
 
                     if let Some(fragment) = self.fragments.get(name) {
                         println!(
-                            "operation kind: {:?}, RootOpName: {}, fragment type condition: {}",
+                            "operation kind: {:?}, RootOpName: {}, fragment type condition: {}, known_type: {:?}",
                             operation.kind,
                             schema.root_operation_name(operation.kind),
                             fragment.type_condition,
+                            known_type
                         );
 
-                        // top level objects will not provide a __typename field
-                        /*match (fragment.type_condition.as_str(), operation.kind) {
-                            ("Query", OperationKind::Query)
-                            | ("Mutation", OperationKind::Mutation) => {}
-                            _ => {
-                                return Err(InvalidValue);
-                            }
-                        }*/
-                        /*
-                        let is_apply = if let Some(input_type) =
-                            input.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            //First determine if fragment is for interface
-                            //Otherwise we assume concrete type is expected
-                            if let Some(interface) = known_type
-                                .as_deref()
-                                .and_then(|known_type| schema.interfaces.get(known_type))
+                        let operation_type_name = schema.root_operation_name(operation.kind);
+                        let is_apply = {
+                            // First determine if the fragment is for zn interface
+                            // Otherwise we assume a concrete type is expected
+                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
                             {
-                                println!("is_apply[{}]", line!());
-
-                                //Check if input implements interface
-                                schema.is_subtype(interface.name.as_str(), input_type)
+                                // Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), operation_type_name)
                             } else {
-                                println!("is_apply[{}]", line!());
-
-                                input_type == fragment.type_condition.as_str()
+                                operation_type_name == fragment.type_condition.as_str()
                             }
-                        } else {
-                            println!("is_apply[{}]", line!());
-
-                            known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
-                        */
-                        if fragment.type_condition.as_str()
-                            != schema.root_operation_name(operation.kind)
-                        {
+
+                        if !is_apply {
                             return Err(InvalidValue);
                         }
+
                         self.apply_selection_set(
                             &fragment.selection_set,
                             variables,
@@ -4712,7 +4688,6 @@ mod tests {
             response.data.as_ref().unwrap(),
             &json! {{
                 "object": {
-                    "__typename": "MyObject",
                     "data": "a"
                 }
             }}
