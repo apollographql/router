@@ -227,7 +227,6 @@ where
 /// collection of plugins, collection of subgraph services are assembled to generate a
 /// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
 /// response.
-//#[derive(Clone)]
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
@@ -248,12 +247,20 @@ impl PluggableRouterServiceBuilder {
         }
     }
 
-    pub fn with_plugin<E: DynPlugin + Plugin>(mut self, plugin_name: String, plugin: E) -> Self {
+    pub fn with_plugin<E: DynPlugin + Plugin>(
+        mut self,
+        plugin_name: String,
+        plugin: E,
+    ) -> PluggableRouterServiceBuilder {
         self.plugins.insert(plugin_name, Box::new(plugin));
         self
     }
 
-    pub fn with_dyn_plugin(mut self, plugin_name: String, plugin: Box<dyn DynPlugin>) -> Self {
+    pub fn with_dyn_plugin(
+        mut self,
+        plugin_name: String,
+        plugin: Box<dyn DynPlugin>,
+    ) -> PluggableRouterServiceBuilder {
         self.plugins.insert(plugin_name, plugin);
         self
     }
@@ -269,7 +276,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
         name: &str,
         service: S,
-    ) -> Self
+    ) -> PluggableRouterServiceBuilder
     where
         S: Clone,
         <S as Service<SubgraphRequest>>::Future: Send,
@@ -279,7 +286,7 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_naive_introspection(mut self) -> Self {
+    pub fn with_naive_introspection(mut self) -> PluggableRouterServiceBuilder {
         self.introspection = true;
         self
     }
@@ -359,34 +366,6 @@ impl PluggableRouterServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        /*
-        // Router service takes a crate::Request and outputs a crate::Response
-        // NB: Cannot use .buffer() here or the code won't compile...
-        let router_service = Buffer::new(
-            ServiceBuilder::new()
-                .layer(APQLayer::default())
-                .layer(EnsureQueryPresence::default())
-                .service(
-                    RouterService::builder()
-                        .query_planner_service(query_planner_service)
-                        .query_execution_service(execution_service)
-                        .schema(self.schema)
-                        .build(), //.boxed()
-                                  self.plugins.iter_mut().rev().fold(
-                                      RouterService::builder()
-                                          .query_planner_service(query_planner_service)
-                                          .query_execution_service(execution_service)
-                                          .schema(self.schema)
-                                          .build()
-                                          .boxed(),
-                                      |acc, (_, e)| e.router_service(acc),
-                                  ),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
-
-        Ok(router_service.boxed_clone())*/
         Ok(MakeARouter {
             query_planner_service,
             execution_service,
