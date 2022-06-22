@@ -553,6 +553,7 @@ impl Query {
                     known_type: _,
                 } => {
                     // top level objects will not provide a __typename field
+                    //FIXME
                     match (type_condition.as_str(), operation.kind) {
                         ("Query", OperationKind::Query) | ("Mutation", OperationKind::Mutation) => {
                         }
@@ -564,18 +565,60 @@ impl Query {
                 }
                 Selection::FragmentSpread {
                     name,
-                    known_type: _,
+                    known_type,
                     skip: _,
                     include: _,
                 } => {
+                    println!(
+                        "trying fragment '{}' at root with condition {:?}",
+                        name, known_type
+                    );
+
                     if let Some(fragment) = self.fragments.get(name) {
+                        println!(
+                            "operation kind: {:?}, RootOpName: {}, fragment type condition: {}",
+                            operation.kind,
+                            schema.root_operation_name(operation.kind),
+                            fragment.type_condition,
+                        );
+
                         // top level objects will not provide a __typename field
-                        match (fragment.type_condition.as_str(), operation.kind) {
+                        /*match (fragment.type_condition.as_str(), operation.kind) {
                             ("Query", OperationKind::Query)
                             | ("Mutation", OperationKind::Mutation) => {}
                             _ => {
                                 return Err(InvalidValue);
                             }
+                        }*/
+                        /*
+                        let is_apply = if let Some(input_type) =
+                            input.get(TYPENAME).and_then(|val| val.as_str())
+                        {
+                            //First determine if fragment is for interface
+                            //Otherwise we assume concrete type is expected
+                            if let Some(interface) = known_type
+                                .as_deref()
+                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            {
+                                println!("is_apply[{}]", line!());
+
+                                //Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), input_type)
+                            } else {
+                                println!("is_apply[{}]", line!());
+
+                                input_type == fragment.type_condition.as_str()
+                            }
+                        } else {
+                            println!("is_apply[{}]", line!());
+
+                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                        };
+                        */
+                        if fragment.type_condition.as_str()
+                            != schema.root_operation_name(operation.kind)
+                        {
+                            return Err(InvalidValue);
                         }
                         self.apply_selection_set(
                             &fragment.selection_set,
@@ -735,6 +778,7 @@ impl Operation {
     }
 }
 
+/*
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum OperationType {
     Query,
@@ -743,6 +787,24 @@ enum OperationType {
 }
 
 impl From<ast::OperationType> for OperationType {
+    // Spec: https://spec.graphql.org/draft/#OperationType
+    fn from(operation_type: ast::OperationType) -> Self {
+        if operation_type.query_token().is_some() {
+            Self::Query
+        } else if operation_type.mutation_token().is_some() {
+            Self::Mutation
+        } else if operation_type.subscription_token().is_some() {
+            Self::Subscription
+        } else {
+            unreachable!(
+                "either the `query` token is provided, either the `mutation` token, \
+                either the `subscription` token; qed"
+            )
+        }
+    }
+}*/
+
+impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
     fn from(operation_type: ast::OperationType) -> Self {
         if operation_type.query_token().is_some() {

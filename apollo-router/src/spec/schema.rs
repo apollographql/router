@@ -3,6 +3,7 @@
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::json_ext::{Object, Value};
+use crate::query_planner::OperationKind;
 use crate::*;
 use apollo_parser::ast;
 use http::Uri;
@@ -25,6 +26,7 @@ pub struct Schema {
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
     pub schema_id: Option<String>,
+    root_operations: HashMap<OperationKind, String>,
 }
 
 impl std::str::FromStr for Schema {
@@ -215,6 +217,38 @@ impl std::str::FromStr for Schema {
                             }
                         }
                     }
+                    // Spec: https://spec.graphql.org/draft/#SchemaDefinition
+                    ast::Definition::SchemaDefinition(schema) => {
+                        println!("parsing schema extension");
+                        for operation in schema.root_operation_type_definitions() {
+                            println!(
+                                "parsing operation: {:?} -> {:?}",
+                                operation.operation_type(),
+                                operation.named_type().map(|n| {
+                                    n.name()
+                                        .expect("the node Name is not optional in the spec; qed")
+                                        .text()
+                                        .to_string()
+                                })
+                            );
+                            match (
+                                operation.operation_type(),
+                                operation.named_type().map(|n| {
+                                    n.name()
+                                        .expect("the node Name is not optional in the spec; qed")
+                                        .text()
+                                        .to_string()
+                                }),
+                            ) {
+                                (Some(optype), Some(name)) => {
+                                    root_operations.insert(optype.into(), name);
+                                }
+                                _ => {
+                                    return Err(SchemaError::Api(format!("a field on the schema definition should have a name and operation type")));
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -396,6 +430,7 @@ impl std::str::FromStr for Schema {
                 enums,
                 api_schema: None,
                 schema_id,
+                root_operations,
             })
         }
     }
@@ -441,6 +476,17 @@ impl Schema {
             schema,
             include_str!("introspection_types.graphql")
         )
+    }
+
+    pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
+        self.root_operations
+            .get(&kind)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| match kind {
+                OperationKind::Query => "Query",
+                OperationKind::Mutation => "Mutation",
+                OperationKind::Subscription => "SubScription",
+            })
     }
 }
 

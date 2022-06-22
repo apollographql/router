@@ -317,7 +317,7 @@ pub(crate) mod fetch {
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
-    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
         Query,
@@ -332,6 +332,12 @@ pub(crate) mod fetch {
                 OperationKind::Mutation => write!(f, "Mutation"),
                 OperationKind::Subscription => write!(f, "Subscription"),
             }
+        }
+    }
+
+    impl Default for OperationKind {
+        fn default() -> Self {
+            OperationKind::Query
         }
     }
 
