@@ -4574,6 +4574,78 @@ mod tests {
     }
 
     #[test]
+    fn fragment_on_interface_on_query() {
+        let schema = "schema {
+            query: MyQueryObject
+        }
+
+        type MyQueryObject implements Interface {
+            object: MyObject
+            other: String
+        }
+
+        type MyObject {
+            data: String
+            foo: String
+        }
+
+        interface Interface {
+            object: MyObject
+        }";
+
+        let schema = schema.parse::<Schema>().expect("could not parse schema");
+        let api_schema = schema.api_schema();
+        let query = Query::parse(query, &schema).expect("could not parse query");
+        println!("parsed query:\n{:#?}", query);
+        let mut response = Response::builder()
+            .data(json! {{
+                "object": {
+                    "__typename": "MyObject",
+                    "data": "a",
+                    "foo": "bar"
+                }
+            }})
+            .build();
+
+        query.format_response(&mut response, None, Default::default(), api_schema);
+        assert_eq_and_ordered!(
+            response.data.as_ref().unwrap(),
+            &json! {{
+                "object": {
+                    "__typename": "MyObject",
+                    "data": "a"
+                }
+            }}
+        );
+
+        /*assert_format_response_fed2!(
+            schema,
+            "{
+                ...FragmentTest
+            }
+            fragment FragmentTest on Interface {
+                object {
+                    data
+                }
+            }",
+            json! {{
+                "object": {
+                    "__typename": "MyObject",
+                    "data": "a",
+                    "foo": "bar"
+                }
+            }},
+            None,
+            json! {{
+                "object": {
+                    "__typename": "MyObject",
+                    "data": "a"
+                }
+            }},
+        );*/
+    }
+
+    #[test]
     fn parse_introspection_query() {
         let schema = "type Query {
             foo: String
