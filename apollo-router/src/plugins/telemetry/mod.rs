@@ -230,7 +230,7 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,

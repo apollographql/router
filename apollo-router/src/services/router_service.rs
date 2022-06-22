@@ -455,7 +455,7 @@ impl MakeARouter {
             .layer(APQLayer::default())
             .layer(EnsureQueryPresence::default())
             .service(
-                /*self.plugins.iter_mut().rev().fold(
+                self.plugins.iter().rev().fold(
                     RouterService::builder()
                         .query_planner_service(self.query_planner_service.clone())
                         .query_execution_service(self.execution_service.clone())
@@ -463,12 +463,7 @@ impl MakeARouter {
                         .build()
                         .boxed(),
                     |acc, (_, e)| e.router_service(acc),
-                ),*/
-                RouterService::builder()
-                    .query_planner_service(self.query_planner_service.clone())
-                    .query_execution_service(self.execution_service.clone())
-                    .schema(self.schema.clone())
-                    .build(),
+                ),
             )
     }
 

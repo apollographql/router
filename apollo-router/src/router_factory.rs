@@ -80,14 +80,12 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         }
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
+        let mut plugins = create_plugins(&configuration, &schema).await?;
 
-        /*for (plugin_name, plugin) in plugins {
+        for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        let (pluggable_router_service, mut plugins) = builder.build().await?;
-        */
         let pluggable_router_service = builder.build().await?;
 
         /*let service = ServiceBuilder::new().buffered().service(

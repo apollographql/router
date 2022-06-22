@@ -4,7 +4,6 @@
 
 use apollo_router::http_compat;
 use apollo_router::json_ext::{Object, ValueExt};
-use apollo_router::new_service::NewService;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugins::csrf;
 use apollo_router::plugins::telemetry::config::Tracing;
@@ -24,7 +23,6 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use tower::buffer::Buffer;
 use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -635,9 +633,8 @@ async fn setup_router_and_registry() -> (
     .unwrap();
     let csrf_plugin = csrf::Csrf::new(Default::default()).await.unwrap();
     builder = builder
-    //    .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
-    //    .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
-    ;
+        .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
+        .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
     for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

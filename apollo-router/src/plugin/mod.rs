@@ -108,7 +108,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,
@@ -184,7 +184,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,
@@ -239,7 +239,7 @@ where
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,

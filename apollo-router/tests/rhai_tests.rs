@@ -35,8 +35,8 @@ async fn all_rhai_callbacks_are_invoked() {
             .unwrap(),
     );
 
-    let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-    //.with_dyn_plugin("experimental.rhai".to_string(), dyn_plugin);
+    let mut builder = PluggableRouterServiceBuilder::new(schema.clone())
+        .with_dyn_plugin("experimental.rhai".to_string(), dyn_plugin);
 
     let subgraphs = schema.subgraphs();
     for (name, _url) in subgraphs {
