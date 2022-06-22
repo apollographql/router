@@ -174,7 +174,7 @@ mod test {
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
         let schema: Arc<Schema> = Arc::new(
-            include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
+            include_str!("../../../benchmarks/benches/fixtures/supergraph.graphql")
                 .parse()
                 .unwrap(),
         );

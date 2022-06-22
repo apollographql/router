@@ -60,7 +60,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         )))
         .git_ref(version)
         .repository_template_path(
-            PathBuf::from("apollo-router-scaffold")
+            PathBuf::from("scaffold")
                 .join("templates")
                 .join("plugin"),
         )
