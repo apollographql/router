@@ -522,16 +522,18 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = service
-                .oneshot(subgraph_request)
-                .instrument(tracing::trace_span!("subfetch_stream"))
-                .await
-                .map_err(|e| FetchError::SubrequestHttpError {
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                })?
-                .response
-                .into_parts();
+            let (_parts, response) = http::Response::from(
+                service
+                    .oneshot(subgraph_request)
+                    .instrument(tracing::trace_span!("subfetch_stream"))
+                    .await
+                    .map_err(|e| FetchError::SubrequestHttpError {
+                        service: service_name.to_string(),
+                        reason: e.to_string(),
+                    })?
+                    .response,
+            )
+            .into_parts();
 
             super::log::trace_subfetch(service_name, operation, &variables, &response);
 
@@ -724,7 +726,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_compat::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -775,7 +781,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_compat::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -820,7 +830,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_compat::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
