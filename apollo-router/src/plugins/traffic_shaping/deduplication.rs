@@ -2,7 +2,8 @@
 //!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
-use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
+use crate::query_planner::fetch::OperationKind;
+use crate::{http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tokio::sync::{
@@ -12,7 +13,7 @@ use tokio::sync::{
 use tower::{BoxError, Layer, ServiceExt};
 
 #[derive(Default)]
-pub struct QueryDeduplicationLayer;
+pub(crate) struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer
 where
@@ -28,7 +29,7 @@ where
 type WaitMap =
     Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
 
-pub struct QueryDeduplicationService<S> {
+pub(crate) struct QueryDeduplicationService<S> {
     service: S,
     wait_map: WaitMap,
 }

@@ -1,10 +1,11 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::configuration::{Configuration, ListenAddr};
+use crate::http_compat;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::FederatedServerError;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
 use crate::ResponseBody;
-use crate::{http_compat, Handler};
-use crate::{prelude::*, DEFAULT_BUFFER_SIZE};
 use async_compression::tokio::write::{BrotliDecoder, GzipDecoder, ZlibDecoder};
 use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
@@ -55,16 +56,15 @@ impl AxumHttpServerFactory {
 
 type BufferedService = Buffer<
     BoxService<
-        http_compat::Request<graphql::Request>,
+        http_compat::Request<crate::Request>,
         http_compat::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
-    http_compat::Request<graphql::Request>,
+    http_compat::Request<crate::Request>,
 >;
 
 impl HttpServerFactory for AxumHttpServerFactory {
-    type Future =
-        Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
     fn create<RS>(
         &self,
@@ -75,7 +75,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                http_compat::Request<graphql::Request>,
+                http_compat::Request<crate::Request>,
                 Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
@@ -94,10 +94,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .server
                 .cors
                 .clone()
-                .map(|cors_configuration| cors_configuration.into_layer())
-                .unwrap_or_else(|| Cors::builder().build().into_layer())
+                .unwrap_or_default()
+                .into_layer()
                 .map_err(|e| {
-                    FederatedServerError::ConfigError(
+                    ApolloRouterError::ConfigError(
                         crate::configuration::ConfigurationError::LayerConfiguration {
                             layer: "Cors".to_string(),
                             error: e,
@@ -175,18 +175,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
-                            .map_err(FederatedServerError::ServerCreationError)?,
+                            .map_err(ApolloRouterError::ServerCreationError)?,
                     ),
                     #[cfg(unix)]
                     ListenAddr::UnixSocket(path) => Listener::Unix(
-                        UnixListener::bind(path)
-                            .map_err(FederatedServerError::ServerCreationError)?,
+                        UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
                     ),
                 }
             };
             let actual_listen_address = listener
                 .local_addr()
-                .map_err(FederatedServerError::ServerCreationError)?;
+                .map_err(ApolloRouterError::ServerCreationError)?;
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
@@ -364,7 +363,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             // Spawn the server into a runtime
             let server_future = tokio::task::spawn(server)
-                .map_err(|_| FederatedServerError::HttpServerLifecycleError)
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
@@ -440,7 +439,7 @@ async fn handle_get(
     if let Some(request) = http_request
         .uri()
         .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+        .and_then(|q| crate::Request::from_urlencoded_query(q.to_string()).ok())
     {
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
@@ -456,7 +455,7 @@ async fn handle_get(
 async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
-    Json(request): Json<graphql::Request>,
+    Json(request): Json<crate::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
@@ -484,7 +483,7 @@ async fn health_check() -> impl IntoResponse {
 
 async fn run_graphql_request(
     service: BufferedService,
-    http_request: Request<graphql::Request>,
+    http_request: Request<crate::Request>,
 ) -> impl IntoResponse {
     match service.ready_oneshot().await {
         Ok(mut service) => {
@@ -720,7 +719,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_compat::Response<BoxStream<'static, ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<crate::Request>) -> Result<http_compat::Response<BoxStream<'static, ResponseBody>>, BoxError>;
         }
     }
 
@@ -746,11 +745,11 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .cors(Some(
+                                .cors(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])
                                         .build(),
-                                ))
+                                )
                                 .build(),
                         )
                         .build(),
@@ -830,11 +829,11 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                                .cors(Some(
+                                .cors(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])
                                         .build(),
-                                ))
+                                )
                                 .build(),
                         )
                         .build(),
@@ -849,7 +848,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_home_page() -> Result<(), FederatedServerError> {
+    async fn it_display_home_page() -> Result<(), ApolloRouterError> {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
@@ -881,8 +880,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_compress_response_body() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+    async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
@@ -923,7 +922,7 @@ mod tests {
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
-        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+        let graphql_resp: crate::Response = serde_json::from_slice(&response).unwrap();
         assert_eq!(graphql_resp, expected_response);
 
         // Get query
@@ -952,7 +951,7 @@ mod tests {
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
-        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+        let graphql_resp: crate::Response = serde_json::from_slice(&response).unwrap();
         assert_eq!(graphql_resp, expected_response);
 
         server.shutdown().await?;
@@ -960,7 +959,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_decompress_request_body() -> Result<(), FederatedServerError> {
+    async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         let original_body = json!({ "query": "query" });
         let mut encoder = GzipEncoder::new(Vec::new());
         encoder
@@ -969,7 +968,7 @@ mod tests {
             .unwrap();
         encoder.shutdown().await.unwrap();
         let compressed_body = encoder.into_inner();
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
@@ -1005,7 +1004,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1014,7 +1013,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_request() -> Result<(), FederatedServerError> {
+    async fn malformed_request() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
@@ -1029,13 +1028,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response() -> Result<(), FederatedServerError> {
+    async fn response() -> Result<(), ApolloRouterError> {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
         // {
         // let _guard = root_span.enter();
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1066,7 +1065,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1086,7 +1085,7 @@ mod tests {
         );
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1100,7 +1099,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bad_response() -> Result<(), FederatedServerError> {
+    async fn bad_response() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
         let url = format!("{}/test", server.listen_address());
@@ -1136,8 +1135,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_endpoint() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+    async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1158,11 +1157,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/graphql"))
                     .build(),
             )
@@ -1181,7 +1180,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1196,7 +1195,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1205,8 +1204,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_prefix_endpoint() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+    async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError> {
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1227,11 +1226,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/:my_prefix/graphql"))
                     .build(),
             )
@@ -1250,7 +1249,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1265,7 +1264,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1274,8 +1273,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_with_custom_endpoint_wildcard() -> Result<(), FederatedServerError> {
-        let expected_response = graphql::Response::builder()
+    async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterError> {
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1296,11 +1295,11 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )
@@ -1321,7 +1320,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<graphql::Response>().await.unwrap(),
+                response.json::<crate::Response>().await.unwrap(),
                 expected_response,
             );
 
@@ -1336,7 +1335,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<graphql::Response>().await.unwrap(),
+                response.json::<crate::Response>().await.unwrap(),
                 expected_response,
             );
         }
@@ -1346,8 +1345,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_extracts_query_and_operation_name_on_get_requests(
-    ) -> Result<(), FederatedServerError> {
+    async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), ApolloRouterError>
+    {
         // TODO re-enable after the release
         // test_span::init();
         // let root_span = info_span!("root");
@@ -1358,7 +1357,7 @@ mod tests {
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1397,7 +1396,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1411,14 +1410,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_extracts_query_and_operation_name_on_post_requests(
-    ) -> Result<(), FederatedServerError> {
+    async fn it_extracts_query_and_operation_name_on_post_requests() -> Result<(), ApolloRouterError>
+    {
         let query = "query";
         let expected_query = query;
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1457,7 +1456,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            response.json::<crate::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1465,13 +1464,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_failure() -> Result<(), FederatedServerError> {
+    async fn response_failure() -> Result<(), ApolloRouterError> {
         let mut expectations = MockRouterService::new();
         expectations
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                let example_response = graphql::FetchError::SubrequestHttpError {
+                let example_response = crate::error::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
@@ -1497,13 +1496,13 @@ mod tests {
             .send()
             .await
             .unwrap()
-            .json::<graphql::Response>()
+            .json::<crate::Response>()
             .await
             .unwrap();
 
         assert_eq!(
             response,
-            graphql::FetchError::SubrequestHttpError {
+            crate::error::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
@@ -1513,7 +1512,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cors_preflight() -> Result<(), FederatedServerError> {
+    async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
@@ -1559,7 +1558,7 @@ mod tests {
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let expected_response = graphql::Response::builder()
+        let expected_response = crate::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1588,7 +1587,7 @@ mod tests {
         .await;
 
         assert_eq!(
-            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            serde_json::from_slice::<crate::Response>(&output).unwrap(),
             expected_response,
         );
 
@@ -1597,7 +1596,7 @@ mod tests {
             send_to_unix_socket(server.listen_address(), Method::GET, r#"query=query"#).await;
 
         assert_eq!(
-            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            serde_json::from_slice::<crate::Response>(&output).unwrap(),
             expected_response,
         );
 
@@ -1707,7 +1706,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_send_bad_content_type() -> Result<(), FederatedServerError> {
+    async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
         let query = "query";
         let operation_name = "operationName";
 
@@ -1728,17 +1727,17 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_doesnt_display_disabled_home_page() -> Result<(), FederatedServerError> {
+    async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .landing_page(false)
                     .build(),
             )
@@ -1757,7 +1756,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_answers_to_custom_endpoint() -> Result<(), FederatedServerError> {
+    async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let plugin_handler = Handler::new(
             service_fn(|req: http_compat::Request<Bytes>| async move {
@@ -1784,11 +1783,11 @@ Content-Type: application/json\r
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Some(
+                    .cors(
                         Cors::builder()
                             .origins(vec!["http://studio".to_string()])
                             .build(),
-                    ))
+                    )
                     .build(),
             )
             .build();
@@ -1839,7 +1838,7 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_checks_the_shape_of_router_request() -> Result<(), FederatedServerError> {
+    async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError> {
         let mut expectations = MockRouterService::new();
         expectations
             .expect_service_call()

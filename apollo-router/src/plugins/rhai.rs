@@ -1,9 +1,14 @@
 //! Customization via Rhai.
 
 use crate::{
-    http_compat, register_plugin, Context, Error, ExecutionRequest, ExecutionResponse, Object,
-    Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
-    RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
+    error::Error,
+    http_compat,
+    json_ext::{Object, Value},
+    layers::ServiceBuilderExt,
+    plugin::Plugin,
+    register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
+    QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest, RouterResponse,
+    SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};
@@ -642,7 +647,7 @@ macro_rules! gen_map_request {
                             status: StatusCode,
                         ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![crate::Error {
+                                .errors(vec![Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -697,7 +702,7 @@ macro_rules! gen_map_response {
                             status: StatusCode,
                         ) -> [<$base:camel Response>] {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![crate::Error {
+                                .errors(vec![Error {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -955,7 +960,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = RouterResponse::error_builder()
-                                    .errors(vec![crate::Error {
+                                    .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1024,7 +1029,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = ExecutionResponse::error_builder()
-                                    .errors(vec![crate::Error {
+                                    .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1101,7 +1106,7 @@ impl ServiceStep {
                                 ) -> RouterResponse<BoxStream<'static, ResponseBody>>
                                 {
                                     let res = RouterResponse::error_builder()
-                                        .errors(vec![crate::Error {
+                                        .errors(vec![Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1200,7 +1205,7 @@ impl ServiceStep {
                                 ) -> ExecutionResponse<BoxStream<'static, Response>>
                                 {
                                     let res = ExecutionResponse::error_builder()
-                                        .errors(vec![crate::Error {
+                                        .errors(vec![Error {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1444,12 +1449,10 @@ impl Rhai {
             .register_get_result("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
             })
-            /* XXX CANNOT DO BECAUSE variables is Arc
             .register_set_result("variables", |x: &mut Request, om: Map| {
                 x.variables = from_dynamic(&om.into())?;
                 Ok(())
             })
-            */
             // Request.extensions
             .register_get_result("extensions", |x: &mut Request| {
                 to_dynamic(x.extensions.clone())
@@ -1735,10 +1738,11 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    use crate::plugin::DynPlugin;
     use crate::{
         http_compat,
-        plugin::utils::test::{MockExecutionService, MockRouterService},
-        Context, DynPlugin, ResponseBody, RouterRequest, RouterResponse,
+        plugin::test::{MockExecutionService, MockRouterService},
+        Context, ResponseBody, RouterRequest, RouterResponse,
     };
     use serde_json::Value;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -1758,7 +1762,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
@@ -1818,7 +1822,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(

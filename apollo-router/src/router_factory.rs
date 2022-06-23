@@ -1,11 +1,13 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
-use crate::prelude::*;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
+use crate::SubgraphService;
 use crate::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
+    PluggableRouterServiceBuilder, ResponseBody, Schema,
 };
-use crate::{DynPlugin, SubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -22,9 +24,9 @@ use tower_service::Service;
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
-            Request<graphql::Request>,
+            Request<crate::Request>,
             Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
@@ -37,26 +39,26 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterService>,
     ) -> Result<(Self::RouterService, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default)]
-pub struct YamlRouterServiceFactory;
+pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
-            Request<graphql::Request>,
+            Request<crate::Request>,
             Response<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
-        Request<graphql::Request>,
+        Request<crate::Request>,
     >;
-    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+    type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
 
     async fn create<'a>(
         &'a mut self,
@@ -108,7 +110,7 @@ async fn create_plugins(
     schema: &Schema,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugins();
+    let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
@@ -204,10 +206,11 @@ fn visit(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod test {
     use crate::configuration::Configuration;
+    use crate::plugin::Plugin;
+    use crate::register_plugin;
     use crate::router_factory::YamlRouterServiceFactory;
     use crate::router_factory::{inject_schema_id, RouterServiceFactory};
     use crate::Schema;
-    use crate::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;

@@ -164,7 +164,7 @@ impl<T> Request<T>
 where
     T: Default,
 {
-    // Only used for plugin::utils and tests
+    // Only used for tests
     pub fn mock() -> Request<T> {
         Request {
             inner: http::Request::default(),

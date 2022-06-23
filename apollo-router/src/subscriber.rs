@@ -60,7 +60,7 @@
 //!  We will need to validate that this remains true as the various moving
 //!  parts change (upgrade) over time.
 use crate::reload::{Handle, Layer as ReloadLayer};
-use crate::FederatedServerError;
+use crate::router::ApolloRouterError;
 use once_cell::sync::OnceCell;
 use std::any::TypeId;
 use tracing::span::{Attributes, Record};
@@ -226,7 +226,7 @@ pub fn is_global_subscriber_set() -> bool {
 ///
 /// The provided subscriber is composed with a reloadable layer so that the default
 /// global subscriber is now reloadable.
-pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
+pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), ApolloRouterError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {
             // First create a boxed BaseLayer
@@ -247,21 +247,21 @@ pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), Federat
             // Return our handle to store in OnceCell
             Ok(handle)
         })
-        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
+        .map_err(ApolloRouterError::SetGlobalSubscriberError)?;
     Ok(())
 }
 
 /// Replace the tracing layer.
 ///
 /// Reload the current tracing layer with new_layer.
-pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
+pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), ApolloRouterError> {
     match RELOAD_HANDLE.get() {
         Some(hdl) => {
             hdl.reload(new_layer)
-                .map_err(FederatedServerError::ReloadTracingLayerError)?;
+                .map_err(ApolloRouterError::ReloadTracingLayerError)?;
         }
         None => {
-            return Err(FederatedServerError::NoReloadTracingHandleError);
+            return Err(ApolloRouterError::NoReloadTracingHandleError);
         }
     }
     Ok(())

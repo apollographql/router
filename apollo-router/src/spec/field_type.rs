@@ -1,3 +1,4 @@
+use crate::json_ext::{Value, ValueExt};
 use crate::*;
 use apollo_parser::ast;
 use displaydoc::Display;
@@ -7,7 +8,7 @@ pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
-pub enum FieldType {
+pub(crate) enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
     /// Named type {0}_
@@ -102,7 +103,7 @@ impl FieldType {
     /// return the name of the type on which selections happen
     ///
     /// Example if we get the field `list: [User!]!`, it will return "User"
-    pub fn inner_type_name(&self) -> Option<&str> {
+    pub(crate) fn inner_type_name(&self) -> Option<&str> {
         match self {
             FieldType::Named(name) | FieldType::Introspection(name) => Some(name.as_str()),
             FieldType::List(inner) | FieldType::NonNull(inner) => inner.inner_type_name(),
@@ -114,7 +115,7 @@ impl FieldType {
         }
     }
 
-    pub fn is_builtin_scalar(&self) -> bool {
+    pub(crate) fn is_builtin_scalar(&self) -> bool {
         match self {
             FieldType::Named(_)
             | FieldType::Introspection(_)
@@ -128,7 +129,7 @@ impl FieldType {
         }
     }
 
-    pub fn is_non_null(&self) -> bool {
+    pub(crate) fn is_non_null(&self) -> bool {
         matches!(self, FieldType::NonNull(_))
     }
 }

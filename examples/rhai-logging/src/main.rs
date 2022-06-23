@@ -13,15 +13,18 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use apollo_router::services::ResponseBody;
+    use apollo_router::services::{RouterRequest, RouterResponse};
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::test::MockRouterService::new();
+        let mut mock = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -68,9 +71,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) =
-            service_response.next_response().await.unwrap()
-        {
+        if let ResponseBody::GraphQL(response) = service_response.next_response().await.unwrap() {
             assert!(response.errors.is_empty());
             assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         } else {

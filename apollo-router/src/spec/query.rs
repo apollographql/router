@@ -2,7 +2,10 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::{fetch::OperationKind, prelude::graphql::*};
+use crate::error::FetchError;
+use crate::json_ext::{Object, Value};
+use crate::query_planner::fetch::OperationKind;
+use crate::*;
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde_json_bytes::ByteString;
@@ -12,7 +15,7 @@ use tracing::level_filters::LevelFilter;
 const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative)]
+#[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
     string: String,
@@ -806,6 +809,7 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json_ext::ValueExt;
     use serde_json_bytes::json;
     use test_log::test;
 
@@ -1240,7 +1244,7 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
-                .query(Some($query.to_string()))
+                .query($query.to_string())
                 .build();
             let query = Query::parse(
                 request

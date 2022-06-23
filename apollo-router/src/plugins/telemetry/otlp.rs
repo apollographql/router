@@ -157,13 +157,13 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Secret {
+pub(crate) enum Secret {
     Env(String),
     File(PathBuf),
 }
 
 impl Secret {
-    pub fn read(&self) -> Result<String, ConfigurationError> {
+    pub(crate) fn read(&self) -> Result<String, ConfigurationError> {
         match self {
             Secret::Env(s) => std::env::var(s).map_err(ConfigurationError::CannotReadSecretFromEnv),
             Secret::File(path) => {

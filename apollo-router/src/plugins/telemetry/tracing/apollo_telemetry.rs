@@ -54,7 +54,7 @@ pub(crate) fn default_collector() -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct SpaceportConfig {
+pub(crate) struct SpaceportConfig {
     #[serde(default = "default_collector")]
     pub(crate) collector: String,
 }
@@ -62,7 +62,7 @@ pub struct SpaceportConfig {
 #[allow(dead_code)]
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
-pub struct StudioGraph {
+pub(crate) struct StudioGraph {
     #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) reference: String,
 
@@ -91,14 +91,14 @@ impl Default for SpaceportConfig {
 }
 /// Pipeline builder
 #[derive(Debug)]
-pub struct PipelineBuilder {
+pub(crate) struct PipelineBuilder {
     graph_config: Option<StudioGraph>,
     spaceport_config: Option<SpaceportConfig>,
     trace_config: Option<sdk::trace::Config>,
 }
 
 /// Create a new apollo telemetry exporter pipeline builder.
-pub fn new_pipeline() -> PipelineBuilder {
+pub(crate) fn new_pipeline() -> PipelineBuilder {
     PipelineBuilder::default()
 }
 
@@ -120,25 +120,25 @@ impl PipelineBuilder {
 
     /// Assign the SDK trace configuration.
     #[allow(dead_code)]
-    pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
+    pub(crate) fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
         self.trace_config = Some(config);
         self
     }
 
     /// Assign graph identification configuration
-    pub fn with_graph_config(mut self, config: &Option<StudioGraph>) -> Self {
+    pub(crate) fn with_graph_config(mut self, config: &Option<StudioGraph>) -> Self {
         self.graph_config = config.clone();
         self
     }
 
     /// Assign spaceport reporting configuration
-    pub fn with_spaceport_config(mut self, config: &Option<SpaceportConfig>) -> Self {
+    pub(crate) fn with_spaceport_config(mut self, config: &Option<SpaceportConfig>) -> Self {
         self.spaceport_config = config.clone();
         self
     }
 
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
-    pub fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
+    pub(crate) fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
         let exporter = self.build_exporter()?;
 
         // Users can override the default batch and queue sizes, but they can't
@@ -218,7 +218,7 @@ impl PipelineBuilder {
     // WHEN TRYING TO EXPORT...
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     #[allow(dead_code)]
-    pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
+    pub(crate) fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
         let exporter = self.build_exporter()?;
 
         let mut provider_builder =
@@ -239,7 +239,7 @@ impl PipelineBuilder {
     }
 
     /// Create a client to talk to our spaceport and return an exporter.
-    pub fn build_exporter(&self) -> Result<Exporter, ApolloError> {
+    pub(crate) fn build_exporter(&self) -> Result<Exporter, ApolloError> {
         let collector = match self.spaceport_config.clone() {
             Some(cfg) => cfg.collector,
             None => DEFAULT_SERVER_URL.to_string(),
@@ -259,7 +259,7 @@ impl PipelineBuilder {
 /// [`Reporter`]: apollo_spaceport::Reporter
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct Exporter {
+pub(crate) struct Exporter {
     collector: String,
     graph: Option<StudioGraph>,
     reporter: tokio::sync::OnceCell<Reporter>,
@@ -268,7 +268,7 @@ pub struct Exporter {
 
 impl Exporter {
     /// Create a new apollo telemetry `Exporter`.
-    pub fn new(collector: String, graph: Option<StudioGraph>) -> Self {
+    pub(crate) fn new(collector: String, graph: Option<StudioGraph>) -> Self {
         Self {
             collector,
             graph,
@@ -281,7 +281,7 @@ impl Exporter {
 /// Apollo Telemetry exporter's error
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct ApolloError(#[from] apollo_spaceport::ReporterError);
+pub(crate) struct ApolloError(#[from] apollo_spaceport::ReporterError);
 
 impl From<std::io::Error> for ApolloError {
     fn from(error: std::io::Error) -> Self {

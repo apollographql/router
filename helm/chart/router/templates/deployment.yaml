@@ -58,14 +58,16 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef }}
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
+            {{- if .Values.managedFederation.apiKey }}
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ template "router.managedFederation.apiSecretName" . }}
                   key: managedFederationApiKey
                   optional: true
+            {{- end }}
             {{- if not (empty .Values.managedFederation.graphRef) }}
             - name: APOLLO_GRAPH_REF
               value: {{ .Values.managedFederation.graphRef }}
@@ -74,6 +76,7 @@ spec:
             {{- tpl (toYaml .Values.extraEnvVars) $ | nindent 12 }}
             {{- end }}
           {{- end }}
+          {{- if or .Values.extraEnvVarsCM .Values.extraEnvVarsSecret }}
           envFrom:
             {{- if .Values.extraEnvVarsCM }}
             - configMapRef:
@@ -83,6 +86,7 @@ spec:
             - secretRef:
                 name: {{ .Values.extraEnvVarsSecret }}
             {{- end }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}
@@ -99,10 +103,12 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
           volumeMounts:
+            {{- if .Values.router.configuration }}
             - name: router-configuration
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
               readOnly: true
+            {{- end }}
           {{- if .Values.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
           {{- end }}
