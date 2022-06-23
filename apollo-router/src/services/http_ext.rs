@@ -323,7 +323,7 @@ impl IntoResponse for Response<Bytes> {
 
 #[cfg(test)]
 mod test {
-    use crate::http_compat::Request;
+    use crate::http_ext::Request;
     use http::{HeaderValue, Method, Uri};
 
     #[test]

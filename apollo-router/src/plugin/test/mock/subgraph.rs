@@ -50,7 +50,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .expect("Response is serializable; qed");
 
             // Create a compatible Response
-            let compat_response = crate::http_compat::Response {
+            let compat_response = crate::http_ext::Response {
                 inner: http_response,
             };
 

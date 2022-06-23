@@ -2,7 +2,7 @@ use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::{http_compat, ResponseBody};
+use crate::{http_ext, ResponseBody};
 use ::serde::Deserialize;
 use bytes::Bytes;
 use http::header::HeaderName;
@@ -22,7 +22,7 @@ pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 pub(crate) type CustomEndpoint =
-    BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
+    BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

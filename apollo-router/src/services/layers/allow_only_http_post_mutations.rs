@@ -60,7 +60,7 @@ where
 mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::error::Error;
-    use crate::http_compat;
+    use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
 
@@ -218,7 +218,7 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
-        let request = http_compat::Request::fake_builder()
+        let request = http_ext::Request::fake_builder()
             .method(method)
             .body(crate::Request::default())
             .build()
