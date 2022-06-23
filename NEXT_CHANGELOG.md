@@ -61,7 +61,9 @@ If you’re unsure where a given item needs to be imported from when porting cod
 unfold the listing below and use your browser’s search function (CTRL+F or ⌘+F).
 
 <details>
-<summary>Listing of paths in the 0.9.6 public API</summary>
+<summary>
+  Output of <code>./scripts/public_items.sh</code> for 0.9.6
+</summary>
 <pre>
 apollo_router::ApolloRouter
 apollo_router::Configuration
@@ -188,25 +190,6 @@ apollo_router::subscriber::is_global_subscriber_set
 apollo_router::subscriber::replace_layer
 apollo_router::subscriber::set_global_subscriber
 </pre>
-
-<details>
-<summary>Generated with:</summary>
-<pre>
-cargo +nightly rustdoc --lib -p apollo-router -- \
-  -Z unstable-options --output-format json
-< target/doc/apollo_router.json > target/public.txt jq -r '
-    [
-      .paths[] |
-      select(.kind != "module" and .kind != "variant") |
-      .path |
-      select(.[0] == "apollo_router") |
-      join("::")
-    ] |
-    sort |
-    .[]
-  '
-</pre>
-</details>
 </details>
 
 By [@SimonSapin](https://github.com/SimonSapin)
