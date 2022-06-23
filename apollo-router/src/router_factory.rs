@@ -5,7 +5,7 @@ use crate::plugin::DynPlugin;
 use crate::services::Plugins;
 use crate::SubgraphService;
 use crate::{
-    http_compat::{Request, Response},
+    http_ext::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, Schema,
 };
 use envmnt::types::ExpandOptions;

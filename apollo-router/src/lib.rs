@@ -59,7 +59,7 @@ pub use executable::{main, Executable};
 pub use request::Request;
 pub use response::Response;
 pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-pub use services::http_compat;
+pub use services::http_ext;
 pub use spec::Schema;
 
 // TODO: clean these up and import from relevant modules instead

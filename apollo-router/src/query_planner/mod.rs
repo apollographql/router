@@ -113,7 +113,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
         mut sender: futures::channel::mpsc::Sender<Response>,
     ) {
@@ -152,7 +152,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -372,7 +372,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: http_compat::Request<crate::Request>,
+            request: http_ext::Request<crate::Request>,
             schema: &Schema,
             enable_variable_deduplication: bool,
         ) -> Option<Variables> {
@@ -454,7 +454,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
-            originating_request: http_compat::Request<Request>,
+            originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
@@ -487,7 +487,7 @@ pub(crate) mod fetch {
             let subgraph_request = SubgraphRequest::builder()
                 .originating_request(Arc::new(originating_request))
                 .subgraph_request(
-                    http_compat::Request::builder()
+                    http_ext::Request::builder()
                         .method(http::Method::POST)
                         .uri(
                             schema
@@ -726,7 +726,7 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
                     .build()
@@ -781,7 +781,7 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
                     .build()
@@ -830,7 +830,7 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
                     .build()

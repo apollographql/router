@@ -388,7 +388,7 @@ impl<T> ResultExt<T> for Result<T, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_compat::{Request, Response};
+    use crate::http_ext::{Request, Response};
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use crate::ResponseBody;
