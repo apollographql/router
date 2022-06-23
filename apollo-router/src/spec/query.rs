@@ -568,7 +568,7 @@ impl Query {
                     if let Some(fragment) = self.fragments.get(name) {
                         let operation_type_name = schema.root_operation_name(operation.kind);
                         let is_apply = {
-                            // First determine if the fragment is for zn interface
+                            // First determine if the fragment is for an interface
                             // Otherwise we assume a concrete type is expected
                             if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
                             {
