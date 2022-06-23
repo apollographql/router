@@ -25,6 +25,8 @@ use access_json::{JSONQuery, QueryParseErr};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::Future;
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
@@ -39,6 +41,8 @@ use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::steer::Steer;
 use tower::util::BoxService;
@@ -46,6 +50,10 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 use self::config::Conf;
+use self::metrics::AttributesForwardConf;
+use self::metrics::ContextForward;
+use self::metrics::Forward;
+use self::metrics::Insert;
 use self::metrics::{HeaderForward, MetricsAttributesConf};
 
 pub mod apollo;
@@ -58,6 +66,7 @@ pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
+const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
@@ -71,7 +80,8 @@ pub struct Telemetry {
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: metrics::apollo::Sender,
-    metrics_response_queries: Vec<JSONQuery>,
+    // TODO precompute the queries
+    // metrics_response_queries: Vec<JSONQuery>,
 }
 
 #[derive(Debug)]
@@ -201,8 +211,8 @@ impl Plugin for Telemetry {
         // The trace provider will not be shut down if drop is not called and it will result in a hang.
         // Don't add anything fallible after the tracer provider has been created.
         let tracer_provider = Self::create_tracer_provider(&config)?;
-
-        let metrics_response_queries = Self::create_metrics_queries(&config)?;
+        //
+        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
 
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
@@ -212,7 +222,7 @@ impl Plugin for Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
-            metrics_response_queries,
+            // metrics_response_queries,
         });
 
         // We're safe now for shutdown.
@@ -245,28 +255,34 @@ impl Plugin for Telemetry {
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
-        let config = self.config.clone();
-        let config_map_res = self.config.clone();
+        let config = Arc::new(self.config.clone());
+        let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::router_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
             .map_future_with_context(
                 move |req: &RouterRequest| {
-                    Self::populate_context(&config, req);
+                    Self::populate_context(config.clone(), req);
                     req.context.clone()
                 },
-                move |ctx, fut| {
+                move |ctx: Context, fut| {
                     let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<
+                        let mut result: Result<
                             RouterResponse<BoxStream<'static, ResponseBody>>,
                             BoxError,
                         > = fut.await;
-                        Self::update_metrics(&config, &ctx, metrics, &result);
+                        Self::update_metrics(
+                            config.clone(),
+                            ctx.clone(),
+                            metrics,
+                            &mut result,
+                            start.elapsed(),
+                        );
                         match result {
                             Err(e) => {
                                 if !matches!(sender, Sender::Noop) {
@@ -348,6 +364,72 @@ impl Plugin for Telemetry {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
+        let subgraph_metrics = Arc::new(
+            self.config
+                .metrics
+                .as_ref()
+                .and_then(|m| m.common.as_ref())
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|c| c.subgraph.as_ref())
+                .map(|subgraph_cfg| {
+                    // TODO write a macro
+                    let mut insert = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.insert.clone())
+                        .unwrap_or_default();
+                    insert.extend(
+                        subgraph_cfg
+                            .subgraphs
+                            .get(&name)
+                            .and_then(|s| s.insert.clone())
+                            .unwrap_or_default(),
+                    );
+                    let mut request = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.request.clone())
+                        .unwrap_or_default();
+                    request.extend(
+                        subgraph_cfg
+                            .subgraphs
+                            .get(&name)
+                            .and_then(|s| s.request.clone())
+                            .unwrap_or_default(),
+                    );
+                    let mut response = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.response.clone())
+                        .unwrap_or_default();
+                    response.extend(
+                        subgraph_cfg
+                            .subgraphs
+                            .get(&name)
+                            .and_then(|s| s.response.clone())
+                            .unwrap_or_default(),
+                    );
+                    let mut context = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.context.clone())
+                        .unwrap_or_default();
+                    context.extend(
+                        subgraph_cfg
+                            .subgraphs
+                            .get(&name)
+                            .and_then(|s| s.context.clone())
+                            .unwrap_or_default(),
+                    );
+                    AttributesForwardConf {
+                        insert: (!insert.is_empty()).then(|| insert),
+                        request: (!request.is_empty()).then(|| request),
+                        response: (!response.is_empty()).then(|| response),
+                        context: (!context.is_empty()).then(|| context),
+                    }
+                }),
+        );
+        let subgraph_metrics_conf = subgraph_metrics.clone();
         ServiceBuilder::new()
             .instrument(move |_| {
                 info_span!("subgraph",
@@ -355,38 +437,136 @@ impl Plugin for Telemetry {
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
-            .service(service)
-            .map_future(move |f| {
-                let metrics = metrics.clone();
-                let subgraph_attribute = subgraph_attribute.clone();
-                // Using Instant because it is guaranteed to be monotonically increasing.
-                let now = Instant::now();
-                f.map(move |r| {
-                    match &r {
-                        Ok(response) => {
-                            metrics.http_requests_total.add(
-                                1,
-                                &[
-                                    KeyValue::new(
-                                        "status",
-                                        response.response.status().as_u16().to_string(),
-                                    ),
-                                    subgraph_attribute.clone(),
-                                ],
-                            );
+            .map_future_with_context(
+                move |sub_request: &SubgraphRequest| {
+                    let subgraph_metrics_conf = subgraph_metrics_conf.clone();
+                    let mut attributes = HashMap::new();
+                    if let Some(AttributesForwardConf {
+                        request: Some(from_request),
+                        insert: Some(to_insert),
+                        ..
+                    }) = &*subgraph_metrics_conf
+                    {
+                        // Fill from static
+                        for Insert { name, value } in to_insert {
+                            attributes.insert(name.clone(), value.clone());
                         }
-                        Err(_) => {
-                            metrics
-                                .http_requests_error_total
-                                .add(1, &[subgraph_attribute.clone()]);
+
+                        for from_req in from_request {
+                            match from_req {
+                                Forward::Header(headers_forward) => {
+                                    let headers = sub_request.subgraph_request.headers();
+                                    attributes.extend(headers_forward.iter().fold(
+                                        HashMap::new(),
+                                        |mut acc, current| {
+                                            acc.extend(current.from_headers(headers));
+                                            acc
+                                        },
+                                    ));
+                                }
+                                Forward::Body(body) => {
+                                    todo!()
+                                }
+                            }
                         }
                     }
-                    metrics
-                        .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[subgraph_attribute.clone()]);
-                    r
-                })
-            })
+                    sub_request
+                        .context
+                        .insert(SUBGRAPH_ATTRIBUTES, attributes)
+                        .unwrap();
+
+                    sub_request.context.clone()
+                },
+                move |context: Context,
+                      f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
+                    let metrics = metrics.clone();
+                    let subgraph_attribute = subgraph_attribute.clone();
+                    let subgraph_metrics = subgraph_metrics.clone();
+                    // Using Instant because it is guaranteed to be monotonically increasing.
+                    let now = Instant::now();
+                    f.map(move |r: Result<SubgraphResponse, BoxError>| {
+                        let subgraph_metrics_conf = subgraph_metrics.clone();
+                        let mut metric_attrs = context
+                            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+                            .ok()
+                            .flatten()
+                            .map(|attrs| {
+                                attrs
+                                    .into_iter()
+                                    .map(|(attr_name, attr_value)| {
+                                        KeyValue::new(attr_name, attr_value)
+                                    })
+                                    .collect::<Vec<KeyValue>>()
+                            })
+                            .unwrap_or_default();
+                        metric_attrs.push(subgraph_attribute.clone());
+                        // Fill attributes from context
+                        if let Some(AttributesForwardConf {
+                            context: Some(from_context),
+                            ..
+                        }) = &*subgraph_metrics_conf
+                        {
+                            for from_ctx in from_context {
+                                metric_attrs.extend(
+                                    from_ctx
+                                        .from_context(&context)
+                                        .into_iter()
+                                        .map(|(k, v)| KeyValue::new(k, v)),
+                                );
+                            }
+                        }
+
+                        match &r {
+                            Ok(response) => {
+                                metric_attrs.push(KeyValue::new(
+                                    "status",
+                                    response.response.status().as_u16().to_string(),
+                                ));
+
+                                // Fill attributes from response
+                                if let Some(AttributesForwardConf {
+                                    response: Some(from_response),
+                                    ..
+                                }) = &*subgraph_metrics_conf
+                                {
+                                    for from_resp in from_response {
+                                        match from_resp {
+                                            Forward::Header(headers_forward) => {
+                                                let headers = response.response.headers();
+                                                metric_attrs.extend(
+                                                    headers_forward
+                                                        .iter()
+                                                        .fold(HashMap::new(), |mut acc, current| {
+                                                            acc.extend(
+                                                                current.from_headers(headers),
+                                                            );
+                                                            acc
+                                                        })
+                                                        .into_iter()
+                                                        .map(|(k, v)| KeyValue::new(k, v)),
+                                                );
+                                            }
+                                            Forward::Body(body) => {
+                                                todo!()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                metrics.http_requests_total.add(1, &metric_attrs);
+                            }
+                            Err(_) => {
+                                metrics.http_requests_error_total.add(1, &metric_attrs);
+                            }
+                        }
+                        metrics
+                            .http_requests_duration
+                            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+                        r
+                    })
+                },
+            )
+            .service(service)
             .boxed()
     }
 
@@ -478,35 +658,35 @@ impl Telemetry {
         Ok(builder)
     }
 
-    fn create_metrics_queries(config: &config::Conf) -> Result<Vec<JSONQuery>, BoxError> {
-        match &config.metrics {
-            Some(metrics_conf) => {
-                if let Some(MetricsCommon {
-                    attributes:
-                        Some(MetricsAttributesConf {
-                            from_response: Some(from_response),
-                            ..
-                        }),
-                    ..
-                }) = &metrics_conf.common
-                {
-                    let queries = from_response
-                        .iter()
-                        .map(|fr| JSONQuery::parse(&fr.path))
-                        .collect::<Result<Vec<JSONQuery>, QueryParseErr>>()
-                        .map_err(|err| ConfigurationError::InvalidConfiguration {
-                            message: "cannot parse JSON query in plugin telemetry for field metrics.from_response.path",
-                            error: err.to_string()
-                        })?;
+    // fn create_metrics_queries(config: &config::Conf) -> Result<Vec<JSONQuery>, BoxError> {
+    //     match &config.metrics {
+    //         Some(metrics_conf) => {
+    //             if let Some(MetricsCommon {
+    //                 attributes:
+    //                     Some(MetricsAttributesConf {
+    //                         from_response: Some(from_response),
+    //                         ..
+    //                     }),
+    //                 ..
+    //             }) = &metrics_conf.common
+    //             {
+    //                 let queries = from_response
+    //                     .iter()
+    //                     .map(|fr| JSONQuery::parse(&fr.path))
+    //                     .collect::<Result<Vec<JSONQuery>, QueryParseErr>>()
+    //                     .map_err(|err| ConfigurationError::InvalidConfiguration {
+    //                         message: "cannot parse JSON query in plugin telemetry for field metrics.from_response.path",
+    //                         error: err.to_string()
+    //                     })?;
 
-                    Ok(queries)
-                } else {
-                    Ok(Vec::new())
-                }
-            }
-            None => Ok(Vec::new()),
-        }
-    }
+    //                 Ok(queries)
+    //             } else {
+    //                 Ok(Vec::new())
+    //             }
+    //         }
+    //         None => Ok(Vec::new()),
+    //     }
+    // }
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
@@ -638,14 +818,12 @@ impl Telemetry {
     }
 
     fn update_metrics(
-        // TODO should take an Arc
-        config: &Conf,
-        context: &Context,
+        config: Arc<Conf>,
+        context: Context,
         metrics: BasicMetrics,
         result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        request_duration: Duration,
     ) {
-        // Using Instant because it is guaranteed to be monotonically increasing.
-        let now = Instant::now();
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -657,29 +835,27 @@ impl Telemetry {
                     .collect::<Vec<KeyValue>>()
             })
             .unwrap_or_default();
-        match &result {
+        match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
                     "status",
                     response.response.status().as_u16().to_string(),
                 ));
-
-                // TODO take from_response conf
                 if let Some(MetricsCommon {
                     attributes:
                         Some(MetricsAttributesConf {
-                            from_response: Some(from_response),
+                            router: Some(forward_attributes),
                             ..
                         }),
                     ..
                 }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
                 {
-                    for from_resp in from_response {
-                        // TODO fetch parsed queries
-                        // execute it on response.response.body...
-                        // If there is something then we push in metric_attrs
-                        // If not we skip
-                    }
+                    metric_attrs.extend(
+                        forward_attributes
+                            .from_router_response(response)
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    );
                 }
 
                 metrics.http_requests_total.add(1, &metric_attrs);
@@ -690,10 +866,10 @@ impl Telemetry {
         }
         metrics
             .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+            .record(request_duration.as_secs_f64(), &metric_attrs);
     }
 
-    fn populate_context(config: &Conf, req: &RouterRequest) {
+    fn populate_context(config: Arc<Conf>, req: &RouterRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
@@ -730,42 +906,63 @@ impl Telemetry {
             if let Some(MetricsCommon {
                 attributes:
                     Some(MetricsAttributesConf {
-                        from_headers: Some(from_headers),
+                        router:
+                            Some(AttributesForwardConf {
+                                insert: Some(to_insert),
+                                request: Some(from_request),
+                                context: Some(from_context),
+                                ..
+                            }),
                         ..
                     }),
                 ..
             }) = &metrics_conf.common
             {
-                for propagate_header in from_headers {
-                    match propagate_header {
-                        HeaderForward::Named {
-                            named,
-                            rename,
-                            default,
-                        } => {
-                            let value = req.originating_request.headers().get(named);
-                            if let Some(value) = value
-                                .and_then(|v| v.to_str().ok()?.to_string().into())
-                                .or_else(|| default.clone())
-                            {
+                // Fill from static
+                for Insert { name, value } in to_insert {
+                    attributes.insert(name.clone(), value.clone());
+                }
+                let headers = req.originating_request.headers();
+                // Fill from response
+                for from_resp in from_request {
+                    match from_resp {
+                        metrics::Forward::Header(header_forward) => attributes.extend(
+                            header_forward
+                                .iter()
+                                .fold(HashMap::new(), |mut acc, current| {
+                                    acc.extend(current.from_headers(headers));
+                                    acc
+                                }),
+                        ),
+                        metrics::Forward::Body(body_forward) => {
+                            // TODO fetch parsed queries
+                            // execute it on response.response.body...
+                            // If there is something then we push in metric_attrs
+                            // If not we skip
+                            todo!()
+                        }
+                    }
+                }
+                // Fill from context
+                for ContextForward {
+                    named,
+                    default,
+                    rename,
+                } in from_context
+                {
+                    let ctx_value = match context.get::<_, String>(named) {
+                        Ok(Some(value)) => {
+                            attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                        }
+                        _ => {
+                            if let Some(default_val) = default {
                                 attributes.insert(
-                                    rename.clone().unwrap_or_else(|| named.to_string()),
-                                    value,
+                                    rename.as_ref().unwrap_or(named).clone(),
+                                    default_val.clone(),
                                 );
                             }
                         }
-                        HeaderForward::Matching { matching } => {
-                            req.originating_request
-                                .headers()
-                                .iter()
-                                .filter(|(name, _)| matching.is_match(name.as_str()))
-                                .for_each(|(name, value)| {
-                                    if let Ok(value) = value.to_str() {
-                                        attributes.insert(name.to_string(), value.to_string());
-                                    }
-                                });
-                        }
-                    }
+                    };
                 }
             }
 

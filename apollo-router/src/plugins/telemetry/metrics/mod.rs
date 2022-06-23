@@ -2,10 +2,13 @@ use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::{http_compat, ResponseBody};
+use crate::services::RouterResponse;
+use crate::{http_compat, Context, ResponseBody};
 use ::serde::Deserialize;
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use http::header::HeaderName;
+use http::HeaderMap;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
 use opentelemetry::KeyValue;
 use regex::Regex;
@@ -28,22 +31,50 @@ pub(crate) type CustomEndpoint =
 #[serde(deny_unknown_fields)]
 /// Configuration to add custom attributes/labels on metrics
 pub struct MetricsAttributesConf {
-    /// Configuration to forward response values in metric attributes/labels
-    pub(crate) from_response: Option<Vec<ResponseForward>>,
-    // TODO maybe add by_subgraphs
-    /// Configuration to forward header values in metric attributes/labels
-    pub(crate) from_headers: Option<Vec<HeaderForward>>,
+    /// Configuration to forward header values or body values from router request/response in metric attributes/labels
+    pub(crate) router: Option<AttributesForwardConf>,
+    /// Configuration to forward header values or body values from subgraph request/response in metric attributes/labels
+    pub(crate) subgraph: Option<SubgraphAttributesConf>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SubgraphAttributesConf {
+    // Apply to all subgraphs
+    pub(crate) all: Option<AttributesForwardConf>,
+    // Apply to specific subgraph
+    pub(crate) subgraphs: HashMap<String, AttributesForwardConf>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
     #[serde(rename = "static")]
     pub(crate) insert: Option<Vec<Insert>>,
+    /// Configuration to forward headers or body values from the request custom attributes/labels in metrics
+    pub(crate) request: Option<Vec<Forward>>,
+    /// Configuration to forward headers or body values from the response custom attributes/labels in metrics
+    pub(crate) response: Option<Vec<Forward>>,
+    /// Configuration to forward values from the context custom attributes/labels in metrics
+    pub(crate) context: Option<Vec<ContextForward>>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
-    name: String,
-    value: String,
+    pub(crate) name: String,
+    pub(crate) value: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) enum Forward {
+    /// Forward header values as custom attributes/labels in metrics
+    Header(Vec<HeaderForward>),
+    /// Forward body values as custom attributes/labels in metrics
+    Body(Vec<BodyForward>),
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -69,11 +100,200 @@ pub(crate) enum HeaderForward {
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-/// Configuration to forward header values in metric labels
-pub(crate) struct ResponseForward {
+/// Configuration to forward body values in metric attributes/labels
+pub(crate) struct BodyForward {
     pub(crate) path: String,
     pub(crate) rename: Option<String>,
     pub(crate) default: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Configuration to forward context values in metric attributes/labels
+pub struct ContextForward {
+    pub(crate) named: String,
+    pub(crate) rename: Option<String>,
+    pub(crate) default: Option<String>,
+}
+
+impl HeaderForward {
+    pub(crate) fn from_headers(&self, headers: &HeaderMap) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+        match self {
+            HeaderForward::Named {
+                named,
+                rename,
+                default,
+            } => {
+                let value = headers.get(named);
+                if let Some(value) = value
+                    .and_then(|v| v.to_str().ok()?.to_string().into())
+                    .or_else(|| default.clone())
+                {
+                    attributes.insert(rename.clone().unwrap_or_else(|| named.to_string()), value);
+                }
+            }
+            HeaderForward::Matching { matching } => {
+                headers
+                    .iter()
+                    .filter(|(name, _)| matching.is_match(name.as_str()))
+                    .for_each(|(name, value)| {
+                        if let Ok(value) = value.to_str() {
+                            attributes.insert(name.to_string(), value.to_string());
+                        }
+                    });
+            }
+        }
+
+        attributes
+    }
+}
+
+impl AttributesForwardConf {
+    pub(crate) fn from_router_response(
+        &self,
+        response: &RouterResponse<BoxStream<'static, ResponseBody>>,
+    ) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+
+        // Fill from static
+        if let Some(to_insert) = &self.insert {
+            for Insert { name, value } in to_insert {
+                attributes.insert(name.clone(), value.clone());
+            }
+        }
+        let headers = response.response.headers();
+        // Fill from response
+        if let Some(from_response) = &self.response {
+            for from_resp in from_response {
+                match from_resp {
+                    Forward::Header(header_forward) => attributes.extend(
+                        header_forward
+                            .iter()
+                            .fold(HashMap::new(), |mut acc, current| {
+                                acc.extend(current.from_headers(headers));
+                                acc
+                            }),
+                    ),
+                    Forward::Body(body_forward) => {
+                        // TODO fetch parsed queries
+                        // execute it on response.response.body...
+                        // If there is something then we push in metric_attrs
+                        // If not we skip
+                        todo!()
+                    }
+                }
+            }
+        }
+        // Fill from context
+        if let Some(from_context) = &self.context {
+            for ContextForward {
+                named,
+                default,
+                rename,
+            } in from_context
+            {
+                match response.context.get::<_, String>(named) {
+                    Ok(Some(value)) => {
+                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                    }
+                    _ => {
+                        if let Some(default_val) = default {
+                            attributes.insert(
+                                rename.as_ref().unwrap_or(named).clone(),
+                                default_val.clone(),
+                            );
+                        }
+                    }
+                };
+            }
+        }
+
+        attributes
+    }
+    pub(crate) fn get_attributes(
+        &self,
+        headers: &HeaderMap,
+        body: &ResponseBody,
+        context: &Context,
+    ) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+
+        // Fill from static
+        if let Some(to_insert) = &self.insert {
+            for Insert { name, value } in to_insert {
+                attributes.insert(name.clone(), value.clone());
+            }
+        }
+        // Fill from response
+        if let Some(from_response) = &self.response {
+            for from_resp in from_response {
+                match from_resp {
+                    Forward::Header(header_forward) => attributes.extend(
+                        header_forward
+                            .iter()
+                            .fold(HashMap::new(), |mut acc, current| {
+                                acc.extend(current.from_headers(headers));
+                                acc
+                            }),
+                    ),
+                    Forward::Body(body_forward) => {
+                        // TODO fetch parsed queries
+                        // execute it on response.response.body...
+                        // If there is something then we push in metric_attrs
+                        // If not we skip
+                        todo!()
+                    }
+                }
+            }
+        }
+        // Fill from context
+        if let Some(from_context) = &self.context {
+            for ContextForward {
+                named,
+                default,
+                rename,
+            } in from_context
+            {
+                match context.get::<_, String>(named) {
+                    Ok(Some(value)) => {
+                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                    }
+                    _ => {
+                        if let Some(default_val) = default {
+                            attributes.insert(
+                                rename.as_ref().unwrap_or(named).clone(),
+                                default_val.clone(),
+                            );
+                        }
+                    }
+                };
+            }
+        }
+
+        attributes
+    }
+}
+
+impl ContextForward {
+    pub(crate) fn from_context(&self, context: &Context) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+        // Fill from context
+        match context.get::<_, String>(&self.named) {
+            Ok(Some(value)) => {
+                attributes.insert(self.rename.as_ref().unwrap_or(&self.named).clone(), value);
+            }
+            _ => {
+                if let Some(default_val) = &self.default {
+                    attributes.insert(
+                        self.rename.as_ref().unwrap_or(&self.named).clone(),
+                        default_val.clone(),
+                    );
+                }
+            }
+        };
+        attributes
+    }
 }
 
 fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
