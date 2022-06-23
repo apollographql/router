@@ -65,130 +65,130 @@ unfold the listing below and use your browser’s search function (CTRL+F or ⌘
   Output of <code>./scripts/public_items.sh</code> for 0.9.6
 </summary>
 <pre>
-apollo_router::ApolloRouter
-apollo_router::Configuration
-apollo_router::ConfigurationKind
-apollo_router::Context
-apollo_router::Executable
-apollo_router::Request
-apollo_router::Response
-apollo_router::Schema
-apollo_router::SchemaKind
-apollo_router::ShutdownKind
-apollo_router::error::CacheResolverError
-apollo_router::error::Error
-apollo_router::error::FetchError
-apollo_router::error::JsonExtError
-apollo_router::error::Location
-apollo_router::error::NewErrorBuilder
-apollo_router::error::ParseErrors
-apollo_router::error::PlannerErrors
-apollo_router::error::QueryPlannerError
-apollo_router::error::SchemaError
-apollo_router::error::ServiceBuildError
-apollo_router::error::SpecError
-apollo_router::json_ext::Object
-apollo_router::json_ext::Path
-apollo_router::json_ext::PathElement
-apollo_router::layers::ServiceBuilderExt
-apollo_router::layers::ServiceExt
-apollo_router::layers::async_checkpoint::AsyncCheckpointLayer
-apollo_router::layers::async_checkpoint::AsyncCheckpointService
-apollo_router::layers::cache::CachingLayer
-apollo_router::layers::cache::CachingService
-apollo_router::layers::instrument::InstrumentLayer
-apollo_router::layers::instrument::InstrumentService
-apollo_router::layers::map_future_with_context::MapFutureWithContextLayer
-apollo_router::layers::map_future_with_context::MapFutureWithContextService
-apollo_router::layers::sync_checkpoint::CheckpointLayer
-apollo_router::layers::sync_checkpoint::CheckpointService
-apollo_router::main
-apollo_router::mock_service
-apollo_router::plugin::DynPlugin
-apollo_router::plugin::Handler
-apollo_router::plugin::Plugin
-apollo_router::plugin::PluginFactory
-apollo_router::plugin::plugins
-apollo_router::plugin::register_plugin
-apollo_router::plugin::serde::deserialize_header_name
-apollo_router::plugin::serde::deserialize_header_value
-apollo_router::plugin::serde::deserialize_option_header_name
-apollo_router::plugin::serde::deserialize_option_header_value
-apollo_router::plugin::serde::deserialize_regex
-apollo_router::plugin::test::IntoSchema
-apollo_router::plugin::test::MockExecutionService
-apollo_router::plugin::test::MockQueryPlanningService
-apollo_router::plugin::test::MockRouterService
-apollo_router::plugin::test::MockSubgraph
-apollo_router::plugin::test::MockSubgraphService
-apollo_router::plugin::test::NewPluginTestHarnessBuilder
-apollo_router::plugin::test::PluginTestHarness
-apollo_router::plugins::csrf::CSRFConfig
-apollo_router::plugins::csrf::Csrf
-apollo_router::plugins::rhai::Conf
-apollo_router::plugins::rhai::Rhai
-apollo_router::plugins::telemetry::ROUTER_SPAN_NAME
-apollo_router::plugins::telemetry::Telemetry
-apollo_router::plugins::telemetry::apollo::Config
-apollo_router::plugins::telemetry::config::AttributeArray
-apollo_router::plugins::telemetry::config::AttributeValue
-apollo_router::plugins::telemetry::config::Conf
-apollo_router::plugins::telemetry::config::GenericWith
-apollo_router::plugins::telemetry::config::Metrics
-apollo_router::plugins::telemetry::config::MetricsCommon
-apollo_router::plugins::telemetry::config::Propagation
-apollo_router::plugins::telemetry::config::Sampler
-apollo_router::plugins::telemetry::config::SamplerOption
-apollo_router::plugins::telemetry::config::Trace
-apollo_router::plugins::telemetry::config::Tracing
-apollo_router::query_planner::OperationKind
-apollo_router::query_planner::QueryPlan
-apollo_router::query_planner::QueryPlanOptions
-apollo_router::register_plugin
-apollo_router::services::ErrorNewExecutionResponseBuilder
-apollo_router::services::ErrorNewQueryPlannerResponseBuilder
-apollo_router::services::ErrorNewRouterResponseBuilder
-apollo_router::services::ErrorNewSubgraphResponseBuilder
-apollo_router::services::ExecutionRequest
-apollo_router::services::ExecutionResponse
-apollo_router::services::ExecutionService
-apollo_router::services::FakeNewExecutionRequestBuilder
-apollo_router::services::FakeNewExecutionResponseBuilder
-apollo_router::services::FakeNewRouterRequestBuilder
-apollo_router::services::FakeNewRouterResponseBuilder
-apollo_router::services::FakeNewSubgraphRequestBuilder
-apollo_router::services::FakeNewSubgraphResponseBuilder
-apollo_router::services::NewExecutionRequestBuilder
-apollo_router::services::NewExecutionResponseBuilder
-apollo_router::services::NewExecutionServiceBuilder
-apollo_router::services::NewQueryPlannerRequestBuilder
-apollo_router::services::NewQueryPlannerResponseBuilder
-apollo_router::services::NewRouterRequestBuilder
-apollo_router::services::NewRouterResponseBuilder
-apollo_router::services::NewRouterServiceBuilder
-apollo_router::services::NewSubgraphRequestBuilder
-apollo_router::services::NewSubgraphResponseBuilder
-apollo_router::services::PluggableRouterServiceBuilder
-apollo_router::services::QueryPlannerContent
-apollo_router::services::QueryPlannerRequest
-apollo_router::services::QueryPlannerResponse
-apollo_router::services::ResponseBody
-apollo_router::services::RouterRequest
-apollo_router::services::RouterResponse
-apollo_router::services::RouterService
-apollo_router::services::SubgraphRequest
-apollo_router::services::SubgraphResponse
-apollo_router::services::SubgraphService
-apollo_router::services::http_compat::FakeNewRequestBuilder
-apollo_router::services::http_compat::IntoHeaderName
-apollo_router::services::http_compat::IntoHeaderValue
-apollo_router::services::http_compat::NewRequestBuilder
-apollo_router::services::http_compat::Request
-apollo_router::services::http_compat::Response
-apollo_router::subscriber::RouterSubscriber
-apollo_router::subscriber::is_global_subscriber_set
-apollo_router::subscriber::replace_layer
-apollo_router::subscriber::set_global_subscriber
+use apollo_router::ApolloRouter;
+use apollo_router::Configuration;
+use apollo_router::ConfigurationKind;
+use apollo_router::Context;
+use apollo_router::Executable;
+use apollo_router::Request;
+use apollo_router::Response;
+use apollo_router::Schema;
+use apollo_router::SchemaKind;
+use apollo_router::ShutdownKind;
+use apollo_router::error::CacheResolverError;
+use apollo_router::error::Error;
+use apollo_router::error::FetchError;
+use apollo_router::error::JsonExtError;
+use apollo_router::error::Location;
+use apollo_router::error::NewErrorBuilder;
+use apollo_router::error::ParseErrors;
+use apollo_router::error::PlannerErrors;
+use apollo_router::error::QueryPlannerError;
+use apollo_router::error::SchemaError;
+use apollo_router::error::ServiceBuildError;
+use apollo_router::error::SpecError;
+use apollo_router::json_ext::Object;
+use apollo_router::json_ext::Path;
+use apollo_router::json_ext::PathElement;
+use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::layers::ServiceExt;
+use apollo_router::layers::async_checkpoint::AsyncCheckpointLayer;
+use apollo_router::layers::async_checkpoint::AsyncCheckpointService;
+use apollo_router::layers::cache::CachingLayer;
+use apollo_router::layers::cache::CachingService;
+use apollo_router::layers::instrument::InstrumentLayer;
+use apollo_router::layers::instrument::InstrumentService;
+use apollo_router::layers::map_future_with_context::MapFutureWithContextLayer;
+use apollo_router::layers::map_future_with_context::MapFutureWithContextService;
+use apollo_router::layers::sync_checkpoint::CheckpointLayer;
+use apollo_router::layers::sync_checkpoint::CheckpointService;
+use apollo_router::main;
+use apollo_router::mock_service;
+use apollo_router::plugin::DynPlugin;
+use apollo_router::plugin::Handler;
+use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginFactory;
+use apollo_router::plugin::plugins;
+use apollo_router::plugin::register_plugin;
+use apollo_router::plugin::serde::deserialize_header_name;
+use apollo_router::plugin::serde::deserialize_header_value;
+use apollo_router::plugin::serde::deserialize_option_header_name;
+use apollo_router::plugin::serde::deserialize_option_header_value;
+use apollo_router::plugin::serde::deserialize_regex;
+use apollo_router::plugin::test::IntoSchema;
+use apollo_router::plugin::test::MockExecutionService;
+use apollo_router::plugin::test::MockQueryPlanningService;
+use apollo_router::plugin::test::MockRouterService;
+use apollo_router::plugin::test::MockSubgraph;
+use apollo_router::plugin::test::MockSubgraphService;
+use apollo_router::plugin::test::NewPluginTestHarnessBuilder;
+use apollo_router::plugin::test::PluginTestHarness;
+use apollo_router::plugins::csrf::CSRFConfig;
+use apollo_router::plugins::csrf::Csrf;
+use apollo_router::plugins::rhai::Conf;
+use apollo_router::plugins::rhai::Rhai;
+use apollo_router::plugins::telemetry::ROUTER_SPAN_NAME;
+use apollo_router::plugins::telemetry::Telemetry;
+use apollo_router::plugins::telemetry::apollo::Config;
+use apollo_router::plugins::telemetry::config::AttributeArray;
+use apollo_router::plugins::telemetry::config::AttributeValue;
+use apollo_router::plugins::telemetry::config::Conf;
+use apollo_router::plugins::telemetry::config::GenericWith;
+use apollo_router::plugins::telemetry::config::Metrics;
+use apollo_router::plugins::telemetry::config::MetricsCommon;
+use apollo_router::plugins::telemetry::config::Propagation;
+use apollo_router::plugins::telemetry::config::Sampler;
+use apollo_router::plugins::telemetry::config::SamplerOption;
+use apollo_router::plugins::telemetry::config::Trace;
+use apollo_router::plugins::telemetry::config::Tracing;
+use apollo_router::query_planner::OperationKind;
+use apollo_router::query_planner::QueryPlan;
+use apollo_router::query_planner::QueryPlanOptions;
+use apollo_router::register_plugin;
+use apollo_router::services::ErrorNewExecutionResponseBuilder;
+use apollo_router::services::ErrorNewQueryPlannerResponseBuilder;
+use apollo_router::services::ErrorNewRouterResponseBuilder;
+use apollo_router::services::ErrorNewSubgraphResponseBuilder;
+use apollo_router::services::ExecutionRequest;
+use apollo_router::services::ExecutionResponse;
+use apollo_router::services::ExecutionService;
+use apollo_router::services::FakeNewExecutionRequestBuilder;
+use apollo_router::services::FakeNewExecutionResponseBuilder;
+use apollo_router::services::FakeNewRouterRequestBuilder;
+use apollo_router::services::FakeNewRouterResponseBuilder;
+use apollo_router::services::FakeNewSubgraphRequestBuilder;
+use apollo_router::services::FakeNewSubgraphResponseBuilder;
+use apollo_router::services::NewExecutionRequestBuilder;
+use apollo_router::services::NewExecutionResponseBuilder;
+use apollo_router::services::NewExecutionServiceBuilder;
+use apollo_router::services::NewQueryPlannerRequestBuilder;
+use apollo_router::services::NewQueryPlannerResponseBuilder;
+use apollo_router::services::NewRouterRequestBuilder;
+use apollo_router::services::NewRouterResponseBuilder;
+use apollo_router::services::NewRouterServiceBuilder;
+use apollo_router::services::NewSubgraphRequestBuilder;
+use apollo_router::services::NewSubgraphResponseBuilder;
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::services::QueryPlannerContent;
+use apollo_router::services::QueryPlannerRequest;
+use apollo_router::services::QueryPlannerResponse;
+use apollo_router::services::ResponseBody;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::RouterService;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
+use apollo_router::services::SubgraphService;
+use apollo_router::services::http_compat::FakeNewRequestBuilder;
+use apollo_router::services::http_compat::IntoHeaderName;
+use apollo_router::services::http_compat::IntoHeaderValue;
+use apollo_router::services::http_compat::NewRequestBuilder;
+use apollo_router::services::http_compat::Request;
+use apollo_router::services::http_compat::Response;
+use apollo_router::subscriber::RouterSubscriber;
+use apollo_router::subscriber::is_global_subscriber_set;
+use apollo_router::subscriber::replace_layer;
+use apollo_router::subscriber::set_global_subscriber;
 </pre>
 </details>
 

@@ -2,7 +2,7 @@
 #
 # This script compiles the `apollo-router` crate,
 # uses rustdoc’s JSON output to extract public API items,
-# then uses jq to format as Rust paths.
+# then uses jq to format as Rust `use` imports ready to be copy-pasted.
 #
 # The output is lengthy, consider using a pager:
 #
@@ -24,6 +24,7 @@ cargo +nightly rustdoc --lib -p apollo-router -- \
         | .path
         | select(.[0] == "apollo_router")
         | join("::")
+        | "use " + . + ";"
     ]
     | sort
     | .[]
