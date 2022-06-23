@@ -2,7 +2,10 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::{fetch::OperationKind, prelude::graphql::*};
+use crate::error::FetchError;
+use crate::json_ext::{Object, Value};
+use crate::query_planner::fetch::OperationKind;
+use crate::*;
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde_json_bytes::ByteString;
@@ -12,7 +15,7 @@ use tracing::level_filters::LevelFilter;
 const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative)]
+#[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
     string: String,
@@ -443,11 +446,9 @@ impl Query {
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            //First determine if fragment is for interface
-                            //Otherwise we assume concrete type is expected
-                            if let Some(interface) = known_type
-                                .as_deref()
-                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            // First determine if the fragment matches an interface
+                            // Otherwise we assume a concrete type is expected
+                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
                             {
                                 //Check if input implements interface
                                 schema.is_subtype(interface.name.as_str(), input_type)
@@ -806,6 +807,7 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json_ext::ValueExt;
     use serde_json_bytes::json;
     use test_log::test;
 
@@ -1240,7 +1242,7 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
-                .query(Some($query.to_string()))
+                .query($query.to_string())
                 .build();
             let query = Query::parse(
                 request
@@ -4565,6 +4567,155 @@ mod tests {
                 },
                 "test_enum": null,
                 "test_enum2": "Z"
+            }},
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface() {
+        let schema = "type Query
+        {
+            test_interface: Interface
+        }
+
+        interface Interface {
+            foo: String
+        }
+
+        type MyTypeA implements Interface {
+            foo: String
+            something: String
+        }
+
+        type MyTypeB implements Interface {
+            foo: String
+            somethingElse: String!
+        }
+        ";
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentA
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    ...FragmentI
+                }
+            }
+
+            fragment FragmentI on Interface {
+                foo
+            }
+            ",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ... on MyTypeA {
+                        something
+                    }
+                    ... on MyTypeB {
+                        somethingElse
+                    }
+                }
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentB
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                }
             }},
         );
     }

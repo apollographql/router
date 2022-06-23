@@ -1,24 +1,26 @@
 //! Utilities which make it easy to test with [`crate::plugin`].
 
-pub mod mock;
-pub mod service;
+mod mock;
+mod service;
 
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::CachingQueryPlanner;
-use crate::ExecutionService;
-use crate::Introspection;
-use crate::Plugin;
-use crate::QueryCache;
-use crate::ResponseBody;
-use crate::RouterService;
-use crate::Schema;
-use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
-use crate::{RouterRequest, RouterResponse};
-use futures::stream::BoxStream;
+pub use mock::subgraph::MockSubgraph;
 pub use service::{
     MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
 };
+
+use crate::introspection::Introspection;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Plugin;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::CachingQueryPlanner;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::ExecutionService;
+use crate::ResponseBody;
+use crate::RouterService;
+use crate::Schema;
+use crate::{RouterRequest, RouterResponse};
+use futures::stream::BoxStream;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -54,10 +56,10 @@ impl From<IntoSchema> for Schema {
         match s {
             IntoSchema::String(s) => Schema::from_str(&s).expect("test schema must be valid"),
             IntoSchema::Schema(s) => *s,
-            IntoSchema::Canned => Schema::from_str(include_str!(
-                "../../../../../examples/graphql/local.graphql"
-            ))
-            .expect("test schema must be valid"),
+            IntoSchema::Canned => {
+                Schema::from_str(include_str!("../../../../examples/graphql/local.graphql"))
+                    .expect("test schema must be valid")
+            }
         }
     }
 }
@@ -128,7 +130,11 @@ impl PluginTestHarness {
         let schema = Arc::new(Schema::from(schema));
 
         let query_planner = CachingQueryPlanner::new(
-            BridgeQueryPlanner::new(schema.clone()).await?,
+            BridgeQueryPlanner::new(
+                schema.clone(),
+                Some(Arc::new(Introspection::from_schema(&schema))),
+            )
+            .await?,
             DEFAULT_BUFFER_SIZE,
         )
         .boxed();
@@ -169,8 +175,6 @@ impl PluginTestHarness {
                                         DEFAULT_BUFFER_SIZE,
                                     ))
                                     .schema(schema.clone())
-                                    .query_cache(Arc::new(QueryCache::new(0, schema.clone())))
-                                    .introspection(Arc::new(Introspection::from_schema(&schema)))
                                     .build(),
                             )
                         }),

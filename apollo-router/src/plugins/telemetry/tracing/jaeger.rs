@@ -13,6 +13,7 @@ use url::Url;
 use super::{deser_endpoint, AgentEndpoint};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+// Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint
 pub struct Config {
     #[serde(flatten)]
     #[schemars(schema_with = "endpoint_schema")]

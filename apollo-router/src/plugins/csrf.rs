@@ -1,6 +1,6 @@
-use crate::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt,
-};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::header;
 use http::{HeaderMap, StatusCode};
@@ -15,7 +15,8 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 pub struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
-    /// Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
+    /// Note that setting this to true is deemed unsafe.
+    /// See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.
     #[serde(default)]
     unsafe_disabled: bool,
     /// Override the headers to check for by setting
@@ -54,8 +55,8 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 
 /// The Csrf plugin makes sure any request received would have been preflighted if it was sent by a browser.
 ///
-/// Quoting the great apollo server comment:
-/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26
+/// Quoting the [great apollo server comment](
+/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26):
 ///
 /// We don't want random websites to be able to execute actual GraphQL operations
 /// from a user's browser unless our CORS policy supports it. It's not good
@@ -106,7 +107,7 @@ impl Plugin for Csrf {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         tracing::trace!("request is not preflighted");
-                        let error = crate::Error::builder().message(
+                        let error = crate::error::Error::builder().message(
                             format!(
                                 "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                                 Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
@@ -206,14 +207,14 @@ register_plugin!("apollo", "csrf", Csrf);
 mod csrf_tests {
     #[tokio::test]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({}))
@@ -222,7 +223,7 @@ mod csrf_tests {
     }
 
     use super::*;
-    use crate::{plugin::utils::test::MockRouterService, ResponseBody};
+    use crate::{plugin::test::MockRouterService, ResponseBody};
     use serde_json_bytes::json;
     use tower::ServiceExt;
 

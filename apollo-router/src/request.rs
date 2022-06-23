@@ -1,24 +1,19 @@
-use crate::prelude::graphql::*;
+use crate::json_ext::{Object, Value};
 use bytes::Bytes;
 use derivative::Derivative;
 use serde::{de::Error, Deserialize, Serialize};
-use std::sync::Arc;
-use typed_builder::TypedBuilder;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Derivative, Serialize, Deserialize, TypedBuilder, Default)]
+#[derive(Clone, Derivative, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-#[builder(field_defaults(setter(into)))]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Request {
     /// The graphql query.
-    #[builder(default)]
     pub query: Option<String>,
 
     /// The optional graphql operation.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[builder(default)]
     pub operation_name: Option<String>,
 
     /// The optional variables in the form of a json object.
@@ -27,12 +22,10 @@ pub struct Request {
         default,
         deserialize_with = "deserialize_null_default"
     )]
-    #[builder(default)]
-    pub variables: Arc<Object>,
+    pub variables: Object,
 
     ///  extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
-    #[builder(default)]
     pub extensions: Object,
 }
 
@@ -46,7 +39,23 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
+#[buildstructor::buildstructor]
 impl Request {
+    #[builder]
+    pub fn new(
+        query: Option<String>,
+        operation_name: Option<String>,
+        variables: Option<Object>,
+        extensions: Option<Object>,
+    ) -> Self {
+        Self {
+            query,
+            operation_name,
+            variables: variables.unwrap_or_default(),
+            extensions: extensions.unwrap_or_default(),
+        }
+    }
+
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
         // As explained in the form content types specification https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
         // `Forms submitted with this content type must be encoded as follows:`
@@ -76,18 +85,17 @@ impl Request {
         } else {
             None
         };
-        let variables =
-            Arc::new(get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default());
+        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
         let extensions: Object =
             get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
 
         let request_builder = Self::builder()
             .variables(variables)
-            .operation_name(operation_name)
+            .and_operation_name(operation_name)
             .extensions(extensions);
 
         let request = if let Some(query_str) = query {
-            request_builder.query(Some(query_str.to_string())).build()
+            request_builder.query(query_str).build()
         } else {
             request_builder.build()
         };
@@ -117,7 +125,7 @@ impl Request {
         Ok(Request {
             query,
             operation_name,
-            variables: Arc::new(variables),
+            variables,
             extensions,
         })
     }
@@ -158,10 +166,8 @@ mod tests {
             result.unwrap(),
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
-                .operation_name(Some("aTest".to_owned()))
-                .variables(Arc::new(
-                    bjson!({ "arg1": "me" }).as_object().unwrap().clone()
-                ))
+                .operation_name("aTest")
+                .variables(bjson!({ "arg1": "me" }).as_object().unwrap().clone())
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
@@ -183,7 +189,7 @@ mod tests {
             result.unwrap(),
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
-                .operation_name(Some("aTest".to_owned()))
+                .operation_name("aTest")
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
@@ -207,8 +213,8 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             Request::builder()
-                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
-                .operation_name(Some("aTest".to_owned()))
+                .query("query aTest($arg1: String!) { test(who: $arg1) }")
+                .operation_name("aTest")
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );

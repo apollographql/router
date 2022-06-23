@@ -1,6 +1,9 @@
 //! Telemetry plugin.
 use crate::configuration::ConfigurationError;
 // This entire file is license key functionality
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Handler;
+use crate::plugin::Plugin;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
     SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
@@ -10,12 +13,12 @@ use crate::plugins::telemetry::metrics::{
     MetricsExporterHandle,
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::reexports::router_bridge::planner::UsageReporting;
+use crate::query_planner::USAGE_REPORTING;
 use crate::subscriber::replace_layer;
 use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
     QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use ::tracing::{info_span, Span};
 use access_json::{JSONQuery, QueryParseErr};
@@ -32,6 +35,7 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
+use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -781,7 +785,7 @@ fn operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: crate::reexports::router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
@@ -812,9 +816,9 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use crate::{
-        http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
-    };
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::DynPlugin;
+    use crate::{http_compat, RouterRequest, RouterResponse};
     use bytes::Bytes;
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
@@ -822,7 +826,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
@@ -832,7 +836,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
@@ -890,7 +894,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(

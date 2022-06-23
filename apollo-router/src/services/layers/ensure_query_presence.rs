@@ -4,7 +4,7 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::sync_checkpoint::CheckpointService;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use http::StatusCode;
@@ -13,7 +13,7 @@ use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct EnsureQueryPresence {}
+pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
@@ -31,7 +31,7 @@ where
                 // A query must be available at this point
                 let query = req.originating_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
-                    let errors = vec![crate::Error {
+                    let errors = vec![crate::error::Error {
                         message: "Must provide query string.".to_string(),
                         locations: Default::default(),
                         path: Default::default(),
@@ -59,7 +59,7 @@ where
 #[cfg(test)]
 mod ensure_query_presence_tests {
     use super::*;
-    use crate::plugin::utils::test::MockRouterService;
+    use crate::plugin::test::MockRouterService;
     use crate::ResponseBody;
     use tower::ServiceExt;
 

@@ -10,6 +10,7 @@ use url::Url;
 use super::{AgentDefault, AgentEndpoint};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]

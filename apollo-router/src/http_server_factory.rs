@@ -1,10 +1,8 @@
-use super::FederatedServerError;
+use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
-use crate::{
-    http_compat::{Request, Response},
-    prelude::*,
-};
-use crate::{Handler, ResponseBody};
+use crate::http_compat::{Request, Response};
+use crate::plugin::Handler;
+use crate::ResponseBody;
 use derivative::Derivative;
 use futures::prelude::*;
 use futures::{channel::oneshot, stream::BoxStream};
@@ -18,7 +16,7 @@ use tower::Service;
 /// This trait enables us to test that `StateMachine` correctly recreates the http server when
 /// necessary e.g. when listen address changes.
 pub(crate) trait HttpServerFactory {
-    type Future: Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send;
+    type Future: Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send;
 
     fn create<RS>(
         &self,
@@ -29,7 +27,7 @@ pub(crate) trait HttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                Request<graphql::Request>,
+                Request<crate::Request>,
                 Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
@@ -51,7 +49,7 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
@@ -61,7 +59,7 @@ pub(crate) struct HttpServerHandle {
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
+        server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
         listen_address: ListenAddr,
     ) -> Self {
         Self {
@@ -71,7 +69,7 @@ impl HttpServerHandle {
         }
     }
 
-    pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
+    pub(crate) async fn shutdown(self) -> Result<(), ApolloRouterError> {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
@@ -91,11 +89,11 @@ impl HttpServerHandle {
         router: RS,
         configuration: Arc<Configuration>,
         plugin_handlers: HashMap<String, Handler>,
-    ) -> Result<Self, FederatedServerError>
+    ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
         RS: Service<
-                Request<graphql::Request>,
+                Request<crate::Request>,
                 Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
@@ -147,20 +145,20 @@ impl HttpServerHandle {
     }
 }
 
-pub enum Listener {
+pub(crate) enum Listener {
     Tcp(tokio::net::TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener),
 }
 
-pub enum NetworkStream {
+pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
 }
 
 impl Listener {
-    pub fn local_addr(&self) -> std::io::Result<ListenAddr> {
+    pub(crate) fn local_addr(&self) -> std::io::Result<ListenAddr> {
         match self {
             Listener::Tcp(listener) => listener.local_addr().map(Into::into),
             #[cfg(unix)]
@@ -174,7 +172,7 @@ impl Listener {
         }
     }
 
-    pub async fn accept(&mut self) -> std::io::Result<NetworkStream> {
+    pub(crate) async fn accept(&mut self) -> std::io::Result<NetworkStream> {
         match self {
             Listener::Tcp(listener) => listener
                 .accept()

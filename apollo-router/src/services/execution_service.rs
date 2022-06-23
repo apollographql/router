@@ -1,7 +1,8 @@
 //! Implements the Execution phase of the request lifecycle.
 
+use crate::service_registry::ServiceRegistry;
+use crate::Schema;
 use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
-use crate::{Schema, ServiceRegistry};
 use futures::future::{ready, BoxFuture};
 use futures::stream::{once, BoxStream};
 use futures::StreamExt;
@@ -81,7 +82,7 @@ impl Service<ExecutionRequest> for ExecutionService {
             let (first, rest) = receiver.into_future().await;
             match first {
                 None => Ok(ExecutionResponse::error_builder()
-                    .errors(vec![crate::Error {
+                    .errors(vec![crate::error::Error {
                         message: "empty response".to_string(),
                         ..Default::default()
                     }])

@@ -204,7 +204,6 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
- "typed-builder 0.10.0",
  "uname",
  "url",
  "urlencoding",
@@ -3620,7 +3619,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "typed-builder 0.9.1",
+ "typed-builder",
 ]
 
 [[package]]
@@ -5854,17 +5853,6 @@ name = "typed-builder"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a46ee5bd706ff79131be9c94e7edcb82b703c487766a114434e5790361cf08c5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "typed-builder"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89851716b67b937e393b3daa8423e67ddfc4bbbf1654bcf05488e95e0828db0c"
 dependencies = [
  "proc-macro2",
  "quote",

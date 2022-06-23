@@ -20,11 +20,12 @@ use serde::Deserialize;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
+use crate::services::subgraph_service::Compression;
 use crate::{
-    register_plugin, Compression, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt,
-    SubgraphRequest, SubgraphResponse,
+    register_plugin, QueryPlannerRequest, QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
 };
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -49,6 +50,7 @@ impl Shaping {
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Config {
     #[serde(default)]
     all: Option<Shaping>,
@@ -142,8 +144,10 @@ mod test {
     use serde_json_bytes::{ByteString, Value};
     use tower::{util::BoxCloneService, Service};
 
+    use crate::json_ext::Object;
+    use crate::plugin::test::MockSubgraph;
+    use crate::plugin::DynPlugin;
     use crate::{
-        utils::test::mock::subgraph::MockSubgraph, DynPlugin, Object,
         PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
     };
 
@@ -242,7 +246,7 @@ mod test {
 
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)

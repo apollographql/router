@@ -1,4 +1,5 @@
-use crate::{CacheResolver, CacheResolverError};
+use crate::error::CacheResolverError;
+use crate::traits::CacheResolver;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use lru::LruCache;
@@ -18,7 +19,7 @@ use tokio::sync::oneshot;
 /// the cache_limit is reached.
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct CachingMap<K, V> {
+pub(crate) struct CachingMap<K, V> {
     #[derivative(Debug = "ignore")]
     cached: Mutex<LruCache<K, Result<V, CacheResolverError>>>,
     #[allow(clippy::type_complexity)]
@@ -39,7 +40,10 @@ where
     ///
     /// resolver is used to resolve cache misses.
     /// cache_limit specifies the size (number of items) of the cache
-    pub fn new(resolver: Box<(dyn CacheResolver<K, V> + Send + Sync)>, cache_limit: usize) -> Self {
+    pub(crate) fn new(
+        resolver: Box<(dyn CacheResolver<K, V> + Send + Sync)>,
+        cache_limit: usize,
+    ) -> Self {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
             wait_map: Arc::new(Mutex::new(HashMap::new())),
@@ -49,7 +53,7 @@ where
     }
 
     /// Get a value from the cache.
-    pub async fn get(&self, key: K) -> Result<V, CacheResolverError> {
+    pub(crate) async fn get(&self, key: K) -> Result<V, CacheResolverError> {
         let mut locked_cache = self.cached.lock().await;
         if let Some(value) = locked_cache.get(&key).cloned() {
             return value;
@@ -139,22 +143,12 @@ where
             }
         }
     }
-
-    /// Get the top 20% of most recently (LRU) used keys
-    pub async fn get_hot_keys(&self) -> Vec<K> {
-        let locked_cache = self.cached.lock().await;
-        locked_cache
-            .iter()
-            .take(self.cache_limit / 5)
-            .map(|(key, _value)| key.clone())
-            .collect()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CacheResolverError;
+    use crate::error::CacheResolverError;
     use async_trait::async_trait;
     use futures::stream::{FuturesUnordered, StreamExt};
     use mockall::mock;

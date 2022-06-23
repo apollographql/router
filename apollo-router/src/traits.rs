@@ -1,14 +1,17 @@
-use crate::prelude::graphql::*;
+use crate::error::CacheResolverError;
+use crate::error::QueryPlannerError;
+use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanOptions;
+use crate::services::QueryPlannerContent;
 use async_trait::async_trait;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 /// A cache resolution trait.
 ///
 /// Clients of CachingMap are required to provider a resolver during Map creation. The resolver
 /// will be used to find values for cache misses. A Result is expected, because retrieval may fail.
 #[async_trait]
-pub trait CacheResolver<K, V> {
+pub(crate) trait CacheResolver<K, V> {
     async fn retrieve(&self, key: K) -> Result<V, CacheResolverError>;
 }
 
@@ -22,7 +25,7 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 ///
 /// Implementations may cache query plans.
 #[async_trait]
-pub trait QueryPlanner: Send + Sync + Debug {
+pub(crate) trait QueryPlanner: Send + Sync + Debug {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
@@ -31,13 +34,13 @@ pub trait QueryPlanner: Send + Sync + Debug {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
+    ) -> Result<QueryPlannerContent, QueryPlannerError>;
 }
 
 /// With caching trait.
 ///
 /// Adds with_caching to any query planner.
-pub trait WithCaching: QueryPlanner
+pub(crate) trait WithCaching: QueryPlanner
 where
     Self: Sized + QueryPlanner + 'static,
 {

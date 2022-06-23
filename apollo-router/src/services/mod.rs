@@ -2,8 +2,12 @@
 
 pub use self::execution_service::*;
 pub use self::router_service::*;
-use crate::fetch::OperationKind;
-use crate::prelude::graphql::*;
+use crate::error::Error;
+use crate::json_ext::{Object, Path, Value};
+use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlanOptions;
+use crate::*;
 use futures::{
     future::{ready, Ready},
     stream::{once, BoxStream, Once, StreamExt},
@@ -21,14 +25,14 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
-pub use subgraph_service::{Compression, SubgraphService};
+pub use subgraph_service::SubgraphService;
 use tower::BoxError;
 
 mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
 mod router_service;
-mod subgraph_service;
+pub(crate) mod subgraph_service;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -159,8 +163,8 @@ impl RouterRequest {
             .collect();
 
         let gql_request = Request::builder()
-            .query(query)
-            .operation_name(operation_name)
+            .and_query(query)
+            .and_operation_name(operation_name)
             .variables(variables)
             .extensions(extensions)
             .build();
@@ -227,7 +231,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -239,7 +243,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
             .collect();
         // Build a response
         let b = Response::builder()
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions);
         let res = match data {
@@ -282,7 +286,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn fake_new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -304,7 +308,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -388,9 +392,20 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
-    pub query_plan: Arc<QueryPlan>,
-
+    pub content: QueryPlannerContent,
     pub context: Context,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueryPlannerContent {
+    Plan {
+        query: Arc<Query>,
+        plan: Arc<QueryPlan>,
+    },
+    Introspection {
+        response: Box<Response>,
+    },
+    IntrospectionDisabled,
 }
 
 #[buildstructor::buildstructor]
@@ -399,11 +414,8 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
-        Self {
-            query_plan,
-            context,
-        }
+    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+        Self { content, context }
     }
 
     /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
@@ -412,14 +424,17 @@ impl QueryPlannerResponse {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(QueryPlan::fake_builder().build()),
+            QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_builder().build()),
+                query: Arc::new(Query::default()),
+            },
             context,
         ))
     }
@@ -512,16 +527,16 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> SubgraphResponse {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -553,7 +568,7 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -574,7 +589,7 @@ impl SubgraphResponse {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -660,16 +675,16 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> Self {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -701,7 +716,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -723,7 +738,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -784,7 +799,6 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 
 #[cfg(test)]
 mod test {
-    use crate::prelude::graphql;
     use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
     use http::{HeaderValue, Method, Uri};
     use serde_json::json;
@@ -839,11 +853,11 @@ mod test {
             .clone();
         assert_eq!(
             request.originating_request.body(),
-            &graphql::Request::builder()
+            &crate::Request::builder()
                 .variables(variables)
                 .extensions(extensions)
-                .operation_name(Some("Default".to_string()))
-                .query(Some("query { topProducts }".to_string()))
+                .operation_name("Default")
+                .query("query { topProducts }")
                 .build()
         );
     }
@@ -875,7 +889,7 @@ mod test {
         assert_eq!(
             response.next_response().await.unwrap(),
             ResponseBody::GraphQL(
-                graphql::Response::builder()
+                crate::Response::builder()
                     .extensions(extensions)
                     .data(json!({}))
                     .build()
