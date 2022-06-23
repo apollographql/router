@@ -167,23 +167,12 @@ telemetry:
 
 ## Using Zipkin
 
-The Apollo Router can be configured to export tracing data to Zipkin either via an agent or http collector.
+The Apollo Router can be configured to export tracing data to either the default collector address or an URL.
 
-### Agent config
 ```yaml title="router.yaml"
 telemetry:
   tracing:
     zipkin:
-      agent:
-        # Either 'default' or an url 
-        endpoint: http://my_zipkin_agent.dev
-```
-
-### Collector config
-```yaml title="router.yaml"
-telemetry:
-  tracing:
-    zipkin:
-      collector: 
-        endpoint: "http://my-zipkin-collector"
+      # Either 'default' or an url 
+      endpoint: http://my_zipkin_collector.dev
 ```

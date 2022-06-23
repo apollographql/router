@@ -247,6 +247,12 @@ You will now be able to actually use the helm chart without being on a managed g
 
 By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
+
+### Deny unknown fields on configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
+Do not silently skip some bad configuration, now if you add an unknown configuration field at the root of your configuration file it will return an error.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1278
+
 ## 🚀 Features ( :rocket: )
 
 ### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
