@@ -15,8 +15,8 @@ use futures::{
 };
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
-use http_compat::IntoHeaderName;
-use http_compat::IntoHeaderValue;
+use http_ext::IntoHeaderName;
+use http_ext::IntoHeaderValue;
 use multimap::MultiMap;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
@@ -29,7 +29,7 @@ pub use subgraph_service::SubgraphService;
 use tower::BoxError;
 
 mod execution_service;
-pub mod http_compat;
+pub mod http_ext;
 pub(crate) mod layers;
 mod router_service;
 pub(crate) mod subgraph_service;
@@ -120,14 +120,14 @@ assert_impl_all!(RouterRequest: Send);
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
 
     /// Context for extension
     pub context: Context,
 }
 
-impl From<http_compat::Request<Request>> for RouterRequest {
-    fn from(originating_request: http_compat::Request<Request>) -> Self {
+impl From<http_ext::Request<Request>> for RouterRequest {
+    fn from(originating_request: http_ext::Request<Request>) -> Self {
         Self {
             originating_request,
             context: Context::new(),
@@ -169,7 +169,7 @@ impl RouterRequest {
             .extensions(extensions)
             .build();
 
-        let originating_request = http_compat::Request::builder()
+        let originating_request = http_ext::Request::builder()
             .headers(headers)
             .uri(uri)
             .method(method)
@@ -212,12 +212,12 @@ impl RouterRequest {
 }
 
 assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
-/// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
+/// [`Context`] and [`http_ext::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]
 pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
-    pub response: http_compat::Response<T>,
+    pub response: http_ext::Response<T>,
     pub context: Context,
 }
 
@@ -264,7 +264,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
         let http_response = builder.body(once(ready(ResponseBody::GraphQL(res))))?;
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -339,7 +339,7 @@ impl<T: Stream<Item = ResponseBody> + Send + Unpin + 'static> RouterResponse<T> 
 }
 
 impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
-    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
@@ -363,7 +363,7 @@ assert_impl_all!(QueryPlannerRequest: Send);
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
     /// Query plan options
     pub query_plan_options: QueryPlanOptions,
 
@@ -377,7 +377,7 @@ impl QueryPlannerRequest {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub fn new(
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
@@ -441,12 +441,12 @@ impl QueryPlannerResponse {
 }
 
 assert_impl_all!(SubgraphRequest: Send);
-/// [`Context`], [`OperationKind`] and [`http_compat::Request<Request>`] for the request.
+/// [`Context`], [`OperationKind`] and [`http_ext::Request<Request>`] for the request.
 pub struct SubgraphRequest {
     /// Original request to the Router.
-    pub originating_request: Arc<http_compat::Request<Request>>,
+    pub originating_request: Arc<http_ext::Request<Request>>,
 
-    pub subgraph_request: http_compat::Request<Request>,
+    pub subgraph_request: http_ext::Request<Request>,
 
     pub operation_kind: OperationKind,
 
@@ -460,8 +460,8 @@ impl SubgraphRequest {
     /// Required parameters are required in non-testing code to create a SubgraphRequest.
     #[builder]
     pub fn new(
-        originating_request: Arc<http_compat::Request<Request>>,
-        subgraph_request: http_compat::Request<Request>,
+        originating_request: Arc<http_ext::Request<Request>>,
+        subgraph_request: http_ext::Request<Request>,
         operation_kind: OperationKind,
         context: Context,
     ) -> SubgraphRequest {
@@ -480,14 +480,28 @@ impl SubgraphRequest {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder]
     pub fn fake_new(
-        originating_request: Option<Arc<http_compat::Request<Request>>>,
-        subgraph_request: Option<http_compat::Request<Request>>,
+        originating_request: Option<Arc<http_ext::Request<Request>>>,
+        subgraph_request: Option<http_ext::Request<Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
     ) -> SubgraphRequest {
         SubgraphRequest::new(
-            originating_request.unwrap_or_else(|| Arc::new(http_compat::Request::mock())),
-            subgraph_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                )
+            }),
+            subgraph_request.unwrap_or_else(|| {
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
         )
@@ -495,12 +509,12 @@ impl SubgraphRequest {
 }
 
 assert_impl_all!(SubgraphResponse: Send);
-/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the subgraph response and the context.
 #[derive(Clone, Debug)]
 pub struct SubgraphResponse {
-    pub response: http_compat::Response<Response>,
+    pub response: http_ext::Response<Response>,
 
     pub context: Context,
 }
@@ -512,7 +526,7 @@ impl SubgraphResponse {
     /// In this case, you already have a valid response and just wish to associate it with a context
     /// and create a SubgraphResponse.
     pub fn new_from_response(
-        response: http_compat::Response<Response>,
+        response: http_ext::Response<Response>,
         context: Context,
     ) -> SubgraphResponse {
         Self { response, context }
@@ -548,7 +562,7 @@ impl SubgraphResponse {
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -609,7 +623,7 @@ assert_impl_all!(ExecutionRequest: Send);
 /// [`Context`] and [`QueryPlan`] for the request.
 pub struct ExecutionRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
 
     pub query_plan: Arc<QueryPlan>,
 
@@ -624,7 +638,7 @@ impl ExecutionRequest {
     /// set and be correct to create a ExecutionRequest.
     #[builder]
     pub fn new(
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> ExecutionRequest {
@@ -642,12 +656,18 @@ impl ExecutionRequest {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder]
     pub fn fake_new(
-        originating_request: Option<http_compat::Request<Request>>,
+        originating_request: Option<http_ext::Request<Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
     ) -> ExecutionRequest {
         ExecutionRequest::new(
-            originating_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
@@ -655,11 +675,11 @@ impl ExecutionRequest {
 }
 
 assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
-/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
 pub struct ExecutionResponse<T: Stream<Item = Response>> {
-    pub response: http_compat::Response<T>,
+    pub response: http_ext::Response<T>,
 
     pub context: Context,
 }
@@ -696,7 +716,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -760,7 +780,7 @@ impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
@@ -785,13 +805,13 @@ impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
     }
 }
 
-impl AsRef<Request> for http_compat::Request<Request> {
+impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {
         self.body()
     }
 }
 
-impl AsRef<Request> for Arc<http_compat::Request<Request>> {
+impl AsRef<Request> for Arc<http_ext::Request<Request>> {
     fn as_ref(&self) -> &Request {
         self.body()
     }

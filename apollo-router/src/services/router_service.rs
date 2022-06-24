@@ -173,10 +173,10 @@ where
                             )
                             .await?;
 
-                        let (parts, response_stream) = response.into_parts();
+                        let (parts, response_stream) = http::Response::from(response).into_parts();
                         Ok(RouterResponse {
                             context,
-                            response: crate::http_compat::Response::from_parts(
+                            response: http::Response::from_parts(
                                 parts,
                                 response_stream
                                     .map(move |mut response: Response| {
@@ -191,7 +191,8 @@ where
                                         ResponseBody::GraphQL(response)
                                     })
                                     .in_current_span(),
-                            ),
+                            )
+                            .into(),
                         }
                         .boxed())
                     }

@@ -26,6 +26,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.6] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
+### Rename http_compat to http_ext ([PR #1291](https://github.com/apollographql/router/pull/1291)
+
+The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
+such as the Request::mock() fn.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
+
 ### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277))
 
 * Many items have been removed from the public API and made private.
@@ -179,12 +186,12 @@ use apollo_router::services::RouterService;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphResponse;
 use apollo_router::services::SubgraphService;
-use apollo_router::services::http_compat::FakeNewRequestBuilder;
-use apollo_router::services::http_compat::IntoHeaderName;
-use apollo_router::services::http_compat::IntoHeaderValue;
-use apollo_router::services::http_compat::NewRequestBuilder;
-use apollo_router::services::http_compat::Request;
-use apollo_router::services::http_compat::Response;
+use apollo_router::services::http_ext::FakeNewRequestBuilder;
+use apollo_router::services::http_ext::IntoHeaderName;
+use apollo_router::services::http_ext::IntoHeaderValue;
+use apollo_router::services::http_ext::NewRequestBuilder;
+use apollo_router::services::http_ext::Request;
+use apollo_router::services::http_ext::Response;
 use apollo_router::subscriber::RouterSubscriber;
 use apollo_router::subscriber::is_global_subscriber_set;
 use apollo_router::subscriber::replace_layer;

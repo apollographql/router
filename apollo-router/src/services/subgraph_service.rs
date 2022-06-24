@@ -89,7 +89,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, body) = subgraph_request.into_parts();
+            let (parts, body) = http::Request::from(subgraph_request).into_parts();
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
@@ -263,7 +263,7 @@ mod tests {
     use tower::{service_fn, ServiceExt};
 
     use crate::query_planner::fetch::OperationKind;
-    use crate::{http_compat, json_ext::Object, Context, Request, Response, SubgraphRequest};
+    use crate::{http_ext, json_ext::Object, Context, Request, Response, SubgraphRequest};
 
     use super::*;
 
@@ -363,14 +363,14 @@ mod tests {
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
@@ -398,14 +398,14 @@ mod tests {
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
@@ -433,14 +433,14 @@ mod tests {
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query".to_string()).build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .header(CONTENT_ENCODING, "gzip")
