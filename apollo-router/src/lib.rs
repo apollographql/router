@@ -35,6 +35,7 @@ mod context;
 pub mod error;
 mod executable;
 mod files;
+pub mod graphql;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
@@ -56,11 +57,13 @@ mod traits;
 pub use configuration::Configuration;
 pub use context::Context;
 pub use executable::{main, Executable};
-pub use request::Request;
-pub use response::Response;
 pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 pub use services::http_ext;
 pub use spec::Schema;
+
+pub type Request = graphql::Request;
+pub type Response = graphql::Response;
+pub type Error = graphql::Error;
 
 // TODO: clean these up and import from relevant modules instead
 pub(crate) use services::*;

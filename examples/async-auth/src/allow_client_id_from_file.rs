@@ -68,7 +68,7 @@ impl Plugin for AllowClientIdFromFile {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     RouterResponse::error_builder()
-                        .error(apollo_router::error::Error {
+                        .error(apollo_router::graphql::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         })
@@ -102,7 +102,7 @@ impl Plugin for AllowClientIdFromFile {
                             res = Some(
                                 RouterResponse::builder()
                                     .data(Value::default())
-                                    .error(apollo_router::error::Error {
+                                    .error(apollo_router::graphql::Error {
                                         message: "client-id is not allowed".to_string(),
                                         ..Default::default()
                                     })
@@ -117,7 +117,7 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
                             RouterResponse::error_builder()
-                                .error(apollo_router::error::Error {
+                                .error(apollo_router::graphql::Error {
                                     message: format!("'{header_key}' value is not a string"),
                                     ..Default::default()
                                 })
