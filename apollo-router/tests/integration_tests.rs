@@ -19,7 +19,6 @@ use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::Telemetry;
 use apollo_router::plugins::telemetry::{self};
 use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::ResponseBody;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
@@ -623,7 +622,7 @@ async fn query_rust(
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -668,25 +667,18 @@ async fn setup_router_and_registry() -> (
 async fn query_with_router(
     router: BoxCloneService<
         RouterRequest,
-        RouterResponse<BoxStream<'static, ResponseBody>>,
+        RouterResponse<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     request: RouterRequest,
 ) -> graphql::Response {
-    let response = router
+    router
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
-        .unwrap();
-
-    match response {
-        ResponseBody::GraphQL(response) => response,
-        _ => {
-            panic!("Expected graphql response")
-        }
-    }
+        .unwrap()
 }
 
 #[derive(Debug, Clone)]

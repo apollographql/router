@@ -233,6 +233,36 @@ Migration tips:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
 
+### Non-GraphQL response body variants removed from `RouterResponse` ([PR #1307](https://github.com/apollographql/router/pull/1307))
+
+Previously the `ResponseBody` enum was used in `RouterResponse`.
+One of this enum’s variants contains a `apollo_router::graphql::Response`,
+which is now used directly instead.
+
+Various type signatures will need changes such as:
+
+```diff
+- RouterResponse<BoxStream<'static, ResponseBody>>
++ RouterResponse<BoxStream<'static, graphql::Response>>
+```
+
+Necessary code changes might look like:
+
+```diff
+- return ResponseBody::GraphQL(response);
++ return response;
+```
+```diff
+- if let ResponseBody::GraphQL(graphql_response) = res {
+-     assert_eq!(&graphql_response.errors[0], expected_error);
+- } else {
+-     panic!("expected a graphql response");
+- }
++ assert_eq!(&res.errors[0], expected_error);
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
 
 You will now be able to actually use the helm chart without being on a managed graph. 

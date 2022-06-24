@@ -78,7 +78,7 @@ impl AxumHttpServerFactory {
 type BufferedService = Buffer<
     BoxService<
         http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, ResponseBody>>,
+        http_ext::Response<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     http_ext::Request<graphql::Request>,
@@ -97,7 +97,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RS: Service<
                 http_ext::Request<graphql::Request>,
-                Response = http_ext::Response<BoxStream<'static, ResponseBody>>,
+                Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
                 Error = BoxError,
             > + Send
             + Sync
@@ -747,7 +747,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, graphql::Response>>, BoxError>;
         }
     }
 
@@ -922,7 +922,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1013,7 +1013,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1075,7 +1075,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1177,7 +1177,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1246,7 +1246,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1315,7 +1315,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1407,7 +1407,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1467,7 +1467,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1506,7 +1506,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1601,7 +1601,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1877,12 +1877,16 @@ Content-Type: application/json\r
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::Text(format!(
-                            "{} + {} + {:?}",
-                            req.method(),
-                            req.uri(),
-                            serde_json::to_string(req.body()).unwrap()
-                        )))
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!(format!(
+                                    "{} + {} + {:?}",
+                                    req.method(),
+                                    req.uri(),
+                                    serde_json::to_string(req.body()).unwrap()
+                                )))
+                                .build(),
+                        )
                         .unwrap(),
                 ))
             });
@@ -1897,11 +1901,14 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.text().await.unwrap(),
-            serde_json::to_string(&format!(
-                "GET + {}?query=query + {:?}",
-                url,
-                serde_json::to_string(&query).unwrap()
-            ))
+            serde_json::to_string(&json!({
+                "data":
+                    format!(
+                        "GET + {}?query=query + {:?}",
+                        url,
+                        serde_json::to_string(&query).unwrap()
+                    )
+            }))
             .unwrap()
         );
         let response = client
@@ -1914,11 +1921,14 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.text().await.unwrap(),
-            serde_json::to_string(&format!(
-                "POST + {} + {:?}",
-                url,
-                serde_json::to_string(&query).unwrap()
-            ))
+            serde_json::to_string(&json!({
+                "data":
+                    format!(
+                        "POST + {} + {:?}",
+                        url,
+                        serde_json::to_string(&query).unwrap()
+                    )
+            }))
             .unwrap()
         );
         server.shutdown().await

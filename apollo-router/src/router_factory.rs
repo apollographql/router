@@ -23,7 +23,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::services::Plugins;
 use crate::PluggableRouterServiceBuilder;
-use crate::ResponseBody;
 use crate::Schema;
 use crate::SubgraphService;
 
@@ -35,7 +34,7 @@ use crate::SubgraphService;
 pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = Response<BoxStream<'static, ResponseBody>>,
+            Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -61,7 +60,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
             Request<graphql::Request>,
-            Response<BoxStream<'static, ResponseBody>>,
+            Response<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
         Request<graphql::Request>,
