@@ -33,7 +33,7 @@ such as the Request::mock() fn.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
 
-### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277))
+### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277), [PR #1303](https://github.com/apollographql/router/pull/1303))
 
 * Many items have been removed from the public API and made private.
   If you still need some of them, please file an issue.
@@ -76,6 +76,7 @@ use apollo_router::ApolloRouter;
 use apollo_router::Configuration;
 use apollo_router::ConfigurationKind;
 use apollo_router::Context;
+use apollo_router::Error;
 use apollo_router::Executable;
 use apollo_router::Request;
 use apollo_router::Response;
@@ -83,17 +84,19 @@ use apollo_router::Schema;
 use apollo_router::SchemaKind;
 use apollo_router::ShutdownKind;
 use apollo_router::error::CacheResolverError;
-use apollo_router::error::Error;
 use apollo_router::error::FetchError;
 use apollo_router::error::JsonExtError;
 use apollo_router::error::Location;
-use apollo_router::error::NewErrorBuilder;
 use apollo_router::error::ParseErrors;
 use apollo_router::error::PlannerErrors;
 use apollo_router::error::QueryPlannerError;
 use apollo_router::error::SchemaError;
 use apollo_router::error::ServiceBuildError;
 use apollo_router::error::SpecError;
+use apollo_router::graphql::Error;
+use apollo_router::graphql::NewErrorBuilder;
+use apollo_router::graphql::Request;
+use apollo_router::graphql::Response;
 use apollo_router::json_ext::Object;
 use apollo_router::json_ext::Path;
 use apollo_router::json_ext::PathElement;
