@@ -26,7 +26,6 @@ use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::Future;
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use http::{HeaderValue, StatusCode};
 use metrics::apollo::Sender;
@@ -41,7 +40,6 @@ use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::steer::Steer;
@@ -54,7 +52,7 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::ContextForward;
 use self::metrics::Forward;
 use self::metrics::Insert;
-use self::metrics::{HeaderForward, MetricsAttributesConf};
+use self::metrics::MetricsAttributesConf;
 
 pub mod apollo;
 pub mod config;
@@ -280,7 +278,7 @@ impl Plugin for Telemetry {
                             config.clone(),
                             ctx.clone(),
                             metrics,
-                            &mut result,
+                            &result,
                             start.elapsed(),
                         );
                         match result {
@@ -390,19 +388,20 @@ impl Plugin for Telemetry {
                         .as_ref()
                         .and_then(|a| a.request.clone())
                         .unwrap_or_default();
-                    request.extend(
+                    request.merge(
                         subgraph_cfg
                             .subgraphs
                             .get(&name)
-                            .and_then(|s| s.request.clone())
+                            .and_then(|a| a.request.clone())
                             .unwrap_or_default(),
                     );
+
                     let mut response = subgraph_cfg
                         .all
                         .as_ref()
                         .and_then(|a| a.response.clone())
                         .unwrap_or_default();
-                    response.extend(
+                    response.merge(
                         subgraph_cfg
                             .subgraphs
                             .get(&name)
@@ -423,8 +422,10 @@ impl Plugin for Telemetry {
                     );
                     AttributesForwardConf {
                         insert: (!insert.is_empty()).then(|| insert),
-                        request: (!request.is_empty()).then(|| request),
-                        response: (!response.is_empty()).then(|| response),
+                        request: (request.header.is_some() || request.body.is_some())
+                            .then(|| request),
+                        response: (response.header.is_some() || response.body.is_some())
+                            .then(|| response),
                         context: (!context.is_empty()).then(|| context),
                     }
                 }),
@@ -451,23 +452,18 @@ impl Plugin for Telemetry {
                         for Insert { name, value } in to_insert {
                             attributes.insert(name.clone(), value.clone());
                         }
-
-                        for from_req in from_request {
-                            match from_req {
-                                Forward::Header(headers_forward) => {
-                                    let headers = sub_request.subgraph_request.headers();
-                                    attributes.extend(headers_forward.iter().fold(
-                                        HashMap::new(),
-                                        |mut acc, current| {
-                                            acc.extend(current.from_headers(headers));
-                                            acc
-                                        },
-                                    ));
-                                }
-                                Forward::Body(body) => {
-                                    todo!()
-                                }
-                            }
+                        if let Some(headers_forward) = &from_request.header {
+                            let headers = sub_request.subgraph_request.headers();
+                            attributes.extend(headers_forward.iter().fold(
+                                HashMap::new(),
+                                |mut acc, current| {
+                                    acc.extend(current.get_attributes_from_headers(headers));
+                                    acc
+                                },
+                            ));
+                        }
+                        if let Some(body_forward) = &from_request.body {
+                            todo!()
                         }
                     }
                     sub_request
@@ -509,7 +505,7 @@ impl Plugin for Telemetry {
                             for from_ctx in from_context {
                                 metric_attrs.extend(
                                     from_ctx
-                                        .from_context(&context)
+                                        .get_attributes_from_context(&context)
                                         .into_iter()
                                         .map(|(k, v)| KeyValue::new(k, v)),
                                 );
@@ -529,27 +525,24 @@ impl Plugin for Telemetry {
                                     ..
                                 }) = &*subgraph_metrics_conf
                                 {
-                                    for from_resp in from_response {
-                                        match from_resp {
-                                            Forward::Header(headers_forward) => {
-                                                let headers = response.response.headers();
-                                                metric_attrs.extend(
-                                                    headers_forward
-                                                        .iter()
-                                                        .fold(HashMap::new(), |mut acc, current| {
-                                                            acc.extend(
-                                                                current.from_headers(headers),
-                                                            );
-                                                            acc
-                                                        })
-                                                        .into_iter()
-                                                        .map(|(k, v)| KeyValue::new(k, v)),
-                                                );
-                                            }
-                                            Forward::Body(body) => {
-                                                todo!()
-                                            }
-                                        }
+                                    if let Some(headers_forward) = &from_response.header {
+                                        let headers = response.response.headers();
+                                        metric_attrs.extend(
+                                            headers_forward
+                                                .iter()
+                                                .fold(HashMap::new(), |mut acc, current| {
+                                                    acc.extend(
+                                                        current
+                                                            .get_attributes_from_headers(headers),
+                                                    );
+                                                    acc
+                                                })
+                                                .into_iter()
+                                                .map(|(k, v)| KeyValue::new(k, v)),
+                                        );
+                                    }
+                                    if let Some(body_forward) = &from_response.body {
+                                        todo!()
                                     }
                                 }
 
@@ -852,7 +845,7 @@ impl Telemetry {
                 {
                     metric_attrs.extend(
                         forward_attributes
-                            .from_router_response(response)
+                            .get_attributes_from_router_response(response)
                             .into_iter()
                             .map(|(k, v)| KeyValue::new(k, v)),
                     );
@@ -923,25 +916,18 @@ impl Telemetry {
                     attributes.insert(name.clone(), value.clone());
                 }
                 let headers = req.originating_request.headers();
-                // Fill from response
-                for from_resp in from_request {
-                    match from_resp {
-                        metrics::Forward::Header(header_forward) => attributes.extend(
-                            header_forward
-                                .iter()
-                                .fold(HashMap::new(), |mut acc, current| {
-                                    acc.extend(current.from_headers(headers));
-                                    acc
-                                }),
-                        ),
-                        metrics::Forward::Body(body_forward) => {
-                            // TODO fetch parsed queries
-                            // execute it on response.response.body...
-                            // If there is something then we push in metric_attrs
-                            // If not we skip
-                            todo!()
-                        }
-                    }
+                // Fill from request
+                if let Some(headers_forward) = &from_request.header {
+                    attributes.extend(headers_forward.iter().fold(
+                        HashMap::new(),
+                        |mut acc, current| {
+                            acc.extend(current.get_attributes_from_headers(headers));
+                            acc
+                        },
+                    ));
+                }
+                if let Some(body_forward) = &from_request.body {
+                    todo!()
                 }
                 // Fill from context
                 for ContextForward {
@@ -950,7 +936,7 @@ impl Telemetry {
                     rename,
                 } in from_context
                 {
-                    let ctx_value = match context.get::<_, String>(named) {
+                    match context.get::<_, String>(named) {
                         Ok(Some(value)) => {
                             attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
                         }
@@ -962,7 +948,7 @@ impl Telemetry {
                                 );
                             }
                         }
-                    };
+                    }
                 }
             }
 
@@ -1050,25 +1036,124 @@ mod tests {
                             "int_arr": [1, 2],
                             "float_arr": [1.0, 2.0],
                             "bool_arr": [true, false]
-                            }
                         }
-                    },
+                    }
+                },
                 "metrics": {
                     "common": {
                         "attributes": {
-                            "from_headers": [
-                                {
-                                    "named": "test",
-                                    "default": "default_value",
-                                    "rename": "renamed_value",
+                            "router": {
+                                "static": [
+                                    {
+                                        "name": "myname",
+                                        "value": "label_value"
+                                    }
+                                ],
+                                "request": {
+                                    "header": [{
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value",
+                                    }],
+                                    "body": [{
+                                        "path": "data.test",
+                                        "name": "my_new_name",
+                                        "default": "default_value"
+                                    }]
+                                },
+                                "response": {
+                                    "header": [{
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value",
+                                    }, {
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value",
+                                    }],
+                                    "body": [{
+                                        "path": "data.test",
+                                        "name": "my_new_name",
+                                        "default": "default_value"
+                                    }]
                                 }
-                            ],
-                            "static": [
-                                {
-                                    "name": "myname",
-                                    "value": "label_value"
+                            },
+                            "subgraph": {
+                                "all": {
+                                    "static": [
+                                        {
+                                            "name": "myname",
+                                            "value": "label_value"
+                                        }
+                                    ],
+                                    "request": {
+                                        "header": [{
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }],
+                                        "body": [{
+                                            "path": "data.test",
+                                            "name": "my_new_name",
+                                            "default": "default_value"
+                                        }]
+                                    },
+                                    "response": {
+                                        "header": [{
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }, {
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }],
+                                        "body": [{
+                                            "path": "data.test",
+                                            "name": "my_new_name",
+                                            "default": "default_value"
+                                        }]
+                                    }
+                                },
+                                "subgraphs": {
+                                    "subgraph_name_test": {
+                                         "static": [
+                                            {
+                                                "name": "myname",
+                                                "value": "label_value"
+                                            }
+                                        ],
+                                        "request": {
+                                            "header": [{
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }],
+                                            "body": [{
+                                                "path": "data.test",
+                                                "name": "my_new_name",
+                                                "default": "default_value"
+                                            }]
+                                        },
+                                        "response": {
+                                            "header": [{
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }, {
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }],
+                                            "body": [{
+                                                "path": "data.test",
+                                                "name": "my_new_name",
+                                                "default": "default_value"
+                                            }]
+                                        }
+                                    }
                                 }
-                            ]
+                            }
                         }
                     }
                 }

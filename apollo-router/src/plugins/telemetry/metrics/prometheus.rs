@@ -4,16 +4,12 @@ use crate::{http_compat, ResponseBody};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
-use opentelemetry::sdk::Resource;
-use opentelemetry::{Key, KeyValue, Value};
 use prometheus::{Encoder, Registry, TextEncoder};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::task::{Context, Poll};
 use tower::{BoxError, ServiceExt};
 use tower_service::Service;
-
-use super::MetricsAttributesConf;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

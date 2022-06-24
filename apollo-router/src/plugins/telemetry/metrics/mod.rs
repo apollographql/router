@@ -39,7 +39,7 @@ pub struct MetricsAttributesConf {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SubgraphAttributesConf {
+pub(crate) struct SubgraphAttributesConf {
     // Apply to all subgraphs
     pub(crate) all: Option<AttributesForwardConf>,
     // Apply to specific subgraph
@@ -48,14 +48,14 @@ pub struct SubgraphAttributesConf {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AttributesForwardConf {
+pub(crate) struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
     #[serde(rename = "static")]
     pub(crate) insert: Option<Vec<Insert>>,
     /// Configuration to forward headers or body values from the request custom attributes/labels in metrics
-    pub(crate) request: Option<Vec<Forward>>,
+    pub(crate) request: Option<Forward>,
     /// Configuration to forward headers or body values from the response custom attributes/labels in metrics
-    pub(crate) response: Option<Vec<Forward>>,
+    pub(crate) response: Option<Forward>,
     /// Configuration to forward values from the context custom attributes/labels in metrics
     pub(crate) context: Option<Vec<ContextForward>>,
 }
@@ -68,13 +68,13 @@ pub(crate) struct Insert {
     pub(crate) value: String,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
-pub(crate) enum Forward {
+pub(crate) struct Forward {
     /// Forward header values as custom attributes/labels in metrics
-    Header(Vec<HeaderForward>),
+    pub(crate) header: Option<Vec<HeaderForward>>,
     /// Forward body values as custom attributes/labels in metrics
-    Body(Vec<BodyForward>),
+    pub(crate) body: Option<Vec<BodyForward>>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -103,7 +103,7 @@ pub(crate) enum HeaderForward {
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
     pub(crate) path: String,
-    pub(crate) rename: Option<String>,
+    pub(crate) name: String,
     pub(crate) default: Option<String>,
 }
 
@@ -117,7 +117,10 @@ pub struct ContextForward {
 }
 
 impl HeaderForward {
-    pub(crate) fn from_headers(&self, headers: &HeaderMap) -> HashMap<String, String> {
+    pub(crate) fn get_attributes_from_headers(
+        &self,
+        headers: &HeaderMap,
+    ) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
         match self {
             HeaderForward::Named {
@@ -149,8 +152,22 @@ impl HeaderForward {
     }
 }
 
+impl Forward {
+    pub(crate) fn merge(&mut self, to_merge: Self) {
+        match (&mut self.body, to_merge.body) {
+            (Some(body), Some(body_to_merge)) => {
+                body.extend(body_to_merge);
+            }
+            (None, Some(body_to_merge)) => {
+                self.body = Some(body_to_merge);
+            }
+            _ => {}
+        }
+    }
+}
+
 impl AttributesForwardConf {
-    pub(crate) fn from_router_response(
+    pub(crate) fn get_attributes_from_router_response(
         &self,
         response: &RouterResponse<BoxStream<'static, ResponseBody>>,
     ) -> HashMap<String, String> {
@@ -165,24 +182,18 @@ impl AttributesForwardConf {
         let headers = response.response.headers();
         // Fill from response
         if let Some(from_response) = &self.response {
-            for from_resp in from_response {
-                match from_resp {
-                    Forward::Header(header_forward) => attributes.extend(
-                        header_forward
-                            .iter()
-                            .fold(HashMap::new(), |mut acc, current| {
-                                acc.extend(current.from_headers(headers));
-                                acc
-                            }),
-                    ),
-                    Forward::Body(body_forward) => {
-                        // TODO fetch parsed queries
-                        // execute it on response.response.body...
-                        // If there is something then we push in metric_attrs
-                        // If not we skip
-                        todo!()
-                    }
-                }
+            if let Some(body_forward) = &from_response.body {
+                todo!();
+            }
+
+            if let Some(header_forward) = &from_response.header {
+                attributes.extend(header_forward.iter().fold(
+                    HashMap::new(),
+                    |mut acc, current| {
+                        acc.extend(current.get_attributes_from_headers(headers));
+                        acc
+                    },
+                ));
             }
         }
         // Fill from context
@@ -227,24 +238,17 @@ impl AttributesForwardConf {
         }
         // Fill from response
         if let Some(from_response) = &self.response {
-            for from_resp in from_response {
-                match from_resp {
-                    Forward::Header(header_forward) => attributes.extend(
-                        header_forward
-                            .iter()
-                            .fold(HashMap::new(), |mut acc, current| {
-                                acc.extend(current.from_headers(headers));
-                                acc
-                            }),
-                    ),
-                    Forward::Body(body_forward) => {
-                        // TODO fetch parsed queries
-                        // execute it on response.response.body...
-                        // If there is something then we push in metric_attrs
-                        // If not we skip
-                        todo!()
-                    }
-                }
+            if let Some(headers_forward) = &from_response.header {
+                attributes.extend(headers_forward.iter().fold(
+                    HashMap::new(),
+                    |mut acc, current| {
+                        acc.extend(current.get_attributes_from_headers(headers));
+                        acc
+                    },
+                ));
+            }
+            if let Some(body_forward) = &from_response.body {
+                todo!()
             }
         }
         // Fill from context
@@ -276,7 +280,7 @@ impl AttributesForwardConf {
 }
 
 impl ContextForward {
-    pub(crate) fn from_context(&self, context: &Context) -> HashMap<String, String> {
+    pub(crate) fn get_attributes_from_context(&self, context: &Context) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
         // Fill from context
         match context.get::<_, String>(&self.named) {
