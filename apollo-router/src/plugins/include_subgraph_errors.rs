@@ -1,4 +1,4 @@
-use crate::error::Error as SubgraphError;
+use crate::error::GraphQLError;
 use crate::plugin::Plugin;
 use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
 use once_cell::sync::Lazy;
@@ -9,8 +9,8 @@ use tower::util::BoxService;
 use tower::{BoxError, ServiceExt};
 
 #[allow(clippy::field_reassign_with_default)]
-static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
-    let mut error: SubgraphError = Default::default();
+static REDACTED_ERROR_MESSAGE: Lazy<Vec<GraphQLError>> = Lazy::new(|| {
+    let mut error: GraphQLError = Default::default();
 
     error.message = "Subgraph errors redacted".to_string();
 

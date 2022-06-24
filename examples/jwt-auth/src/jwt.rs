@@ -239,7 +239,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, ResponseBody>>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router::error::Error {
+                        .errors(vec![apollo_router::error::GraphQLError {
                             message: msg,
                             ..Default::default()
                         }])

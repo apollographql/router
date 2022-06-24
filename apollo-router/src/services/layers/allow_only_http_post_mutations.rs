@@ -3,8 +3,8 @@
 //! See [`Layer`] and [`Service`] for more details.
 
 use crate::{
-    error::Error, json_ext::Object, layers::sync_checkpoint::CheckpointService, ExecutionRequest,
-    ExecutionResponse, Response,
+    error::GraphQLError, json_ext::Object, layers::sync_checkpoint::CheckpointService,
+    ExecutionRequest, ExecutionResponse, Response,
 };
 use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};
@@ -30,7 +30,7 @@ where
                 if req.originating_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
-                    let errors = vec![Error {
+                    let errors = vec![GraphQLError {
                         message: "Mutations can only be sent over HTTP POST".to_string(),
                         locations: Default::default(),
                         path: Default::default(),
@@ -59,7 +59,7 @@ where
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
     use super::*;
-    use crate::error::Error;
+    use crate::error::GraphQLError;
     use crate::http_compat;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
@@ -144,7 +144,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_non_http_post_mutations_pass_through() {
-        let expected_error = Error {
+        let expected_error = GraphQLError {
             message: "Mutations can only be sent over HTTP POST".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -183,7 +183,7 @@ mod forbid_http_get_mutations_tests {
         }
     }
 
-    fn assert_error_matches(expected_error: &Error, response: Response) {
+    fn assert_error_matches(expected_error: &GraphQLError, response: Response) {
         assert_eq!(&response.errors[0], expected_error);
     }
 

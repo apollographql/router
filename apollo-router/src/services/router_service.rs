@@ -138,7 +138,7 @@ where
                 QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
                         crate::Response::builder()
-                            .errors(vec![crate::error::Error::builder()
+                            .errors(vec![crate::error::GraphQLError::builder()
                                 .message(String::from("introspection has been disabled"))
                                 .build()])
                             .build(),
@@ -199,7 +199,7 @@ where
             }
         }
         .or_else(|error: BoxError| async move {
-            let errors = vec![crate::error::Error {
+            let errors = vec![crate::error::GraphQLError {
                 message: error.to_string(),
                 ..Default::default()
             }];

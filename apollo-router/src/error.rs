@@ -103,9 +103,9 @@ pub enum FetchError {
 
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
-    pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+    pub fn to_graphql_error(&self, path: Option<Path>) -> GraphQLError {
         let value: Value = serde_json::to_value(self).unwrap().into();
-        Error {
+        GraphQLError {
             message: self.to_string(),
             locations: Default::default(),
             path,
@@ -125,11 +125,14 @@ impl FetchError {
     }
 }
 
+#[deprecated(note = "use GraphQLError instead")]
+pub type Error = GraphQLError;
+
 /// Any error.
 #[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[error("{message}")]
 #[serde(rename_all = "camelCase")]
-pub struct Error {
+pub struct GraphQLError {
     /// The error message.
     pub message: String,
 
@@ -145,7 +148,7 @@ pub struct Error {
 }
 
 #[buildstructor::buildstructor]
-impl Error {
+impl GraphQLError {
     #[builder]
     pub fn new(
         message: String,
@@ -161,7 +164,7 @@ impl Error {
         }
     }
 
-    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Self, FetchError> {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
@@ -198,7 +201,7 @@ impl Error {
                 reason: err.to_string(),
             })?;
 
-        Ok(Error {
+        Ok(Self {
             message,
             locations,
             path,

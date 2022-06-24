@@ -1,5 +1,5 @@
-use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::GraphQLError;
 use crate::json_ext::{Path, Value, ValueExt};
 use crate::service_registry::ServiceRegistry;
 use crate::*;
@@ -155,7 +155,7 @@ impl PlanNode {
         originating_request: http_compat::Request<Request>,
         parent_value: &'a Value,
         options: &'a QueryPlanOptions,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<(Value, Vec<GraphQLError>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
@@ -307,7 +307,7 @@ impl PlanNode {
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use super::QueryPlanOptions;
-    use crate::error::{Error, FetchError};
+    use crate::error::{FetchError, GraphQLError};
     use crate::json_ext::{Object, Path, Value, ValueExt};
     use crate::service_registry::ServiceRegistry;
     use crate::*;
@@ -457,7 +457,7 @@ pub(crate) mod fetch {
             originating_request: http_compat::Request<Request>,
             schema: &'a Schema,
             options: &QueryPlanOptions,
-        ) -> Result<(Value, Vec<Error>), FetchError> {
+        ) -> Result<(Value, Vec<GraphQLError>), FetchError> {
             let FetchNode {
                 operation,
                 operation_kind,
@@ -546,7 +546,7 @@ pub(crate) mod fetch {
             let errors = response
                 .errors
                 .into_iter()
-                .map(|error| Error {
+                .map(|error| GraphQLError {
                     locations: error.locations,
                     path: error.path.map(|path| current_dir.join(path)),
                     message: error.message,

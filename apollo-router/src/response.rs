@@ -1,5 +1,5 @@
-use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::GraphQLError;
 use crate::json_ext::{Object, Path, Value};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub struct Response {
 
     /// The optional graphql errors encountered.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub errors: Vec<Error>,
+    pub errors: Vec<GraphQLError>,
 
     /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
@@ -40,7 +40,7 @@ impl Response {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<Error>,
+        errors: Vec<GraphQLError>,
         extensions: Map<ByteString, Value>,
     ) -> Self {
         Self {
@@ -58,7 +58,7 @@ impl Response {
     }
 
     /// append_errors default the errors `path` with the one provided.
-    pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
+    pub fn append_errors(&mut self, errors: &mut Vec<GraphQLError>) {
         self.errors.append(errors)
     }
 
@@ -85,8 +85,8 @@ impl Response {
             })?
             .into_iter()
             .flatten()
-            .map(|v| Error::from_value(service_name, v))
-            .collect::<Result<Vec<Error>, FetchError>>()?;
+            .map(|v| GraphQLError::from_value(service_name, v))
+            .collect::<Result<Vec<GraphQLError>, FetchError>>()?;
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
                 .map_err(|err| FetchError::SubrequestMalformedResponse {
@@ -129,24 +129,24 @@ mod tests {
     #[test]
     fn test_append_errors_path_fallback_and_override() {
         let expected_errors = vec![
-            Error {
+            GraphQLError {
                 message: "Something terrible happened!".to_string(),
                 path: Some(Path::from("here")),
                 ..Default::default()
             },
-            Error {
+            GraphQLError {
                 message: "I mean for real".to_string(),
                 ..Default::default()
             },
         ];
 
         let mut errors_to_append = vec![
-            Error {
+            GraphQLError {
                 message: "Something terrible happened!".to_string(),
                 path: Some(Path::from("here")),
                 ..Default::default()
             },
-            Error {
+            GraphQLError {
                 message: "I mean for real".to_string(),
                 ..Default::default()
             },
@@ -220,7 +220,7 @@ mod tests {
                     ]
                   }
                 }))
-                .errors(vec![Error {
+                .errors(vec![GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),
@@ -311,7 +311,7 @@ mod tests {
                   }
                 }))
                 .path(Path::from("hero/heroFriends/1/name"))
-                .errors(vec![Error {
+                .errors(vec![GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),

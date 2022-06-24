@@ -82,7 +82,7 @@ impl Service<ExecutionRequest> for ExecutionService {
             let (first, rest) = receiver.into_future().await;
             match first {
                 None => Ok(ExecutionResponse::error_builder()
-                    .errors(vec![crate::error::Error {
+                    .errors(vec![crate::error::GraphQLError {
                         message: "empty response".to_string(),
                         ..Default::default()
                     }])

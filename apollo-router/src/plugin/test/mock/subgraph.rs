@@ -56,7 +56,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
             SubgraphResponse::new_from_response(compat_response, req.context)
         } else {
-            let error = crate::error::Error::builder()
+            let error = crate::error::GraphQLError::builder()
                 .message("couldn't find mock for query".to_string())
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();

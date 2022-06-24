@@ -59,7 +59,7 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::error_builder()
-                        .error(apollo_router::error::Error {
+                        .error(apollo_router::error::GraphQLError {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         })

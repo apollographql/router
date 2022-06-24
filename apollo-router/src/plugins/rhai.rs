@@ -1,7 +1,7 @@
 //! Customization via Rhai.
 
 use crate::{
-    error::Error,
+    error::GraphQLError,
     http_compat,
     json_ext::{Object, Value},
     layers::ServiceBuilderExt,
@@ -647,7 +647,7 @@ macro_rules! gen_map_request {
                             status: StatusCode,
                         ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![Error {
+                                .errors(vec![GraphQLError {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -702,7 +702,7 @@ macro_rules! gen_map_response {
                             status: StatusCode,
                         ) -> [<$base:camel Response>] {
                             let res = [<$base:camel Response>]::error_builder()
-                                .errors(vec![Error {
+                                .errors(vec![GraphQLError {
                                     message: msg,
                                     ..Default::default()
                                 }])
@@ -960,7 +960,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = RouterResponse::error_builder()
-                                    .errors(vec![Error {
+                                    .errors(vec![GraphQLError {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1029,7 +1029,7 @@ impl ServiceStep {
                                 BoxError,
                             > {
                                 let res = ExecutionResponse::error_builder()
-                                    .errors(vec![Error {
+                                    .errors(vec![GraphQLError {
                                         message: msg,
                                         ..Default::default()
                                     }])
@@ -1106,7 +1106,7 @@ impl ServiceStep {
                                 ) -> RouterResponse<BoxStream<'static, ResponseBody>>
                                 {
                                     let res = RouterResponse::error_builder()
-                                        .errors(vec![Error {
+                                        .errors(vec![GraphQLError {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1205,7 +1205,7 @@ impl ServiceStep {
                                 ) -> ExecutionResponse<BoxStream<'static, Response>>
                                 {
                                     let res = ExecutionResponse::error_builder()
-                                        .errors(vec![Error {
+                                        .errors(vec![GraphQLError {
                                             message: msg,
                                             ..Default::default()
                                         }])
@@ -1363,7 +1363,7 @@ impl Rhai {
             .register_type::<ResponseBody>()
             .register_type::<Response>()
             .register_type::<Value>()
-            .register_type::<Error>()
+            .register_type::<GraphQLError>()
             .register_type::<Uri>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
@@ -1710,7 +1710,7 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Response| -> String {
                 format!("{:?}", x)
             })
-            .register_fn("to_string", |x: &mut Error| -> String {
+            .register_fn("to_string", |x: &mut GraphQLError| -> String {
                 format!("{:?}", x)
             })
             .register_fn("to_string", |x: &mut Object| -> String {

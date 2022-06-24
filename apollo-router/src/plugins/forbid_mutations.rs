@@ -1,6 +1,6 @@
 use crate::{
-    error::Error, json_ext::Object, layers::ServiceBuilderExt, plugin::Plugin, register_plugin,
-    ExecutionRequest, ExecutionResponse, Response,
+    error::GraphQLError, json_ext::Object, layers::ServiceBuilderExt, plugin::Plugin,
+    register_plugin, ExecutionRequest, ExecutionResponse, Response,
 };
 use futures::stream::BoxStream;
 use http::StatusCode;
@@ -34,7 +34,7 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let error = Error {
+                        let error = GraphQLError {
                             message: "Mutations are forbidden".to_string(),
                             locations: Default::default(),
                             path: Default::default(),
@@ -99,7 +99,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_mutations_pass_through() {
-        let expected_error = Error {
+        let expected_error = GraphQLError {
             message: "Mutations are forbidden".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -147,7 +147,7 @@ mod forbid_http_get_mutations_tests {
             .unwrap();
     }
 
-    fn assert_error_matches(expected_error: &Error, response: Response) {
+    fn assert_error_matches(expected_error: &GraphQLError, response: Response) {
         assert_eq!(&response.errors[0], expected_error);
     }
 

@@ -78,6 +78,7 @@ use apollo_router::ShutdownKind;
 use apollo_router::error::CacheResolverError;
 use apollo_router::error::Error;
 use apollo_router::error::FetchError;
+use apollo_router::error::GraphQLError;
 use apollo_router::error::JsonExtError;
 use apollo_router::error::Location;
 use apollo_router::error::NewErrorBuilder;
@@ -191,6 +192,14 @@ use apollo_router::subscriber::replace_layer;
 use apollo_router::subscriber::set_global_subscriber;
 </pre>
 </details>
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### `apollo_router`’s `Error` struct has been renamed to `GraphQLError` ([PR #1302](https://github.com/apollographql/router/pull/1302))
+
+This isn’t actually breaking since `Error` is now a `type` alias,
+but it is deprecated so you may see compiler warnings
+until you apply the rename in your code.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
