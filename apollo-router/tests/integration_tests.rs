@@ -2,6 +2,8 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_router::graphql;
+use apollo_router::graphql::Request;
 use apollo_router::http_ext;
 use apollo_router::json_ext::{Object, ValueExt};
 use apollo_router::plugin::Plugin;
@@ -12,7 +14,6 @@ use apollo_router::services::PluggableRouterServiceBuilder;
 use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
 use apollo_router::services::{SubgraphRequest, SubgraphService};
 use apollo_router::Context;
-use apollo_router::Request;
 use apollo_router::Schema;
 use futures::stream::BoxStream;
 use http::Method;
@@ -205,7 +206,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error = apollo_router::graphql::Error {
+    let expected_error = graphql::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -583,8 +584,8 @@ async fn missing_variables() {
 }
 
 async fn query_node(
-    request: &apollo_router::Request,
-) -> Result<apollo_router::Response, apollo_router::error::FetchError> {
+    request: &graphql::Request,
+) -> Result<graphql::Response, apollo_router::error::FetchError> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
@@ -606,7 +607,9 @@ async fn query_node(
         )
 }
 
-async fn query_rust(request: RouterRequest) -> (apollo_router::Response, CountingServiceRegistry) {
+async fn query_rust(
+    request: RouterRequest,
+) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry().await;
     (query_with_router(router, request).await, counting_registry)
 }
@@ -661,7 +664,7 @@ async fn query_with_router(
         BoxError,
     >,
     request: RouterRequest,
-) -> apollo_router::Response {
+) -> graphql::Response {
     let response = router
         .oneshot(request)
         .await

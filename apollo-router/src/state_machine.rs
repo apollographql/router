@@ -603,7 +603,7 @@ mod tests {
         #[async_trait::async_trait]
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
+            type Future = <Self::RouterService as Service<Request<crate::graphql::Request>>>::Future;
 
             async fn create<'a>(
                 &'a mut self,
@@ -618,7 +618,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: Request<crate::Request>) -> <MockMyRouter as Service<Request<crate::Request>>>::Future;
+            fn service_call(&mut self, req: Request<crate::graphql::Request>) -> <MockMyRouter as Service<Request<crate::graphql::Request>>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -627,7 +627,7 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<Request<crate::Request>> for MockMyRouter {
+    impl Service<Request<crate::graphql::Request>> for MockMyRouter {
         type Response = Response<BoxStream<'static, ResponseBody>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -635,7 +635,7 @@ mod tests {
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: Request<crate::Request>) -> Self::Future {
+        fn call(&mut self, req: Request<crate::graphql::Request>) -> Self::Future {
             self.service_call(req)
         }
     }
@@ -662,14 +662,14 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>
         where
             RS: Service<
-                    Request<crate::Request>,
+                    Request<crate::graphql::Request>,
                     Response = Response<BoxStream<'static, ResponseBody>>,
                     Error = BoxError,
                 > + Send
                 + Sync
                 + Clone
                 + 'static,
-            <RS as Service<Request<crate::Request>>>::Future: std::marker::Send,
+            <RS as Service<Request<crate::graphql::Request>>>::Future: std::marker::Send,
         {
             let res = self.create_server(configuration, listener);
             Box::pin(async move { res })

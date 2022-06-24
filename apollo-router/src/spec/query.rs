@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 
 use crate::error::FetchError;
+use crate::graphql::{Request, Response};
 use crate::json_ext::{Object, Value};
 use crate::query_planner::fetch::OperationKind;
 use crate::*;

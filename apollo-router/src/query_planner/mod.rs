@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql::{Request, Response};
 use crate::json_ext::{Path, Value, ValueExt};
 use crate::service_registry::ServiceRegistry;
 use crate::*;
@@ -308,6 +309,7 @@ pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use super::QueryPlanOptions;
     use crate::error::{Error, FetchError};
+    use crate::graphql::Request;
     use crate::json_ext::{Object, Path, Value, ValueExt};
     use crate::service_registry::ServiceRegistry;
     use crate::*;
@@ -372,7 +374,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: http_ext::Request<crate::Request>,
+            request: http_ext::Request<Request>,
             schema: &Schema,
             enable_variable_deduplication: bool,
         ) -> Option<Variables> {
@@ -641,7 +643,7 @@ mod log {
         service_name: &str,
         operation: &str,
         variables: &Map<ByteString, Value>,
-        response: &crate::Response,
+        response: &crate::graphql::Response,
     ) {
         tracing::trace!(
             "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",

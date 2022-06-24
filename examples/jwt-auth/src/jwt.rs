@@ -60,6 +60,7 @@
 //!  - Token refresh
 //!  - ...
 
+use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
@@ -239,7 +240,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, ResponseBody>>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router::graphql::Error {
+                        .errors(vec![graphql::Error {
                             message: msg,
                             ..Default::default()
                         }])
@@ -389,6 +390,7 @@ register_plugin!("example", "jwt", JwtAuth);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::services::{RouterRequest, RouterResponse};
@@ -433,7 +435,7 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -473,7 +475,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -513,7 +515,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -557,7 +559,7 @@ mod tests {
         );
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -645,7 +647,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -700,7 +702,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -762,7 +764,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()

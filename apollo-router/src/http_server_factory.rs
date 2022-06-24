@@ -1,5 +1,6 @@
 use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
+use crate::graphql;
 use crate::http_ext::{Request, Response};
 use crate::plugin::Handler;
 use crate::ResponseBody;
@@ -27,14 +28,14 @@ pub(crate) trait HttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                Request<crate::Request>,
+                Request<graphql::Request>,
                 Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
             + Clone
             + 'static,
-        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send;
+        <RS as Service<Request<graphql::Request>>>::Future: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -93,14 +94,14 @@ impl HttpServerHandle {
     where
         SF: HttpServerFactory,
         RS: Service<
-                Request<crate::Request>,
+                Request<graphql::Request>,
                 Response = Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
             + Clone
             + 'static,
-        <RS as Service<Request<crate::Request>>>::Future: std::marker::Send,
+        <RS as Service<Request<graphql::Request>>>::Future: std::marker::Send,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {

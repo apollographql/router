@@ -1,6 +1,8 @@
 //! Implements the router phase of the request lifecycle.
 
 use crate::error::ServiceBuildError;
+use crate::graphql;
+use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -15,8 +17,8 @@ use crate::{
             ensure_query_presence::EnsureQueryPresence,
         },
     },
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream, StreamExt};
@@ -137,7 +139,7 @@ where
                 }
                 QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
-                        crate::Response::builder()
+                        graphql::Response::builder()
                             .errors(vec![crate::error::Error::builder()
                                 .message(String::from("introspection has been disabled"))
                                 .build()])

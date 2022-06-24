@@ -1,5 +1,6 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
+use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -16,7 +17,7 @@ use crate::query_planner::USAGE_REPORTING;
 use crate::subscriber::replace_layer;
 use crate::{
     http_ext, register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
     SubgraphResponse,
 };
 use ::tracing::{info_span, Span};

@@ -1,14 +1,15 @@
 //! Customization via Rhai.
 
+use crate::error::Error;
+use crate::graphql::{Request, Response};
+use crate::http_ext;
+use crate::json_ext::{Object, Value};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
 use crate::{
-    error::Error,
-    http_ext,
-    json_ext::{Object, Value},
-    layers::ServiceBuilderExt,
-    plugin::Plugin,
     register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};
@@ -1836,7 +1837,7 @@ mod tests {
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
         let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
-            .body(crate::Request::builder().query(String::new()).build())
+            .body(Request::builder().query(String::new()).build())
             .build()?;
         let context = Context::new();
         context.insert("test", 5i64).unwrap();

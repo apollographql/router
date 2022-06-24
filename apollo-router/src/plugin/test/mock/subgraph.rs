@@ -1,7 +1,8 @@
 //! Mock subgraph implementation
 
+use crate::graphql::{Request, Response};
 use crate::json_ext::Object;
-use crate::{Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::{SubgraphRequest, SubgraphResponse};
 use futures::future;
 use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};

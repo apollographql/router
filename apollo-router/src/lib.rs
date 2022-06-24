@@ -61,8 +61,11 @@ pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
 pub use services::http_ext;
 pub use spec::Schema;
 
+#[deprecated(note = "use apollo_router::graphql::Request instead")]
 pub type Request = graphql::Request;
+#[deprecated(note = "use apollo_router::graphql::Response instead")]
 pub type Response = graphql::Response;
+#[deprecated(note = "use apollo_router::graphql::Error instead")]
 pub type Error = graphql::Error;
 
 // TODO: clean these up and import from relevant modules instead

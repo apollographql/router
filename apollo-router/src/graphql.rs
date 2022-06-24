@@ -1,3 +1,5 @@
+//! Namespace for the GraphQL [`Request`], [`Response`], and [`Error`] types.
+
 use crate::error::{FetchError, Location};
 use crate::json_ext::Object;
 use crate::json_ext::Path;

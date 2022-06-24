@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        let graphql_response: apollo_router::Response =
+        let graphql_response: apollo_router::graphql::Response =
             http::Response::from(service_response.response).into_body();
 
         assert!(graphql_response.errors.is_empty());
