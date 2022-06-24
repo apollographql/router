@@ -1,6 +1,7 @@
 //! Tower fetcher for subgraphs.
 
 use crate::error::FetchError;
+use crate::graphql;
 use ::serde::Deserialize;
 use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
 use futures::future::BoxFuture;
@@ -190,9 +191,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 }));
             }
 
-            let graphql: crate::Response = tracing::debug_span!("parse_subgraph_response")
+            let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
-                    crate::Response::from_bytes(&service_name, body).map_err(|error| {
+                    graphql::Response::from_bytes(&service_name, body).map_err(|error| {
                         FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
@@ -262,8 +263,9 @@ mod tests {
     use serde_json_bytes::{ByteString, Value};
     use tower::{service_fn, ServiceExt};
 
+    use crate::graphql::{Request, Response};
     use crate::query_planner::fetch::OperationKind;
-    use crate::{http_ext, json_ext::Object, Context, Request, Response, SubgraphRequest};
+    use crate::{http_ext, json_ext::Object, Context, SubgraphRequest};
 
     use super::*;
 

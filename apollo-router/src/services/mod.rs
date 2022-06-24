@@ -3,6 +3,7 @@
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::error::Error;
+use crate::graphql::{Request, Response};
 use crate::json_ext::{Object, Path, Value};
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
@@ -819,6 +820,7 @@ impl AsRef<Request> for Arc<http_ext::Request<Request>> {
 
 #[cfg(test)]
 mod test {
+    use crate::graphql;
     use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
     use http::{HeaderValue, Method, Uri};
     use serde_json::json;
@@ -873,7 +875,7 @@ mod test {
             .clone();
         assert_eq!(
             request.originating_request.body(),
-            &crate::Request::builder()
+            &graphql::Request::builder()
                 .variables(variables)
                 .extensions(extensions)
                 .operation_name("Default")
@@ -909,7 +911,7 @@ mod test {
         assert_eq!(
             response.next_response().await.unwrap(),
             ResponseBody::GraphQL(
-                crate::Response::builder()
+                graphql::Response::builder()
                     .extensions(extensions)
                     .data(json!({}))
                     .build()

@@ -1,9 +1,9 @@
-use futures::stream::BoxStream;
-
+use crate::graphql::Response;
 use crate::{
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+use futures::stream::BoxStream;
 
 /// Build a mock service handler for the router pipeline.
 #[macro_export]

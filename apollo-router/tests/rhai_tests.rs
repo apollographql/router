@@ -1,10 +1,10 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_router::graphql::Request;
 use apollo_router::http_ext;
 use apollo_router::plugin::{plugins, DynPlugin};
 use apollo_router::services::{PluggableRouterServiceBuilder, SubgraphService};
-use apollo_router::Request;
 use apollo_router::Schema;
 use serde_json::Value;
 use tower::ServiceExt;

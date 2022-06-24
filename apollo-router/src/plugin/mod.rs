@@ -17,10 +17,11 @@
 pub mod serde;
 pub mod test;
 
+use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::{
     http_ext, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use ::serde::{de::DeserializeOwned, Deserialize};
 use async_trait::async_trait;

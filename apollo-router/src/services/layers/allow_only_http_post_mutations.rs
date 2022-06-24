@@ -2,10 +2,10 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::{
-    error::Error, json_ext::Object, layers::sync_checkpoint::CheckpointService, ExecutionRequest,
-    ExecutionResponse, Response,
-};
+use crate::graphql::{Error, Response};
+use crate::json_ext::Object;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::{ExecutionRequest, ExecutionResponse};
 use futures::stream::BoxStream;
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
@@ -60,6 +60,7 @@ where
 mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::error::Error;
+    use crate::graphql;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
@@ -220,7 +221,7 @@ mod forbid_http_get_mutations_tests {
 
         let request = http_ext::Request::fake_builder()
             .method(method)
-            .body(crate::Request::default())
+            .body(graphql::Request::default())
             .build()
             .expect("expecting valid request");
 
