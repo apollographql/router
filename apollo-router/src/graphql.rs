@@ -5,14 +5,13 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use std::fmt;
 
 pub use crate::request::Request;
 pub use crate::response::Response;
 
 /// Any GraphQL error.
-#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
-#[error("{message}")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Error {
     /// The error message.
@@ -89,5 +88,11 @@ impl Error {
             path,
             extensions,
         })
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
     }
 }
