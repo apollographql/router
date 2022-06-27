@@ -377,6 +377,7 @@ impl PluggableRouterServiceBuilder {
             execution_service,
             schema: self.schema,
             plugins: Arc::new(self.plugins),
+            apq: APQLayer::default(),
         })
     }
 }
@@ -393,6 +394,7 @@ pub struct MakeARouter {
     >,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
+    apq: APQLayer,
 }
 
 impl NewService<Request<graphql::Request>> for MakeARouter {
@@ -437,7 +439,7 @@ impl MakeARouter {
     > + Send
            + 'static {
         ServiceBuilder::new()
-            .layer(APQLayer::default())
+            .layer(self.apq.clone())
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins.iter().rev().fold(
