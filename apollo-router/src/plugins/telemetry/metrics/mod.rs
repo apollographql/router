@@ -14,9 +14,11 @@ use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorde
 use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
+use serde::Serialize;
 use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -237,48 +239,10 @@ impl AttributesForwardConf {
         attributes
     }
 
-    pub(crate) fn get_attributes_from_response(
-        &self,
-        headers: &HeaderMap,
-        body: &ResponseBody,
-        context: &Context,
-    ) -> HashMap<String, String> {
+    /// Get attributes from context
+    pub(crate) fn get_attributes_from_context(&self, context: &Context) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
 
-        // Fill from static
-        if let Some(to_insert) = &self.insert {
-            for Insert { name, value } in to_insert {
-                attributes.insert(name.clone(), value.clone());
-            }
-        }
-        // Fill from response
-        if let Some(from_response) = &self.response {
-            if let Some(headers_forward) = &from_response.header {
-                attributes.extend(headers_forward.iter().fold(
-                    HashMap::new(),
-                    |mut acc, current| {
-                        acc.extend(current.get_attributes_from_headers(headers));
-                        acc
-                    },
-                ));
-            }
-            if let Some(body_forward) = &from_response.body {
-                dbg!(body);
-                for body_fw in body_forward {
-                    let output = body_fw.path.execute(body).unwrap();
-                    if let Some(val) = output {
-                        if let Value::String(val_str) = val {
-                            attributes.insert(body_fw.name.clone(), val_str);
-                        } else {
-                            attributes.insert(body_fw.name.clone(), val.to_string());
-                        }
-                    } else if let Some(default_val) = &body_fw.default {
-                        attributes.insert(body_fw.name.clone(), default_val.clone());
-                    }
-                }
-            }
-        }
-        // Fill from context
         if let Some(from_context) = &self.context {
             for ContextForward {
                 named,
@@ -305,11 +269,53 @@ impl AttributesForwardConf {
         attributes
     }
 
+    pub(crate) fn get_attributes_from_response<T: Serialize>(
+        &self,
+        headers: &HeaderMap,
+        body: &T,
+    ) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+
+        // Fill from static
+        if let Some(to_insert) = &self.insert {
+            for Insert { name, value } in to_insert {
+                attributes.insert(name.clone(), value.clone());
+            }
+        }
+        // Fill from response
+        if let Some(from_response) = &self.response {
+            if let Some(headers_forward) = &from_response.header {
+                attributes.extend(headers_forward.iter().fold(
+                    HashMap::new(),
+                    |mut acc, current| {
+                        acc.extend(current.get_attributes_from_headers(headers));
+                        acc
+                    },
+                ));
+            }
+            if let Some(body_forward) = &from_response.body {
+                for body_fw in body_forward {
+                    let output = body_fw.path.execute(body).unwrap();
+                    if let Some(val) = output {
+                        if let Value::String(val_str) = val {
+                            attributes.insert(body_fw.name.clone(), val_str);
+                        } else {
+                            attributes.insert(body_fw.name.clone(), val.to_string());
+                        }
+                    } else if let Some(default_val) = &body_fw.default {
+                        attributes.insert(body_fw.name.clone(), default_val.clone());
+                    }
+                }
+            }
+        }
+
+        attributes
+    }
+
     pub(crate) fn get_attributes_from_request(
         &self,
         headers: &HeaderMap,
         body: &Request,
-        context: &Context,
     ) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
 
@@ -343,29 +349,6 @@ impl AttributesForwardConf {
                         attributes.insert(body_fw.name.clone(), default_val.clone());
                     }
                 }
-            }
-        }
-        // Fill from context
-        if let Some(from_context) = &self.context {
-            for ContextForward {
-                named,
-                default,
-                rename,
-            } in from_context
-            {
-                match context.get::<_, String>(named) {
-                    Ok(Some(value)) => {
-                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
-                    }
-                    _ => {
-                        if let Some(default_val) = default {
-                            attributes.insert(
-                                rename.as_ref().unwrap_or(named).clone(),
-                                default_val.clone(),
-                            );
-                        }
-                    }
-                };
             }
         }
 

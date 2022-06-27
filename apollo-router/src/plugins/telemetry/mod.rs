@@ -37,7 +37,6 @@ use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use router_bridge::planner::UsageReporting;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -50,9 +49,6 @@ use url::Url;
 
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
-use self::metrics::ContextForward;
-use self::metrics::Forward;
-use self::metrics::Insert;
 use self::metrics::MetricsAttributesConf;
 
 pub mod apollo;
@@ -454,8 +450,11 @@ impl Plugin for Telemetry {
                         attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
                             sub_request.subgraph_request.headers(),
                             sub_request.subgraph_request.body(),
-                            &sub_request.context,
                         ));
+                        attributes.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_context(&sub_request.context),
+                        );
                     }
                     sub_request
                         .context
@@ -488,19 +487,13 @@ impl Plugin for Telemetry {
                             .unwrap_or_default();
                         metric_attrs.push(subgraph_attribute.clone());
                         // Fill attributes from context
-                        if let Some(AttributesForwardConf {
-                            context: Some(from_context),
-                            ..
-                        }) = &*subgraph_metrics_conf
-                        {
-                            for from_ctx in from_context {
-                                metric_attrs.extend(
-                                    from_ctx
-                                        .get_attributes_from_context(&context)
-                                        .into_iter()
-                                        .map(|(k, v)| KeyValue::new(k, v)),
-                                );
-                            }
+                        if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                            metric_attrs.extend(
+                                subgraph_attributes_conf
+                                    .get_attributes_from_context(&context)
+                                    .into_iter()
+                                    .map(|(k, v)| KeyValue::new(k, v)),
+                            );
                         }
 
                         match &r {
@@ -511,55 +504,16 @@ impl Plugin for Telemetry {
                                 ));
 
                                 // Fill attributes from response
-                                if let Some(AttributesForwardConf {
-                                    response: Some(from_response),
-                                    ..
-                                }) = &*subgraph_metrics_conf
-                                {
-                                    if let Some(headers_forward) = &from_response.header {
-                                        let headers = response.response.headers();
-                                        metric_attrs.extend(
-                                            headers_forward
-                                                .iter()
-                                                .fold(HashMap::new(), |mut acc, current| {
-                                                    acc.extend(
-                                                        current
-                                                            .get_attributes_from_headers(headers),
-                                                    );
-                                                    acc
-                                                })
-                                                .into_iter()
-                                                .map(|(k, v)| KeyValue::new(k, v)),
-                                        );
-                                    }
-                                    if let Some(body_forward) = &from_response.body {
-                                        // TODO refactor
-                                        dbg!(response.response.body());
-                                        for body_fw in body_forward {
-                                            let output = body_fw
-                                                .path
-                                                .execute(response.response.body())
-                                                .unwrap(); //FIXME do not use unwrap
-                                            if let Some(val) = output {
-                                                if let Value::String(val_str) = val {
-                                                    metric_attrs.push(KeyValue::new(
-                                                        body_fw.name.clone(),
-                                                        val_str,
-                                                    ));
-                                                } else {
-                                                    metric_attrs.push(KeyValue::new(
-                                                        body_fw.name.clone(),
-                                                        val.to_string(),
-                                                    ));
-                                                }
-                                            } else if let Some(default_val) = &body_fw.default {
-                                                metric_attrs.push(KeyValue::new(
-                                                    body_fw.name.clone(),
-                                                    default_val.clone(),
-                                                ));
-                                            }
-                                        }
-                                    }
+                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_response(
+                                                response.response.headers(),
+                                                response.response.body(),
+                                            )
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
                                 }
 
                                 metrics.http_requests_total.add(1, &metric_attrs);
@@ -888,11 +842,11 @@ impl Telemetry {
                 .and_then(|c| c.attributes.as_ref())
                 .and_then(|a| a.router.as_ref())
             {
-                attributes.extend(router_attributes_conf.get_attributes_from_request(
-                    headers,
-                    req.originating_request.body(),
-                    context,
-                ));
+                attributes.extend(
+                    router_attributes_conf
+                        .get_attributes_from_request(headers, req.originating_request.body()),
+                );
+                attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
 
             let _ = context.insert(ATTRIBUTES, attributes);
