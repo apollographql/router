@@ -516,7 +516,8 @@ impl ApolloRouter {
 mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
-    use crate::Request;
+    use crate::graphql;
+    use crate::graphql::Request;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
@@ -554,8 +555,8 @@ mod tests {
 
     async fn query(
         listen_addr: &ListenAddr,
-        request: &crate::Request,
-    ) -> Result<crate::Response, crate::error::FetchError> {
+        request: &graphql::Request,
+    ) -> Result<graphql::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
             .post(format!("{}/", listen_addr))
             .json(request)

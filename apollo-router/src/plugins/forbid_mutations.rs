@@ -1,6 +1,7 @@
+use crate::graphql::Response;
 use crate::{
     error::Error, json_ext::Object, layers::ServiceBuilderExt, plugin::Plugin, register_plugin,
-    ExecutionRequest, ExecutionResponse, Response,
+    ExecutionRequest, ExecutionResponse,
 };
 use futures::stream::BoxStream;
 use http::StatusCode;
@@ -62,7 +63,8 @@ impl Plugin for ForbidMutations {
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
     use super::*;
-    use crate::http_compat::Request;
+    use crate::graphql;
+    use crate::http_ext::Request;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
     use crate::query_planner::{PlanNode, QueryPlan};
@@ -184,7 +186,7 @@ mod forbid_http_get_mutations_tests {
 
         let request = Request::fake_builder()
             .method(method)
-            .body(crate::Request::default())
+            .body(graphql::Request::default())
             .build()
             .expect("expecting valid request");
         ExecutionRequest::fake_builder()

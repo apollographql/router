@@ -1,14 +1,15 @@
 //! Customization via Rhai.
 
+use crate::error::Error;
+use crate::graphql::{Request, Response};
+use crate::http_ext;
+use crate::json_ext::{Object, Value};
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
 use crate::{
-    error::Error,
-    http_compat,
-    json_ext::{Object, Value},
-    layers::ServiceBuilderExt,
-    plugin::Plugin,
     register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, Request, Response, ResponseBody, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream};
@@ -159,14 +160,14 @@ mod router_plugin_mod {
     #[rhai_fn(get = "subgraph", pure, return_raw)]
     pub(crate) fn get_subgraph(
         obj: &mut SharedSubgraphRequest,
-    ) -> Result<http_compat::Request<Request>, Box<EvalAltResult>> {
+    ) -> Result<http_ext::Request<Request>, Box<EvalAltResult>> {
         obj.with_mut(|request| Ok(request.subgraph_request.clone()))
     }
 
     #[rhai_fn(set = "subgraph", return_raw)]
     pub(crate) fn set_subgraph(
         obj: &mut SharedSubgraphRequest,
-        sub: http_compat::Request<Request>,
+        sub: http_ext::Request<Request>,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|request| {
             request.subgraph_request = sub;
@@ -176,14 +177,14 @@ mod router_plugin_mod {
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_subgraph_headers(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.headers().clone())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_subgraph_headers(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.headers_mut() = headers;
@@ -192,14 +193,14 @@ mod router_plugin_mod {
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_subgraph_body(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
     ) -> Result<Request, Box<EvalAltResult>> {
         Ok(obj.body().clone())
     }
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_subgraph_body(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
         body: Request,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.body_mut() = body;
@@ -208,14 +209,14 @@ mod router_plugin_mod {
 
     #[rhai_fn(get = "uri", pure, return_raw)]
     pub(crate) fn get_subgraph_uri(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
     ) -> Result<Uri, Box<EvalAltResult>> {
         Ok(obj.uri().clone())
     }
 
     #[rhai_fn(set = "uri", return_raw)]
     pub(crate) fn set_subgraph_uri(
-        obj: &mut http_compat::Request<Request>,
+        obj: &mut http_ext::Request<Request>,
         uri: Uri,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.uri_mut() = uri;
@@ -327,26 +328,26 @@ mod router_plugin_mod {
         Ok(())
     }
 
-    fn get_originating_headers<T: Accessor<http_compat::Request<Request>>>(
+    fn get_originating_headers<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.accessor().headers().clone())
     }
 
-    fn get_originating_body<T: Accessor<http_compat::Request<Request>>>(
+    fn get_originating_body<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
     ) -> Result<Request, Box<EvalAltResult>> {
         Ok(obj.accessor().body().clone())
     }
 
-    fn get_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+    fn get_originating_uri<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
     ) -> Result<Uri, Box<EvalAltResult>> {
         Ok(obj.accessor().uri().clone())
     }
 
     fn get_originating_headers_response_response_body<
-        T: Accessor<http_compat::Response<ResponseBody>>,
+        T: Accessor<http_ext::Response<ResponseBody>>,
     >(
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
@@ -354,26 +355,26 @@ mod router_plugin_mod {
     }
 
     fn get_originating_body_response_response_body<
-        T: Accessor<http_compat::Response<ResponseBody>>,
+        T: Accessor<http_ext::Response<ResponseBody>>,
     >(
         obj: &mut T,
     ) -> Result<ResponseBody, Box<EvalAltResult>> {
         Ok(obj.accessor().body().clone())
     }
 
-    fn get_originating_headers_response_response<T: Accessor<http_compat::Response<Response>>>(
+    fn get_originating_headers_response_response<T: Accessor<http_ext::Response<Response>>>(
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.accessor().headers().clone())
     }
 
-    fn get_originating_body_response_response<T: Accessor<http_compat::Response<Response>>>(
+    fn get_originating_body_response_response<T: Accessor<http_ext::Response<Response>>>(
         obj: &mut T,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.accessor().body().clone())
     }
 
-    fn set_originating_headers<T: Accessor<http_compat::Request<Request>>>(
+    fn set_originating_headers<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -381,7 +382,7 @@ mod router_plugin_mod {
         Ok(())
     }
 
-    fn set_originating_body<T: Accessor<http_compat::Request<Request>>>(
+    fn set_originating_body<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
         body: Request,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -389,7 +390,7 @@ mod router_plugin_mod {
         Ok(())
     }
 
-    fn set_originating_uri<T: Accessor<http_compat::Request<Request>>>(
+    fn set_originating_uri<T: Accessor<http_ext::Request<Request>>>(
         obj: &mut T,
         uri: Uri,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -398,7 +399,7 @@ mod router_plugin_mod {
     }
 
     fn set_originating_headers_response_response_body<
-        T: Accessor<http_compat::Response<ResponseBody>>,
+        T: Accessor<http_ext::Response<ResponseBody>>,
     >(
         obj: &mut T,
         headers: HeaderMap,
@@ -408,7 +409,7 @@ mod router_plugin_mod {
     }
 
     fn set_originating_body_response_response_body<
-        T: Accessor<http_compat::Response<ResponseBody>>,
+        T: Accessor<http_ext::Response<ResponseBody>>,
     >(
         obj: &mut T,
         body: ResponseBody,
@@ -417,7 +418,7 @@ mod router_plugin_mod {
         Ok(())
     }
 
-    fn set_originating_headers_response_response<T: Accessor<http_compat::Response<Response>>>(
+    fn set_originating_headers_response_response<T: Accessor<http_ext::Response<Response>>>(
         obj: &mut T,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -425,7 +426,7 @@ mod router_plugin_mod {
         Ok(())
     }
 
-    fn set_originating_body_response_response<T: Accessor<http_compat::Response<Response>>>(
+    fn set_originating_body_response_response<T: Accessor<http_ext::Response<Response>>>(
         obj: &mut T,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -574,12 +575,12 @@ pub(crate) enum ServiceStep {
 macro_rules! accessor_mut_for_shared_types {
     (subgraph) => {
         // XXX CAN'T DO THIS FOR SUBGRAPH
-        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+        fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
             panic!("cannot mutate originating request on a subgraph");
         }
     };
     ($_base: ident) => {
-        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+        fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
             &mut self.originating_request
         }
     };
@@ -620,9 +621,9 @@ macro_rules! gen_shared_types {
                 }
             }
 
-            impl Accessor<http_compat::Request<Request>> for [<$base:camel Request >] {
+            impl Accessor<http_ext::Request<Request>> for [<$base:camel Request >] {
 
-                fn accessor(&self) -> &http_compat::Request<Request> {
+                fn accessor(&self) -> &http_ext::Request<Request> {
                     &self.originating_request
                 }
 
@@ -755,7 +756,7 @@ type SharedExecutionService = Arc<
 type SharedExecutionRequest = Arc<Mutex<Option<ExecutionRequest>>>;
 pub(crate) struct RhaiExecutionResponse {
     context: Context,
-    response: http_compat::Response<Response>,
+    response: http_ext::Response<Response>,
 }
 #[allow(dead_code)]
 type SharedExecutionResponse = Arc<Mutex<Option<RhaiExecutionResponse>>>;
@@ -775,11 +776,11 @@ impl Accessor<Context> for ExecutionResponse<BoxStream<'static, Response>> {
         &mut self.context
     }
 }
-impl Accessor<http_compat::Request<Request>> for ExecutionRequest {
-    fn accessor(&self) -> &http_compat::Request<Request> {
+impl Accessor<http_ext::Request<Request>> for ExecutionRequest {
+    fn accessor(&self) -> &http_ext::Request<Request> {
         &self.originating_request
     }
-    fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
         &mut self.originating_request
     }
 }
@@ -794,44 +795,44 @@ impl Accessor<Context> for RhaiExecutionResponse {
     }
 }
 
-impl Accessor<http_compat::Response<Response>> for RhaiExecutionResponse {
-    fn accessor(&self) -> &http_compat::Response<Response> {
+impl Accessor<http_ext::Response<Response>> for RhaiExecutionResponse {
+    fn accessor(&self) -> &http_ext::Response<Response> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
         &mut self.response
     }
 }
 
-impl Accessor<http_compat::Response<ResponseBody>> for RhaiRouterResponse {
-    fn accessor(&self) -> &http_compat::Response<ResponseBody> {
+impl Accessor<http_ext::Response<ResponseBody>> for RhaiRouterResponse {
+    fn accessor(&self) -> &http_ext::Response<ResponseBody> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_compat::Response<ResponseBody> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Response<ResponseBody> {
         &mut self.response
     }
 }
 
-impl Accessor<http_compat::Response<BoxStream<'static, Response>>>
+impl Accessor<http_ext::Response<BoxStream<'static, Response>>>
     for ExecutionResponse<BoxStream<'static, Response>>
 {
-    fn accessor(&self) -> &http_compat::Response<BoxStream<'static, Response>> {
+    fn accessor(&self) -> &http_ext::Response<BoxStream<'static, Response>> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_compat::Response<BoxStream<'static, Response>> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Response<BoxStream<'static, Response>> {
         &mut self.response
     }
 }
 
-impl Accessor<http_compat::Response<Response>> for SubgraphResponse {
-    fn accessor(&self) -> &http_compat::Response<Response> {
+impl Accessor<http_ext::Response<Response>> for SubgraphResponse {
+    fn accessor(&self) -> &http_ext::Response<Response> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
         &mut self.response
     }
 }
@@ -849,7 +850,7 @@ type SharedRouterRequest = Arc<Mutex<Option<RouterRequest>>>;
 
 pub(crate) struct RhaiRouterResponse {
     context: Context,
-    response: http_compat::Response<ResponseBody>,
+    response: http_ext::Response<ResponseBody>,
 }
 
 #[allow(dead_code)]
@@ -870,11 +871,11 @@ impl Accessor<Context> for RhaiRouterResponse {
         &mut self.context
     }
 }
-impl Accessor<http_compat::Request<Request>> for RouterRequest {
-    fn accessor(&self) -> &http_compat::Request<Request> {
+impl Accessor<http_ext::Request<Request>> for RouterRequest {
+    fn accessor(&self) -> &http_ext::Request<Request> {
         &self.originating_request
     }
-    fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
         &mut self.originating_request
     }
 }
@@ -1120,7 +1121,7 @@ impl ServiceStep {
                                 // we split the response stream into headers+first response, then a stream of deferred responses
                                 // for which we will implement mapping later
                                 let RouterResponse { response, context } = router_response;
-                                let (parts, stream) = response.into_parts();
+                                let (parts, stream) = http::Response::from(response).into_parts();
                                 let (first, rest) = stream.into_future().await;
 
                                 if first.is_none() {
@@ -1133,7 +1134,7 @@ impl ServiceStep {
 
                                 let response = RhaiRouterResponse {
                                     context,
-                                    response: http_compat::Response::from_parts(parts, first.expect("already checked")),
+                                    response: http::Response::from_parts(parts, first.expect("already checked")).into(),
                                 };
                                 let shared_response =
                                 Shared::new(Mutex::new(Some(response)));
@@ -1172,10 +1173,10 @@ impl ServiceStep {
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
                                 let RhaiRouterResponse { context, response } = response_opt.unwrap();
-                                let (parts, body)  = response.into_parts();
+                                let (parts, body)  = http::Response::from(response).into_parts();
 
                                 //FIXME we should also map over the stream of future responses
-                                let response = http_compat::Response::from_parts(parts,once(ready(body)).chain(rest).boxed());
+                                let response = http::Response::from_parts(parts,once(ready(body)).chain(rest).boxed()).into();
                                 Ok(RouterResponse {context, response})
                             },
                         ))
@@ -1219,7 +1220,7 @@ impl ServiceStep {
                                 // we split the response stream into headers+first response, then a stream of deferred responses
                                 // for which we will implement mapping later
                                 let ExecutionResponse { response, context } = execution_response;
-                                let (parts, stream) = response.into_parts();
+                                let (parts, stream) = http::Response::from(response).into_parts();
                                 let (first, rest) = stream.into_future().await;
 
                                 if first.is_none() {
@@ -1232,10 +1233,11 @@ impl ServiceStep {
 
                                 let response = RhaiExecutionResponse {
                                     context,
-                                    response: http_compat::Response::from_parts(
+                                    response: http::Response::from_parts(
                                         parts,
                                         first.expect("already checked"),
-                                    ),
+                                    )
+                                    .into(),
                                 };
                                 let shared_response = Shared::new(Mutex::new(Some(response)));
                                 let result: Result<Dynamic, String> = if callback.is_curried() {
@@ -1273,13 +1275,14 @@ impl ServiceStep {
                                 let response_opt = guard.take();
                                 let RhaiExecutionResponse { context, response } =
                                     response_opt.unwrap();
-                                let (parts, body) = response.into_parts();
+                                let (parts, body) = http::Response::from(response).into_parts();
 
                                 //FIXME we should also map over the stream of future responses
-                                let response = http_compat::Response::from_parts(
+                                let response = http::Response::from_parts(
                                     parts,
                                     once(ready(body)).chain(rest).boxed(),
-                                );
+                                )
+                                .into();
                                 Ok(ExecutionResponse { context, response })
                             },
                         )
@@ -1740,7 +1743,7 @@ mod tests {
 
     use crate::plugin::DynPlugin;
     use crate::{
-        http_compat,
+        http_ext,
         plugin::test::{MockExecutionService, MockRouterService},
         Context, ResponseBody, RouterRequest, RouterResponse,
     };
@@ -1832,9 +1835,9 @@ mod tests {
             .unwrap();
         let mut router_service =
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
-        let fake_req = http_compat::Request::fake_builder()
+        let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
-            .body(crate::Request::builder().query(String::new()).build())
+            .body(Request::builder().query(String::new()).build())
             .build()?;
         let context = Context::new();
         context.insert("test", 5i64).unwrap();

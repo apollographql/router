@@ -1,7 +1,8 @@
 //! Mock subgraph implementation
 
+use crate::graphql::{Request, Response};
 use crate::json_ext::Object;
-use crate::{Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::{SubgraphRequest, SubgraphResponse};
 use futures::future;
 use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};
@@ -50,7 +51,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .expect("Response is serializable; qed");
 
             // Create a compatible Response
-            let compat_response = crate::http_compat::Response {
+            let compat_response = crate::http_ext::Response {
                 inner: http_response,
             };
 

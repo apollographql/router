@@ -1,6 +1,7 @@
 //! Tower fetcher for subgraphs.
 
 use crate::error::FetchError;
+use crate::graphql;
 use ::serde::Deserialize;
 use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
 use futures::future::BoxFuture;
@@ -89,7 +90,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, body) = subgraph_request.into_parts();
+            let (parts, body) = http::Request::from(subgraph_request).into_parts();
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
@@ -190,9 +191,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 }));
             }
 
-            let graphql: crate::Response = tracing::debug_span!("parse_subgraph_response")
+            let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
-                    crate::Response::from_bytes(&service_name, body).map_err(|error| {
+                    graphql::Response::from_bytes(&service_name, body).map_err(|error| {
                         FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
@@ -262,8 +263,9 @@ mod tests {
     use serde_json_bytes::{ByteString, Value};
     use tower::{service_fn, ServiceExt};
 
+    use crate::graphql::{Request, Response};
     use crate::query_planner::fetch::OperationKind;
-    use crate::{http_compat, json_ext::Object, Context, Request, Response, SubgraphRequest};
+    use crate::{http_ext, json_ext::Object, Context, SubgraphRequest};
 
     use super::*;
 
@@ -363,14 +365,14 @@ mod tests {
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
@@ -398,14 +400,14 @@ mod tests {
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query").build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .uri(url)
@@ -433,14 +435,14 @@ mod tests {
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
-                    http_compat::Request::fake_builder()
+                    http_ext::Request::fake_builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
                         .body(Request::builder().query("query".to_string()).build())
                         .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_compat::Request::fake_builder()
+                subgraph_request: http_ext::Request::fake_builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, "application/json")
                     .header(CONTENT_ENCODING, "gzip")

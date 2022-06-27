@@ -1,13 +1,12 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
+use crate::graphql;
+use crate::http_ext::{Request, Response};
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::services::Plugins;
 use crate::SubgraphService;
-use crate::{
-    http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, Schema,
-};
+use crate::{PluggableRouterServiceBuilder, ResponseBody, Schema};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -26,7 +25,7 @@ use tower_service::Service;
 #[async_trait::async_trait]
 pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
-            Request<crate::Request>,
+            Request<graphql::Request>,
             Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
@@ -52,13 +51,13 @@ pub(crate) struct YamlRouterServiceFactory;
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
-            Request<crate::Request>,
+            Request<graphql::Request>,
             Response<BoxStream<'static, ResponseBody>>,
             BoxError,
         >,
-        Request<crate::Request>,
+        Request<graphql::Request>,
     >;
-    type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
+    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
 
     async fn create<'a>(
         &'a mut self,
@@ -86,7 +85,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let (pluggable_router_service, mut plugins) = builder.build().await?;
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(|http_request: Request<crate::Request>| http_request.into())
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );

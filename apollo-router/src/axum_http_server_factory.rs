@@ -1,6 +1,7 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, ListenAddr};
-use crate::http_compat;
+use crate::graphql;
+use crate::http_ext;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
@@ -56,11 +57,11 @@ impl AxumHttpServerFactory {
 
 type BufferedService = Buffer<
     BoxService<
-        http_compat::Request<crate::Request>,
-        http_compat::Response<BoxStream<'static, ResponseBody>>,
+        http_ext::Request<graphql::Request>,
+        http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
-    http_compat::Request<crate::Request>,
+    http_ext::Request<graphql::Request>,
 >;
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -75,15 +76,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<
-                http_compat::Request<crate::Request>,
-                Response = http_compat::Response<BoxStream<'static, ResponseBody>>,
+                http_ext::Request<graphql::Request>,
+                Response = http_ext::Response<BoxStream<'static, ResponseBody>>,
                 Error = BoxError,
             > + Send
             + Sync
             + Clone
             + 'static,
 
-        <RS as Service<http_compat::Request<crate::Request>>>::Future: std::marker::Send,
+        <RS as Service<http_ext::Request<graphql::Request>>>::Future: std::marker::Send,
     {
         let boxed_service = Buffer::new(service.boxed(), DEFAULT_BUFFER_SIZE);
         Box::pin(async move {
@@ -392,7 +393,7 @@ async fn custom_plugin_handler(
         .map_err(|err| err.to_string())?;
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
-    let req = http_compat::Request::from_parts(head, body);
+    let req = Request::from_parts(head, body).into();
     let res = handler.oneshot(req).await.map_err(|err| err.to_string())?;
 
     let is_json = matches!(
@@ -439,7 +440,7 @@ async fn handle_get(
     if let Some(request) = http_request
         .uri()
         .query()
-        .and_then(|q| crate::Request::from_urlencoded_query(q.to_string()).ok())
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
     {
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
@@ -455,7 +456,7 @@ async fn handle_get(
 async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
-    Json(request): Json<crate::Request>,
+    Json(request): Json<graphql::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
@@ -483,16 +484,13 @@ async fn health_check() -> impl IntoResponse {
 
 async fn run_graphql_request(
     service: BufferedService,
-    http_request: Request<crate::Request>,
+    http_request: Request<graphql::Request>,
 ) -> impl IntoResponse {
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
 
-            match service
-                .call(http_compat::Request::from_parts(head, body))
-                .await
-            {
+            match service.call(Request::from_parts(head, body).into()).await {
                 Err(e) => {
                     tracing::error!("router service call failed: {}", e);
                     (
@@ -502,7 +500,7 @@ async fn run_graphql_request(
                         .into_response()
                 }
                 Ok(response) => {
-                    let (parts, mut stream) = response.into_parts();
+                    let (parts, mut stream) = http::Response::from(response).into_parts();
                     match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);
@@ -514,8 +512,10 @@ async fn run_graphql_request(
                         }
                         Some(response) => {
                             tracing::trace_span!("serialize_response").in_scope(|| {
-                                http_compat::Response::from_parts(parts, response).into_response()
-                                //response.into_response()
+                                http_ext::Response::from(http::Response::from_parts(
+                                    parts, response,
+                                ))
+                                .into_response()
                             })
                         }
                     }
@@ -660,7 +660,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use crate::http_compat::Request;
+    use crate::http_ext::Request;
     use async_compression::tokio::write::GzipEncoder;
     use http::header::{self, ACCEPT_ENCODING, CONTENT_TYPE};
     use mockall::mock;
@@ -719,7 +719,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<crate::Request>) -> Result<http_compat::Response<BoxStream<'static, ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, ResponseBody>>, BoxError>;
         }
     }
 
@@ -881,7 +881,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
@@ -891,7 +891,7 @@ mod tests {
             .times(2)
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -922,7 +922,7 @@ mod tests {
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
-        let graphql_resp: crate::Response = serde_json::from_slice(&response).unwrap();
+        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
         assert_eq!(graphql_resp, expected_response);
 
         // Get query
@@ -951,7 +951,7 @@ mod tests {
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
-        let graphql_resp: crate::Response = serde_json::from_slice(&response).unwrap();
+        let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
         assert_eq!(graphql_resp, expected_response);
 
         server.shutdown().await?;
@@ -968,7 +968,7 @@ mod tests {
             .unwrap();
         encoder.shutdown().await.unwrap();
         let compressed_body = encoder.into_inner();
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
@@ -982,7 +982,7 @@ mod tests {
             })
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1004,7 +1004,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1034,7 +1034,7 @@ mod tests {
         // let root_span = info_span!("root");
         // {
         // let _guard = root_span.enter();
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1044,7 +1044,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1065,7 +1065,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1085,7 +1085,7 @@ mod tests {
         );
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1146,7 +1146,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1180,7 +1180,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1195,7 +1195,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1205,7 +1205,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError> {
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1215,7 +1215,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1249,7 +1249,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1264,7 +1264,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1274,7 +1274,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterError> {
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1284,7 +1284,7 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1320,7 +1320,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<crate::Response>().await.unwrap(),
+                response.json::<graphql::Response>().await.unwrap(),
                 expected_response,
             );
 
@@ -1335,7 +1335,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                response.json::<crate::Response>().await.unwrap(),
+                response.json::<graphql::Response>().await.unwrap(),
                 expected_response,
             );
         }
@@ -1357,7 +1357,7 @@ mod tests {
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1376,7 +1376,7 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1396,7 +1396,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1417,7 +1417,7 @@ mod tests {
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
 
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1436,7 +1436,7 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1456,7 +1456,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<crate::Response>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -1475,7 +1475,7 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1496,7 +1496,7 @@ mod tests {
             .send()
             .await
             .unwrap()
-            .json::<crate::Response>()
+            .json::<graphql::Response>()
             .await
             .unwrap();
 
@@ -1558,7 +1558,7 @@ mod tests {
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let expected_response = crate::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -1570,7 +1570,7 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::GraphQL(example_response))
@@ -1587,7 +1587,7 @@ mod tests {
         .await;
 
         assert_eq!(
-            serde_json::from_slice::<crate::Response>(&output).unwrap(),
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
             expected_response,
         );
 
@@ -1596,7 +1596,7 @@ mod tests {
             send_to_unix_socket(server.listen_address(), Method::GET, r#"query=query"#).await;
 
         assert_eq!(
-            serde_json::from_slice::<crate::Response>(&output).unwrap(),
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
             expected_response,
         );
 
@@ -1759,8 +1759,8 @@ Content-Type: application/json\r
     async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let plugin_handler = Handler::new(
-            service_fn(|req: http_compat::Request<Bytes>| async move {
-                Ok::<_, BoxError>(http_compat::Response {
+            service_fn(|req: http_ext::Request<Bytes>| async move {
+                Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::OK)
                         .body(ResponseBody::Text(format!(
@@ -1844,7 +1844,7 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(http_compat::Response::from_response_to_stream(
+                Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(ResponseBody::Text(format!(

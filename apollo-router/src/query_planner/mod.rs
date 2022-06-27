@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql::{Request, Response};
 use crate::json_ext::{Path, Value, ValueExt};
 use crate::service_registry::ServiceRegistry;
 use crate::*;
@@ -113,7 +114,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
         mut sender: futures::channel::mpsc::Sender<Response>,
     ) {
@@ -152,7 +153,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -308,6 +309,7 @@ pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use super::QueryPlanOptions;
     use crate::error::{Error, FetchError};
+    use crate::graphql::Request;
     use crate::json_ext::{Object, Path, Value, ValueExt};
     use crate::service_registry::ServiceRegistry;
     use crate::*;
@@ -378,7 +380,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: http_compat::Request<crate::Request>,
+            request: http_ext::Request<Request>,
             schema: &Schema,
             enable_variable_deduplication: bool,
         ) -> Option<Variables> {
@@ -460,7 +462,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
-            originating_request: http_compat::Request<Request>,
+            originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
@@ -493,7 +495,7 @@ pub(crate) mod fetch {
             let subgraph_request = SubgraphRequest::builder()
                 .originating_request(Arc::new(originating_request))
                 .subgraph_request(
-                    http_compat::Request::builder()
+                    http_ext::Request::builder()
                         .method(http::Method::POST)
                         .uri(
                             schema
@@ -528,16 +530,18 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = service
-                .oneshot(subgraph_request)
-                .instrument(tracing::trace_span!("subfetch_stream"))
-                .await
-                .map_err(|e| FetchError::SubrequestHttpError {
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                })?
-                .response
-                .into_parts();
+            let (_parts, response) = http::Response::from(
+                service
+                    .oneshot(subgraph_request)
+                    .instrument(tracing::trace_span!("subfetch_stream"))
+                    .await
+                    .map_err(|e| FetchError::SubrequestHttpError {
+                        service: service_name.to_string(),
+                        reason: e.to_string(),
+                    })?
+                    .response,
+            )
+            .into_parts();
 
             super::log::trace_subfetch(service_name, operation, &variables, &response);
 
@@ -645,7 +649,7 @@ mod log {
         service_name: &str,
         operation: &str,
         variables: &Map<ByteString, Value>,
-        response: &crate::Response,
+        response: &crate::graphql::Response,
     ) {
         tracing::trace!(
             "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
@@ -730,7 +734,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -781,7 +789,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -826,7 +838,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )

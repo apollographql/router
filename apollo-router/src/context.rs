@@ -13,7 +13,7 @@ use tower::BoxError;
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
-/// Context for a [`crate::http_compat::Request`]
+/// Context for a [`crate::http_ext::Request`]
 ///
 /// Context makes use of [`DashMap`] under the hood which tries to handle concurrency
 /// by allowing concurrency across threads without requiring locking. This is great
