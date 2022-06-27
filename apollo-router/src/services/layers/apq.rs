@@ -92,7 +92,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: RouterRequest) -> Self::Future {
@@ -107,7 +107,7 @@ where
         let body_query = req.originating_request.body().query.clone();
 
         let mut cache = self.cache.clone();
-        let mut service = self.inner.clone();
+        let service = self.inner.clone();
         Box::pin(async move {
             match (maybe_query_hash, body_query) {
                 (Some(query_hash), Some(query)) => {
@@ -119,14 +119,14 @@ where
                         tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                     }
 
-                    Ok(service.call(req).await?)
+                    Ok(service.oneshot(req).await?)
                 }
                 (Some(apq_hash), _) => {
                     if let Some(cached_query) = cache.get(&apq_hash).await {
                         let _ = req.context.insert("persisted_query_hit", true);
                         tracing::trace!("apq: cache hit");
                         req.originating_request.body_mut().query = Some(cached_query);
-                        Ok(service.call(req).await?)
+                        Ok(service.oneshot(req).await?)
                     } else {
                         tracing::trace!("apq: cache miss");
                         let errors = vec![crate::error::Error {
@@ -153,7 +153,7 @@ where
                         Ok(res.boxed())
                     }
                 }
-                _ => Ok(service.call(req).await?),
+                _ => Ok(service.oneshot(req).await?),
             }
         })
     }
