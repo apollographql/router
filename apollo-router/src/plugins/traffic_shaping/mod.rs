@@ -50,6 +50,7 @@ impl Shaping {
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Config {
     #[serde(default)]
     all: Option<Shaping>,

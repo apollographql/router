@@ -1,5 +1,6 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
+use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -15,9 +16,9 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::subscriber::replace_layer;
 use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
-    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, SubgraphResponse,
+    http_ext, register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
 use ::tracing::{info_span, Span};
 use apollo_spaceport::server::ReportSpaceport;
@@ -392,7 +393,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_compat::Request<Bytes>, _services: &[_]| {
+            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -472,8 +473,8 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_compat::Request<Bytes>| async {
-                Ok::<_, BoxError>(http_compat::Response {
+            service_fn(|_req: http_ext::Request<Bytes>| async {
+                Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .body(ResponseBody::Text("Not found".to_string()))
@@ -760,7 +761,7 @@ mod tests {
 
     use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
-    use crate::{http_compat, RouterRequest, RouterResponse};
+    use crate::{http_ext, RouterRequest, RouterResponse};
     use bytes::Bytes;
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
@@ -894,7 +895,7 @@ mod tests {
             .unwrap();
 
         let handler = dyn_plugin.custom_endpoint().unwrap();
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
             ))
@@ -905,7 +906,7 @@ mod tests {
         let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/plugins/apollo.telemetry/prometheus",
             ))

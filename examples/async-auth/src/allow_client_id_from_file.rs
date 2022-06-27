@@ -1,3 +1,4 @@
+use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
@@ -68,7 +69,7 @@ impl Plugin for AllowClientIdFromFile {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     RouterResponse::error_builder()
-                        .error(apollo_router::error::Error {
+                        .error(graphql::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         })
@@ -102,7 +103,7 @@ impl Plugin for AllowClientIdFromFile {
                             res = Some(
                                 RouterResponse::builder()
                                     .data(Value::default())
-                                    .error(apollo_router::error::Error {
+                                    .error(graphql::Error {
                                         message: "client-id is not allowed".to_string(),
                                         ..Default::default()
                                     })
@@ -117,7 +118,7 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
                             RouterResponse::error_builder()
-                                .error(apollo_router::error::Error {
+                                .error(graphql::Error {
                                     message: format!("'{header_key}' value is not a string"),
                                     ..Default::default()
                                 })
@@ -176,6 +177,7 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
+    use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::services::{RouterRequest, RouterResponse};
@@ -229,7 +231,7 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -275,7 +277,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -349,7 +351,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()

@@ -233,11 +233,12 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::http_compat;
+    use crate::graphql::{Request, Response};
+    use crate::http_ext;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::query_planner::fetch::OperationKind;
-    use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
+    use crate::{Context, SubgraphRequest, SubgraphResponse};
     use std::collections::HashSet;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -516,7 +517,7 @@ mod test {
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .header("da", "vda")
                     .header("db", "vdb")
                     .header("db", "vdb")
@@ -527,7 +528,7 @@ mod test {
                     .build()
                     .expect("expecting valid request"),
             ),
-            subgraph_request: http_compat::Request::fake_builder()
+            subgraph_request: http_ext::Request::fake_builder()
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")

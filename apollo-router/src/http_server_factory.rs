@@ -1,5 +1,7 @@
 use super::router::ApolloRouterError;
 use crate::configuration::{Configuration, ListenAddr};
+use crate::graphql;
+use crate::http_ext::{Request, Response};
 use crate::plugin::Handler;
 use crate::router_factory::RouterServiceFactory;
 use derivative::Derivative;

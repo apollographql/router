@@ -32,7 +32,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::http_compat;
+    use apollo_router::http_ext;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
@@ -87,8 +87,16 @@ mod tests {
 
         let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
 
-        let mut sub_request = http_compat::Request::mock();
-        let mut originating_request = http_compat::Request::mock();
+        let mut sub_request = http_ext::Request::fake_builder()
+            .headers(Default::default())
+            .body(Default::default())
+            .build()
+            .expect("fake builds should always work; qed");
+        let mut originating_request = http_ext::Request::fake_builder()
+            .headers(Default::default())
+            .body(Default::default())
+            .build()
+            .expect("fake builds should always work; qed");
 
         let headers = vec![(
             HeaderName::from_static("cookie"),
@@ -118,7 +126,8 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        let graphql_response: apollo_router::Response = service_response.response.into_body();
+        let graphql_response: apollo_router::graphql::Response =
+            http::Response::from(service_response.response).into_body();
 
         assert!(graphql_response.errors.is_empty());
         assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())

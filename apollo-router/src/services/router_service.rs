@@ -1,7 +1,9 @@
 //! Implements the router phase of the request lifecycle.
 
 use crate::error::ServiceBuildError;
-use crate::http_compat::Request;
+use crate::graphql;
+use crate::graphql::Response;
+use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -17,8 +19,8 @@ use crate::{
             ensure_query_presence::EnsureQueryPresence,
         },
     },
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
 };
 use futures::future::ready;
 use futures::stream::{once, BoxStream, StreamExt};
@@ -141,7 +143,7 @@ where
                 }
                 QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
-                        crate::Response::builder()
+                        graphql::Response::builder()
                             .errors(vec![crate::error::Error::builder()
                                 .message(String::from("introspection has been disabled"))
                                 .build()])
@@ -177,10 +179,10 @@ where
                             )
                             .await?;
 
-                        let (parts, response_stream) = response.into_parts();
+                        let (parts, response_stream) = http::Response::from(response).into_parts();
                         Ok(RouterResponse {
                             context,
-                            response: crate::http_compat::Response::from_parts(
+                            response: http::Response::from_parts(
                                 parts,
                                 response_stream
                                     .map(move |mut response: Response| {
@@ -195,7 +197,8 @@ where
                                         ResponseBody::GraphQL(response)
                                     })
                                     .in_current_span(),
-                            ),
+                            )
+                            .into(),
                         }
                         .boxed())
                     }
@@ -396,7 +399,7 @@ pub struct MakeARouter {
 impl NewService<Request<crate::Request>> for MakeARouter {
     type Service = BoxService<
         Request<crate::Request>,
-        crate::http_compat::Response<BoxStream<'static, ResponseBody>>,
+        crate::http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
@@ -411,7 +414,7 @@ impl NewService<Request<crate::Request>> for MakeARouter {
 impl RouterServiceFactory for MakeARouter {
     type RouterService = BoxService<
         Request<crate::Request>,
-        crate::http_compat::Response<BoxStream<'static, ResponseBody>>,
+        crate::http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >;
 

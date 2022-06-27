@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 
 use crate::error::FetchError;
+use crate::graphql::{Request, Response};
 use crate::json_ext::{Object, Value};
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
@@ -446,11 +447,9 @@ impl Query {
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            //First determine if fragment is for interface
-                            //Otherwise we assume concrete type is expected
-                            if let Some(interface) = known_type
-                                .as_deref()
-                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            // First determine if the fragment matches an interface
+                            // Otherwise we assume a concrete type is expected
+                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
                             {
                                 //Check if input implements interface
                                 schema.is_subtype(interface.name.as_str(), input_type)
@@ -729,7 +728,12 @@ impl Operation {
 
     fn is_introspection(&self) -> bool {
         self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => name.as_str().starts_with("__"),
+            Selection::Field { name, .. } => {
+                let name = name.as_str();
+                // `__typename` can only be resolved in runtime,
+                // so this query cannot be seen as an introspection query
+                name == "__schema" || name == "__type"
+            }
             _ => false,
         })
     }
@@ -4569,6 +4573,155 @@ mod tests {
                 },
                 "test_enum": null,
                 "test_enum2": "Z"
+            }},
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface() {
+        let schema = "type Query
+        {
+            test_interface: Interface
+        }
+
+        interface Interface {
+            foo: String
+        }
+
+        type MyTypeA implements Interface {
+            foo: String
+            something: String
+        }
+
+        type MyTypeB implements Interface {
+            foo: String
+            somethingElse: String!
+        }
+        ";
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentA
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    ...FragmentI
+                }
+            }
+
+            fragment FragmentI on Interface {
+                foo
+            }
+            ",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ... on MyTypeA {
+                        something
+                    }
+                    ... on MyTypeB {
+                        somethingElse
+                    }
+                }
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentB
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                }
             }},
         );
     }

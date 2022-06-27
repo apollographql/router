@@ -2,8 +2,10 @@
 //!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
+use crate::graphql::Request;
+use crate::http_ext;
 use crate::query_planner::fetch::OperationKind;
-use crate::{http_compat, Request, SubgraphRequest, SubgraphResponse};
+use crate::{SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tokio::sync::{
@@ -27,7 +29,7 @@ where
 }
 
 type WaitMap =
-    Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
+    Arc<Mutex<HashMap<http_ext::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
 
 pub(crate) struct QueryDeduplicationService<S> {
     service: S,

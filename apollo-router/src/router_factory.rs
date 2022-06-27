@@ -1,14 +1,13 @@
 // This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
+use crate::graphql;
+use crate::http_ext::{Request, Response};
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
 use crate::services::{MakeARouter, Plugins};
 use crate::SubgraphService;
-use crate::{
-    http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, Schema,
-};
+use crate::{PluggableRouterServiceBuilder, ResponseBody, Schema};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
@@ -29,7 +28,7 @@ pub(crate) trait RouterServiceFactory:
     NewService<Request<crate::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
     type RouterService: Service<
-            Request<crate::Request>,
+            Request<graphql::Request>,
             Response = Response<BoxStream<'static, ResponseBody>>,
             Error = BoxError,
             Future = Self::Future,
