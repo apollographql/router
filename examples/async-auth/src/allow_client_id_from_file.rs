@@ -43,7 +43,7 @@ impl Plugin for AllowClientIdFromFile {
     // We could easily change the place where the file list is stored,
     // switching the async file read with an async http request
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,

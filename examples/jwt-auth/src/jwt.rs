@@ -207,7 +207,7 @@ impl Plugin for JwtAuth {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,

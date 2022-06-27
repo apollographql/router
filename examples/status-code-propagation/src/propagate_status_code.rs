@@ -65,7 +65,7 @@ impl Plugin for PropagateStatusCode {
 
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, ResponseBody>>,
