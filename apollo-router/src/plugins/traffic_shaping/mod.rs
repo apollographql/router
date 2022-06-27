@@ -13,20 +13,25 @@ mod deduplication;
 
 use std::collections::HashMap;
 
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
+use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
-use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
-};
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -141,17 +146,20 @@ mod test {
 
     use futures::stream::BoxStream;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::{ByteString, Value};
-    use tower::{util::BoxCloneService, Service};
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
+    use tower::util::BoxCloneService;
+    use tower::Service;
 
+    use super::*;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::{
-        PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
-    };
-
-    use super::*;
+    use crate::PluggableRouterServiceBuilder;
+    use crate::ResponseBody;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
+    use crate::Schema;
 
     static EXPECTED_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
         ResponseBody::GraphQL(serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap())

@@ -1,26 +1,30 @@
 // This entire file is license key functionality
-use crate::{
-    agent::{
-        reporter_server::{Reporter, ReporterServer},
-        ReporterRequest, ReporterResponse,
-    },
-    report::Report,
-};
+use std::future::Future;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::pin::Pin;
+
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use prost::Message;
 use reqwest::Client;
-use std::future::Future;
-use std::io::Write;
-use std::net::SocketAddr;
-use std::pin::Pin;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 use tokio::time::Duration;
-use tokio::{net::TcpListener, sync::mpsc::error::TrySendError};
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::transport::{Error, Server};
-use tonic::{Request, Response, Status};
+use tonic::transport::Error;
+use tonic::transport::Server;
+use tonic::Request;
+use tonic::Response;
+use tonic::Status;
+
+use crate::agent::reporter_server::Reporter;
+use crate::agent::reporter_server::ReporterServer;
+use crate::agent::ReporterRequest;
+use crate::agent::ReporterResponse;
+use crate::report::Report;
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";

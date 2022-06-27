@@ -1,17 +1,21 @@
 //! GraphQL schema.
 
-use crate::error::ParseErrors;
-use crate::error::SchemaError;
-use crate::json_ext::{Object, Value};
-use crate::query_planner::OperationKind;
-use crate::*;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_parser::ast;
 use http::Uri;
 use itertools::Itertools;
 use router_bridge::api_schema;
 use sha2::Digest;
 use sha2::Sha256;
-use std::collections::{HashMap, HashSet};
+
+use crate::error::ParseErrors;
+use crate::error::SchemaError;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::query_planner::OperationKind;
+use crate::*;
 
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]
@@ -630,8 +634,9 @@ implement_input_object_type_or_interface!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
+
+    use super::*;
 
     fn with_supergraph_boilerplate(content: &str) -> String {
         format!(

@@ -1,7 +1,9 @@
 use anyhow::Result;
 use structopt::StructOpt;
 
-use super::{Compliance, Lint, Test};
+use super::Compliance;
+use super::Lint;
+use super::Test;
 
 #[derive(Debug, StructOpt)]
 pub struct All {

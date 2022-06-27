@@ -2,16 +2,21 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::error::FetchError;
-use crate::graphql::{Request, Response};
-use crate::json_ext::{Object, Value};
-use crate::query_planner::fetch::OperationKind;
-use crate::*;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde_json_bytes::ByteString;
-use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
+
+use crate::error::FetchError;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::query_planner::fetch::OperationKind;
+use crate::*;
 
 const TYPENAME: &str = "__typename";
 
@@ -811,10 +816,11 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::json_ext::ValueExt;
     use serde_json_bytes::json;
     use test_log::test;
+
+    use super::*;
+    use crate::json_ext::ValueExt;
 
     macro_rules! assert_eq_and_ordered {
         ($a:expr, $b:expr $(,)?) => {

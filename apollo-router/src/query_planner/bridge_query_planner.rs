@@ -1,5 +1,18 @@
 //! Calls out to nodejs query planner
 
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use futures::future::BoxFuture;
+use opentelemetry::trace::SpanKind;
+use router_bridge::planner::PlanSuccess;
+use router_bridge::planner::Planner;
+use serde::Deserialize;
+use tower::BoxError;
+use tower::Service;
+use tracing::Instrument;
+
 use super::PlanNode;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
@@ -7,17 +20,6 @@ use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
 use crate::traits::QueryPlanner;
 use crate::*;
-use async_trait::async_trait;
-use futures::future::BoxFuture;
-use opentelemetry::trace::SpanKind;
-use router_bridge::planner::PlanSuccess;
-use router_bridge::planner::Planner;
-use serde::Deserialize;
-use std::fmt::Debug;
-use std::sync::Arc;
-use tower::BoxError;
-use tower::Service;
-use tracing::Instrument;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -180,9 +182,10 @@ struct QueryPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
     use test_log::test;
+
+    use super::*;
 
     #[test(tokio::test)]
     async fn test_plan() {

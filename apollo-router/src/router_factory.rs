@@ -1,22 +1,31 @@
 // This entire file is license key functionality
-use crate::configuration::{Configuration, ConfigurationError};
-use crate::graphql;
-use crate::http_ext::{Request, Response};
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::DynPlugin;
-use crate::services::Plugins;
-use crate::SubgraphService;
-use crate::{PluggableRouterServiceBuilder, ResponseBody, Schema};
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
 use futures::stream::BoxStream;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxCloneService;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
+
+use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
+use crate::graphql;
+use crate::http_ext::Request;
+use crate::http_ext::Response;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
+use crate::PluggableRouterServiceBuilder;
+use crate::ResponseBody;
+use crate::Schema;
+use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
@@ -204,19 +213,22 @@ fn visit(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod test {
-    use crate::configuration::Configuration;
-    use crate::plugin::Plugin;
-    use crate::register_plugin;
-    use crate::router_factory::YamlRouterServiceFactory;
-    use crate::router_factory::{inject_schema_id, RouterServiceFactory};
-    use crate::Schema;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
-    use serde_json::json;
     use std::error::Error;
     use std::fmt;
     use std::sync::Arc;
+
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use serde_json::json;
     use tower_http::BoxError;
+
+    use crate::configuration::Configuration;
+    use crate::plugin::Plugin;
+    use crate::register_plugin;
+    use crate::router_factory::inject_schema_id;
+    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::YamlRouterServiceFactory;
+    use crate::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -331,8 +343,10 @@ mod test {
     // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
     #[tokio::test(flavor = "multi_thread")]
     async fn test_telemetry_doesnt_hang_with_invalid_schema() {
-        use crate::subscriber::{set_global_subscriber, RouterSubscriber};
         use tracing_subscriber::EnvFilter;
+
+        use crate::subscriber::set_global_subscriber;
+        use crate::subscriber::RouterSubscriber;
 
         // A global subscriber must be set before we start up the telemetry plugin
         let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(

@@ -1,7 +1,8 @@
 //! Canned data for use with MockSugbraph.
 //! Eventually we may replace this with a real subgraph.
-use crate::plugin::test::MockSubgraph;
 use serde_json::json;
+
+use crate::plugin::test::MockSubgraph;
 
 /// Canned responses for accounts_subgraphs.
 pub(crate) fn accounts_subgraph() -> MockSubgraph {

@@ -1,6 +1,8 @@
-use anyhow::{ensure, Result};
 use std::process::Command;
 use std::process::Stdio;
+
+use anyhow::ensure;
+use anyhow::Result;
 use structopt::StructOpt;
 use xtask::*;
 

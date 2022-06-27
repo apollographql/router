@@ -1,22 +1,28 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use crate::graphql::Response;
-use crate::service_registry::ServiceRegistry;
-use crate::Schema;
-use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
-use futures::future::{ready, BoxFuture};
-use futures::stream::{once, BoxStream};
-use futures::StreamExt;
-use http::StatusCode;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
+
+use futures::future::ready;
+use futures::future::BoxFuture;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use http::StatusCode;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower_service::Service;
 use tracing::Instrument;
+
+use crate::graphql::Response;
+use crate::service_registry::ServiceRegistry;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::Schema;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]

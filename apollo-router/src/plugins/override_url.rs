@@ -1,12 +1,17 @@
 //! Allows subgraph URLs to be overridden.
 
-use crate::plugin::Plugin;
-use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
-use http::Uri;
 use std::collections::HashMap;
 use std::str::FromStr;
+
+use http::Uri;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceExt};
+use tower::BoxError;
+use tower::ServiceExt;
+
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
@@ -48,13 +53,19 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::plugin::DynPlugin;
-    use crate::{plugin::test::MockSubgraphService, Context, SubgraphRequest};
+    use std::str::FromStr;
+
     use http::Uri;
     use serde_json::Value;
-    use std::str::FromStr;
-    use tower::{util::BoxService, Service, ServiceExt};
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::DynPlugin;
+    use crate::Context;
+    use crate::SubgraphRequest;
 
     #[tokio::test]
     async fn plugin_registered() {

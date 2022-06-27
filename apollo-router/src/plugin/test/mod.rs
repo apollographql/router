@@ -3,10 +3,22 @@
 mod mock;
 mod service;
 
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use futures::stream::BoxStream;
 pub use mock::subgraph::MockSubgraph;
-pub use service::{
-    MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
-};
+pub use service::MockExecutionService;
+pub use service::MockQueryPlanningService;
+pub use service::MockRouterService;
+pub use service::MockSubgraphService;
+use tower::buffer::Buffer;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -17,18 +29,10 @@ use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::ExecutionService;
 use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
 use crate::RouterService;
 use crate::Schema;
-use crate::{RouterRequest, RouterResponse};
-use futures::stream::BoxStream;
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::Arc;
-use tower::buffer::Buffer;
-use tower::util::BoxService;
-use tower::Service;
-use tower::ServiceExt;
-use tower::{BoxError, ServiceBuilder};
 
 pub struct PluginTestHarness {
     router_service:
@@ -211,8 +215,9 @@ impl PluginTestHarness {
 
 #[cfg(test)]
 mod testing {
-    use super::*;
     use insta::assert_json_snapshot;
+
+    use super::*;
 
     struct EmptyPlugin {}
     #[async_trait::async_trait]

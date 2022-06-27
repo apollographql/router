@@ -1,15 +1,13 @@
 #[cfg(not(windows))]
 fn main() {
-    use std::{
-        fs::File,
-        io::{Read, Write},
-    };
-
-    use launchpad::{
-        blocking::GraphQLClient,
-        introspect::{self, GraphIntrospectInput},
-    };
     use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::Read;
+    use std::io::Write;
+
+    use launchpad::blocking::GraphQLClient;
+    use launchpad::introspect::GraphIntrospectInput;
+    use launchpad::introspect::{self};
 
     if let Ok("debug") = std::env::var("PROFILE").as_deref() {
         let client = GraphQLClient::new(

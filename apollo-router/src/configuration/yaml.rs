@@ -1,11 +1,15 @@
-use crate::configuration::ConfigurationError;
+use std::collections::HashMap;
+
 use derivative::Derivative;
 use indexmap::IndexMap;
-use jsonschema::paths::{JSONPointer, PathChunk};
-use std::collections::HashMap;
-use yaml_rust::parser::{MarkedEventReceiver, Parser};
+use jsonschema::paths::JSONPointer;
+use jsonschema::paths::PathChunk;
+use yaml_rust::parser::MarkedEventReceiver;
+use yaml_rust::parser::Parser;
 use yaml_rust::scanner::Marker;
 use yaml_rust::Event;
+
+use crate::configuration::ConfigurationError;
 
 #[derive(Derivative, Clone, Debug, Eq)]
 #[derivative(Hash, PartialEq)]
@@ -190,8 +194,9 @@ impl MarkedEventReceiver for MarkedYaml {
 
 #[cfg(test)]
 mod test {
-    use crate::configuration::yaml::parse;
     use insta::assert_snapshot;
+
+    use crate::configuration::yaml::parse;
 
     #[test]
     fn test() {
