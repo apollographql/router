@@ -8,9 +8,9 @@ fn from_elem(c: &mut Criterion) {
 
         let builder = setup();
 
-        let (router, _) = runtime.block_on(builder.build()).unwrap();
+        let router = runtime.block_on(builder.build()).unwrap();
         b.to_async(runtime)
-            .iter(|| basic_composition_benchmark(router.clone()));
+            .iter(|| basic_composition_benchmark(router.test_service()));
     });
 }
 
