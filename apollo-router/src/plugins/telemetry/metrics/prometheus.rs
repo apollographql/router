@@ -21,7 +21,7 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
+        _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
             let exporter = opentelemetry_prometheus::exporter()

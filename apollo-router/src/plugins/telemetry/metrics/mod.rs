@@ -116,7 +116,7 @@ pub(crate) struct BodyForward {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Configuration to forward context values in metric attributes/labels
-pub struct ContextForward {
+pub(crate) struct ContextForward {
     pub(crate) named: String,
     pub(crate) rename: Option<String>,
     pub(crate) default: Option<String>,
@@ -198,7 +198,8 @@ impl AttributesForwardConf {
         let headers = response.response.headers();
         // Fill from response
         if let Some(from_response) = &self.response {
-            if let Some(body_forward) = &from_response.body {
+            if let Some(_body_forward) = &from_response.body {
+                // TODO implement this
                 todo!();
             }
 
@@ -352,27 +353,6 @@ impl AttributesForwardConf {
             }
         }
 
-        attributes
-    }
-}
-
-impl ContextForward {
-    pub(crate) fn get_attributes_from_context(&self, context: &Context) -> HashMap<String, String> {
-        let mut attributes = HashMap::new();
-        // Fill from context
-        match context.get::<_, String>(&self.named) {
-            Ok(Some(value)) => {
-                attributes.insert(self.rename.as_ref().unwrap_or(&self.named).clone(), value);
-            }
-            _ => {
-                if let Some(default_val) = &self.default {
-                    attributes.insert(
-                        self.rename.as_ref().unwrap_or(&self.named).clone(),
-                        default_val.clone(),
-                    );
-                }
-            }
-        };
         attributes
     }
 }

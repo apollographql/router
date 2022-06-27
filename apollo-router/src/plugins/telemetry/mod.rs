@@ -1,5 +1,4 @@
 //! Telemetry plugin.
-use crate::configuration::ConfigurationError;
 // This entire file is license key functionality
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
@@ -21,7 +20,6 @@ use crate::{
     RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use ::tracing::{info_span, Span};
-use access_json::{JSONQuery, QueryParseErr};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
