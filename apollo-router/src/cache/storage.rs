@@ -7,7 +7,7 @@ use std::hash::Hash;
 
 // these trait bounds should be revisited if we move away from moka
 #[derive(Clone)]
-pub struct CacheStorage<K: Hash + Eq + Send + Sync, V: Clone> {
+pub(crate) struct CacheStorage<K: Hash + Eq + Send + Sync, V: Clone> {
     inner: Cache<K, V>,
 }
 

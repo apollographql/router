@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json_bytes::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::buffer::Buffer;
-use tower::{BoxError, Layer, Service};
+use tower::{BoxError, Layer, Service, ServiceExt};
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub struct APQService<S>
+pub(crate) struct APQService<S>
 where
     S: Service<RouterRequest>,
 {
