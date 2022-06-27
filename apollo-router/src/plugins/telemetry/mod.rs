@@ -365,64 +365,48 @@ impl Plugin for Telemetry {
                 .and_then(|c| c.attributes.as_ref())
                 .and_then(|c| c.subgraph.as_ref())
                 .map(|subgraph_cfg| {
-                    dbg!(&name);
-                    dbg!(&subgraph_cfg);
-                    // TODO write a macro
-                    let mut insert = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.insert.clone())
-                        .unwrap_or_default();
-                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                        insert.extend(
-                            subgraphs
-                                .get(&name)
-                                .and_then(|s| s.insert.clone())
-                                .unwrap_or_default(),
-                        );
-                    }
+                    macro_rules! extend_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.extend(
+                                    subgraphs
+                                        .get(&name)
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
 
-                    let mut request = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.request.clone())
-                        .unwrap_or_default();
-                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                        request.merge(
-                            subgraphs
-                                .get(&name)
-                                .and_then(|a| a.request.clone())
-                                .unwrap_or_default(),
-                        );
+                            cfg
+                        }};
                     }
+                    macro_rules! merge_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.merge(
+                                    subgraphs
+                                        .get(&name)
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
 
-                    let mut response = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.response.clone())
-                        .unwrap_or_default();
-                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                        response.merge(
-                            subgraphs
-                                .get(&name)
-                                .and_then(|s| s.response.clone())
-                                .unwrap_or_default(),
-                        );
+                            cfg
+                        }};
                     }
-
-                    let mut context = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.context.clone())
-                        .unwrap_or_default();
-                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                        context.extend(
-                            subgraphs
-                                .get(&name)
-                                .and_then(|s| s.context.clone())
-                                .unwrap_or_default(),
-                        );
-                    }
+                    let insert = extend_config!(insert);
+                    let context = extend_config!(context);
+                    let request = merge_config!(request);
+                    let response = merge_config!(response);
 
                     AttributesForwardConf {
                         insert: (!insert.is_empty()).then(|| insert),
@@ -1242,7 +1226,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
             crate::ResponseBody::Text(prom_metrics) => {
-                dbg!(prom_metrics);
                 assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
                 assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
