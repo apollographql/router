@@ -15,10 +15,10 @@ pub struct All {
 
 impl All {
     pub fn run(&self) -> Result<()> {
-        eprintln!("Running tests...");
-        self.test.run()?;
         eprintln!("Checking format and clippy...");
         self.lint.run_local()?;
+        eprintln!("Running tests...");
+        self.test.run()?;
         eprintln!("Checking licenses...");
         self.compliance.run_local()
     }

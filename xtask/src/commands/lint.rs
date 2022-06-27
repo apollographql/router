@@ -9,6 +9,8 @@ pub struct Lint {}
 
 const RUSTFMT_TOOLCHAIN: &str = "nightly-2022-06-26";
 
+const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=StdExternalCrate"];
+
 impl Lint {
     pub fn run(&self) -> Result<()> {
         Self::install_rustfmt()?;
@@ -69,6 +71,8 @@ impl Lint {
             "fmt",
             "--all",
             "--",
+            "--config",
+            &RUSTFMT_CONFIG.join(","),
         ]);
         Ok(command)
     }
