@@ -5,7 +5,7 @@ use crate::service_registry::ServiceRegistry;
 use crate::*;
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
-use fetch::OperationKind;
+pub use fetch::OperationKind;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
@@ -24,7 +24,7 @@ pub struct QueryPlanOptions {
     pub enable_variable_deduplication: bool,
 }
 
-/// A plan for a [`crate::Query`]
+/// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {
     pub usage_reporting: UsageReporting,

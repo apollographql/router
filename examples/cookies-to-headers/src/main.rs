@@ -32,10 +32,11 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::http_compat;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::{http_compat, SubgraphRequest, SubgraphResponse};
+    use apollo_router::services::{SubgraphRequest, SubgraphResponse};
     use http::{header::HeaderName, HeaderValue, StatusCode};
     use tower::util::ServiceExt;
 

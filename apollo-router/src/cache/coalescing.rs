@@ -143,16 +143,6 @@ where
             }
         }
     }
-
-    /// Get the top 20% of most recently (LRU) used keys
-    pub(crate) async fn get_hot_keys(&self) -> Vec<K> {
-        let locked_cache = self.cached.lock().await;
-        locked_cache
-            .iter()
-            .take(self.cache_limit / 5)
-            .map(|(key, _value)| key.clone())
-            .collect()
-    }
 }
 
 #[cfg(test)]

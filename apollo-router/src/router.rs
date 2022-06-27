@@ -329,16 +329,16 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
-/// use apollo_router::prelude::*;
-/// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: apollo_router::Schema = "schema".parse().unwrap();
 ///     let server = ApolloRouter::builder()
-///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-///             .schema(SchemaKind::Instance(Box::new(schema)))
+///             .configuration(configuration)
+///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     server.serve().await;
@@ -347,16 +347,16 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::prelude::*;
-/// use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-/// use apollo_router::configuration::Configuration;
+/// use apollo_router::ApolloRouter;
+/// use apollo_router::Configuration;
+/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: apollo_router::Schema = "schema".parse().unwrap();
 ///     let server = ApolloRouter::builder()
-///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-///             .schema(SchemaKind::Instance(Box::new(schema)))
+///             .configuration(configuration)
+///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     let handle = server.serve();
@@ -527,8 +527,8 @@ mod tests {
                 .unwrap();
         let schema: crate::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         ApolloRouter::builder()
-            .configuration(ConfigurationKind::Instance(Box::new(configuration)))
-            .schema(SchemaKind::Instance(Box::new(schema)))
+            .configuration(configuration)
+            .schema(schema)
             .build()
             .serve()
     }
