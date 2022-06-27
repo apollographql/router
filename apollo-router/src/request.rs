@@ -56,6 +56,21 @@ impl Request {
         }
     }
 
+    #[builder]
+    pub fn fake_new(
+        query: Option<String>,
+        operation_name: Option<String>,
+        variables: Option<Object>,
+        extensions: Option<Object>,
+    ) -> Self {
+        Self {
+            query,
+            operation_name,
+            variables: variables.unwrap_or_default(),
+            extensions: extensions.unwrap_or_default(),
+        }
+    }
+
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
         // As explained in the form content types specification https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
         // `Forms submitted with this content type must be encoded as follows:`

@@ -37,6 +37,7 @@ use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use router_bridge::planner::UsageReporting;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -78,8 +79,6 @@ pub struct Telemetry {
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: metrics::apollo::Sender,
-    // TODO precompute the queries
-    // metrics_response_queries: Vec<JSONQuery>,
 }
 
 #[derive(Debug)]
@@ -270,7 +269,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let mut result: Result<
+                        let result: Result<
                             RouterResponse<BoxStream<'static, ResponseBody>>,
                             BoxError,
                         > = fut.await;
@@ -370,56 +369,65 @@ impl Plugin for Telemetry {
                 .and_then(|c| c.attributes.as_ref())
                 .and_then(|c| c.subgraph.as_ref())
                 .map(|subgraph_cfg| {
+                    dbg!(&name);
+                    dbg!(&subgraph_cfg);
                     // TODO write a macro
                     let mut insert = subgraph_cfg
                         .all
                         .as_ref()
                         .and_then(|a| a.insert.clone())
                         .unwrap_or_default();
-                    insert.extend(
-                        subgraph_cfg
-                            .subgraphs
-                            .get(&name)
-                            .and_then(|s| s.insert.clone())
-                            .unwrap_or_default(),
-                    );
+                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                        insert.extend(
+                            subgraphs
+                                .get(&name)
+                                .and_then(|s| s.insert.clone())
+                                .unwrap_or_default(),
+                        );
+                    }
+
                     let mut request = subgraph_cfg
                         .all
                         .as_ref()
                         .and_then(|a| a.request.clone())
                         .unwrap_or_default();
-                    request.merge(
-                        subgraph_cfg
-                            .subgraphs
-                            .get(&name)
-                            .and_then(|a| a.request.clone())
-                            .unwrap_or_default(),
-                    );
+                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                        request.merge(
+                            subgraphs
+                                .get(&name)
+                                .and_then(|a| a.request.clone())
+                                .unwrap_or_default(),
+                        );
+                    }
 
                     let mut response = subgraph_cfg
                         .all
                         .as_ref()
                         .and_then(|a| a.response.clone())
                         .unwrap_or_default();
-                    response.merge(
-                        subgraph_cfg
-                            .subgraphs
-                            .get(&name)
-                            .and_then(|s| s.response.clone())
-                            .unwrap_or_default(),
-                    );
+                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                        response.merge(
+                            subgraphs
+                                .get(&name)
+                                .and_then(|s| s.response.clone())
+                                .unwrap_or_default(),
+                        );
+                    }
+
                     let mut context = subgraph_cfg
                         .all
                         .as_ref()
                         .and_then(|a| a.context.clone())
                         .unwrap_or_default();
-                    context.extend(
-                        subgraph_cfg
-                            .subgraphs
-                            .get(&name)
-                            .and_then(|s| s.context.clone())
-                            .unwrap_or_default(),
-                    );
+                    if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                        context.extend(
+                            subgraphs
+                                .get(&name)
+                                .and_then(|s| s.context.clone())
+                                .unwrap_or_default(),
+                        );
+                    }
+
                     AttributesForwardConf {
                         insert: (!insert.is_empty()).then(|| insert),
                         request: (request.header.is_some() || request.body.is_some())
@@ -442,29 +450,12 @@ impl Plugin for Telemetry {
                 move |sub_request: &SubgraphRequest| {
                     let subgraph_metrics_conf = subgraph_metrics_conf.clone();
                     let mut attributes = HashMap::new();
-                    if let Some(AttributesForwardConf {
-                        request: Some(from_request),
-                        insert: Some(to_insert),
-                        ..
-                    }) = &*subgraph_metrics_conf
-                    {
-                        // Fill from static
-                        for Insert { name, value } in to_insert {
-                            attributes.insert(name.clone(), value.clone());
-                        }
-                        if let Some(headers_forward) = &from_request.header {
-                            let headers = sub_request.subgraph_request.headers();
-                            attributes.extend(headers_forward.iter().fold(
-                                HashMap::new(),
-                                |mut acc, current| {
-                                    acc.extend(current.get_attributes_from_headers(headers));
-                                    acc
-                                },
-                            ));
-                        }
-                        if let Some(body_forward) = &from_request.body {
-                            todo!()
-                        }
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
+                            sub_request.subgraph_request.headers(),
+                            sub_request.subgraph_request.body(),
+                            &sub_request.context,
+                        ));
                     }
                     sub_request
                         .context
@@ -542,7 +533,32 @@ impl Plugin for Telemetry {
                                         );
                                     }
                                     if let Some(body_forward) = &from_response.body {
-                                        todo!()
+                                        // TODO refactor
+                                        dbg!(response.response.body());
+                                        for body_fw in body_forward {
+                                            let output = body_fw
+                                                .path
+                                                .execute(response.response.body())
+                                                .unwrap(); //FIXME do not use unwrap
+                                            if let Some(val) = output {
+                                                if let Value::String(val_str) = val {
+                                                    metric_attrs.push(KeyValue::new(
+                                                        body_fw.name.clone(),
+                                                        val_str,
+                                                    ));
+                                                } else {
+                                                    metric_attrs.push(KeyValue::new(
+                                                        body_fw.name.clone(),
+                                                        val.to_string(),
+                                                    ));
+                                                }
+                                            } else if let Some(default_val) = &body_fw.default {
+                                                metric_attrs.push(KeyValue::new(
+                                                    body_fw.name.clone(),
+                                                    default_val.clone(),
+                                                ));
+                                            }
+                                        }
                                     }
                                 }
 
@@ -650,36 +666,6 @@ impl Telemetry {
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
         Ok(builder)
     }
-
-    // fn create_metrics_queries(config: &config::Conf) -> Result<Vec<JSONQuery>, BoxError> {
-    //     match &config.metrics {
-    //         Some(metrics_conf) => {
-    //             if let Some(MetricsCommon {
-    //                 attributes:
-    //                     Some(MetricsAttributesConf {
-    //                         from_response: Some(from_response),
-    //                         ..
-    //                     }),
-    //                 ..
-    //             }) = &metrics_conf.common
-    //             {
-    //                 let queries = from_response
-    //                     .iter()
-    //                     .map(|fr| JSONQuery::parse(&fr.path))
-    //                     .collect::<Result<Vec<JSONQuery>, QueryParseErr>>()
-    //                     .map_err(|err| ConfigurationError::InvalidConfiguration {
-    //                         message: "cannot parse JSON query in plugin telemetry for field metrics.from_response.path",
-    //                         error: err.to_string()
-    //                     })?;
-
-    //                 Ok(queries)
-    //             } else {
-    //                 Ok(Vec::new())
-    //             }
-    //         }
-    //         None => Ok(Vec::new()),
-    //     }
-    // }
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
@@ -896,60 +882,17 @@ impl Telemetry {
                 attributes.insert("operation_name".to_string(), operation_name.clone());
             }
 
-            if let Some(MetricsCommon {
-                attributes:
-                    Some(MetricsAttributesConf {
-                        router:
-                            Some(AttributesForwardConf {
-                                insert: Some(to_insert),
-                                request: Some(from_request),
-                                context: Some(from_context),
-                                ..
-                            }),
-                        ..
-                    }),
-                ..
-            }) = &metrics_conf.common
+            if let Some(router_attributes_conf) = metrics_conf
+                .common
+                .as_ref()
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|a| a.router.as_ref())
             {
-                // Fill from static
-                for Insert { name, value } in to_insert {
-                    attributes.insert(name.clone(), value.clone());
-                }
-                let headers = req.originating_request.headers();
-                // Fill from request
-                if let Some(headers_forward) = &from_request.header {
-                    attributes.extend(headers_forward.iter().fold(
-                        HashMap::new(),
-                        |mut acc, current| {
-                            acc.extend(current.get_attributes_from_headers(headers));
-                            acc
-                        },
-                    ));
-                }
-                if let Some(body_forward) = &from_request.body {
-                    todo!()
-                }
-                // Fill from context
-                for ContextForward {
-                    named,
-                    default,
-                    rename,
-                } in from_context
-                {
-                    match context.get::<_, String>(named) {
-                        Ok(Some(value)) => {
-                            attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
-                        }
-                        _ => {
-                            if let Some(default_val) = default {
-                                attributes.insert(
-                                    rename.as_ref().unwrap_or(named).clone(),
-                                    default_val.clone(),
-                                );
-                            }
-                        }
-                    }
-                }
+                attributes.extend(router_attributes_conf.get_attributes_from_request(
+                    headers,
+                    req.originating_request.body(),
+                    context,
+                ));
             }
 
             let _ = context.insert(ATTRIBUTES, attributes);
@@ -999,12 +942,16 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use crate::plugin::test::MockRouterService;
+    use crate::error::Error;
+    use crate::json_ext::Object;
+    use crate::plugin::test::{MockRouterService, MockSubgraphService};
     use crate::plugin::DynPlugin;
-    use crate::{http_compat, RouterRequest, RouterResponse};
+    use crate::services::{SubgraphRequest, SubgraphResponse};
+    use crate::{http_compat, Request, RouterRequest, RouterResponse};
     use bytes::Bytes;
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
+    use serde_json_bytes::ByteString;
     use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1056,7 +1003,7 @@ mod tests {
                                         "rename": "renamed_value",
                                     }],
                                     "body": [{
-                                        "path": "data.test",
+                                        "path": ".data.test",
                                         "name": "my_new_name",
                                         "default": "default_value"
                                     }]
@@ -1072,7 +1019,7 @@ mod tests {
                                         "rename": "renamed_value",
                                     }],
                                     "body": [{
-                                        "path": "data.test",
+                                        "path": ".data.test",
                                         "name": "my_new_name",
                                         "default": "default_value"
                                     }]
@@ -1093,7 +1040,7 @@ mod tests {
                                             "rename": "renamed_value",
                                         }],
                                         "body": [{
-                                            "path": "data.test",
+                                            "path": ".data.test",
                                             "name": "my_new_name",
                                             "default": "default_value"
                                         }]
@@ -1109,7 +1056,7 @@ mod tests {
                                             "rename": "renamed_value",
                                         }],
                                         "body": [{
-                                            "path": "data.test",
+                                            "path": ".data.test",
                                             "name": "my_new_name",
                                             "default": "default_value"
                                         }]
@@ -1130,7 +1077,7 @@ mod tests {
                                                 "rename": "renamed_value",
                                             }],
                                             "body": [{
-                                                "path": "data.test",
+                                                "path": ".data.test",
                                                 "name": "my_new_name",
                                                 "default": "default_value"
                                             }]
@@ -1146,7 +1093,7 @@ mod tests {
                                                 "rename": "renamed_value",
                                             }],
                                             "body": [{
-                                                "path": "data.test",
+                                                "path": ".data.test",
                                                 "name": "my_new_name",
                                                 "default": "default_value"
                                             }]
@@ -1176,6 +1123,31 @@ mod tests {
                     .boxed())
             });
 
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                let mut extension = Object::new();
+                extension.insert(
+                    serde_json_bytes::ByteString::from("status"),
+                    serde_json_bytes::Value::String(ByteString::from("INTERNAL_SERVER_ERROR")),
+                );
+                let _ = req
+                    .context
+                    .insert("my_key", "my_custom_attribute_from_context".to_string())
+                    .unwrap();
+                Ok(SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .error(
+                        Error::builder()
+                            .message(String::from("an error occured"))
+                            .extensions(extension)
+                            .build(),
+                    )
+                    .build())
+            });
+
         let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
@@ -1190,23 +1162,57 @@ mod tests {
                 "metrics": {
                     "common": {
                         "attributes": {
-                            "from_headers": [
-                                {
-                                    "named": "test",
-                                    "default": "default_value",
-                                    "rename": "renamed_value"
-                                },
-                                {
-                                    "named": "another_test",
-                                    "default": "my_default_value"
+                            "router": {
+                                "static": [
+                                    {
+                                        "name": "myname",
+                                        "value": "label_value"
+                                    }
+                                ],
+                                "request": {
+                                    "header": [
+                                        {
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value"
+                                        },
+                                        {
+                                            "named": "another_test",
+                                            "default": "my_default_value"
+                                        }
+                                    ]
                                 }
-                            ],
-                            "static": [
-                                {
-                                    "name": "myname",
-                                    "value": "label_value"
+                            },
+                            "subgraph": {
+                                "subgraphs": {
+                                    "my_subgraph_name": {
+                                        "request": {
+                                            "body": [{
+                                                "path": ".query",
+                                                "name": "query_from_request"
+                                            }, {
+                                                "path": ".data",
+                                                "name": "unknown_data",
+                                                "default": "default_value"
+                                            }, {
+                                                "path": ".data2",
+                                                "name": "unknown_data_bis"
+                                            }]
+                                        },
+                                        "response": {
+                                            "body": [{
+                                                "path": ".errors[0].extensions.status",
+                                                "name": "error"
+                                            }]
+                                        },
+                                        "context": [
+                                            {
+                                                "named": "my_key"
+                                            }
+                                        ]
+                                    }
                                 }
-                            ]
+                            }
                         }
                     },
                     "prometheus": {
@@ -1230,6 +1236,31 @@ mod tests {
             .await
             .unwrap()
             .next_response()
+            .await
+            .unwrap();
+
+        let mut subgraph_service = dyn_plugin.subgraph_service(
+            "my_subgraph_name",
+            BoxService::new(mock_subgraph_service.build()),
+        );
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_compat::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
             .await
             .unwrap();
 
@@ -1257,21 +1288,24 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
             crate::ResponseBody::Text(prom_metrics) => {
+                dbg!(prom_metrics);
                 assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"}"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"} 1"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"} 1"#));
             }
             _ => panic!("body does not have the right format"),
         }

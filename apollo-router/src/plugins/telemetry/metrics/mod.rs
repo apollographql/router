@@ -1,10 +1,11 @@
-use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
+use crate::plugin::serde::{deserialize_header_name, deserialize_json_query, deserialize_regex};
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::services::RouterResponse;
-use crate::{http_compat, Context, ResponseBody};
+use crate::{http_compat, Context, Request, ResponseBody};
 use ::serde::Deserialize;
+use access_json::JSONQuery;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use http::header::HeaderName;
@@ -13,6 +14,7 @@ use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorde
 use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
+use serde_json::Value;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,7 +45,7 @@ pub(crate) struct SubgraphAttributesConf {
     // Apply to all subgraphs
     pub(crate) all: Option<AttributesForwardConf>,
     // Apply to specific subgraph
-    pub(crate) subgraphs: HashMap<String, AttributesForwardConf>,
+    pub(crate) subgraphs: Option<HashMap<String, AttributesForwardConf>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -102,7 +104,9 @@ pub(crate) enum HeaderForward {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
-    pub(crate) path: String,
+    #[schemars(schema_with = "string_schema")]
+    #[serde(deserialize_with = "deserialize_json_query")]
+    pub(crate) path: JSONQuery,
     pub(crate) name: String,
     pub(crate) default: Option<String>,
 }
@@ -148,6 +152,7 @@ impl HeaderForward {
             }
         }
 
+        println!("attributes {attributes:#?}");
         attributes
     }
 }
@@ -160,6 +165,15 @@ impl Forward {
             }
             (None, Some(body_to_merge)) => {
                 self.body = Some(body_to_merge);
+            }
+            _ => {}
+        }
+        match (&mut self.header, to_merge.header) {
+            (Some(header), Some(header_to_merge)) => {
+                header.extend(header_to_merge);
+            }
+            (None, Some(header_to_merge)) => {
+                self.header = Some(header_to_merge);
             }
             _ => {}
         }
@@ -222,7 +236,8 @@ impl AttributesForwardConf {
 
         attributes
     }
-    pub(crate) fn get_attributes(
+
+    pub(crate) fn get_attributes_from_response(
         &self,
         headers: &HeaderMap,
         body: &ResponseBody,
@@ -248,7 +263,86 @@ impl AttributesForwardConf {
                 ));
             }
             if let Some(body_forward) = &from_response.body {
-                todo!()
+                dbg!(body);
+                for body_fw in body_forward {
+                    let output = body_fw.path.execute(body).unwrap();
+                    if let Some(val) = output {
+                        if let Value::String(val_str) = val {
+                            attributes.insert(body_fw.name.clone(), val_str);
+                        } else {
+                            attributes.insert(body_fw.name.clone(), val.to_string());
+                        }
+                    } else if let Some(default_val) = &body_fw.default {
+                        attributes.insert(body_fw.name.clone(), default_val.clone());
+                    }
+                }
+            }
+        }
+        // Fill from context
+        if let Some(from_context) = &self.context {
+            for ContextForward {
+                named,
+                default,
+                rename,
+            } in from_context
+            {
+                match context.get::<_, String>(named) {
+                    Ok(Some(value)) => {
+                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                    }
+                    _ => {
+                        if let Some(default_val) = default {
+                            attributes.insert(
+                                rename.as_ref().unwrap_or(named).clone(),
+                                default_val.clone(),
+                            );
+                        }
+                    }
+                };
+            }
+        }
+
+        attributes
+    }
+
+    pub(crate) fn get_attributes_from_request(
+        &self,
+        headers: &HeaderMap,
+        body: &Request,
+        context: &Context,
+    ) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+
+        // Fill from static
+        if let Some(to_insert) = &self.insert {
+            for Insert { name, value } in to_insert {
+                attributes.insert(name.clone(), value.clone());
+            }
+        }
+        // Fill from response
+        if let Some(from_request) = &self.request {
+            if let Some(headers_forward) = &from_request.header {
+                attributes.extend(headers_forward.iter().fold(
+                    HashMap::new(),
+                    |mut acc, current| {
+                        acc.extend(current.get_attributes_from_headers(headers));
+                        acc
+                    },
+                ));
+            }
+            if let Some(body_forward) = &from_request.body {
+                for body_fw in body_forward {
+                    let output = body_fw.path.execute(body).unwrap(); //FIXME do not use unwrap
+                    if let Some(val) = output {
+                        if let Value::String(val_str) = val {
+                            attributes.insert(body_fw.name.clone(), val_str);
+                        } else {
+                            attributes.insert(body_fw.name.clone(), val.to_string());
+                        }
+                    } else if let Some(default_val) = &body_fw.default {
+                        attributes.insert(body_fw.name.clone(), default_val.clone());
+                    }
+                }
             }
         }
         // Fill from context
