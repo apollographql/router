@@ -31,7 +31,6 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
@@ -396,16 +395,16 @@ pub struct MakeARouter {
     plugins: Arc<Plugins>,
 }
 
-impl NewService<Request<crate::Request>> for MakeARouter {
+impl NewService<Request<graphql::Request>> for MakeARouter {
     type Service = BoxService<
-        Request<crate::Request>,
+        Request<graphql::Request>,
         crate::http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
         BoxService::new(
             self.make()
-                .map_request(|http_request: Request<crate::Request>| http_request.into())
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
                 .map_response(|response| response.response),
         )
     }
@@ -413,13 +412,13 @@ impl NewService<Request<crate::Request>> for MakeARouter {
 
 impl RouterServiceFactory for MakeARouter {
     type RouterService = BoxService<
-        Request<crate::Request>,
+        Request<graphql::Request>,
         crate::http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >;
 
-    type Future = <<MakeARouter as NewService<Request<crate::Request>>>::Service as Service<
-        Request<crate::Request>,
+    type Future = <<MakeARouter as NewService<Request<graphql::Request>>>::Service as Service<
+        Request<graphql::Request>,
     >>::Future;
 }
 

@@ -2,7 +2,6 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::graphql;
 use crate::http_ext::{Request, Response};
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
 use crate::services::{MakeARouter, Plugins};
@@ -15,9 +14,8 @@ use indexmap::IndexMap;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxCloneService;
+use tower::BoxError;
 use tower_service::Service;
 
 /// Factory for creating a RouterService
@@ -25,7 +23,7 @@ use tower_service::Service;
 /// Instances of this traits are used by the HTTP server to generate a new
 /// RouterService on each request
 pub(crate) trait RouterServiceFactory:
-    NewService<Request<crate::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
     type RouterService: Service<
             Request<graphql::Request>,

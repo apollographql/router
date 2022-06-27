@@ -397,7 +397,7 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::new_service::NewService;
     use crate::router_factory::{RouterServiceConfigurator, RouterServiceFactory};
-    use crate::ResponseBody;
+    use crate::{graphql, ResponseBody};
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use futures::stream::BoxStream;
@@ -625,10 +625,10 @@ mod tests {
 
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<crate::Request>>>::Future;
+            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
         }
 
-        impl  NewService<Request<crate::Request>> for MyRouterFactory {
+        impl  NewService<Request<graphql::Request>> for MyRouterFactory {
             type Service = MockMyRouter;
             fn new_service(&self) -> MockMyRouter;
         }

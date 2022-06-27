@@ -110,7 +110,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .post({
                         move |host: Host,
                               uri: OriginalUri,
-                              request: Json<crate::Request>,
+                              request: Json<graphql::Request>,
                               Extension(service): Extension<RF>,
                               header_map: HeaderMap| {
                             handle_post(
@@ -423,7 +423,7 @@ async fn custom_plugin_handler(
 async fn handle_get(
     Host(host): Host,
     service: BoxService<
-        http_ext::Request<crate::Request>,
+        http_ext::Request<graphql::Request>,
         http_ext::Response<BoxStream<'static, ResponseBody>>,
         BoxError,
     >,
@@ -692,7 +692,6 @@ mod tests {
     use std::str::FromStr;
     use test_log::test;
     use tower::service_fn;
-    use tower_test::mock::Spawn;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -743,14 +742,14 @@ mod tests {
     #[derive(Clone)]
     struct TestRouterServiceFactory {
         inner: tower_test::mock::Mock<
-            http_ext::Request<crate::Request>,
+            http_ext::Request<graphql::Request>,
             http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
         >,
     }
 
-    impl NewService<Request<crate::Request>> for TestRouterServiceFactory {
+    impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
         type Service = tower_test::mock::Mock<
-            http_ext::Request<crate::Request>,
+            http_ext::Request<graphql::Request>,
             http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
         >;
 
@@ -761,13 +760,13 @@ mod tests {
 
     impl RouterServiceFactory for TestRouterServiceFactory {
         type RouterService = tower_test::mock::Mock<
-            http_ext::Request<crate::Request>,
+            http_ext::Request<graphql::Request>,
             http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
         >;
 
         type Future = <<TestRouterServiceFactory as NewService<
-            http_ext::Request<crate::Request>,
-        >>::Service as Service<http_ext::Request<crate::Request>>>::Future;
+            http_ext::Request<graphql::Request>,
+        >>::Service as Service<http_ext::Request<graphql::Request>>>::Future;
     }
 
     async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {

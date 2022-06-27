@@ -5,7 +5,7 @@ use apollo_router::services::SubgraphService;
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
 use std::sync::Arc;
 use tower::util::BoxCloneService;
-use tower::{util::BoxService, ServiceExt};
+use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]

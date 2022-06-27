@@ -837,7 +837,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
