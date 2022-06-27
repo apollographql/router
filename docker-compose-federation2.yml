@@ -52,7 +52,7 @@ services:
 
   collector:
     container_name: collector
-    image: otel/opentelemetry-collector:0.46.0
+    image: otel/opentelemetry-collector:0.54.0
     command: ["--config=/conf/collector-config.yml"]
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/collector-config.yml:/conf/collector-config.yml
