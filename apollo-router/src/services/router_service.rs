@@ -221,7 +221,7 @@ where
 
             Ok(RouterResponse::builder()
                 .errors(errors)
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .status_code(StatusCode::BAD_REQUEST)
                 .context(context_cloned)
                 .build()
                 .expect("building a response like this should not fail")
