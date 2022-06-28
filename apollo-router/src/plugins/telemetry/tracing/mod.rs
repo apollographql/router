@@ -1,9 +1,12 @@
-use crate::plugins::telemetry::config::Trace;
 use opentelemetry::sdk::trace::Builder;
 use reqwest::Url;
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
 use tower::BoxError;
+
+use crate::plugins::telemetry::config::Trace;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;

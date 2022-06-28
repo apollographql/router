@@ -1,34 +1,38 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use crate::configuration::{Configuration, ListenAddr};
-use crate::graphql;
-use crate::http_ext;
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugin::Handler;
-use crate::router::ApolloRouterError;
-use crate::ResponseBody;
-use async_compression::tokio::write::{BrotliDecoder, GzipDecoder, ZlibDecoder};
-use axum::extract::{Extension, Host, OriginalUri};
-use axum::http::{header::HeaderMap, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::*;
-use axum::routing::get;
-use axum::Router;
-use bytes::Bytes;
-use futures::stream::BoxStream;
-use futures::{channel::oneshot, prelude::*};
-use http::header::CONTENT_ENCODING;
-use http::{HeaderValue, Request, Uri};
-use hyper::server::conn::Http;
-use hyper::Body;
-use opentelemetry::global;
-use opentelemetry::trace::{SpanKind, TraceContextExt};
-use serde_json::json;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+
+use async_compression::tokio::write::BrotliDecoder;
+use async_compression::tokio::write::GzipDecoder;
+use async_compression::tokio::write::ZlibDecoder;
+use axum::extract::Extension;
+use axum::extract::Host;
+use axum::extract::OriginalUri;
+use axum::http::header::HeaderMap;
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::middleware::{self};
+use axum::response::*;
+use axum::routing::get;
+use axum::Router;
+use bytes::Bytes;
+use futures::channel::oneshot;
+use futures::prelude::*;
+use futures::stream::BoxStream;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
+use http::Request;
+use http::Uri;
+use hyper::server::conn::Http;
+use hyper::Body;
+use opentelemetry::global;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceContextExt;
+use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -36,12 +40,28 @@ use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
+use tower::BoxError;
 use tower::MakeService;
-use tower::{BoxError, ServiceExt};
+use tower::ServiceExt;
 use tower_http::compression::CompressionLayer;
-use tower_http::trace::{MakeSpan, TraceLayer};
+use tower_http::trace::MakeSpan;
+use tower_http::trace::TraceLayer;
 use tower_service::Service;
-use tracing::{Level, Span};
+use tracing::Level;
+use tracing::Span;
+
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
+use crate::graphql;
+use crate::http_ext;
+use crate::http_server_factory::HttpServerFactory;
+use crate::http_server_factory::HttpServerHandle;
+use crate::http_server_factory::Listener;
+use crate::http_server_factory::NetworkStream;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
+use crate::ResponseBody;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -658,24 +678,32 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+
+    use async_compression::tokio::write::GzipEncoder;
+    use http::header::ACCEPT_ENCODING;
+    use http::header::CONTENT_TYPE;
+    use http::header::{self};
+    use mockall::mock;
+    use reqwest::header::ACCEPT;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+    use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
+    use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
+    use reqwest::header::ORIGIN;
+    use reqwest::redirect::Policy;
+    use reqwest::Client;
+    use reqwest::Method;
+    use reqwest::StatusCode;
+    use serde_json::json;
+    use test_log::test;
+    use tower::service_fn;
+
     use super::*;
     use crate::configuration::Cors;
     use crate::http_ext::Request;
-    use async_compression::tokio::write::GzipEncoder;
-    use http::header::{self, ACCEPT_ENCODING, CONTENT_TYPE};
-    use mockall::mock;
-    use reqwest::header::{
-        ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
-        ORIGIN,
-    };
-    use reqwest::redirect::Policy;
-    use reqwest::{Client, Method, StatusCode};
-    use serde_json::json;
-    use std::net::SocketAddr;
-    use std::str::FromStr;
-    use test_log::test;
-    use tower::service_fn;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -1605,7 +1633,9 @@ mod tests {
 
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
-        use tokio::io::{AsyncBufReadExt, BufReader, Interest};
+        use tokio::io::AsyncBufReadExt;
+        use tokio::io::BufReader;
+        use tokio::io::Interest;
         use tokio::net::UnixStream;
 
         let content = match method {

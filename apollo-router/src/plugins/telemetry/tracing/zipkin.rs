@@ -1,13 +1,17 @@
 //! Configuration for zipkin tracing.
-use crate::plugins::telemetry::config::{GenericWith, Trace};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
 use tower::BoxError;
 use url::Url;
 
-use super::{AgentDefault, AgentEndpoint};
+use super::AgentDefault;
+use super::AgentEndpoint;
+use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

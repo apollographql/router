@@ -1,10 +1,13 @@
+use std::fmt::Formatter;
+use std::str::FromStr;
+
 use http::header::HeaderName;
 use http::HeaderValue;
 use regex::Regex;
-use serde::de::{Error, Visitor};
-use serde::{de, Deserializer};
-use std::fmt::Formatter;
-use std::str::FromStr;
+use serde::de;
+use serde::de::Error;
+use serde::de::Visitor;
+use serde::Deserializer;
 
 pub fn deserialize_option_header_name<'de, D>(
     deserializer: D,

@@ -1,51 +1,74 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
-use crate::graphql::Response;
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Handler;
-use crate::plugin::Plugin;
-use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::studio::{
-    SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
-};
-use crate::plugins::telemetry::metrics::{
-    AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
-    MetricsExporterHandle,
-};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::query_planner::USAGE_REPORTING;
-use crate::subscriber::replace_layer;
-use crate::{
-    http_ext, register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
-use ::tracing::{info_span, Span};
-use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::StatsContext;
-use bytes::Bytes;
-use futures::{stream::BoxStream, FutureExt, StreamExt};
-use http::{HeaderValue, StatusCode};
-use metrics::apollo::Sender;
-use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::{
-    BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
-};
-use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
-use opentelemetry::{global, KeyValue};
-use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+
+use ::tracing::info_span;
+use ::tracing::Span;
+use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::StatsContext;
+use bytes::Bytes;
+use futures::stream::BoxStream;
+use futures::FutureExt;
+use futures::StreamExt;
+use http::HeaderValue;
+use http::StatusCode;
+use metrics::apollo::Sender;
+use opentelemetry::global;
+use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::propagation::BaggagePropagator;
+use opentelemetry::sdk::propagation::TextMapCompositePropagator;
+use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::Tracer;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
+use router_bridge::planner::UsageReporting;
+use tower::service_fn;
 use tower::steer::Steer;
 use tower::util::BoxService;
-use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use url::Url;
 
 use self::config::Conf;
-use self::metrics::{Forward, MetricsAttributesConf};
+use self::metrics::Forward;
+use self::metrics::MetricsAttributesConf;
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Handler;
+use crate::plugin::Plugin;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleReport;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleTracesAndStats;
+use crate::plugins::telemetry::metrics::AggregateMeterProvider;
+use crate::plugins::telemetry::metrics::BasicMetrics;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::USAGE_REPORTING;
+use crate::register_plugin;
+use crate::subscriber::replace_layer;
+use crate::Context;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 pub mod apollo;
 pub mod config;
@@ -759,13 +782,20 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
+    use bytes::Bytes;
+    use http::Method;
+    use http::StatusCode;
+    use http::Uri;
+    use serde_json::Value;
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use crate::http_ext;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
-    use crate::{http_ext, RouterRequest, RouterResponse};
-    use bytes::Bytes;
-    use http::{Method, StatusCode, Uri};
-    use serde_json::Value;
-    use tower::{util::BoxService, Service, ServiceExt};
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {

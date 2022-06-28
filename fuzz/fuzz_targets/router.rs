@@ -1,11 +1,13 @@
 #![no_main]
 
+use std::fs::OpenOptions;
+use std::io::Write;
+
 use libfuzzer_sys::fuzz_target;
 use log::debug;
 use router_fuzz::generate_valid_operation;
-use serde_json::{json, Value};
-use std::fs::OpenOptions;
-use std::io::Write;
+use serde_json::json;
+use serde_json::Value;
 
 const GATEWAY_URL: &str = "http://localhost:4100/graphql";
 const ROUTER_URL: &str = "http://localhost:4000/graphql";

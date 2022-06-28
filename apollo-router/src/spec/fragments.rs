@@ -1,6 +1,8 @@
-use crate::*;
-use apollo_parser::ast;
 use std::collections::HashMap;
+
+use apollo_parser::ast;
+
+use crate::*;
 
 #[derive(Debug, Default)]
 pub(crate) struct Fragments {

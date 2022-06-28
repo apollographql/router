@@ -1,24 +1,32 @@
 //! Main entry point for CLI command to start server.
 
-use crate::configuration::{generate_config_schema, ConfigurationError};
+use std::env;
+use std::ffi::OsStr;
+use std::fmt;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
+use clap::AppSettings;
+use clap::CommandFactory;
+use clap::Parser;
+use directories::ProjectDirs;
+use once_cell::sync::OnceCell;
+use tracing_subscriber::EnvFilter;
+use url::ParseError;
+use url::Url;
+
+use crate::configuration::generate_config_schema;
+use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
 use crate::router::ApolloRouter;
 use crate::router::ConfigurationKind;
 use crate::router::SchemaKind;
 use crate::router::ShutdownKind;
-use crate::{
-    configuration::Configuration,
-    subscriber::{set_global_subscriber, RouterSubscriber},
-};
-use anyhow::{anyhow, Context, Result};
-use clap::{AppSettings, CommandFactory, Parser};
-use directories::ProjectDirs;
-use once_cell::sync::OnceCell;
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::{env, fmt};
-use tracing_subscriber::EnvFilter;
-use url::{ParseError, Url};
+use crate::subscriber::set_global_subscriber;
+use crate::subscriber::RouterSubscriber;
 
 static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 

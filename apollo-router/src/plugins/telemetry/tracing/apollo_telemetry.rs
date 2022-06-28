@@ -26,24 +26,24 @@
 //!     shutdown_tracer_provider(); // sending remaining spans
 //! }
 //! ```
-use apollo_spaceport::Reporter;
-use async_trait::async_trait;
-use derivative::Derivative;
-use opentelemetry::{
-    global,
-    runtime::Tokio,
-    sdk,
-    sdk::export::{
-        trace::{ExportResult, SpanData, SpanExporter},
-        ExportError,
-    },
-    trace::TracerProvider,
-};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
+
+use apollo_spaceport::Reporter;
+use async_trait::async_trait;
+use derivative::Derivative;
+use opentelemetry::global;
+use opentelemetry::runtime::Tokio;
+use opentelemetry::sdk;
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::export::ExportError;
+use opentelemetry::trace::TracerProvider;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tokio::task::JoinError;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";

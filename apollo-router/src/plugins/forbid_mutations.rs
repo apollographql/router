@@ -1,13 +1,20 @@
-use crate::graphql::Response;
-use crate::{
-    error::Error, json_ext::Object, layers::ServiceBuilderExt, plugin::Plugin, register_plugin,
-    ExecutionRequest, ExecutionResponse,
-};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::StatusCode;
-use std::ops::ControlFlow;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::error::Error;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
 
 #[derive(Debug, Clone)]
 struct ForbidMutations {
@@ -62,15 +69,18 @@ impl Plugin for ForbidMutations {
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
+    use http::Method;
+    use http::StatusCode;
+    use serde_json::json;
+    use tower::ServiceExt;
+
     use super::*;
     use crate::graphql;
     use crate::http_ext::Request;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::query_planner::{PlanNode, QueryPlan};
-    use http::{Method, StatusCode};
-    use serde_json::json;
-    use tower::ServiceExt;
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {

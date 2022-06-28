@@ -1,7 +1,11 @@
-use crate::json_ext::Object;
-use crate::{FieldType, Schema, SpecError};
-use apollo_parser::ast::{self, Value};
+use apollo_parser::ast::Value;
+use apollo_parser::ast::{self};
 use serde_json_bytes::ByteString;
+
+use crate::json_ext::Object;
+use crate::FieldType;
+use crate::Schema;
+use crate::SpecError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {

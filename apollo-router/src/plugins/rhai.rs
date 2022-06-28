@@ -1,33 +1,62 @@
 //! Customization via Rhai.
 
-use crate::error::Error;
-use crate::graphql::{Request, Response};
-use crate::http_ext;
-use crate::json_ext::{Object, Value};
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::{
-    register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use futures::future::ready;
-use futures::stream::{once, BoxStream};
+use futures::stream::once;
+use futures::stream::BoxStream;
 use futures::StreamExt;
-use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::uri::{Authority, Parts, PathAndQuery};
-use http::{HeaderMap, StatusCode, Uri};
-use rhai::serde::{from_dynamic, to_dynamic};
-use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
+use http::header::HeaderName;
+use http::header::HeaderValue;
+use http::header::InvalidHeaderName;
+use http::uri::Authority;
+use http::uri::Parts;
+use http::uri::PathAndQuery;
+use http::HeaderMap;
+use http::StatusCode;
+use http::Uri;
+use rhai::plugin::*;
+use rhai::serde::from_dynamic;
+use rhai::serde::to_dynamic;
+use rhai::Dynamic;
+use rhai::Engine;
+use rhai::EvalAltResult;
+use rhai::FnPtr;
+use rhai::Instant;
+use rhai::Map;
+use rhai::Scope;
+use rhai::Shared;
+use rhai::AST;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::str::FromStr;
-use std::{
-    ops::ControlFlow,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::error::Error;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::Context;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 pub(crate) trait Accessor<Access>: Send {
     fn accessor(&self) -> &Access;
@@ -1738,17 +1767,22 @@ register_plugin!("experimental", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
 
-    use crate::plugin::DynPlugin;
-    use crate::{
-        http_ext,
-        plugin::test::{MockExecutionService, MockRouterService},
-        Context, ResponseBody, RouterRequest, RouterResponse,
-    };
     use serde_json::Value;
-    use tower::{util::BoxService, Service, ServiceExt};
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::http_ext;
+    use crate::plugin::test::MockExecutionService;
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::DynPlugin;
+    use crate::Context;
+    use crate::ResponseBody;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {

@@ -60,12 +60,16 @@
 //!  - Token refresh
 //!  - ...
 
+use std::ops::ControlFlow;
+use std::str::FromStr;
+
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::ResponseBody;
-use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use apollo_router::Context;
 use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
@@ -75,10 +79,11 @@ use jwt_simple::Error;
 use schemars::JsonSchema;
 use serde::de;
 use serde::Deserialize;
-use std::ops::ControlFlow;
-use std::str::FromStr;
 use strum_macros::EnumString;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 // It's a shame that we can't just have one enum which finds the algorithm and contains
 // the verifier, but the verification structs don't support Default, so we can't
@@ -389,11 +394,13 @@ register_plugin!("example", "jwt", JwtAuth);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use super::*;
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
+
+    use super::*;
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,

@@ -1,9 +1,11 @@
 mod common;
-use crate::common::TracingTest;
-use opentelemetry::sdk::propagation::TraceContextPropagator;
 use std::path::Path;
 use std::result::Result;
+
+use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tower::BoxError;
+
+use crate::common::TracingTest;
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]

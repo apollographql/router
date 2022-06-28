@@ -2,17 +2,28 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use apollo_router::graphql;
 use apollo_router::graphql::Request;
 use apollo_router::http_ext;
-use apollo_router::json_ext::{Object, ValueExt};
+use apollo_router::json_ext::Object;
+use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugins::csrf;
+use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
+use apollo_router::plugins::telemetry::Telemetry;
+use apollo_router::plugins::telemetry::{self};
 use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
-use apollo_router::services::{SubgraphRequest, SubgraphService};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphService;
 use apollo_router::Context;
 use apollo_router::Schema;
 use futures::stream::BoxStream;
@@ -20,9 +31,6 @@ use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
 use tower::BoxError;

@@ -4,10 +4,15 @@ use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
@@ -96,13 +101,16 @@ register_plugin!(
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use super::ForbidAnonymousOperations;
     use apollo_router::graphql;
-    use apollo_router::plugin::{test, Plugin};
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
+
+    use super::ForbidAnonymousOperations;
 
     // This test ensures the router will be able to
     // find our `forbid_anonymous_operations` plugin,

@@ -2,22 +2,22 @@
 //!
 //! To improve their usability.
 
-use axum::{body::boxed, response::IntoResponse};
+use std::cmp::PartialEq;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::ops::DerefMut;
+
+use axum::body::boxed;
+use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures::{
-    future::ready,
-    stream::{once, BoxStream},
-};
-use http::{
-    header::{self, HeaderName},
-    HeaderValue, Method,
-};
+use futures::future::ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use http::header::HeaderName;
+use http::header::{self};
+use http::HeaderValue;
+use http::Method;
 use multimap::MultiMap;
-use std::{
-    cmp::PartialEq,
-    hash::Hash,
-    ops::{Deref, DerefMut},
-};
 
 use crate::ResponseBody;
 
@@ -323,8 +323,11 @@ impl IntoResponse for Response<Bytes> {
 
 #[cfg(test)]
 mod test {
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
+
     use crate::http_ext::Request;
-    use http::{HeaderValue, Method, Uri};
 
     #[test]
     fn builder() {

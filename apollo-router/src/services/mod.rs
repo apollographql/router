@@ -1,33 +1,44 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
-pub use self::execution_service::*;
-pub use self::router_service::*;
-use crate::error::Error;
-use crate::graphql::{Request, Response};
-use crate::json_ext::{Object, Path, Value};
-use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::QueryPlan;
-use crate::query_planner::QueryPlanOptions;
-use crate::*;
-use futures::{
-    future::{ready, Ready},
-    stream::{once, BoxStream, Once, StreamExt},
-    Stream,
-};
-use http::{header::HeaderName, HeaderValue, StatusCode};
-use http::{method::Method, Uri};
-use http_ext::IntoHeaderName;
-use http_ext::IntoHeaderValue;
-use multimap::MultiMap;
-use serde::{Deserialize, Serialize};
-use serde_json_bytes::ByteString;
-use static_assertions::assert_impl_all;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use futures::future::ready;
+use futures::future::Ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::stream::Once;
+use futures::stream::StreamExt;
+use futures::Stream;
+use http::header::HeaderName;
+use http::method::Method;
+use http::HeaderValue;
+use http::StatusCode;
+use http::Uri;
+use http_ext::IntoHeaderName;
+use http_ext::IntoHeaderValue;
+use multimap::MultiMap;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::ByteString;
+use static_assertions::assert_impl_all;
 pub use subgraph_service::SubgraphService;
 use tower::BoxError;
+
+pub use self::execution_service::*;
+pub use self::router_service::*;
+use crate::error::Error;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
+use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlanOptions;
+use crate::*;
 
 mod execution_service;
 pub mod http_ext;
@@ -820,10 +831,16 @@ impl AsRef<Request> for Arc<http_ext::Request<Request>> {
 
 #[cfg(test)]
 mod test {
-    use crate::graphql;
-    use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
-    use http::{HeaderValue, Method, Uri};
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
     use serde_json::json;
+
+    use crate::graphql;
+    use crate::Context;
+    use crate::ResponseBody;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[test]
     fn router_request_builder() {
