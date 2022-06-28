@@ -255,6 +255,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Returns HTTP 400 bad request instead of 500 when it's a query plan error ([PR #1321](https://github.com/apollographql/router/pull/1321))
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1321
+
 ### Restrict static introspection to only `__schema` and `__type` ([PR #1299](https://github.com/apollographql/router/pull/1299))
 Queries with selected field names starting with `__` are recognized as introspection queries. This includes `__schema`, `__type` and `__typename`. However, `__typename` is introspection at query time which is different from `__schema` and `__type` because two of the later can be answered with queries with empty input variables. This change will restrict introspection to only `__schema` and `__type`.
 
