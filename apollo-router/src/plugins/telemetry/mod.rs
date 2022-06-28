@@ -1,53 +1,76 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Handler;
-use crate::plugin::Plugin;
-use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::studio::{
-    SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
-};
-use crate::plugins::telemetry::metrics::{
-    AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
-    MetricsExporterHandle,
-};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::query_planner::USAGE_REPORTING;
-use crate::subscriber::replace_layer;
-use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse,
-    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, SubgraphResponse,
-};
-use ::tracing::{info_span, Span};
-use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::StatsContext;
-use bytes::Bytes;
-use futures::future::BoxFuture;
-use futures::{stream::BoxStream, FutureExt, StreamExt};
-use http::{HeaderValue, StatusCode};
-use metrics::apollo::Sender;
-use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::{
-    BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
-};
-use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
-use opentelemetry::{global, KeyValue};
-use router_bridge::planner::UsageReporting;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+
+use ::tracing::info_span;
+use ::tracing::Span;
+use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::StatsContext;
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
+use futures::FutureExt;
+use futures::StreamExt;
+use http::HeaderValue;
+use http::StatusCode;
+use metrics::apollo::Sender;
+use opentelemetry::global;
+use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::propagation::BaggagePropagator;
+use opentelemetry::sdk::propagation::TextMapCompositePropagator;
+use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::Tracer;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
+use router_bridge::planner::UsageReporting;
+use tower::service_fn;
 use tower::steer::Steer;
 use tower::util::BoxService;
-use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use url::Url;
 
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Handler;
+use crate::plugin::Plugin;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleReport;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleTracesAndStats;
+use crate::plugins::telemetry::metrics::AggregateMeterProvider;
+use crate::plugins::telemetry::metrics::BasicMetrics;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::USAGE_REPORTING;
+use crate::register_plugin;
+use crate::subscriber::replace_layer;
+use crate::Context;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 pub mod apollo;
 pub mod config;
@@ -526,7 +549,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_compat::Request<Bytes>, _services: &[_]| {
+            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -606,8 +629,8 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_compat::Request<Bytes>| async {
-                Ok::<_, BoxError>(http_compat::Response {
+            service_fn(|_req: http_ext::Request<Bytes>| async {
+                Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .body(ResponseBody::Text("Not found".to_string()))
@@ -887,17 +910,27 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use crate::error::Error;
+    use bytes::Bytes;
+    use http::Method;
+    use http::StatusCode;
+    use http::Uri;
+    use serde_json::Value;
+    use serde_json_bytes::json;
+    use serde_json_bytes::ByteString;
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use crate::graphql::Error;
+    use crate::graphql::Request;
+    use crate::http_ext;
     use crate::json_ext::Object;
-    use crate::plugin::test::{MockRouterService, MockSubgraphService};
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
     use crate::services::{SubgraphRequest, SubgraphResponse};
-    use crate::{http_compat, Request, RouterRequest, RouterResponse};
-    use bytes::Bytes;
-    use http::{Method, StatusCode, Uri};
-    use serde_json::Value;
-    use serde_json_bytes::{json, ByteString};
-    use tower::{util::BoxService, Service, ServiceExt};
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -1201,7 +1234,7 @@ mod tests {
         );
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .header("test", "my_value_set")
                     .body(
                         Request::fake_builder()
@@ -1221,7 +1254,7 @@ mod tests {
             .unwrap();
 
         let handler = dyn_plugin.custom_endpoint().unwrap();
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
             ))
@@ -1232,7 +1265,7 @@ mod tests {
         let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/plugins/apollo.telemetry/prometheus",
             ))
@@ -1244,23 +1277,22 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
             crate::ResponseBody::Text(prom_metrics) => {
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.001"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.005"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.015"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.05"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.3"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.4"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.5"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="1"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="5"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="10"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="+Inf"} 1"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.001"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.005"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.015"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.05"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.3"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.4"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="1"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="5"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="10"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="+Inf"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"}"#));
             }
             _ => panic!("body does not have the right format"),
         }

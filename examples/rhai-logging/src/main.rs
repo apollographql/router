@@ -15,9 +15,11 @@ fn main() -> Result<()> {
 mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugins::rhai::{Conf, Rhai};
+    use apollo_router::plugins::rhai::Conf;
+    use apollo_router::plugins::rhai::Rhai;
     use apollo_router::services::ResponseBody;
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use tower::util::ServiceExt;
 

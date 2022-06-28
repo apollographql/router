@@ -1,11 +1,16 @@
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use futures::{Stream, StreamExt};
+use std::time::Duration;
+
+use futures::Stream;
+use futures::StreamExt;
 use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::util::tokio_interval_stream;
-use opentelemetry_otlp::{HttpExporterBuilder, TonicExporterBuilder};
-use std::time::Duration;
+use opentelemetry_otlp::HttpExporterBuilder;
+use opentelemetry_otlp::TonicExporterBuilder;
 use tower::BoxError;
+
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
 
 // TODO Remove MetricExporterBuilder once upstream issue is fixed
 // This has to exist because Http is not currently supported for metrics export

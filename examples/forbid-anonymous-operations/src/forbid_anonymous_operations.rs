@@ -1,12 +1,18 @@
 use std::ops::ControlFlow;
 
+use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
@@ -59,7 +65,7 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::error_builder()
-                        .error(apollo_router::error::Error {
+                        .error(graphql::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         })
@@ -95,12 +101,16 @@ register_plugin!(
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use super::ForbidAnonymousOperations;
-    use apollo_router::plugin::{test, Plugin};
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::graphql;
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
+
+    use super::ForbidAnonymousOperations;
 
     // This test ensures the router will be able to
     // find our `forbid_anonymous_operations` plugin,
@@ -143,7 +153,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -184,7 +194,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -252,7 +262,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()

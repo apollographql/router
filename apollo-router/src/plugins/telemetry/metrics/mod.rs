@@ -1,9 +1,7 @@
-use crate::plugin::serde::{deserialize_header_name, deserialize_json_query, deserialize_regex};
-use crate::plugin::Handler;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::services::RouterResponse;
-use crate::{http_compat, Context, Request, Response, ResponseBody};
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use ::serde::Deserialize;
 use access_json::JSONQuery;
 use bytes::Bytes;
@@ -12,18 +10,28 @@ use futures::stream::{once, BoxStream};
 use futures::StreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
-use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::Number;
+use opentelemetry::metrics::ValueRecorder;
 use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
-use std::any::Any;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::sync::Arc;
 use tower::util::BoxService;
 use tower::BoxError;
+
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::plugin::serde::{deserialize_header_name, deserialize_json_query, deserialize_regex};
+use crate::plugin::Handler;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::services::RouterResponse;
+use crate::ResponseBody;
+use crate::{http_ext, Context};
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;
@@ -31,7 +39,7 @@ pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 pub(crate) type CustomEndpoint =
-    BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
+    BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -223,7 +231,7 @@ impl AttributesForwardConf {
                 };
             }
         }
-        let (parts, stream) = response.response.into_parts();
+        let (parts, stream) = http::Response::from(response.response).into_parts();
         let (first, rest) = stream.into_future().await;
         // Fill from response
         if let Some(from_response) = &self.response {

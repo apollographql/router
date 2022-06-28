@@ -17,12 +17,13 @@
 pub mod serde;
 pub mod test;
 
-use crate::layers::ServiceBuilderExt;
-use crate::{
-    http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
-use ::serde::{de::DeserializeOwned, Deserialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+
+use ::serde::de::DeserializeOwned;
+use ::serde::Deserialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -30,13 +31,25 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::task::{Context, Poll};
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
-use tower::{BoxError, Service, ServiceBuilder};
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
@@ -318,18 +331,14 @@ macro_rules! register_plugin {
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<
-        BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>,
-        http_compat::Request<Bytes>,
+        BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        http_ext::Request<Bytes>,
     >,
 }
 
 impl Handler {
     pub fn new(
-        service: BoxService<
-            http_compat::Request<Bytes>,
-            http_compat::Response<ResponseBody>,
-            BoxError,
-        >,
+        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
     ) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
@@ -337,8 +346,8 @@ impl Handler {
     }
 }
 
-impl Service<http_compat::Request<Bytes>> for Handler {
-    type Response = http_compat::Response<ResponseBody>;
+impl Service<http_ext::Request<Bytes>> for Handler {
+    type Response = http_ext::Response<ResponseBody>;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -346,20 +355,16 @@ impl Service<http_compat::Request<Bytes>> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http_compat::Request<Bytes>) -> Self::Future {
+    fn call(&mut self, req: http_ext::Request<Bytes>) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>>
+impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>>
     for Handler
 {
     fn from(
-        original: BoxService<
-            http_compat::Request<Bytes>,
-            http_compat::Response<ResponseBody>,
-            BoxError,
-        >,
+        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
     ) -> Self {
         Self::new(original)
     }

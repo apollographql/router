@@ -1,10 +1,14 @@
-use crate::error::Error;
-use crate::error::FetchError;
-use crate::json_ext::{Object, Path, Value};
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
+
+use crate::error::Error;
+use crate::error::FetchError;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
@@ -120,11 +124,11 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::Location;
-
-    use super::*;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
+
+    use super::*;
+    use crate::error::Location;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

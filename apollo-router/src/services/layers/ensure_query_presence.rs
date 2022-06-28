@@ -4,13 +4,19 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::layers::sync_checkpoint::CheckpointService;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::StatusCode;
 use serde_json_bytes::Value;
-use std::ops::ControlFlow;
-use tower::{BoxError, Layer, Service};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 #[derive(Default)]
 pub(crate) struct EnsureQueryPresence {}
@@ -58,10 +64,11 @@ where
 
 #[cfg(test)]
 mod ensure_query_presence_tests {
+    use tower::ServiceExt;
+
     use super::*;
     use crate::plugin::test::MockRouterService;
     use crate::ResponseBody;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_works_with_query() {

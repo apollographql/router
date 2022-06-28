@@ -1,16 +1,22 @@
+use apollo_router::graphql::Response;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
+use apollo_router::services::ExecutionRequest;
+use apollo_router::services::ExecutionResponse;
+use apollo_router::services::QueryPlannerRequest;
+use apollo_router::services::QueryPlannerResponse;
 use apollo_router::services::ResponseBody;
-use apollo_router::services::{ExecutionRequest, ExecutionResponse};
-use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
-use apollo_router::services::{RouterRequest, RouterResponse};
-use apollo_router::services::{SubgraphRequest, SubgraphResponse};
-use apollo_router::Response;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
 use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Debug)]
 struct HelloWorld {
@@ -110,11 +116,12 @@ register_plugin!("example", "hello_world", HelloWorld);
 
 #[cfg(test)]
 mod tests {
-    use super::{Conf, HelloWorld};
-
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
+
+    use super::Conf;
+    use super::HelloWorld;
 
     #[tokio::test]
     async fn plugin_registered() {

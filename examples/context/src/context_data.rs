@@ -1,10 +1,16 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::ResponseBody;
-use apollo_router::services::{RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.

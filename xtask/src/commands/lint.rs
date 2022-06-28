@@ -1,41 +1,96 @@
-use anyhow::{ensure, Result};
+use std::process::Command;
+use std::process::Stdio;
+
+use anyhow::ensure;
+use anyhow::Result;
 use structopt::StructOpt;
 use xtask::*;
 
 #[derive(Debug, StructOpt)]
 pub struct Lint {}
 
+const RUSTFMT_TOOLCHAIN: &str = "nightly-2022-06-26";
+
+const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=StdExternalCrate"];
+
 impl Lint {
     pub fn run(&self) -> Result<()> {
+        Self::install_rustfmt()?;
         Self::check_fmt()?;
         cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
-
         Ok(())
     }
 
     pub fn run_local(&self) -> Result<()> {
-        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
-
+        Self::install_rustfmt()?;
         if Self::check_fmt().is_err() {
             // cargo fmt check failed, this means there is some formatting to do
             // given this task is running locally, let's do it and let our user know
-            cargo!(["fmt", "--all"]);
+            let status = Self::fmt_command()?.status()?;
+            ensure!(status.success(), "cargo fmt failed");
             eprintln!(
                 "🧹 cargo fmt job is complete 🧹\n\
                 Commit the changes and you should be good to go!"
             );
         };
+        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
 
+        Ok(())
+    }
+
+    fn install_rustfmt() -> Result<()> {
+        let nightly = RUSTFMT_TOOLCHAIN;
+        if !output("rustup", &["toolchain", "list"])?
+            .lines()
+            .any(|line| line.starts_with(nightly))
+        {
+            let args = ["toolchain", "install", nightly, "--profile", "minimal"];
+            run("rustup", &args)?
+        }
+        let args = ["component", "list", "--installed", "--toolchain", nightly];
+        if !output("rustup", &args)?
+            .lines()
+            .any(|line| line.starts_with("rustfmt"))
+        {
+            let args = ["component", "add", "rustfmt", "--toolchain", nightly];
+            run("rustup", &args)?
+        }
         Ok(())
     }
 
     fn check_fmt() -> Result<()> {
-        let cargo = which::which("cargo")?;
-        let mut command = ::std::process::Command::new(cargo);
-        command.args(["fmt", "--all", "--", "--check"]);
-
-        let status = command.current_dir(&*PKG_PROJECT_ROOT).status()?;
+        let status = Self::fmt_command()?.arg("--check").status()?;
         ensure!(status.success(), "cargo fmt check failed");
         Ok(())
     }
+
+    fn fmt_command() -> Result<Command> {
+        let mut command = Command::new(which::which("rustup")?);
+        command.current_dir(&*PKG_PROJECT_ROOT).args([
+            "run",
+            RUSTFMT_TOOLCHAIN,
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--config",
+            &RUSTFMT_CONFIG.join(","),
+        ]);
+        Ok(command)
+    }
+}
+
+fn run(program: &str, args: &[&str]) -> Result<()> {
+    let status = Command::new(which::which(program)?).args(args).status()?;
+    ensure!(status.success(), "{} failed", program);
+    Ok(())
+}
+
+fn output(program: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(which::which(program)?)
+        .args(args)
+        .stderr(Stdio::piped())
+        .output()?;
+    ensure!(output.status.success(), "{} failed", program);
+    Ok(String::from_utf8(output.stdout)?)
 }

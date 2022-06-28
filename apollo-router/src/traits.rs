@@ -1,10 +1,12 @@
+use std::fmt::Debug;
+
+use async_trait::async_trait;
+
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
 use crate::services::QueryPlannerContent;
-use async_trait::async_trait;
-use std::fmt::Debug;
 
 /// A cache resolution trait.
 ///
@@ -55,8 +57,9 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use static_assertions::*;
+
+    use super::*;
 
     assert_obj_safe!(QueryPlanner);
 }

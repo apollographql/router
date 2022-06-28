@@ -60,11 +60,16 @@
 //!  - Token refresh
 //!  - ...
 
+use std::ops::ControlFlow;
+use std::str::FromStr;
+
+use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::ResponseBody;
-use apollo_router::services::{RouterRequest, RouterResponse};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use apollo_router::Context;
 use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
@@ -74,10 +79,11 @@ use jwt_simple::Error;
 use schemars::JsonSchema;
 use serde::de;
 use serde::Deserialize;
-use std::ops::ControlFlow;
-use std::str::FromStr;
 use strum_macros::EnumString;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 // It's a shame that we can't just have one enum which finds the algorithm and contains
 // the verifier, but the verification structs don't support Default, so we can't
@@ -239,7 +245,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, ResponseBody>>, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
-                        .errors(vec![apollo_router::error::Error {
+                        .errors(vec![graphql::Error {
                             message: msg,
                             ..Default::default()
                         }])
@@ -388,10 +394,13 @@ register_plugin!("example", "jwt", JwtAuth);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
+
+    use super::*;
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -433,7 +442,7 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -473,7 +482,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -513,7 +522,7 @@ mod tests {
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -557,7 +566,7 @@ mod tests {
         );
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -645,7 +654,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -700,7 +709,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
@@ -762,7 +771,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
+        let graphql_response: graphql::Response = service_response
             .next_response()
             .await
             .unwrap()
