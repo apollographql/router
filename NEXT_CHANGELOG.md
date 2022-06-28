@@ -309,15 +309,16 @@ telemetry:
               # Always insert on all metrics for all subgraphs
               - name: kind
                 value: subgraph_request
-          my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
-            request:
-              header:
-                - named: "x-custom-header"
-              body:
-                # Take element from the request body of the router located at this path (here it's the query)
-                - path: .query
-                  name: query
-                  default: UNKNOWN
+          subgraphs:
+            my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+              request:
+                header:
+                  - named: "x-custom-header"
+                body:
+                  # Take element from the request body of the router located at this path (here it's the query)
+                  - path: .query
+                    name: query
+                    default: UNKNOWN
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
