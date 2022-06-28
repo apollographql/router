@@ -1244,8 +1244,8 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
             crate::ResponseBody::Text(prom_metrics) => {
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.001"} 1"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.005"} 1"#));

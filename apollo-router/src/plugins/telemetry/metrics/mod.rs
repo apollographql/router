@@ -156,7 +156,6 @@ impl HeaderForward {
             }
         }
 
-        println!("attributes {attributes:#?}");
         attributes
     }
 }
