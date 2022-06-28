@@ -112,7 +112,7 @@ startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.31"
-tokio = { version = "1.18.2", features = ["full"] }
+tokio = { version = "1.19.2", features = ["full"] }
 tokio-util = { version = "0.7.1", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.12", features = ["full"] }
