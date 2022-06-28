@@ -424,7 +424,6 @@ impl RouterServiceFactory for MakeARouter {
     >>::Future;
 }
 
-//#[cfg(test)]
 impl MakeARouter {
     fn make(
         &self,
