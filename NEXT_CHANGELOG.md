@@ -286,6 +286,14 @@ or valid data being nullified.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1295
 
+### Fix fragment selection on interfaces ([PR #1296](https://github.com/apollographql/router/pull/1296))
+
+The schema object can specify objects for queries, mutations or subscriptions that are not named `Query`, `Mutation` or
+`Subscription`. Response formatting now supports it
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1296
+
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
