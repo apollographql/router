@@ -1,12 +1,12 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 {{#if type_basic}}
+use apollo_router::graphql::Response;
 use apollo_router::services::ResponseBody;
 use apollo_router::services::{ExecutionRequest, ExecutionResponse};
 use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
 use apollo_router::services::{RouterRequest, RouterResponse};
 use apollo_router::services::{SubgraphRequest, SubgraphResponse};
-use apollo_router::Response;
 {{/if}}
 {{#if type_auth}}
 use apollo_router::services::ResponseBody;

@@ -152,6 +152,7 @@ mod test {
     fn test_build(dir: &TempDir) -> Result<()> {
         let output = Command::new("cargo")
             .args(["test"])
+            .env("RUSTFLAGS", "-Dwarnings")
             .current_dir(dir)
             .output()?;
         if !output.status.success() {
