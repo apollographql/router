@@ -17,8 +17,8 @@ serde_json = { version = "1.0.81", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3.11", features = ["json", "env-filter"] }
-async-trait = "0.1.53"
-tower = "0.4.12"
+async-trait = "0.1.56"
+tower = "0.4.13"
 
 
 [[bench]]
