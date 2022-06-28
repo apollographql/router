@@ -130,7 +130,7 @@ async fn create_plugins(
                 let configuration = expand_env_variables(&configuration);
                 match factory.create_instance(&configuration).await {
                     Ok(plugin) => {
-                        plugin_instances.push((name.clone(), plugin));
+                        plugin_instances.push((name, plugin));
                     }
                     Err(err) => errors.push(ConfigurationError::PluginConfiguration {
                         plugin: name,
@@ -139,6 +139,28 @@ async fn create_plugins(
                 }
             }
             None => errors.push(ConfigurationError::PluginUnknown(name)),
+        }
+    }
+
+    // The "include_subgraph_errors" plugin must always be active. If it is not
+    // configured, add an instance with default configuration to ensure that
+    // subgraph errors are correctly redacted.
+    let subgraph_error_plugin = "experimental.include_subgraph_errors".to_string();
+    if !plugin_instances
+        .iter()
+        .any(|(x, _)| x == &subgraph_error_plugin)
+    {
+        match plugin_registry.get(&subgraph_error_plugin) {
+            Some(factory) => match factory.create_instance(&serde_json::json!({})).await {
+                Ok(plugin) => {
+                    plugin_instances.push((subgraph_error_plugin, plugin));
+                }
+                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                    plugin: subgraph_error_plugin,
+                    error: err.to_string(),
+                }),
+            },
+            None => errors.push(ConfigurationError::PluginUnknown(subgraph_error_plugin)),
         }
     }
 

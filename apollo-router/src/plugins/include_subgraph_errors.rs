@@ -52,12 +52,25 @@ impl Plugin for IncludeSubgraphErrors {
         // Search for subgraph in our configured subgraph map.
         // If we can't find it, use the "all" value
         if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {
+            let sub_name_response = name.to_string();
+            let sub_name_error = name.to_string();
             return service
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
+                        tracing::info!("redacted subgraph({sub_name_response}) errors");
                         response.response.body_mut().errors = REDACTED_ERROR_MESSAGE.clone();
                     }
                     response
+                })
+                // _error to stop clippy complaining about unused assignments...
+                .map_err(move |mut _error: BoxError| {
+                    // Create a redacted error to replace whatever error we have
+                    tracing::info!("redacted subgraph({sub_name_error}) error");
+                    _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                        service: "redacted".to_string(),
+                        reason: "redacted".to_string(),
+                    });
+                    _error
                 })
                 .boxed();
         }
