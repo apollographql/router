@@ -263,17 +263,18 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<
+                        let mut result: Result<
                             RouterResponse<BoxStream<'static, ResponseBody>>,
                             BoxError,
                         > = fut.await;
-                        Self::update_metrics(
+                        result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
                             metrics,
-                            &result,
+                            result,
                             start.elapsed(),
-                        );
+                        )
+                        .await;
                         match result {
                             Err(e) => {
                                 if !matches!(sender, Sender::Noop) {
@@ -732,13 +733,13 @@ impl Telemetry {
         sender.send(metrics);
     }
 
-    fn update_metrics(
+    async fn update_metrics(
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        result: Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
         request_duration: Duration,
-    ) {
+    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -750,7 +751,7 @@ impl Telemetry {
                     .collect::<Vec<KeyValue>>()
             })
             .unwrap_or_default();
-        match result {
+        let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
                     "status",
@@ -765,23 +766,31 @@ impl Telemetry {
                     ..
                 }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
                 {
-                    metric_attrs.extend(
-                        forward_attributes
-                            .get_attributes_from_router_response(response)
-                            .into_iter()
-                            .map(|(k, v)| KeyValue::new(k, v)),
-                    );
-                }
+                    let (resp, attributes) = forward_attributes
+                        .get_attributes_from_router_response(response)
+                        .await;
 
-                metrics.http_requests_total.add(1, &metric_attrs);
+                    metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
+                    metrics.http_requests_total.add(1, &metric_attrs);
+
+                    Ok(resp)
+                } else {
+                    metrics.http_requests_total.add(1, &metric_attrs);
+
+                    Ok(response)
+                }
             }
-            Err(_) => {
+            Err(err) => {
                 metrics.http_requests_error_total.add(1, &[]);
+
+                Err(err)
             }
-        }
+        };
         metrics
             .http_requests_duration
             .record(request_duration.as_secs_f64(), &metric_attrs);
+
+        res
     }
 
     fn populate_context(config: Arc<Conf>, req: &RouterRequest) {
@@ -887,7 +896,7 @@ mod tests {
     use bytes::Bytes;
     use http::{Method, StatusCode, Uri};
     use serde_json::Value;
-    use serde_json_bytes::ByteString;
+    use serde_json_bytes::{json, ByteString};
     use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test(flavor = "multi_thread")]
@@ -936,7 +945,7 @@ mod tests {
                                     "header": [{
                                         "named": "test",
                                         "default": "default_value",
-                                        "rename": "renamed_value",
+                                        "rename": "renamed_value"
                                     }],
                                     "body": [{
                                         "path": ".data.test",
@@ -1054,6 +1063,8 @@ mod tests {
             .returning(move |req: RouterRequest| {
                 Ok(RouterResponse::fake_builder()
                     .context(req.context)
+                    .header("x-custom", "coming_from_header")
+                    .data(json!({"data": {"my_value": 2}}))
                     .build()
                     .unwrap()
                     .boxed())
@@ -1117,6 +1128,15 @@ mod tests {
                                             "default": "my_default_value"
                                         }
                                     ]
+                                },
+                                "response": {
+                                    "header": [{
+                                        "named": "x-custom"
+                                    }],
+                                    "body": [{
+                                        "path": ".data.data.my_value",
+                                        "name": "my_value"
+                                    }]
                                 }
                             },
                             "subgraph": {
@@ -1224,22 +1244,22 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         match resp.body() {
             crate::ResponseBody::Text(prom_metrics) => {
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.001"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.005"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.015"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.05"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.3"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.4"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.5"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="1"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="5"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="10"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="+Inf"} 1"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+                assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
                 assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"} 1"#));
             }
             _ => panic!("body does not have the right format"),

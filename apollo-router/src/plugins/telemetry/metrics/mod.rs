@@ -3,11 +3,13 @@ use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::services::RouterResponse;
-use crate::{http_compat, Context, Request, ResponseBody};
+use crate::{http_compat, Context, Request, Response, ResponseBody};
 use ::serde::Deserialize;
 use access_json::JSONQuery;
 use bytes::Bytes;
-use futures::stream::BoxStream;
+use futures::future::ready;
+use futures::stream::{once, BoxStream};
+use futures::StreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
@@ -183,10 +185,13 @@ impl Forward {
 }
 
 impl AttributesForwardConf {
-    pub(crate) fn get_attributes_from_router_response(
+    pub(crate) async fn get_attributes_from_router_response(
         &self,
-        response: &RouterResponse<BoxStream<'static, ResponseBody>>,
-    ) -> HashMap<String, String> {
+        response: RouterResponse<BoxStream<'static, ResponseBody>>,
+    ) -> (
+        RouterResponse<BoxStream<'static, ResponseBody>>,
+        HashMap<String, String>,
+    ) {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -195,24 +200,7 @@ impl AttributesForwardConf {
                 attributes.insert(name.clone(), value.clone());
             }
         }
-        let headers = response.response.headers();
-        // Fill from response
-        if let Some(from_response) = &self.response {
-            if let Some(_body_forward) = &from_response.body {
-                // TODO implement this
-                todo!();
-            }
-
-            if let Some(header_forward) = &from_response.header {
-                attributes.extend(header_forward.iter().fold(
-                    HashMap::new(),
-                    |mut acc, current| {
-                        acc.extend(current.get_attributes_from_headers(headers));
-                        acc
-                    },
-                ));
-            }
-        }
+        let context = response.context;
         // Fill from context
         if let Some(from_context) = &self.context {
             for ContextForward {
@@ -221,7 +209,7 @@ impl AttributesForwardConf {
                 rename,
             } in from_context
             {
-                match response.context.get::<_, String>(named) {
+                match context.get::<_, String>(named) {
                     Ok(Some(value)) => {
                         attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
                     }
@@ -236,8 +224,49 @@ impl AttributesForwardConf {
                 };
             }
         }
+        let (parts, stream) = response.response.into_parts();
+        let (first, rest) = stream.into_future().await;
+        // Fill from response
+        if let Some(from_response) = &self.response {
+            if let Some(header_forward) = &from_response.header {
+                attributes.extend(header_forward.iter().fold(
+                    HashMap::new(),
+                    |mut acc, current| {
+                        acc.extend(current.get_attributes_from_headers(&parts.headers));
+                        acc
+                    },
+                ));
+            }
 
-        attributes
+            if let Some(body_forward) = &from_response.body {
+                if let Some(body) = &first {
+                    for body_fw in body_forward {
+                        let output = body_fw.path.execute(body).unwrap();
+                        if let Some(val) = output {
+                            if let Value::String(val_str) = val {
+                                attributes.insert(body_fw.name.clone(), val_str);
+                            } else {
+                                attributes.insert(body_fw.name.clone(), val.to_string());
+                            }
+                        } else if let Some(default_val) = &body_fw.default {
+                            attributes.insert(body_fw.name.clone(), default_val.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let response = http::Response::from_parts(
+            parts,
+            once(ready(first.unwrap_or_else(|| {
+                ResponseBody::GraphQL(Response::default())
+            })))
+            .chain(rest)
+            .boxed(),
+        )
+        .into();
+
+        (RouterResponse { context, response }, attributes)
     }
 
     /// Get attributes from context
