@@ -6,7 +6,8 @@ use ::serde::Deserialize;
 use access_json::JSONQuery;
 use bytes::Bytes;
 use futures::future::ready;
-use futures::stream::{once, BoxStream};
+use futures::stream::once;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
@@ -25,13 +26,16 @@ use tower::BoxError;
 
 use crate::graphql::Request;
 use crate::graphql::Response;
-use crate::plugin::serde::{deserialize_header_name, deserialize_json_query, deserialize_regex};
+use crate::http_ext;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_json_query;
+use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::services::RouterResponse;
+use crate::Context;
 use crate::ResponseBody;
-use crate::{http_ext, Context};
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;

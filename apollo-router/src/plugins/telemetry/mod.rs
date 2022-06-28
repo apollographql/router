@@ -928,7 +928,8 @@ mod tests {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
-    use crate::services::{SubgraphRequest, SubgraphResponse};
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::RouterRequest;
     use crate::RouterResponse;
 
