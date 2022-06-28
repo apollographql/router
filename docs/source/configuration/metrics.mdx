@@ -35,14 +35,14 @@ Note that if you have not run a query against the router you will see a blank pa
 
 Here is the list of available metrics you'll have using Prometheus:
 
-- HTTP router request duration
-- HTTP request duration by subgraph
-- Total number of HTTP requests by HTTP Status
-- Total number of HTTP requests in error
+- HTTP router request duration (`http_request_duration_seconds_bucket`)
+- HTTP request duration by subgraph (`http_request_duration_seconds_bucket` with attribute `subgraph`)
+- Total number of HTTP requests by HTTP Status (`http_requests_total`)
+- Total number of HTTP requests in error (`http_requests_error_total`)
 
 ## Using OpenTelemetry Collector
 
-You may send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and eporting metrics.
+You may send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -76,7 +76,8 @@ telemetry:
 
 ## Add custom attributes/labels
 
-If you need to add attributes/labels on your generated metrics, for example add a custom attributes/labels coming from a specific header in the original HTTP request, or insert custom attributes/labels on every metrics.
+If you need to add attributes/labels on your generated metrics, for example add a custom attributes/labels coming from a specific header in the original HTTP router request, or insert custom attributes/labels on every metrics.
+You also have access to the body of subgraph/router request/response. And be able to add a custom attribute coming from the context filled in the plugins chain.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -93,4 +94,48 @@ telemetry:
                 rename: "payload_type"
                 default: "application/json"
               - named: "x-custom-header-to-add"
+          response:
+            body:
+              # Take element from the response body of the router located at this path
+              - path: .errors[0].extensions.status
+                name: error_from_body
+          context:
+            # Take element from context in plugin chains and add it in attributes
+            - named: my_key
+        subgraph:
+          all:
+            static:
+              # Always insert on all metrics for all subgraphs
+              - name: kind
+                value: subgraph_request
+          my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+            request:
+              header:
+                - named: "x-custom-header"
+              body:
+                # Take element from the request body of the router located at this path (here it's the query)
+                - path: .query
+                  name: query
+                  default: UNKNOWN
 ```
+
+### Example of JSON Query to extract data from the body
+
+If you have this data:
+
+```json
+{
+  "items": [
+    {
+      "unwanted": 7,
+      "wanted": { "x": 3, "y": 7 },
+      "array": [3, 2, 1]
+    },
+    {
+      "whatever": true
+    }
+  ]
+}
+```
+
+And want to fetch the field `whatever` here is the syntax `.items[1].whatever`. You can also try to fetch the field `x` by using this query `.items[0].wanted.x`. A JSON Query is always starting with a dot.

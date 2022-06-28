@@ -26,6 +26,35 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [0.9.6] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
+### Change configuration for custom attributes for metrics in telemetry plugin ([PR #1300](https://github.com/apollographql/router/pull/1300)
+
+```diff
+telemetry:
+  metrics:
+    common:
+      attributes:
+-        static:
+-          - name: "version"
+-            value: "v1.0.0"
+-        from_headers:
+-          - named: "content-type"
+-            rename: "payload_type"
+-            default: "application/json"
+-          - named: "x-custom-header-to-add"
++        router:
++          static:
++            - name: "version"
++              value: "v1.0.0"
++          request:
++            header:
++              - named: "content-type"
++                rename: "payload_type"
++                default: "application/json"
++              - named: "x-custom-header-to-add"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
+
 ### Rename http_compat to http_ext ([PR #1291](https://github.com/apollographql/router/pull/1291)
 
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
@@ -246,6 +275,52 @@ Do not silently skip some bad configuration, now if you add an unknown configura
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1278
 
 ## 🚀 Features ( :rocket: )
+
+### Add support to add custom attributes on metrics. [PR #1300](https://github.com/apollographql/router/pull/1300)
+
+Previously, it was only possible to add custom attributes coming from headers from router request. Now you are able to add custom attributes coming from headers and body of router response/request and subgraph response/request. You also have the ability to add an attribute coming from the context. Example:
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        router:
+          static:
+            - name: "version"
+              value: "v1.0.0"
+          request:
+            header:
+              - named: "content-type"
+                rename: "payload_type"
+                default: "application/json"
+              - named: "x-custom-header-to-add"
+          response:
+            body:
+              # Take element from the response body of the router located at this path
+              - path: .errors[0].extensions.status
+                name: error_from_body
+          context:
+            # Take element from context in plugin chains and add it in attributes
+            - named: my_key
+        subgraph:
+          all:
+            static:
+              # Always insert on all metrics for all subgraphs
+              - name: kind
+                value: subgraph_request
+          my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+            request:
+              header:
+                - named: "x-custom-header"
+              body:
+                # Take element from the request body of the router located at this path (here it's the query)
+                - path: .query
+                  name: query
+                  default: UNKNOWN
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
 ### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
 
