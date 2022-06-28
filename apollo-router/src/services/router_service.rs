@@ -293,7 +293,7 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub(crate) fn plugins(&mut self) -> &mut Plugins {
+    pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
         &mut self.plugins
     }
 
