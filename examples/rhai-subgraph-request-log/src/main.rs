@@ -15,7 +15,8 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugins::rhai::{Conf, Rhai};
+    use apollo_router::plugins::rhai::Conf;
+    use apollo_router::plugins::rhai::Rhai;
     use apollo_router::services::RouterRequest;
     use apollo_router::Context;
     use http::StatusCode;

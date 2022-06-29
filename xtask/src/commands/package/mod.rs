@@ -1,9 +1,12 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
-use anyhow::{ensure, Context, Result};
-use camino::Utf8PathBuf;
 use std::path::Path;
+
+use anyhow::ensure;
+use anyhow::Context;
+use anyhow::Result;
+use camino::Utf8PathBuf;
 use structopt::StructOpt;
 use xtask::*;
 

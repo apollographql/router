@@ -1,20 +1,28 @@
-use crate::plugin::serde::{deserialize_header_name, deserialize_regex};
-use crate::plugin::Handler;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::{http_ext, ResponseBody};
-use ::serde::Deserialize;
-use bytes::Bytes;
-use http::header::HeaderName;
-use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
-use opentelemetry::KeyValue;
-use regex::Regex;
-use schemars::JsonSchema;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use ::serde::Deserialize;
+use bytes::Bytes;
+use http::header::HeaderName;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::Number;
+use opentelemetry::metrics::ValueRecorder;
+use opentelemetry::KeyValue;
+use regex::Regex;
+use schemars::JsonSchema;
 use tower::util::BoxService;
 use tower::BoxError;
+
+use crate::http_ext;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_regex;
+use crate::plugin::Handler;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::ResponseBody;
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;

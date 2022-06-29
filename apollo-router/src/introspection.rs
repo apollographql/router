@@ -1,9 +1,12 @@
-use crate::graphql::Response;
-use crate::*;
+use std::collections::HashMap;
+
 use include_dir::include_dir;
 use once_cell::sync::Lazy;
-use router_bridge::introspect::{self, IntrospectionError};
-use std::collections::HashMap;
+use router_bridge::introspect::IntrospectionError;
+use router_bridge::introspect::{self};
+
+use crate::graphql::Response;
+use crate::*;
 
 /// KNOWN_INTROSPECTION_QUERIES we will serve through Introspection.
 ///

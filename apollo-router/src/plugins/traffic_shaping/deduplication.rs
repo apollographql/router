@@ -2,17 +2,24 @@
 //!
 //! See [`Layer`] and [`tower::Service`] for more details.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::task::Poll;
+
+use futures::future::BoxFuture;
+use futures::lock::Mutex;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast::{self};
+use tokio::sync::oneshot;
+use tower::BoxError;
+use tower::Layer;
+use tower::ServiceExt;
+
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::query_planner::fetch::OperationKind;
-use crate::{SubgraphRequest, SubgraphResponse};
-use futures::{future::BoxFuture, lock::Mutex};
-use std::{collections::HashMap, sync::Arc, task::Poll};
-use tokio::sync::{
-    broadcast::{self, Sender},
-    oneshot,
-};
-use tower::{BoxError, Layer, ServiceExt};
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 #[derive(Default)]
 pub(crate) struct QueryDeduplicationLayer;

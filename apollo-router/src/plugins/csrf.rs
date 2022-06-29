@@ -1,14 +1,22 @@
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::{register_plugin, ResponseBody, RouterRequest, RouterResponse};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::header;
-use http::{HeaderMap, StatusCode};
+use http::HeaderMap;
+use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::ops::ControlFlow;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -222,10 +230,12 @@ mod csrf_tests {
             .unwrap();
     }
 
-    use super::*;
-    use crate::{plugin::test::MockRouterService, ResponseBody};
     use serde_json_bytes::json;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::plugin::test::MockRouterService;
+    use crate::ResponseBody;
 
     #[tokio::test]
     async fn it_lets_preflighted_request_pass_through() {

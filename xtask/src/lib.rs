@@ -1,15 +1,20 @@
 mod federation_demo;
 mod jaeger;
 
+use std::convert::TryFrom;
+use std::env;
+use std::process::Child;
+use std::process::Command;
+use std::str;
+
 pub use anyhow;
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use camino::Utf8PathBuf;
 use cargo_metadata::MetadataCommand;
 pub use federation_demo::*;
 pub use jaeger::*;
 use once_cell::sync::Lazy;
-use std::process::{Child, Command};
-use std::{convert::TryFrom, env, str};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 #[cfg(not(windows))]

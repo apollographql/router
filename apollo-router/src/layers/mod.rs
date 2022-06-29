@@ -1,21 +1,24 @@
 //! Reusable layers
 //! Layers that are specific to one plugin should not be placed in this module.
+use std::future::Future;
+use std::ops::ControlFlow;
+use std::sync::Arc;
+
+use moka::sync::Cache;
+use tokio::sync::RwLock;
+use tower::buffer::BufferLayer;
+use tower::layer::util::Stack;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower_service::Service;
+use tracing::Span;
+
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::cache::CachingLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
-use moka::sync::Cache;
-use std::future::Future;
-use std::ops::ControlFlow;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tower::buffer::BufferLayer;
-use tower::layer::util::Stack;
-use tower::{BoxError, ServiceBuilder};
-use tower_service::Service;
-use tracing::Span;
 
 pub mod map_future_with_context;
 

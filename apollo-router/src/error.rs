@@ -1,22 +1,26 @@
-use crate::graphql::Response;
-use crate::json_ext::Path;
-use crate::json_ext::Value;
-use displaydoc::Display;
-use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-use router_bridge::{
-    introspect::IntrospectionError,
-    planner::{PlanErrors, UsageReporting},
-};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+use displaydoc::Display;
+use miette::Diagnostic;
+use miette::NamedSource;
+use miette::Report;
+use miette::SourceSpan;
+use router_bridge::introspect::IntrospectionError;
+pub use router_bridge::planner::PlanError;
+use router_bridge::planner::PlanErrors;
+pub use router_bridge::planner::PlannerError;
+use router_bridge::planner::UsageReporting;
+use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tracing::level_filters::LevelFilter;
 
-pub use crate::spec::SpecError;
-pub use router_bridge::planner::{PlanError, PlannerError};
-
 pub(crate) use crate::graphql::Error;
+use crate::graphql::Response;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
+pub use crate::spec::SpecError;
 
 /// Error types for execution.
 ///

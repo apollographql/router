@@ -1,12 +1,17 @@
-use crate::error::Error as SubgraphError;
-use crate::plugin::Plugin;
-use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
+use std::collections::HashMap;
+
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::collections::HashMap;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceExt};
+use tower::BoxError;
+use tower::ServiceExt;
+
+use crate::error::Error as SubgraphError;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 #[allow(clippy::field_reassign_with_default)]
 static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
@@ -80,20 +85,26 @@ impl Plugin for IncludeSubgraphErrors {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use futures::stream::BoxStream;
+    use serde_json::Value as jValue;
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
+    use tower::util::BoxCloneService;
+    use tower::Service;
+
     use super::*;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::{
-        PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
-    };
-    use bytes::Bytes;
-    use futures::stream::BoxStream;
-    use serde_json::Value as jValue;
-    use serde_json_bytes::{ByteString, Value};
-    use std::sync::Arc;
-    use tower::{util::BoxCloneService, Service};
+    use crate::PluggableRouterServiceBuilder;
+    use crate::ResponseBody;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
+    use crate::Schema;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
         ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap())

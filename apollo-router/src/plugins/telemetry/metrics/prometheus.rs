@@ -1,19 +1,28 @@
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use crate::{http_ext, ResponseBody};
+use std::task::Context;
+use std::task::Poll;
+
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry::sdk::Resource;
-use opentelemetry::{Key, KeyValue, Value};
-use prometheus::{Encoder, Registry, TextEncoder};
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
+use prometheus::Encoder;
+use prometheus::Registry;
+use prometheus::TextEncoder;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::task::{Context, Poll};
-use tower::{BoxError, ServiceExt};
+use tower::BoxError;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use super::MetricsAttributesConf;
+use crate::http_ext;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::ResponseBody;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

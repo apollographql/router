@@ -4,14 +4,12 @@ mod query;
 mod schema;
 mod selection;
 
+use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
 pub(crate) use query::*;
-pub(crate) use selection::*;
-
 pub use schema::Schema;
-
-use displaydoc::Display;
+pub(crate) use selection::*;
 use thiserror::Error;
 
 /// GraphQL parsing errors.

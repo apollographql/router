@@ -3,12 +3,15 @@
 //! Router plugins accept a mutable [`Context`] when invoked and this contains a DashMap which
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
-use crate::json_ext::Value;
-use dashmap::mapref::multiple::{RefMulti, RefMutMulti};
+use std::sync::Arc;
+
+use dashmap::mapref::multiple::RefMulti;
+use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use serde::Serialize;
-use std::sync::Arc;
 use tower::BoxError;
+
+use crate::json_ext::Value;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;

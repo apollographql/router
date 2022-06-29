@@ -1,7 +1,9 @@
-use crate::json_ext::{Value, ValueExt};
-use crate::*;
 use apollo_parser::ast;
 use displaydoc::Display;
+
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::*;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;

@@ -1,8 +1,9 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
 use futures::channel::mpsc;
 use futures::prelude::*;
 use hotwatch::Hotwatch;
-use std::path::PathBuf;
-use std::time::Duration;
 
 /// Creates a stream events whenever the file at the path has changes. The stream never terminates
 /// and must be dropped to finish watching.
@@ -59,11 +60,15 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use std::env::temp_dir;
     use std::fs::File;
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::Seek;
+    use std::io::SeekFrom;
+    use std::io::Write;
+
     use test_log::test;
+
+    use super::*;
 
     #[test(tokio::test)]
     async fn basic_watch() {

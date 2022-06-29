@@ -2,24 +2,34 @@
 // This entire file is license key functionality
 mod yaml;
 
-use crate::plugin::plugins;
-use derivative::Derivative;
-use displaydoc::Display;
-use envmnt::{ExpandOptions, ExpansionType};
-use itertools::Itertools;
-use jsonschema::{Draft, JSONSchema};
-use schemars::gen::{SchemaGenerator, SchemaSettings};
-use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::Map;
-use serde_json::Value;
 use std::cmp::Ordering;
 use std::fmt;
 use std::net::SocketAddr;
 use std::str::FromStr;
+
+use derivative::Derivative;
+use displaydoc::Display;
+use envmnt::ExpandOptions;
+use envmnt::ExpansionType;
+use itertools::Itertools;
+use jsonschema::Draft;
+use jsonschema::JSONSchema;
+use schemars::gen::SchemaGenerator;
+use schemars::gen::SchemaSettings;
+use schemars::schema::ObjectValidation;
+use schemars::schema::RootSchema;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 use thiserror::Error;
-use tower_http::cors::{self, CorsLayer};
+use tower_http::cors::CorsLayer;
+use tower_http::cors::{self};
+
+use crate::plugin::plugins;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -763,18 +773,20 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::error::SchemaError;
+    use std::collections::HashMap;
+    use std::fs;
+
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;
     use regex::Regex;
     #[cfg(unix)]
     use schemars::gen::SchemaSettings;
-    use std::collections::HashMap;
-    use std::fs;
     use walkdir::DirEntry;
     use walkdir::WalkDir;
+
+    use super::*;
+    use crate::error::SchemaError;
 
     #[cfg(unix)]
     #[test]

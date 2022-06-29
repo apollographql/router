@@ -1,8 +1,9 @@
 mod plugin;
 
-use crate::plugin::PluginAction;
 use anyhow::Result;
 use clap::Subcommand;
+
+use crate::plugin::PluginAction;
 
 #[derive(Subcommand, Debug)]
 pub enum RouterAction {
@@ -23,13 +24,18 @@ impl RouterAction {
 
 #[cfg(test)]
 mod test {
-    use anyhow::{bail, Result};
-    use cargo_scaffold::{Opts, ScaffoldDescription};
-    use inflector::Inflector;
     use std::collections::BTreeMap;
     use std::env;
-    use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::path::MAIN_SEPARATOR;
     use std::process::Command;
+
+    use anyhow::bail;
+    use anyhow::Result;
+    use cargo_scaffold::Opts;
+    use cargo_scaffold::ScaffoldDescription;
+    use inflector::Inflector;
     use tempfile::TempDir;
 
     #[test]

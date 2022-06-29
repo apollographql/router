@@ -18,7 +18,9 @@
 //!
 
 use std::marker::PhantomData;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
+
 use tower::Layer;
 use tower_service::Service;
 use tracing::Instrument;

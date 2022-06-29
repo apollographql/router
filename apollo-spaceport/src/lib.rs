@@ -10,16 +10,20 @@ mod agent {
 /// The server module contains the server components
 pub mod server;
 
+use std::error::Error;
+
 use agent::reporter_client::ReporterClient;
 pub use agent::*;
 pub use prost_types::Timestamp;
 pub use report::*;
-use std::error::Error;
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
-use tonic::transport::{Channel, Endpoint};
-use tonic::{Request, Response, Status};
+use tonic::transport::Channel;
+use tonic::transport::Endpoint;
+use tonic::Request;
+use tonic::Response;
+use tonic::Status;
 
 /// Reporting Error type
 #[derive(Debug)]

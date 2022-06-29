@@ -1,22 +1,30 @@
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
+
 use http::header::CONTENT_TYPE;
-use http::{Method, Request, Uri};
+use http::Method;
+use http::Request;
+use http::Uri;
 use jsonpath_lib::Selector;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_http::HttpClient;
 use serde_json::Value;
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
 use tower::BoxError;
 use tracing::info_span;
 use tracing_core::LevelFilter;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{EnvFilter, Layer, Registry};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::Registry;
 use uuid::Uuid;
 
 pub struct TracingTest {

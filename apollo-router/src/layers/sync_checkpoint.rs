@@ -7,9 +7,13 @@
 //! chain of responsibilities. If it fails, then the control flow is broken a response is passed
 //! back to the invoking service.
 
+use std::ops::ControlFlow;
+use std::sync::Arc;
+
 use futures::future::BoxFuture;
-use std::{ops::ControlFlow, sync::Arc};
-use tower::{BoxError, Layer, Service};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
 
 /// [`Layer`] for Synchronous Checkpoints.
 #[allow(clippy::type_complexity)]
@@ -161,12 +165,16 @@ where
 
 #[cfg(test)]
 mod checkpoint_tests {
+    use tower::BoxError;
+    use tower::Layer;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
     use super::*;
-    use crate::{
-        layers::ServiceBuilderExt, plugin::test::MockExecutionService, ExecutionRequest,
-        ExecutionResponse,
-    };
-    use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+    use crate::layers::ServiceBuilderExt;
+    use crate::plugin::test::MockExecutionService;
+    use crate::ExecutionRequest;
+    use crate::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {

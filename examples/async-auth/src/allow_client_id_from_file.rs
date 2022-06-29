@@ -1,15 +1,22 @@
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::ResponseBody;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
-use std::{ops::ControlFlow, path::PathBuf};
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 // This structure is the one we'll deserialize the yml configuration into
 #[derive(Deserialize, JsonSchema)]
@@ -174,16 +181,17 @@ register_plugin!(
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use crate::allow_client_id_from_file::AllowClientIdConfig;
-
-    use super::AllowClientIdFromFile;
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
+
+    use super::AllowClientIdFromFile;
+    use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     // This test ensures the router will be able to
     // find our `allow-client-id-from-file` plugin,

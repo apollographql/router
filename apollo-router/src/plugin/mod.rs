@@ -17,13 +17,13 @@
 pub mod serde;
 pub mod test;
 
-use crate::graphql::Response;
-use crate::layers::ServiceBuilderExt;
-use crate::{
-    http_ext, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
-use ::serde::{de::DeserializeOwned, Deserialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+
+use ::serde::de::DeserializeOwned;
+use ::serde::Deserialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -31,13 +31,25 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::task::{Context, Poll};
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
-use tower::{BoxError, Service, ServiceBuilder};
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::ResponseBody;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 

@@ -17,19 +17,21 @@
 //!
 //! [`Layer` type]: struct.Layer.html
 //! [`Layer` trait]: ../layer/trait.Layer.html
-use tracing_subscriber::layer;
+use std::any::TypeId;
+use std::error;
+use std::fmt;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::Weak;
 
-use std::{
-    any::TypeId,
-    error, fmt,
-    marker::PhantomData,
-    sync::{Arc, RwLock, Weak},
-};
-use tracing_core::{
-    callsite, span,
-    subscriber::{Interest, Subscriber},
-    Event, Metadata,
-};
+use tracing_core::callsite;
+use tracing_core::span;
+use tracing_core::subscriber::Interest;
+use tracing_core::subscriber::Subscriber;
+use tracing_core::Event;
+use tracing_core::Metadata;
+use tracing_subscriber::layer;
 
 macro_rules! try_lock {
     ($lock:expr) => {
