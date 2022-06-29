@@ -64,13 +64,16 @@ impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
         options: QueryPlanOptions,
     ) -> PlanResult {
         let key = (query, operation, options);
-        let entry = self.cm.get(key.clone()).await;
+        let entry = self.cm.get(&key).await;
         if entry.is_first() {
             let res = self.delegate.get(key.0, key.1, key.2).await;
             entry.insert(res.clone()).await;
             res
         } else {
-            entry.get().await
+            entry
+                .get()
+                .await
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
         }
     }
 }

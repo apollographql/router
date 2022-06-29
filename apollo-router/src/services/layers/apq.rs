@@ -6,6 +6,7 @@
 use std::task::Poll;
 
 use crate::cache::storage::CacheStorage;
+use crate::cache::DedupCache;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::future::BoxFuture;
@@ -28,11 +29,11 @@ struct PersistedQuery {
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
-    cache: CacheStorage<Vec<u8>, String>,
+    cache: DedupCache<Vec<u8>, String>,
 }
 
 impl APQLayer {
-    pub(crate) fn with_cache(cache: CacheStorage<Vec<u8>, String>) -> Self {
+    pub(crate) fn with_cache(cache: DedupCache<Vec<u8>, String>) -> Self {
         Self { cache }
     }
 }
@@ -67,7 +68,7 @@ pub(crate) struct APQService<S>
 where
     S: Service<RouterRequest>,
 {
-    cache: CacheStorage<Vec<u8>, String>,
+    cache: DedupCache<Vec<u8>, String>,
     inner: Buffer<S, RouterRequest>,
 }
 
@@ -122,7 +123,7 @@ where
                     Ok(service.oneshot(req).await?)
                 }
                 (Some(apq_hash), _) => {
-                    if let Some(cached_query) = cache.get(&apq_hash).await {
+                    if let Some(cached_query) = cache.get(&apq_hash).await.get().await.ok() {
                         let _ = req.context.insert("persisted_query_hit", true);
                         tracing::trace!("apq: cache hit");
                         req.originating_request.body_mut().query = Some(cached_query);
@@ -250,7 +251,7 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+        let apq = APQLayer::with_cache(DedupCache::new(512).await);
         let mut service_stack = apq.layer(mock);
 
         let extensions = HashMap::from([(
@@ -346,7 +347,7 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+        let apq = APQLayer::with_cache(DedupCache::new(512).await);
         let mut service_stack = apq.layer(mock_service);
 
         let extensions = HashMap::from([(

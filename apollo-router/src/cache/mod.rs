@@ -30,7 +30,7 @@ where
         }
     }
 
-    pub(crate) async fn get(&self, key: K) -> Entry<K, V> {
+    pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
         //loop {
         let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get(&key) {
@@ -110,6 +110,12 @@ enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
     Value(V),
 }
 
+#[derive(Debug)]
+pub(crate) enum EntryError {
+    Closed,
+    IsFirst,
+}
+
 impl<K, V> Entry<K, V>
 where
     K: Clone + Send + Eq + Hash + 'static,
@@ -123,13 +129,14 @@ where
         }
     }
 
-    //FIXME: error management
-    pub(crate) async fn get(self) -> V {
+    pub(crate) async fn get(self) -> Result<V, EntryError> {
         match self.inner {
             // there was already a value in cache
-            EntryInner::Value(v) => v,
-            EntryInner::Receiver { mut receiver } => receiver.recv().await.unwrap(),
-            _ => panic!("should not call get on the first call"),
+            EntryInner::Value(v) => Ok(v),
+            EntryInner::Receiver { mut receiver } => {
+                receiver.recv().await.map_err(|_| EntryError::Closed)
+            }
+            _ => Err(EntryError::IsFirst),
         }
     }
 
@@ -164,7 +171,7 @@ where
 }
 
 async fn example_cache_usage(k: String, cache: &mut DedupCache<String, String>) -> String {
-    let entry = cache.get(k).await;
+    let entry = cache.get(&k).await;
 
     if entry.is_first() {
         // potentially long and complex async task that can fail
@@ -172,6 +179,6 @@ async fn example_cache_usage(k: String, cache: &mut DedupCache<String, String>) 
         entry.insert(value.clone()).await;
         value
     } else {
-        entry.get().await
+        entry.get().await.unwrap()
     }
 }

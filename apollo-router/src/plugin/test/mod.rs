@@ -9,6 +9,7 @@ pub use service::{
 };
 
 use crate::cache::storage::CacheStorage;
+use crate::cache::DedupCache;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
@@ -158,7 +159,7 @@ impl PluginTestHarness {
                 }),
         );
 
-        let apq = APQLayer::with_cache(CacheStorage::new(512).await);
+        let apq = APQLayer::with_cache(DedupCache::new(512).await);
         let router_service = ServiceBuilder::new()
             .layer(apq)
             .layer(EnsureQueryPresence::default())
