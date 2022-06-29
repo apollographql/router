@@ -13,15 +13,15 @@ pub(crate) mod storage;
 type WaitMap<K, V: Clone> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, String>>>>>;
 
 #[derive(Clone)]
-pub(crate) struct DedupCache<K: Clone + Send + Sync + Eq + Hash, V: Clone> {
+pub(crate) struct DedupCache<K: Clone + Send + Eq + Hash, V: Clone> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
 }
 
 impl<K, V> DedupCache<K, V>
 where
-    K: Clone + Send + Sync + Eq + Hash + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Clone + Send + Eq + Hash + 'static,
+    V: Clone + Send + 'static,
 {
     async fn get(&mut self, key: K) -> Entry<K, V> {
         //loop {
@@ -88,10 +88,10 @@ where
     }
 }
 
-pub struct Entry<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
+pub struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send> {
     inner: EntryInner<K, V>,
 }
-enum EntryInner<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
+enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
     First {
         key: K,
         sender: broadcast::Sender<Result<V, String>>,
@@ -106,8 +106,8 @@ enum EntryInner<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
 
 impl<K, V> Entry<K, V>
 where
-    K: Clone + Send + Sync + Eq + Hash + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Clone + Send + Eq + Hash + 'static,
+    V: Clone + Send + 'static,
 {
     pub fn is_first(&self) -> bool {
         if let EntryInner::First { .. } = self.inner {
