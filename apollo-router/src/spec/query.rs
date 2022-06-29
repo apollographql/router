@@ -1360,7 +1360,14 @@ mod tests {
 
         // https://spec.graphql.org/June2018/#sec-Type-System.List
         assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
-        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation!(schema, "query($foo:[String]){x}", json!({"foo":"bar"}));
+        assert_validation!(schema, "query($foo:[[Int]]){x}", json!({"foo":1}));
+        assert_validation!(
+            schema,
+            "query($foo:[[Int]]){x}",
+            json!({"foo":[[1], [2, 3]]})
+        );
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
         assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
