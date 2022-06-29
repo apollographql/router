@@ -19,7 +19,7 @@ use http::HeaderValue;
 use http::Method;
 use multimap::MultiMap;
 
-use crate::ResponseBody;
+use crate::graphql;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
 /// because header name creation is fallible.
@@ -241,8 +241,8 @@ impl<T> Response<T> {
     }
 }
 
-impl Response<BoxStream<'static, ResponseBody>> {
-    pub fn from_response_to_stream(http: http::response::Response<ResponseBody>) -> Self {
+impl Response<BoxStream<'static, graphql::Response>> {
+    pub fn from_response_to_stream(http: http::response::Response<graphql::Response>) -> Self {
         let (parts, body) = http.into_parts();
         Response {
             inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
@@ -297,7 +297,7 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-impl IntoResponse for Response<ResponseBody> {
+impl IntoResponse for Response<graphql::Response> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
         let (mut parts, body) = http::Response::from(self).into_parts();

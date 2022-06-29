@@ -13,8 +13,8 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::graphql::Response;
 use crate::layers::sync_checkpoint::CheckpointService;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
@@ -23,7 +23,7 @@ pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -68,7 +68,6 @@ mod ensure_query_presence_tests {
 
     use super::*;
     use crate::plugin::test::MockRouterService;
-    use crate::ResponseBody;
 
     #[tokio::test]
     async fn it_works_with_query() {
@@ -112,11 +111,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
 
         assert_eq!(expected_error, actual_error);
     }
@@ -140,11 +135,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
     }
 }

@@ -11,10 +11,10 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::register_plugin;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
@@ -100,12 +100,8 @@ impl Plugin for Csrf {
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -235,7 +231,6 @@ mod csrf_tests {
 
     use super::*;
     use crate::plugin::test::MockRouterService;
-    use crate::ResponseBody;
 
     #[tokio::test]
     async fn it_lets_preflighted_request_pass_through() {
@@ -325,12 +320,7 @@ mod csrf_tests {
             .await
             .unwrap();
 
-        match res {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
+        assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
     }
 
     async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
@@ -347,21 +337,16 @@ mod csrf_tests {
             .await
             .unwrap();
 
-        match res {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(
-                    1,
-                    res.errors.len(),
-                    "expected one(1) error in the RouterResponse, found {}\n{:?}",
-                    res.errors.len(),
-                    res.errors
-                );
-                assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+        assert_eq!(
+            1,
+            res.errors.len(),
+            "expected one(1) error in the RouterResponse, found {}\n{:?}",
+            res.errors.len(),
+            res.errors
+        );
+        assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                 Please either specify a 'content-type' header \
                 (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
                 or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight");
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
     }
 }

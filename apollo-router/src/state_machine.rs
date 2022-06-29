@@ -419,11 +419,11 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::graphql;
     use crate::http_ext::Request;
     use crate::http_ext::Response;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
-    use crate::ResponseBody;
 
     fn example_schema() -> Schema {
         include_str!("testdata/supergraph.graphql").parse().unwrap()
@@ -649,7 +649,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = Response<BoxStream<'static, ResponseBody>>;
+        type Response = Response<BoxStream<'static, graphql::Response>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -684,7 +684,7 @@ mod tests {
         where
             RS: Service<
                     Request<crate::graphql::Request>,
-                    Response = Response<BoxStream<'static, ResponseBody>>,
+                    Response = Response<BoxStream<'static, graphql::Response>>,
                     Error = BoxError,
                 > + Send
                 + Sync
