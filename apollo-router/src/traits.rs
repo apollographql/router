@@ -25,7 +25,7 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 ///
 /// Implementations may cache query plans.
 #[async_trait]
-pub(crate) trait QueryPlanner: Send + Sync + Debug {
+pub(crate) trait QueryPlanner: Send + Sync {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
@@ -37,6 +37,7 @@ pub(crate) trait QueryPlanner: Send + Sync + Debug {
     ) -> Result<QueryPlannerContent, QueryPlannerError>;
 }
 
+/*FIXME: should we keep this trait?
 /// With caching trait.
 ///
 /// Adds with_caching to any query planner.
@@ -60,3 +61,4 @@ mod tests {
 
     assert_obj_safe!(QueryPlanner);
 }
+*/

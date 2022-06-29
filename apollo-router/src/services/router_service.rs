@@ -330,13 +330,14 @@ impl PluggableRouterServiceBuilder {
         let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
             .await
             .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            ServiceBuilder::new()
-                .buffered()
-                .service(self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
-                    |acc, (_, e)| e.query_planning_service(acc),
-                ));
+        let query_planner_service = ServiceBuilder::new().buffered().service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                    .await
+                    .boxed(),
+                |acc, (_, e)| e.query_planning_service(acc),
+            ),
+        );
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self

@@ -27,7 +27,7 @@ where
         self.inner.lock().await.get(key).cloned()
     }
 
-    pub(crate) async fn insert(&mut self, key: K, value: V) {
+    pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key, value);
     }
 }

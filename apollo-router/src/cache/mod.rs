@@ -10,7 +10,7 @@ use self::storage::CacheStorage;
 pub(crate) mod coalescing;
 pub(crate) mod storage;
 
-type WaitMap<K, V: Clone, E> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, E>>>>>;
+type WaitMap<K, V, E> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, E>>>>>;
 
 #[derive(Clone)]
 pub(crate) struct DedupCache<K: Clone + Send + Eq + Hash, V: Clone, E> {
@@ -24,7 +24,14 @@ where
     V: Clone + Send + 'static,
     E: Clone + Send + 'static,
 {
-    async fn get(&mut self, key: K) -> Entry<K, V, E> {
+    pub(crate) async fn new(capacity: usize) -> Self {
+        Self {
+            wait_map: Arc::new(Mutex::new(HashMap::new())),
+            storage: CacheStorage::new(capacity).await,
+        }
+    }
+
+    pub(crate) async fn get(&self, key: K) -> Entry<K, V, E> {
         //loop {
         let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get(&key) {
@@ -45,7 +52,7 @@ where
                 if let Some(value) = self.storage.get(&key).await {
                     let mut locked_wait_map = self.wait_map.lock().await;
                     let _ = locked_wait_map.remove(&key);
-                    sender.send(Ok(value.clone()));
+                    let _ = sender.send(Ok(value.clone()));
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -78,14 +85,17 @@ where
         }
     }
 
-    async fn insert(&mut self, key: K, value: V) {
-        self.storage.insert(key.clone(), value.clone()).await;
+    pub(crate) async fn insert(&self, key: K, value: V) {
+        self.storage.insert(key, value.clone()).await;
+    }
+
+    pub(crate) async fn remove_wait(&self, key: &K) {
         let mut locked_wait_map = self.wait_map.lock().await;
-        let opt_sender = locked_wait_map.remove(&key);
+        let _ = locked_wait_map.remove(&key);
     }
 }
 
-pub struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send, E: Clone + Send> {
+pub(crate) struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send, E: Clone + Send> {
     inner: EntryInner<K, V, E>,
 }
 enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send, E: Clone + Send> {
@@ -107,7 +117,7 @@ where
     V: Clone + Send + 'static,
     E: Clone + Send + 'static,
 {
-    pub fn is_first(&self) -> bool {
+    pub(crate) fn is_first(&self) -> bool {
         if let EntryInner::First { .. } = self.inner {
             true
         } else {
@@ -115,34 +125,43 @@ where
         }
     }
 
-    pub async fn get(self) -> Result<V, E> {
+    pub(crate) async fn get(self) -> Result<V, E> {
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => receiver.recv().await.unwrap(),
+            EntryInner::Receiver { mut receiver } => {
+                println!("will receive value");
+                receiver.recv().await.unwrap()
+            }
             _ => panic!("should not call get on the first call"),
         }
     }
 
-    pub async fn insert(self, value: V) {
+    pub(crate) async fn insert(self, value: V) {
         match self.inner {
             EntryInner::First {
                 key,
                 sender,
-                mut cache,
+                cache,
                 _drop_signal,
             } => {
                 cache.insert(key.clone(), value.clone()).await;
-                sender.send(Ok(value));
+                println!("will send value");
+                cache.remove_wait(&key).await;
+                let _ = sender.send(Ok(value));
             }
             _ => {}
         }
     }
 
-    pub async fn error(self, error: E) {
+    pub(crate) async fn error(self, error: E) {
         match self.inner {
-            EntryInner::First { sender, .. } => {
+            EntryInner::First {
+                sender, cache, key, ..
+            } => {
                 let _ = sender.send(Err(error));
+                println!("sent error");
+                cache.remove_wait(&key).await;
             }
             _ => {}
         }

@@ -138,6 +138,7 @@ impl PluginTestHarness {
             .await?,
             DEFAULT_BUFFER_SIZE,
         )
+        .await
         .boxed();
         let query_planner_service = plugin.query_planning_service(
             mock_query_planner_service
