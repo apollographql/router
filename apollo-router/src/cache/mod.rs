@@ -10,20 +10,21 @@ use self::storage::CacheStorage;
 pub(crate) mod coalescing;
 pub(crate) mod storage;
 
-type WaitMap<K, V: Clone> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, String>>>>>;
+type WaitMap<K, V: Clone, E> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, E>>>>>;
 
 #[derive(Clone)]
-pub(crate) struct DedupCache<K: Clone + Send + Eq + Hash, V: Clone> {
-    wait_map: WaitMap<K, V>,
+pub(crate) struct DedupCache<K: Clone + Send + Eq + Hash, V: Clone, E> {
+    wait_map: WaitMap<K, V, E>,
     storage: CacheStorage<K, V>,
 }
 
-impl<K, V> DedupCache<K, V>
+impl<K, V, E> DedupCache<K, V, E>
 where
     K: Clone + Send + Eq + Hash + 'static,
     V: Clone + Send + 'static,
+    E: Clone + Send + 'static,
 {
-    async fn get(&mut self, key: K) -> Entry<K, V> {
+    async fn get(&mut self, key: K) -> Entry<K, V, E> {
         //loop {
         let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get(&key) {
@@ -81,33 +82,30 @@ where
         self.storage.insert(key.clone(), value.clone()).await;
         let mut locked_wait_map = self.wait_map.lock().await;
         let opt_sender = locked_wait_map.remove(&key);
-        /*drop(locked_wait_map);
-        if let Some(sender) = opt_sender {
-            sender.send(Ok(value));
-        }*/
     }
 }
 
-pub struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send> {
-    inner: EntryInner<K, V>,
+pub struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send, E: Clone + Send> {
+    inner: EntryInner<K, V, E>,
 }
-enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send, E: Clone + Send> {
     First {
         key: K,
-        sender: broadcast::Sender<Result<V, String>>,
-        cache: DedupCache<K, V>,
+        sender: broadcast::Sender<Result<V, E>>,
+        cache: DedupCache<K, V, E>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
-        receiver: broadcast::Receiver<Result<V, String>>,
+        receiver: broadcast::Receiver<Result<V, E>>,
     },
     Value(V),
 }
 
-impl<K, V> Entry<K, V>
+impl<K, V, E> Entry<K, V, E>
 where
     K: Clone + Send + Eq + Hash + 'static,
     V: Clone + Send + 'static,
+    E: Clone + Send + 'static,
 {
     pub fn is_first(&self) -> bool {
         if let EntryInner::First { .. } = self.inner {
@@ -117,7 +115,7 @@ where
         }
     }
 
-    pub async fn get(self) -> Result<V, String> {
+    pub async fn get(self) -> Result<V, E> {
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
@@ -141,7 +139,7 @@ where
         }
     }
 
-    pub async fn error(self, error: String) {
+    pub async fn error(self, error: E) {
         match self.inner {
             EntryInner::First { sender, .. } => {
                 let _ = sender.send(Err(error));
@@ -153,7 +151,7 @@ where
 
 async fn example_cache_usage(
     k: String,
-    cache: &mut DedupCache<String, String>,
+    cache: &mut DedupCache<String, String, String>,
 ) -> Result<String, String> {
     let entry = cache.get(k).await;
 
