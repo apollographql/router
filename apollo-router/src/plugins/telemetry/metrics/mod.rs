@@ -269,9 +269,7 @@ impl AttributesForwardConf {
 
         let response = http::Response::from_parts(
             parts,
-            once(ready(first.unwrap_or_else(Response::default)))
-                .chain(rest)
-                .boxed(),
+            once(ready(first.unwrap_or_default())).chain(rest).boxed(),
         )
         .into();
 
