@@ -69,14 +69,9 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) =
-            service_response.response.body()
-        {
-            assert!(response.errors.is_empty());
-            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-        } else {
-            panic!("unexpected response");
-        }
+        let response = service_response.response.body();
+        assert!(response.errors.is_empty());
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         */
     }
 }

@@ -1,8 +1,6 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
 use std::collections::HashMap;
-use std::convert::Infallible;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::future::ready;
@@ -20,8 +18,6 @@ use http::Uri;
 use http_ext::IntoHeaderName;
 use http_ext::IntoHeaderValue;
 use multimap::MultiMap;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
 pub use subgraph_service::SubgraphService;
@@ -45,86 +41,6 @@ pub mod http_ext;
 pub(crate) mod layers;
 mod router_service;
 pub(crate) mod subgraph_service;
-
-/// Different kinds of body we could have as the Router's response
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-#[serde(untagged)]
-pub enum ResponseBody {
-    /// A GraphQL response corresponding to the spec <https://spec.graphql.org/October2021/#sec-Response>
-    GraphQL(Response),
-    /// A json value
-    RawJSON(serde_json::Value),
-    /// Text without any serialization (example: HTML content, Prometheus metrics, ...)
-    Text(String),
-}
-
-impl TryFrom<ResponseBody> for Response {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::GraphQL(res) => Ok(res),
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected Response, found RawJSON")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for String {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
-            }
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
-            }
-            ResponseBody::Text(res) => Ok(res),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for serde_json::Value {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(res) => Ok(res),
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
-        }
-    }
-}
-
-impl From<Response> for ResponseBody {
-    fn from(response: Response) -> Self {
-        Self::GraphQL(response)
-    }
-}
-
-impl From<serde_json::Value> for ResponseBody {
-    fn from(json: serde_json::Value) -> Self {
-        Self::RawJSON(json)
-    }
-}
-
-// This impl is purposefully done this way to hint users this might not be what they would like to do.
-/// Creates a ResponseBody from a &str
-///
-/// /!\ No serialization or deserialization is involved,
-/// please make sure you don't want to send a GraphQL response or a Raw JSON payload instead.
-impl FromStr for ResponseBody {
-    type Err = Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::Text(s.to_owned()))
-    }
-}
 
 assert_impl_all!(RouterRequest: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -224,7 +140,7 @@ impl RouterRequest {
 }
 
 assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
-/// [`Context`] and [`http_ext::Response<ResponseBody>`] for the response.
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]

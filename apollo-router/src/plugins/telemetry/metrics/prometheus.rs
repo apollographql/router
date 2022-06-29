@@ -17,7 +17,6 @@ use crate::http_ext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::ResponseBody;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +56,7 @@ pub(crate) struct PrometheusService {
 }
 
 impl Service<http_ext::Request<Bytes>> for PrometheusService {
-    type Response = http_ext::Response<ResponseBody>;
+    type Response = http_ext::Response<Bytes>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -74,9 +73,7 @@ impl Service<http_ext::Request<Bytes>> for PrometheusService {
             Ok(http_ext::Response {
                 inner: http::Response::builder()
                     .status(StatusCode::OK)
-                    .body(ResponseBody::Text(
-                        String::from_utf8_lossy(&result).into_owned(),
-                    ))
+                    .body(result.into())
                     .map_err(|err| BoxError::from(err.to_string()))?,
             })
         })
