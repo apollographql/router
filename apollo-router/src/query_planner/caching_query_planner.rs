@@ -1,6 +1,5 @@
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
-use crate::cache::coalescing::CachingMap;
 use crate::cache::DedupCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -24,7 +23,7 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: QueryPlanner + Clone> {
-    cm: Arc<DedupCache<QueryKey, QueryPlannerContent, QueryPlannerError>>,
+    cm: Arc<DedupCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
     delegate: Arc<T>,
 }
 
@@ -67,22 +66,10 @@ impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
         let key = (query, operation, options);
         let entry = self.cm.get(key.clone()).await;
         if entry.is_first() {
-            println!("is first");
-            match self.delegate.get(key.0, key.1, key.2).await {
-                Ok(value) => {
-                    println!("will insert entry");
-                    entry.insert(value.clone()).await;
-                    Ok(value)
-                }
-                Err(e) => {
-                    println!("will insert error: {:?}", e);
-                    entry.error(e.clone()).await;
-                    Err(e)
-                }
-            }
+            let res = self.delegate.get(key.0, key.1, key.2).await;
+            entry.insert(res.clone()).await;
+            res
         } else {
-            println!("is not first");
-
             entry.get().await
         }
     }
@@ -227,7 +214,6 @@ mod tests {
         let planner = CachingQueryPlanner::new(delegate, 10).await;
 
         for _ in 0..5 {
-            println!("[{}] will query", line!());
             assert!(planner
                 .get(
                     "query1".into(),
