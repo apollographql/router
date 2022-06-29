@@ -31,7 +31,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
 such as the Request::mock() fn.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1291
 
 ### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277), [PR #1303](https://github.com/apollographql/router/pull/1303))
 
@@ -254,6 +254,12 @@ Previously, it was not possible to modify variables in a `Request` from a plugin
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
 
 ## 🐛 Fixes
+
+### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317)
+
+In a re-factoring the "include_subgraph_errors" plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialisation mechanism was improved to ensure that plugins start in the required sequence.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1317
 
 ### Restrict static introspection to only `__schema` and `__type` ([PR #1299](https://github.com/apollographql/router/pull/1299))
 Queries with selected field names starting with `__` are recognized as introspection queries. This includes `__schema`, `__type` and `__typename`. However, `__typename` is introspection at query time which is different from `__schema` and `__type` because two of the later can be answered with queries with empty input variables. This change will restrict introspection to only `__schema` and `__type`.
