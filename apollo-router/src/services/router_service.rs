@@ -12,6 +12,7 @@ use futures::Stream;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
+use lazy_static::__Deref;
 use tower::buffer::Buffer;
 use tower::util::BoxCloneService;
 use tower::util::BoxService;
@@ -22,6 +23,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::QueryPlannerContent;
+use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
@@ -211,10 +213,22 @@ where
                 message: error.to_string(),
                 ..Default::default()
             }];
+            let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
+                Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
+                    if matches!(
+                        retrieval_error.deref(),
+                        QueryPlannerError::SpecError(_)
+                            | QueryPlannerError::SchemaValidationErrors(_)
+                    ) =>
+                {
+                    StatusCode::BAD_REQUEST
+                }
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
 
             Ok(RouterResponse::builder()
                 .errors(errors)
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .status_code(status_code)
                 .context(context_cloned)
                 .build()
                 .expect("building a response like this should not fail")

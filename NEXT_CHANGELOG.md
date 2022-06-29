@@ -285,6 +285,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Returns HTTP 400 bad request instead of 500 when it's a query plan error ([PR #1321](https://github.com/apollographql/router/pull/1321))
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1321
+
 ### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317)
 
 In a re-factoring the "include_subgraph_errors" plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialisation mechanism was improved to ensure that plugins start in the required sequence.
