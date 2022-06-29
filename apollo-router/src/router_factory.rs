@@ -168,13 +168,12 @@ async fn create_plugins(
             None => {
                 // Didn't find it, insert
                 match plugin_registry.get(*name) {
-                    // Create an instance with no configuration
-                    // Some(factory) => match factory.create_instance(&serde_json::json!({})).await {
+                    // Create an instance
                     Some(factory) => {
                         // Create default (empty) config
                         let mut config = Value::Object(Map::new());
-                        // The apollo.telemetry" plugin isn't happy with no config, so we give
-                        // it some. If any of the other mandatory plugins need special
+                        // The apollo.telemetry" plugin isn't happy with empty config, so we
+                        // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here.
                         // This is *required* by the telemetry module or it will fail...
                         if *name == "apollo.telemetry" {
