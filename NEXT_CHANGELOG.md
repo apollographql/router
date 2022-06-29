@@ -31,7 +31,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
 such as the Request::mock() fn.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1291
 
 ### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277), [PR #1303](https://github.com/apollographql/router/pull/1303))
 
@@ -233,6 +233,36 @@ Migration tips:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
 
+### Non-GraphQL response body variants removed from `RouterResponse` ([PR #1307](https://github.com/apollographql/router/pull/1307))
+
+Previously the `ResponseBody` enum was used in `RouterResponse`.
+One of this enum’s variants contains a `apollo_router::graphql::Response`,
+which is now used directly instead.
+
+Various type signatures will need changes such as:
+
+```diff
+- RouterResponse<BoxStream<'static, ResponseBody>>
++ RouterResponse<BoxStream<'static, graphql::Response>>
+```
+
+Necessary code changes might look like:
+
+```diff
+- return ResponseBody::GraphQL(response);
++ return response;
+```
+```diff
+- if let ResponseBody::GraphQL(graphql_response) = res {
+-     assert_eq!(&graphql_response.errors[0], expected_error);
+- } else {
+-     panic!("expected a graphql response");
+- }
++ assert_eq!(&res.errors[0], expected_error);
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
 
 You will now be able to actually use the helm chart without being on a managed graph. 
@@ -258,6 +288,12 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Returns HTTP 400 bad request instead of 500 when it's a query plan error ([PR #1321](https://github.com/apollographql/router/pull/1321))
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1321
+
+### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317)
+
+In a re-factoring the "include_subgraph_errors" plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialisation mechanism was improved to ensure that plugins start in the required sequence.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1317
 
 ### Restrict static introspection to only `__schema` and `__type` ([PR #1299](https://github.com/apollographql/router/pull/1299))
 Queries with selected field names starting with `__` are recognized as introspection queries. This includes `__schema`, `__type` and `__typename`. However, `__typename` is introspection at query time which is different from `__schema` and `__type` because two of the later can be answered with queries with empty input variables. This change will restrict introspection to only `__schema` and `__type`.

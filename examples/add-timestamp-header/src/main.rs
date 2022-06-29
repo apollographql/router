@@ -80,13 +80,8 @@ mod tests {
             .expect("x-elapsed-time is present");
 
         // with the expected message
-        if let apollo_router::services::ResponseBody::GraphQL(response) =
-            service_response.next_response().await.unwrap()
-        {
-            assert!(response.errors.is_empty());
-            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-        } else {
-            panic!("unexpected response");
-        }
+        let response = service_response.next_response().await.unwrap();
+        assert!(response.errors.is_empty());
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
     }
 }

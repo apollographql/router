@@ -255,12 +255,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = self.config.clone();
@@ -278,10 +274,8 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<
-                            RouterResponse<BoxStream<'static, ResponseBody>>,
-                            BoxError,
-                        > = fut.await;
+                        let result: Result<RouterResponse<BoxStream<'static, Response>>, BoxError> =
+                            fut.await;
                         Self::update_metrics(&ctx, metrics, &result);
                         match result {
                             Err(e) => {
@@ -305,10 +299,7 @@ impl Plugin for Telemetry {
                                         let ctx = ctx.clone();
 
                                         response_stream.map(move |response| {
-                                            let response_has_errors = match &response {
-                                                ResponseBody::GraphQL(r) => !r.errors.is_empty(),
-                                                _ => false,
-                                            };
+                                            let response_has_errors = !response.errors.is_empty();
 
                                             if !matches!(sender, Sender::Noop) {
                                                 Self::update_apollo_metrics(
@@ -626,7 +617,7 @@ impl Telemetry {
     fn update_metrics(
         context: &Context,
         metrics: BasicMetrics,
-        result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        result: &Result<RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) {
         // Using Instant because it is guaranteed to be monotonically increasing.
         let now = Instant::now();

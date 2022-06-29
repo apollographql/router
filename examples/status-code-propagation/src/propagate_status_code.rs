@@ -1,6 +1,6 @@
+use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::ResponseBody;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
@@ -73,10 +73,11 @@ impl Plugin for PropagateStatusCode {
         &mut self,
         service: BoxService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
+    {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res

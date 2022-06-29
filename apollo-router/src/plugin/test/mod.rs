@@ -20,6 +20,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
@@ -27,16 +28,15 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
 use crate::ExecutionService;
-use crate::ResponseBody;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::RouterService;
 use crate::Schema;
 
 pub struct PluginTestHarness {
     router_service:
-        BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
 }
 pub enum IntoSchema {
     String(String),
@@ -192,14 +192,14 @@ impl PluginTestHarness {
     pub async fn call(
         &mut self,
         request: RouterRequest,
-    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service.ready().await?.call(request).await
     }
 
     /// If using the canned schema this canned request will give a response.
     pub async fn call_canned(
         &mut self,
-    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service
             .ready()
             .await?
@@ -236,14 +236,10 @@ mod testing {
             .schema(IntoSchema::Canned)
             .build()
             .await?;
-        let result = harness.call_canned().await?.next_response().await.unwrap();
-        if let crate::ResponseBody::GraphQL(graphql) = result {
-            insta::with_settings!({sort_maps => true}, {
-                assert_json_snapshot!(graphql.data);
-            });
-        } else {
-            panic!("Should have got response body");
-        }
+        let graphql = harness.call_canned().await?.next_response().await.unwrap();
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(graphql.data);
+        });
         Ok(())
     }
 }

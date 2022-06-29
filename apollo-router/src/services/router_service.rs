@@ -43,7 +43,6 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::Schema;
@@ -96,7 +95,7 @@ where
     ExecutionService::Future: Send + 'static,
     ResponseStream: Stream<Item = Response> + Send + 'static,
 {
-    type Response = RouterResponse<BoxStream<'static, ResponseBody>>;
+    type Response = RouterResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -145,20 +144,18 @@ where
 
             match content {
                 QueryPlannerContent::Introspection { response } => {
-                    return Ok(RouterResponse::new_from_response_body(
-                        ResponseBody::GraphQL(*response),
-                        context,
-                    )
-                    .boxed());
+                    return Ok(
+                        RouterResponse::new_from_graphql_response(*response, context).boxed(),
+                    );
                 }
                 QueryPlannerContent::IntrospectionDisabled => {
-                    let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
+                    let mut resp = http::Response::new(once(ready(
                         graphql::Response::builder()
                             .errors(vec![crate::error::Error::builder()
                                 .message(String::from("introspection has been disabled"))
                                 .build()])
                             .build(),
-                    ))));
+                    )));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
                     return Ok(RouterResponse {
@@ -169,11 +166,7 @@ where
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_response_body(
-                            ResponseBody::GraphQL(err),
-                            context,
-                        )
-                        .boxed())
+                        Ok(RouterResponse::new_from_graphql_response(err, context).boxed())
                     } else {
                         let operation_name = body.operation_name.clone();
 
@@ -204,7 +197,7 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
-                                        ResponseBody::GraphQL(response)
+                                        response
                                     })
                                     .in_current_span(),
                             )
@@ -319,11 +312,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
     ) -> Result<
         (
-            BoxCloneService<
-                RouterRequest,
-                RouterResponse<BoxStream<'static, ResponseBody>>,
-                BoxError,
-            >,
+            BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
             Plugins,
         ),
         crate::error::ServiceBuildError,

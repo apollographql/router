@@ -57,12 +57,25 @@ impl Plugin for IncludeSubgraphErrors {
         // Search for subgraph in our configured subgraph map.
         // If we can't find it, use the "all" value
         if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {
+            let sub_name_response = name.to_string();
+            let sub_name_error = name.to_string();
             return service
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
+                        tracing::info!("redacted subgraph({sub_name_response}) errors");
                         response.response.body_mut().errors = REDACTED_ERROR_MESSAGE.clone();
                     }
                     response
+                })
+                // _error to stop clippy complaining about unused assignments...
+                .map_err(move |mut _error: BoxError| {
+                    // Create a redacted error to replace whatever error we have
+                    tracing::info!("redacted subgraph({sub_name_error}) error");
+                    _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                        service: "redacted".to_string(),
+                        reason: "redacted".to_string(),
+                    });
+                    _error
                 })
                 .boxed();
         }
@@ -88,30 +101,27 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::PluggableRouterServiceBuilder;
-    use crate::ResponseBody;
     use crate::RouterRequest;
     use crate::RouterResponse;
     use crate::Schema;
 
-    static UNREDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap())
+    static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
+        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
     });
 
-    static REDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#).unwrap())
+    static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
+        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#).unwrap()
     });
 
-    static REDACTED_ACCOUNT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(
-            Response::from_bytes("account", Bytes::from_static(r#"{
+    static REDACTED_ACCOUNT_RESPONSE: Lazy<Response> = Lazy::new(|| {
+        Response::from_bytes("account", Bytes::from_static(r#"{
                 "data": null,
                 "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#.as_bytes())
     ).unwrap()
-    )
     });
 
-    static EXPECTED_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap())
+    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
+        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
@@ -122,10 +132,10 @@ mod test {
 
     async fn execute_router_test(
         query: &str,
-        body: &ResponseBody,
+        body: &Response,
         mut router_service: BoxCloneService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, Response>>,
             BoxError,
         >,
     ) {
@@ -150,7 +160,7 @@ mod test {
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>
+    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>
     {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));

@@ -85,9 +85,9 @@ mod test {
     use tower::ServiceBuilder;
     use tower::ServiceExt;
 
+    use crate::graphql::Response;
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockRouterService;
-    use crate::ResponseBody;
     use crate::RouterRequest;
     use crate::RouterResponse;
 
@@ -109,7 +109,7 @@ mod test {
                         .unwrap()
                 },
                 |ctx: HeaderValue, resp| async move {
-                    let resp: Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> =
+                    let resp: Result<RouterResponse<BoxStream<'static, Response>>, BoxError> =
                         resp.await;
                     resp.map(|mut response| {
                         response.response.headers_mut().insert("hello", ctx.clone());
