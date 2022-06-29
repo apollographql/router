@@ -262,11 +262,15 @@ Migration tips:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1227 https://github.com/apollographql/router/pull/1234 https://github.com/apollographql/router/pull/1239 https://github.com/apollographql/router/pull/1263
 
-### Non-GraphQL response body variants removed from `RouterResponse` ([PR #1307](https://github.com/apollographql/router/pull/1307))
+### Non-GraphQL response body variants removed from `RouterResponse` ([PR #1307](https://github.com/apollographql/router/pull/1307), [PR #1328](https://github.com/apollographql/router/pull/1328))
 
-Previously the `ResponseBody` enum was used in `RouterResponse`.
-One of this enum’s variants contains a `apollo_router::graphql::Response`,
-which is now used directly instead.
+The `ResponseBody` enum has been removed.
+It had variants for GraphQL and non-GraphQL responses.
+
+It was used:
+
+* In `RouterResponse` which now uses `apollo_router::graphql::Response` instead
+* In `Handler` for plugin custom endpoints which now uses `bytes::Bytes` instead
 
 Various type signatures will need changes such as:
 

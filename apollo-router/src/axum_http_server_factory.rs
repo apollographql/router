@@ -61,7 +61,6 @@ use crate::http_server_factory::NetworkStream;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
 use crate::router::ApolloRouterError;
-use crate::ResponseBody;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -414,31 +413,7 @@ async fn custom_plugin_handler(
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
     let req = Request::from_parts(head, body).into();
-    let res = handler.oneshot(req).await.map_err(|err| err.to_string())?;
-
-    let is_json = matches!(
-        res.body(),
-        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_)
-    );
-
-    let mut res = res.map(|body| match body {
-        ResponseBody::GraphQL(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::RawJSON(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::Text(res) => Bytes::from(res),
-    });
-
-    if is_json {
-        res.headers_mut().insert(
-            http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-    }
-
-    Ok::<_, String>(res)
+    handler.oneshot(req).await.map_err(|err| err.to_string())
 }
 
 async fn handle_get(
@@ -1793,11 +1768,7 @@ Content-Type: application/json\r
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::OK)
-                        .body(ResponseBody::Text(format!(
-                            "{} + {}",
-                            req.method(),
-                            req.uri().path()
-                        )))
+                        .body(format!("{} + {}", req.method(), req.uri().path()).into())
                         .unwrap(),
                 })
             })

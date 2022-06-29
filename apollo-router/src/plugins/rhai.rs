@@ -52,7 +52,6 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::SubgraphRequest;
@@ -1354,7 +1353,6 @@ impl Rhai {
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             .register_type::<Request>()
             .register_type::<Object>()
-            .register_type::<ResponseBody>()
             .register_type::<Response>()
             .register_type::<Value>()
             .register_type::<Error>()
@@ -1502,107 +1500,6 @@ impl Rhai {
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
-            // ResponseBody "short-cuts" to bypass the enum
-            // ResponseBody.label
-            .register_get_result("label", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the label from our resp
-                        to_dynamic(resp.label.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("label", |x: &mut ResponseBody, value: Dynamic| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to update the label on our resp
-                        resp.label = from_dynamic(&value)?;
-                        Ok(())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            // ResponseBody.data
-            .register_get_result("data", |x: &mut ResponseBody| match x {
-                ResponseBody::GraphQL(resp) => {
-                    // Because we are short-cutting the response here
-                    // we need to select the data from our resp
-                    to_dynamic(resp.data.clone())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            .register_set_result("data", |x: &mut ResponseBody, om: Map| match x {
-                ResponseBody::GraphQL(resp) => {
-                    // Because we are short-cutting the response here
-                    // we need to update the data on our resp
-                    resp.data = from_dynamic(&om.into())?;
-                    Ok(())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            // ResponseBody.path (Not Implemented)
-            // ResponseBody.errors
-            .register_get_result("errors", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the errors from our resp
-                        to_dynamic(resp.errors.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("errors", |x: &mut ResponseBody, value: Dynamic| match x {
-                ResponseBody::GraphQL(resp) => {
-                    resp.errors = from_dynamic(&value)?;
-                    Ok(())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            // ResponseBody.extensions
-            .register_get_result("extensions", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the extensions from our resp
-                        to_dynamic(resp.extensions.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("extensions", |x: &mut ResponseBody, om: Map| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to update the extensions on our resp
-                        resp.extensions = from_dynamic(&om.into())?;
-                        Ok(())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            // ResponseBody.response
-            /* We short-cut the treatment of ResponseBody processing to directly
-             * manipulate "data" rather than moving the enum as we probably should.
-             * We do this to "harmonise" the interactions with response data for Rhai
-             * scripts and (effectively) hide the ResponseBody enum from sight.
-             * At some point: ResponseBody should probably be taken out of the
-             * codebase, so this is probably a good decision.
-            .register_get_result("response", |x: &mut ResponseBody| match x {
-                ResponseBody::GraphQL(resp) => Ok(resp.clone()),
-                _ => Err("wrong type of response".into()),
-            })
-            .register_set_result("response", |x: &mut ResponseBody, value: Response| {
-                match x {
-                    ResponseBody::GraphQL(resp) => std::mem::replace(resp, value),
-                    _ => return Err("wrong type of response".into()),
-                };
-                Ok(())
-            })
-            */
             // Response.label
             .register_get("label", |x: &mut Response| {
                 x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
@@ -1696,9 +1593,6 @@ impl Rhai {
                 },
             )
             .register_fn("to_string", |x: &mut Request| -> String {
-                format!("{:?}", x)
-            })
-            .register_fn("to_string", |x: &mut ResponseBody| -> String {
                 format!("{:?}", x)
             })
             .register_fn("to_string", |x: &mut Response| -> String {

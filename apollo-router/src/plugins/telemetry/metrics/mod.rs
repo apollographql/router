@@ -35,7 +35,6 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::services::RouterResponse;
 use crate::Context;
-use crate::ResponseBody;
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;
@@ -43,7 +42,7 @@ pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 pub(crate) type CustomEndpoint =
-    BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>;
+    BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

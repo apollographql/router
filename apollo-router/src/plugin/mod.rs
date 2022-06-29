@@ -45,7 +45,6 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::SubgraphRequest;
@@ -319,14 +318,14 @@ macro_rules! register_plugin {
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<
-        BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
         http_ext::Request<Bytes>,
     >,
 }
 
 impl Handler {
     pub fn new(
-        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
@@ -335,7 +334,7 @@ impl Handler {
 }
 
 impl Service<http_ext::Request<Bytes>> for Handler {
-    type Response = http_ext::Response<ResponseBody>;
+    type Response = http_ext::Response<Bytes>;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -348,11 +347,9 @@ impl Service<http_ext::Request<Bytes>> for Handler {
     }
 }
 
-impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>>
-    for Handler
-{
+impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>> for Handler {
     fn from(
-        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self::new(original)
     }
