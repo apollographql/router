@@ -4,10 +4,6 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
-use opentelemetry::sdk::Resource;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -17,7 +13,6 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::MetricsAttributesConf;
 use crate::http_ext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
@@ -34,29 +29,10 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
+        _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let mut resources = Resource::default();
-            if let MetricsCommon {
-                attributes:
-                    Some(MetricsAttributesConf {
-                        insert: Some(insert_cfg),
-                        ..
-                    }),
-                ..
-            } = metrics_config
-            {
-                let kvs = insert_cfg
-                    .clone()
-                    .into_iter()
-                    .map(|e| KeyValue::new(Key::from(e.name), Value::from(e.value)))
-                    .collect::<Vec<KeyValue>>();
-                resources = Resource::new(kvs);
-            }
-
             let exporter = opentelemetry_prometheus::exporter()
-                .with_resource(resources)
                 .with_default_histogram_boundaries(vec![
                     0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
                 ])

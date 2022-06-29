@@ -12,7 +12,7 @@ use crate::json_ext::Value;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Response {
     /// The label that was passed to the defer or stream directive for this patch.

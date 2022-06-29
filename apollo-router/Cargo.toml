@@ -127,6 +127,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
+access-json = "0.1.0"
 async-compression = { version = "0.3.14", features = ["tokio", "brotli", "gzip", "deflate"] }
 
 [target.'cfg(macos)'.dependencies]

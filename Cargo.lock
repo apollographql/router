@@ -3,6 +3,18 @@
 version = 3
 
 [[package]]
+name = "access-json"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed51fb0cfa6f88331d4424a7aca87146b315a3b5bd2bbad298ec855718ef9df"
+dependencies = [
+ "erased-serde",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "add-timestamp-header"
 version = "0.1.0"
 dependencies = [
@@ -106,6 +118,7 @@ dependencies = [
 name = "apollo-router"
 version = "0.9.5"
 dependencies = [
+ "access-json",
  "anyhow",
  "apollo-parser",
  "apollo-spaceport",
@@ -1674,6 +1687,15 @@ checksum = "9fbb2fcaad9e6c9e3388dfcc1b44ae5508ae864b7af36f163a8a7c1a48796eee"
 dependencies = [
  "fsio",
  "indexmap",
+]
+
+[[package]]
+name = "erased-serde"
+version = "0.3.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad132dd8d0d0b546348d7d86cb3191aad14b34e5f979781fc005c80d4ac67ffd"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

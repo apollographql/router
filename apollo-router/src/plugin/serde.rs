@@ -1,6 +1,7 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
+use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::HeaderValue;
 use regex::Regex;
@@ -96,6 +97,31 @@ where
     D: Deserializer<'de>,
 {
     deserializer.deserialize_str(HeaderNameVisitor)
+}
+
+struct JSONQueryVisitor;
+
+impl<'de> Visitor<'de> for JSONQueryVisitor {
+    type Value = JSONQuery;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        formatter.write_str("struct JSONQuery")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        JSONQuery::parse(v)
+            .map_err(|e| de::Error::custom(format!("Invalid JSON query path for '{}' {}", v, e)))
+    }
+}
+
+pub fn deserialize_json_query<'de, D>(deserializer: D) -> Result<JSONQuery, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializer.deserialize_str(JSONQueryVisitor)
 }
 
 struct HeaderValueVisitor;
