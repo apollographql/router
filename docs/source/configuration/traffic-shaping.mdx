@@ -1,9 +1,6 @@
 ---
-title: Traffic shaping
-description: Configuring traffic shaping
+title: Traffic shaping in the Apollo Router
 ---
-
-import { Link } from "gatsby";
 
 The Apollo Router provides support for traffic shaping.
 
@@ -15,29 +12,29 @@ Currently features are limited, but are expected to grow over time:
 
 ## Configuration
 
-To configure traffic shaping add the `traffic_shaping` plugin to `your router.yaml`:
+To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config file](./configuration/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  variables_deduplication: true # Enable the variables deduplication optimization
+  variables_deduplication: true # Enable the variable deduplication optimization.
   all:
     query_deduplication: true # Enable query deduplication for all subgraphs.
-    compression: br # Enable brotli compression for all subgraphs
+    compression: br # Enable brotli compression for all subgraphs.
   subgraphs:
     products:
-      query_deduplication: false # Disable query deduplication for products.
-      compression: gzip # Enable gzip compression only for subgraph products
+      query_deduplication: false # Disable query for the products subgraph.
+      compression: gzip # Enable gzip compression only for the products subgraph.
 ```
 
-Note that configuration in the `subgraphs` section will take precedence over that in the `all` section.
+Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, query deduplication is enabled for all subgraphs _except_ the `products` subgraph.
 
 ### Sub-query deduplication
 
-Deduplication will cause any identical, in-flight, non-mutation sub-queries to be merged into a single request. This can reduce network bandwidth and CPU at your subgraph.
+Deduplication causes any identical, in-flight, non-mutation sub-queries to be merged into a single request. This can reduce network bandwidth and CPU usage in your subgraph.
 
-Note that only in flight requests are deduplicated.
+Note that only in-flight requests are deduplicated.
 
-### Variables deduplication
+### Variable deduplication
 
 Variables deduplication will cause any identical variables in the sub-request body to be merged into an unique list of variables. This can reduce network bandwidth and CPU at your subgraph.
 
