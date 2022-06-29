@@ -10,8 +10,9 @@ use self::storage::CacheStorage;
 pub(crate) mod coalescing;
 pub(crate) mod storage;
 
-type WaitMap<K, V: Clone> = Arc<Mutex<HashMap<K, broadcast::Receiver<Result<V, String>>>>>;
+type WaitMap<K, V: Clone> = Arc<Mutex<HashMap<K, broadcast::Sender<Result<V, String>>>>>;
 
+#[derive(Clone)]
 pub(crate) struct DedupCache<K: Clone + Send + Sync + Eq + Hash, V: Clone> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
@@ -28,13 +29,15 @@ where
         match locked_wait_map.get(&key) {
             Some(waiter) => {
                 // Register interest in key
-                let receiver = waiter.resubscribe();
-                return Entry::Receiver { receiver };
+                let receiver = waiter.subscribe();
+                return Entry {
+                    inner: EntryInner::Receiver { receiver },
+                };
             }
             None => {
-                let (sender, receiver) = broadcast::channel(1);
+                let (sender, _receiver) = broadcast::channel(1);
 
-                locked_wait_map.insert(key.clone(), receiver);
+                locked_wait_map.insert(key.clone(), sender.clone());
 
                 drop(locked_wait_map);
 
@@ -43,7 +46,9 @@ where
                     let _ = locked_wait_map.remove(&key);
                     sender.send(Ok(value.clone()));
 
-                    return Entry::Value(value);
+                    return Entry {
+                        inner: EntryInner::Value(value),
+                    };
                 }
 
                 let k = key.clone();
@@ -58,26 +63,39 @@ where
                     let _ = locked_wait_map.remove(&k);
                 });
 
-                let res = Entry::First {
-                    sender,
-                    key: key.clone(),
-                    wait_map: self.wait_map.clone(),
-                    storage: self.storage.clone(),
-                    _drop_signal,
+                let res = Entry {
+                    inner: EntryInner::First {
+                        sender,
+                        key: key.clone(),
+                        cache: self.clone(),
+                        _drop_signal,
+                    },
                 };
 
                 res
             }
         }
     }
+
+    async fn insert(&mut self, key: K, value: V) {
+        self.storage.insert(key.clone(), value.clone()).await;
+        let mut locked_wait_map = self.wait_map.lock().await;
+        let opt_sender = locked_wait_map.remove(&key);
+        /*drop(locked_wait_map);
+        if let Some(sender) = opt_sender {
+            sender.send(Ok(value));
+        }*/
+    }
 }
 
-pub(crate) enum Entry<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
+pub struct Entry<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
+    inner: EntryInner<K, V>,
+}
+enum EntryInner<K: Clone + Send + Sync + Eq + Hash, V: Clone + Send + Sync> {
     First {
         key: K,
         sender: broadcast::Sender<Result<V, String>>,
-        wait_map: WaitMap<K, V>,
-        storage: CacheStorage<K, V>,
+        cache: DedupCache<K, V>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
@@ -91,19 +109,32 @@ where
     K: Clone + Send + Sync + Eq + Hash + 'static,
     V: Clone + Send + Sync + 'static,
 {
+    pub fn is_first(&self) -> bool {
+        if let EntryInner::First { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn get(self) -> Result<V, String> {
+        match self.inner {
+            // there was already a value in cache
+            EntryInner::Value(v) => Ok(v),
+            EntryInner::Receiver { mut receiver } => receiver.recv().await.unwrap(),
+            _ => panic!("should not call get on the first call"),
+        }
+    }
+
     pub async fn insert(self, value: V) {
-        match self {
-            Entry::First {
+        match self.inner {
+            EntryInner::First {
                 key,
                 sender,
-                wait_map,
-                mut storage,
+                mut cache,
                 _drop_signal,
             } => {
-                storage.insert(key.clone(), value.clone()).await;
-                let mut locked_wait_map = wait_map.lock().await;
-                locked_wait_map.remove(&key);
-                drop(locked_wait_map);
+                cache.insert(key.clone(), value.clone()).await;
                 sender.send(Ok(value));
             }
             _ => {}
@@ -111,8 +142,8 @@ where
     }
 
     pub async fn error(self, error: String) {
-        match self {
-            Entry::First { sender, .. } => {
+        match self.inner {
+            EntryInner::First { sender, .. } => {
                 let _ = sender.send(Err(error));
             }
             _ => {}
@@ -124,16 +155,14 @@ async fn example_cache_usage(
     k: String,
     cache: &mut DedupCache<String, String>,
 ) -> Result<String, String> {
-    match cache.get(k).await {
-        // there was already a value in cache
-        Entry::Value(v) => Ok(v),
-        Entry::Receiver { mut receiver } => receiver.recv().await.unwrap(),
+    let entry = cache.get(k).await;
 
-        other => {
-            // potentially long and complex async task that can fail
-            let value = "hello".to_string();
-            other.insert(value.clone()).await;
-            Ok(value)
-        }
+    if entry.is_first() {
+        // potentially long and complex async task that can fail
+        let value = "hello".to_string();
+        entry.insert(value.clone()).await;
+        Ok(value)
+    } else {
+        entry.get().await
     }
 }
