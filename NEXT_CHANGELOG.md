@@ -361,11 +361,17 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Fix input coercion for a list ([PR #1327](https://github.com/apollographql/router/pull/1327))
+
+The router is now following coercion rules for List regarding [the specs](https://spec.graphql.org/June2018/#sec-Type-System.List). Especially it fixes the case when for an input type `[Int]` only `1` was provided as a value. It's now working and it's coerced to `[1]`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1327
+
 ### Returns HTTP 400 bad request instead of 500 when it's a query plan error ([PR #1321](https://github.com/apollographql/router/pull/1321))
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1321
 
-### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317)
+### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317))
 
 In a re-factoring the "include_subgraph_errors" plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialisation mechanism was improved to ensure that plugins start in the required sequence.
 
