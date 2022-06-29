@@ -5,7 +5,6 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::SubgraphRequest;
@@ -48,7 +47,7 @@ macro_rules! mock_service {
 mock_service!(
     Router,
     RouterRequest,
-    RouterResponse<BoxStream<'static, ResponseBody>>
+    RouterResponse<BoxStream<'static, Response>>
 );
 mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(

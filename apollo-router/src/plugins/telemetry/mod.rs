@@ -261,12 +261,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
@@ -287,7 +283,7 @@ impl Plugin for Telemetry {
                     let start = Instant::now();
                     async move {
                         let mut result: Result<
-                            RouterResponse<BoxStream<'static, ResponseBody>>,
+                            RouterResponse<BoxStream<'static, Response>>,
                             BoxError,
                         > = fut.await;
                         result = Self::update_metrics(
@@ -320,10 +316,7 @@ impl Plugin for Telemetry {
                                         let ctx = ctx.clone();
 
                                         response_stream.map(move |response| {
-                                            let response_has_errors = match &response {
-                                                ResponseBody::GraphQL(r) => !r.errors.is_empty(),
-                                                _ => false,
-                                            };
+                                            let response_has_errors = !response.errors.is_empty();
 
                                             if !matches!(sender, Sender::Noop) {
                                                 Self::update_apollo_metrics(
@@ -760,9 +753,9 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        result: Result<RouterResponse<BoxStream<'static, Response>>, BoxError>,
         request_duration: Duration,
-    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()

@@ -17,8 +17,8 @@ use tower::Layer;
 use tower::Service;
 
 use crate::error::Error;
+use crate::graphql::Response;
 use crate::layers::sync_checkpoint::CheckpointService;
-use crate::ResponseBody;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
@@ -51,7 +51,7 @@ impl Default for APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -147,7 +147,6 @@ mod apq_tests {
     use crate::error::Error;
     use crate::plugin::test::MockRouterService;
     use crate::Context;
-    use crate::ResponseBody;
 
     #[tokio::test]
     async fn it_works() {
@@ -381,11 +380,7 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
-    fn assert_error_matches(expected_error: &Error, res: crate::ResponseBody) {
-        if let ResponseBody::GraphQL(graphql_response) = res {
-            assert_eq!(&graphql_response.errors[0], expected_error);
-        } else {
-            panic!("expected a graphql response");
-        }
+    fn assert_error_matches(expected_error: &Error, res: Response) {
+        assert_eq!(&res.errors[0], expected_error);
     }
 }

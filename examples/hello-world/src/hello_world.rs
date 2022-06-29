@@ -5,7 +5,6 @@ use apollo_router::services::ExecutionRequest;
 use apollo_router::services::ExecutionResponse;
 use apollo_router::services::QueryPlannerRequest;
 use apollo_router::services::QueryPlannerResponse;
-use apollo_router::services::ResponseBody;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
@@ -41,12 +40,8 @@ impl Plugin for HelloWorld {
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]

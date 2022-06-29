@@ -198,9 +198,9 @@ impl Forward {
 impl AttributesForwardConf {
     pub(crate) async fn get_attributes_from_router_response(
         &self,
-        response: RouterResponse<BoxStream<'static, ResponseBody>>,
+        response: RouterResponse<BoxStream<'static, Response>>,
     ) -> (
-        RouterResponse<BoxStream<'static, ResponseBody>>,
+        RouterResponse<BoxStream<'static, Response>>,
         HashMap<String, String>,
     ) {
         let mut attributes = HashMap::new();
@@ -269,11 +269,9 @@ impl AttributesForwardConf {
 
         let response = http::Response::from_parts(
             parts,
-            once(ready(first.unwrap_or_else(|| {
-                ResponseBody::GraphQL(Response::default())
-            })))
-            .chain(rest)
-            .boxed(),
+            once(ready(first.unwrap_or_else(Response::default)))
+                .chain(rest)
+                .boxed(),
         )
         .into();
 

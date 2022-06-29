@@ -16,7 +16,6 @@ use crate::graphql;
 use crate::http_ext::Request;
 use crate::http_ext::Response;
 use crate::plugin::Handler;
-use crate::ResponseBody;
 
 /// Factory for creating the http server component.
 ///
@@ -35,7 +34,7 @@ pub(crate) trait HttpServerFactory {
     where
         RS: Service<
                 Request<graphql::Request>,
-                Response = Response<BoxStream<'static, ResponseBody>>,
+                Response = Response<BoxStream<'static, graphql::Response>>,
                 Error = BoxError,
             > + Send
             + Sync
@@ -101,7 +100,7 @@ impl HttpServerHandle {
         SF: HttpServerFactory,
         RS: Service<
                 Request<graphql::Request>,
-                Response = Response<BoxStream<'static, ResponseBody>>,
+                Response = Response<BoxStream<'static, graphql::Response>>,
                 Error = BoxError,
             > + Send
             + Sync

@@ -223,18 +223,18 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
+assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
 /// [`Context`] and [`http_ext::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]
-pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
+pub struct RouterResponse<T: Stream<Item = Response>> {
     pub response: http_ext::Response<T>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse<Once<Ready<ResponseBody>>> {
+impl RouterResponse<Once<Ready<Response>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -273,7 +273,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
             }
         }
 
-        let http_response = builder.body(once(ready(ResponseBody::GraphQL(res))))?;
+        let http_response = builder.body(once(ready(res)))?;
 
         // Create a compatible Response
         let compat_response = http_ext::Response {
@@ -336,7 +336,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
         )
     }
 
-    pub fn new_from_response_body(response: ResponseBody, context: Context) -> Self {
+    pub fn new_from_graphql_response(response: Response, context: Context) -> Self {
         Self {
             response: http::Response::new(once(ready(response))).into(),
             context,
@@ -344,18 +344,18 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + Unpin + 'static> RouterResponse<T> {
-    pub async fn next_response(&mut self) -> Option<ResponseBody> {
+impl<T: Stream<Item = Response> + Send + Unpin + 'static> RouterResponse<T> {
+    pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
+impl<T: Stream<Item = Response> + Send + 'static> RouterResponse<T> {
     pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = ResponseBody>>(self, f: F) -> RouterResponse<U>
+    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> RouterResponse<U>
     where
         F: FnMut(T) -> U,
     {
@@ -365,8 +365,8 @@ impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
         }
     }
 
-    pub fn boxed(self) -> RouterResponse<BoxStream<'static, ResponseBody>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, ResponseBody>)
+    pub fn boxed(self) -> RouterResponse<BoxStream<'static, Response>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
     }
 }
 
@@ -838,7 +838,6 @@ mod test {
 
     use crate::graphql;
     use crate::Context;
-    use crate::ResponseBody;
     use crate::RouterRequest;
     use crate::RouterResponse;
 
@@ -927,12 +926,10 @@ mod test {
             .clone();
         assert_eq!(
             response.next_response().await.unwrap(),
-            ResponseBody::GraphQL(
-                graphql::Response::builder()
-                    .extensions(extensions)
-                    .data(json!({}))
-                    .build()
-            )
+            graphql::Response::builder()
+                .extensions(extensions)
+                .data(json!({}))
+                .build()
         );
     }
 }

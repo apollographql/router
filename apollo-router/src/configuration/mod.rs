@@ -30,7 +30,6 @@ use tower_http::cors::CorsLayer;
 use tower_http::cors::{self};
 
 use crate::plugin::plugins;
-use crate::subscriber::is_global_subscriber_set;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -91,10 +90,6 @@ pub struct Configuration {
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
-// Add your plugin to this list so it gets automatically set up if its not been provided a custom configuration.
-// ! requires the plugin configuration to implement Default
-const MANDATORY_APOLLO_PLUGINS: &[&str] = &["csrf"];
-
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
@@ -122,14 +117,8 @@ impl Configuration {
         Box::new(self)
     }
 
-    pub(crate) fn plugins(&self) -> Map<String, Value> {
-        let mut plugins = Vec::default();
-
-        if is_global_subscriber_set() {
-            // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
-            // Note that this can only be done if the global subscriber has been set, i.e. we're not unit testing.
-            plugins.push(("apollo.telemetry".into(), Value::Object(Map::new())));
-        }
+    pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
+        let mut plugins = vec![];
 
         // Add all the apollo plugins
         for (plugin, config) in &self.apollo_plugins.plugins {
@@ -141,19 +130,6 @@ impl Configuration {
             plugins.push((plugin_full_name, config.clone()));
         }
 
-        // Add the mandatory apollo plugins with defaults,
-        // if a custom configuration hasn't been provided by the user
-        MANDATORY_APOLLO_PLUGINS.iter().for_each(|plugin_name| {
-            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin_name);
-            if !plugins.iter().any(|p| p.0 == plugin_full_name) {
-                tracing::debug!(
-                    "adding plugin {} with default configuration",
-                    plugin_full_name.as_str()
-                );
-                plugins.push((plugin_full_name, Value::Object(Map::new())));
-            }
-        });
-
         // Add all the user plugins
         if let Some(config_map) = self.plugins.plugins.as_ref() {
             for (plugin, config) in config_map {
@@ -161,19 +137,7 @@ impl Configuration {
             }
         }
 
-        // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
-        plugins.sort_by_key(|(name, _)| match name.as_str() {
-            "apollo.telemetry" => -100,
-            "apollo.rhai" => 100,
-            _ => 0,
-        });
-
-        let mut final_plugins = Map::new();
-        for (plugin, config) in plugins {
-            final_plugins.insert(plugin, config);
-        }
-
-        final_plugins
+        plugins
     }
 }
 
