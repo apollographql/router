@@ -105,6 +105,29 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
     }
 }
 
+/// test only helper method to create a router factory in integration tests
+///
+/// not meant to be used directly
+pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
+    let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+
+    let schema: Schema = schema.parse().unwrap();
+
+    let service = YamlRouterServiceFactory::default()
+        .create(Arc::new(config), Arc::new(schema), None)
+        .await;
+    assert_eq!(
+        service.map(|_| ()).unwrap_err().to_string().as_str(),
+        r#"couldn't build Router Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
+Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+
+Details:
+Error: Cannot find type "Review" in subgraph "products"
+caused by
+"#
+    );
+}
+
 async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -389,45 +412,6 @@ mod test {
         .unwrap();
         let service = create_service(config).await;
         assert!(service.is_err())
-    }
-
-    // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
-    // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_telemetry_doesnt_hang_with_invalid_schema() {
-        use tracing_subscriber::EnvFilter;
-
-        use crate::subscriber::set_global_subscriber;
-        use crate::subscriber::RouterSubscriber;
-
-        // A global subscriber must be set before we start up the telemetry plugin
-        let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(
-            tracing_subscriber::fmt::fmt()
-                .with_env_filter(EnvFilter::from_default_env())
-                .json()
-                .finish(),
-        ));
-
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            telemetry:
-              tracing:
-                trace_config:
-                  service_name: router
-                otlp:
-                  endpoint: default
-        "#,
-        )
-        .unwrap();
-
-        let schema: Schema = include_str!("testdata/invalid_supergraph.graphql")
-            .parse()
-            .unwrap();
-
-        let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
-            .await;
-        service.map(|_| ()).unwrap_err();
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
