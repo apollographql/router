@@ -10,28 +10,41 @@
 //!
 
 mod deduplication;
+mod timeout;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
+use futures::stream::BoxStream;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::limit::RateLimitLayer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::timeout::TimeoutLayer;
+use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
+
+const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
+trait Merge {
+    fn merge(&self, fallback: Option<&Self>) -> Self;
+}
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -40,15 +53,27 @@ struct Shaping {
     query_deduplication: Option<bool>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
+    /// Enable rate limiting
+    rate_limit: Option<RateLimitConf>,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// Enable timeout for incoming requests
+    timeout: Option<Duration>,
 }
 
-impl Shaping {
-    fn merge(&self, fallback: Option<&Shaping>) -> Shaping {
+impl Merge for Shaping {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
         match fallback {
             None => self.clone(),
             Some(fallback) => Shaping {
                 query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
                 compression: self.compression.or(fallback.compression),
+                timeout: self.timeout.or(fallback.timeout),
+                rate_limit: self
+                    .rate_limit
+                    .as_ref()
+                    .or(fallback.rate_limit.as_ref())
+                    .cloned(),
             },
         }
     }
@@ -56,13 +81,52 @@ impl Shaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct RouterShaping {
+    /// Enable rate limiting
+    rate_limit: Option<RateLimitConf>,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// Enable timeout for incoming requests
+    timeout: Option<Duration>,
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Config {
     #[serde(default)]
+    /// Applied at the router level
+    router: Option<RouterShaping>,
+    #[serde(default)]
+    /// Applied on all subgraphs
     all: Option<Shaping>,
     #[serde(default)]
+    /// Applied on specific subgraphs
     subgraphs: HashMap<String, Shaping>,
     /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     variables_deduplication: Option<bool>,
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+struct RateLimitConf {
+    /// Number of requests
+    num: u64,
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    /// Per time
+    per: Duration,
+}
+
+impl Merge for RateLimitConf {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => Self {
+                num: fallback.num,
+                per: fallback.per,
+            },
+        }
+    }
 }
 
 struct TrafficShaping {
@@ -74,41 +138,36 @@ impl Plugin for TrafficShaping {
     type Config = Config;
 
     async fn new(config: Self::Config) -> Result<Self, BoxError> {
+        // TODO display some warnings regarding the configuration with timeout and rate limit
         Ok(Self { config })
     }
 
-    fn subgraph_service(
+    fn router_service(
         &mut self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
-        let all_config = self.config.all.as_ref();
-        let subgraph_config = self.config.subgraphs.get(name);
-        let final_config = Self::merge_config(all_config, subgraph_config);
-
-        if let Some(config) = final_config {
-            ServiceBuilder::new()
-                .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
-                    // Buffer is required because dedup layer requires a clone service.
-                    ServiceBuilder::new()
-                        .layer(QueryDeduplicationLayer::default())
-                        .buffered()
-                }))
-                .service(service)
-                .map_request(move |mut req: SubgraphRequest| {
-                    if let Some(compression) = config.compression {
-                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
-                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
-                    }
-
-                    req
-                })
-                .boxed()
-        } else {
-            service
-        }
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        ServiceBuilder::new()
+            .layer(TimeoutLayer::new(
+                self.config
+                    .router
+                    .as_ref()
+                    .and_then(|r| r.timeout)
+                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
+            ))
+            .option_layer(
+                self.config
+                    .router
+                    .as_ref()
+                    .and_then(|r| r.rate_limit.as_ref())
+                    .map(|router_rate_limit_conf| {
+                        ServiceBuilder::new().layer(RateLimitLayer::new(
+                            router_rate_limit_conf.num,
+                            router_rate_limit_conf.per,
+                        ))
+                    }),
+            )
+            .service(service)
+            .boxed()
     }
 
     fn query_planning_service(
@@ -126,13 +185,59 @@ impl Plugin for TrafficShaping {
             service
         }
     }
+
+    fn subgraph_service(
+        &mut self,
+        name: &str,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
+        let all_config = self.config.all.as_ref();
+        let subgraph_config = self.config.subgraphs.get(name);
+        let final_config = Self::merge_config(all_config, subgraph_config);
+
+        if let Some(config) = final_config {
+            ServiceBuilder::new()
+                .layer(TimeoutLayer::new(
+                    config
+                    .timeout
+                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
+                ))
+                .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
+                    // Buffer is required because dedup layer requires a clone service.
+                    ServiceBuilder::new()
+                        .layer(QueryDeduplicationLayer::default())
+                        .buffered()
+                }))
+                
+                .option_layer(config.rate_limit.as_ref().map(|rate_limit_conf| {
+                    RateLimitLayer::new(
+                        rate_limit_conf.num,
+                        rate_limit_conf.per,
+                    )
+                }))
+                .service(service)
+                .map_request(move |mut req: SubgraphRequest| {
+                    if let Some(compression) = config.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
+                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+
+                    req
+                })
+                .boxed()
+        } else {
+            service
+        }
+    }
 }
 
 impl TrafficShaping {
-    fn merge_config(
-        all_config: Option<&Shaping>,
-        subgraph_config: Option<&Shaping>,
-    ) -> Option<Shaping> {
+    fn merge_config<T: Merge + Clone>(
+        all_config: Option<&T>,
+        subgraph_config: Option<&T>,
+    ) -> Option<T> {
         let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
         merged_subgraph_config.or_else(|| all_config.cloned())
     }
@@ -329,7 +434,7 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(TrafficShaping::merge_config(None, None), None);
+        assert_eq!(TrafficShaping::merge_config::<Shaping>(None, None), None);
         assert_eq!(
             TrafficShaping::merge_config(config.all.as_ref(), None),
             config.all
