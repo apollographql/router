@@ -368,7 +368,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Improve configuration validation and environment expansion ([PR #1331](https://github.com/apollographql/router/pull/1331))
 
 Environment expansion now covers the entire configuration file, and supports non string types.
-This means that it is not possible to use environment variable in the server section of the yaml, and also in numeric and boolean fields.
+This means that it is now possible to use environment variable in the server section of the yaml, and also in numeric and boolean fields.
 
 Environment variables will always be shown in their original form in error messages preventing leakage of secrets.
 
