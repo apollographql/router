@@ -167,22 +167,6 @@ impl PlanNode {
             let mut value;
             let mut errors;
 
-            if !current_dir.is_empty() {
-                // Check if parent data has field requested by Flatten
-                match parent_value.pointer(&current_dir.to_string()) {
-                    Some(matched_value) => {
-                        // If it's not we don't need to run underlying fetch
-                        if matched_value.is_null() {
-                            return (
-                                Value::default(),
-                                Vec::new(),
-                            )
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
             match self {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
@@ -517,7 +501,22 @@ pub(crate) mod fetch {
             )
             .await
             {
-                Some(variables) => variables,
+                Some(variables) => {
+                    if variables.variables.is_empty() && !current_dir.is_empty() {
+                        match data.pointer(&current_dir.to_string()) {
+                            Some(matched_value) => {
+                                if matched_value.is_null() {
+                                    return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
+                                }
+                            },
+                            None => {
+                                return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
+                            }
+                        }
+                    }
+
+                    variables
+                },
                 None => {
                     return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
                 }
