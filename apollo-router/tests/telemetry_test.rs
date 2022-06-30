@@ -4,10 +4,9 @@ use apollo_router::__create_test_service_factory_from_yaml;
 // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
 #[tokio::test(flavor = "multi_thread")]
 async fn test_telemetry_doesnt_hang_with_invalid_schema() {
-    use tracing_subscriber::EnvFilter;
-
     use apollo_router::subscriber::set_global_subscriber;
     use apollo_router::subscriber::RouterSubscriber;
+    use tracing_subscriber::EnvFilter;
 
     // A global subscriber must be set before we start up the telemetry plugin
     let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(
