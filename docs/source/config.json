@@ -14,7 +14,7 @@
       "CSRF prevention": "/configuration/csrf",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
-      "Traffic shaping (experimental)": "/configuration/traffic-shaping",
+      "Traffic shaping": "/configuration/traffic-shaping",
       "Subgraph error inclusion (experimental)": "/configuration/subgraph-error-inclusion"
     },
     "Monitoring & Metrics": {
