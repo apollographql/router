@@ -1,6 +1,10 @@
-use anyhow::{ensure, Result};
-use sha2::{Digest, Sha256};
-use std::{fs::File, io};
+use std::fs::File;
+use std::io;
+
+use anyhow::ensure;
+use anyhow::Result;
+use sha2::Digest;
+use sha2::Sha256;
 use structopt::StructOpt;
 use xtask::*;
 

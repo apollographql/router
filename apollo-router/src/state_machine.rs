@@ -1,18 +1,34 @@
-use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
-use super::router::ApolloRouterError::{self, NoConfiguration, NoSchema};
-use super::router::Event::{self, UpdateConfiguration, UpdateSchema};
-use super::router_factory::RouterServiceConfigurator;
-use super::state_machine::State::{Errored, Running, Startup, Stopped};
-use crate::configuration::{Configuration, ListenAddr};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::sync::Arc;
+
+use futures::prelude::*;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
+use Event::NoMoreConfiguration;
+use Event::NoMoreSchema;
+use Event::Shutdown;
+
+use super::http_server_factory::HttpServerFactory;
+use super::http_server_factory::HttpServerHandle;
+use super::router::ApolloRouterError::NoConfiguration;
+use super::router::ApolloRouterError::NoSchema;
+use super::router::ApolloRouterError::{self};
+use super::router::Event::UpdateConfiguration;
+use super::router::Event::UpdateSchema;
+use super::router::Event::{self};
+use super::router_factory::RouterServiceFactory;
+use super::state_machine::State::Errored;
+use super::state_machine::State::Running;
+use super::state_machine::State::Startup;
+use super::state_machine::State::Stopped;
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
+use crate::router_factory::RouterServiceConfigurator;
 use crate::services::Plugins;
 use crate::Schema;
-use futures::prelude::*;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use tokio::sync::{OwnedRwLockWriteGuard, RwLock};
-use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
@@ -392,23 +408,30 @@ impl<T> ResultExt<T> for Result<T, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::http_ext::{Request, Response};
-    use crate::http_server_factory::Listener;
-    use crate::new_service::NewService;
-    use crate::router_factory::{RouterServiceConfigurator, RouterServiceFactory};
-    use crate::{graphql, ResponseBody};
-    use futures::channel::oneshot;
-    use futures::future::BoxFuture;
-    use futures::stream::BoxStream;
-    use mockall::{mock, Sequence};
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
-    use std::task::{Context, Poll};
+    use std::task::Context;
+    use std::task::Poll;
+
+    use futures::channel::oneshot;
+    use futures::future::BoxFuture;
+    use futures::stream::BoxStream;
+    use mockall::mock;
+    use mockall::Sequence;
     use test_log::test;
-    use tower::{BoxError, Service};
+    use tower::BoxError;
+    use tower::Service;
+
+    use super::*;
+    use crate::graphql;
+    use crate::http_ext::Request;
+    use crate::http_ext::Response;
+    use crate::http_server_factory::Listener;
+    use crate::router_factory::RouterServiceConfigurator;
+    use crate::router_factory::RouterServiceFactory;
+    use crate::services::new_service::NewService;
 
     fn example_schema() -> Schema {
         include_str!("testdata/supergraph.graphql").parse().unwrap()
@@ -627,7 +650,6 @@ mod tests {
             type RouterService = MockMyRouter;
             type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
         }
-
         impl  NewService<Request<graphql::Request>> for MyRouterFactory {
             type Service = MockMyRouter;
             fn new_service(&self) -> MockMyRouter;
@@ -652,7 +674,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = Response<BoxStream<'static, ResponseBody>>;
+        type Response = Response<BoxStream<'static, graphql::Response>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 

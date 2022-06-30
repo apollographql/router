@@ -1,15 +1,18 @@
-use crate::error::CacheResolverError;
-use crate::traits::CacheResolver;
-use derivative::Derivative;
-use futures::lock::Mutex;
-use lru::LruCache;
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::sync::Arc;
-use tokio::sync::broadcast::{self, Sender};
+
+use derivative::Derivative;
+use futures::lock::Mutex;
+use lru::LruCache;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast::{self};
 use tokio::sync::oneshot;
+
+use crate::error::CacheResolverError;
+use crate::traits::CacheResolver;
 
 /// A caching map optimised for slow value resolution.
 ///
@@ -147,12 +150,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::error::CacheResolverError;
     use async_trait::async_trait;
-    use futures::stream::{FuturesUnordered, StreamExt};
+    use futures::stream::FuturesUnordered;
+    use futures::stream::StreamExt;
     use mockall::mock;
     use test_log::test;
+
+    use super::*;
+    use crate::error::CacheResolverError;
 
     struct HasACache {
         cm: CachingMap<usize, usize>,

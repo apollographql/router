@@ -1,9 +1,5 @@
-use crate::error::Error;
-use crate::error::FetchError;
-use crate::graphql::{Request, Response};
-use crate::json_ext::{Path, Value, ValueExt};
-use crate::service_registry::ServiceRegistry;
-use crate::*;
+use std::collections::HashSet;
+
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 pub use fetch::OperationKind;
@@ -11,8 +7,17 @@ use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use std::collections::HashSet;
 use tracing::Instrument;
+
+use crate::error::Error;
+use crate::error::FetchError;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::service_registry::ServiceRegistry;
+use crate::*;
 
 mod bridge_query_planner;
 mod caching_query_planner;
@@ -306,20 +311,30 @@ impl PlanNode {
 }
 
 pub(crate) mod fetch {
-    use super::selection::{select_object, Selection};
-    use super::QueryPlanOptions;
-    use crate::error::{Error, FetchError};
-    use crate::graphql::Request;
-    use crate::json_ext::{Object, Path, Value, ValueExt};
-    use crate::service_registry::ServiceRegistry;
-    use crate::*;
+    use std::collections::HashMap;
+    use std::fmt::Display;
+    use std::sync::Arc;
+
     use indexmap::IndexSet;
     use serde::Deserialize;
-    use std::{collections::HashMap, fmt::Display, sync::Arc};
     use tower::ServiceExt;
-    use tracing::{instrument, Instrument};
+    use tracing::instrument;
+    use tracing::Instrument;
 
-    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    use super::selection::select_object;
+    use super::selection::Selection;
+    use super::QueryPlanOptions;
+    use crate::error::Error;
+    use crate::error::FetchError;
+    use crate::graphql::Request;
+    use crate::json_ext::Object;
+    use crate::json_ext::Path;
+    use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
+    use crate::service_registry::ServiceRegistry;
+    use crate::*;
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
         Query,
@@ -334,6 +349,12 @@ pub(crate) mod fetch {
                 OperationKind::Mutation => write!(f, "Mutation"),
                 OperationKind::Subscription => write!(f, "Subscription"),
             }
+        }
+    }
+
+    impl Default for OperationKind {
+        fn default() -> Self {
+            OperationKind::Query
         }
     }
 
@@ -529,6 +550,10 @@ pub(crate) mod fetch {
                     .oneshot(subgraph_request)
                     .instrument(tracing::trace_span!("subfetch_stream"))
                     .await
+                    // TODO this is a problem since it restores details about failed service
+                    // when errors have been redacted in the include_subgraph_errors module.
+                    // Unfortunately, not easy to fix here, because at this point we don't
+                    // know if we should be redacting errors for this subgraph...
                     .map_err(|e| FetchError::SubrequestHttpError {
                         service: service_name.to_string(),
                         reason: e.to_string(),
@@ -632,8 +657,11 @@ pub(crate) struct FlattenNode {
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
 mod log {
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Map;
+    use serde_json_bytes::Value;
+
     use crate::query_planner::PlanNode;
-    use serde_json_bytes::{ByteString, Map, Value};
 
     pub(crate) fn trace_query_plan(plan: &PlanNode) {
         tracing::trace!("query plan\n{:?}", plan);
@@ -657,13 +685,17 @@ mod log {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use http::Method;
+    use std::collections::HashMap;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::{collections::HashMap, sync::atomic::AtomicBool};
-    use tower::{ServiceBuilder, ServiceExt};
+
+    use http::Method;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
+    use super::*;
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")

@@ -2,24 +2,24 @@
 //!
 //! To improve their usability.
 
-use axum::{body::boxed, response::IntoResponse};
-use bytes::Bytes;
-use futures::{
-    future::ready,
-    stream::{once, BoxStream},
-};
-use http::{
-    header::{self, HeaderName},
-    HeaderValue, Method,
-};
-use multimap::MultiMap;
-use std::{
-    cmp::PartialEq,
-    hash::Hash,
-    ops::{Deref, DerefMut},
-};
+use std::cmp::PartialEq;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
-use crate::ResponseBody;
+use axum::body::boxed;
+use axum::response::IntoResponse;
+use bytes::Bytes;
+use futures::future::ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use http::header::HeaderName;
+use http::header::{self};
+use http::HeaderValue;
+use http::Method;
+use multimap::MultiMap;
+
+use crate::graphql;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
 /// because header name creation is fallible.
@@ -241,8 +241,8 @@ impl<T> Response<T> {
     }
 }
 
-impl Response<BoxStream<'static, ResponseBody>> {
-    pub fn from_response_to_stream(http: http::response::Response<ResponseBody>) -> Self {
+impl Response<BoxStream<'static, graphql::Response>> {
+    pub fn from_response_to_stream(http: http::response::Response<graphql::Response>) -> Self {
         let (parts, body) = http.into_parts();
         Response {
             inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
@@ -297,7 +297,7 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-impl IntoResponse for Response<ResponseBody> {
+impl IntoResponse for Response<graphql::Response> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
         let (mut parts, body) = http::Response::from(self).into_parts();
@@ -323,8 +323,11 @@ impl IntoResponse for Response<Bytes> {
 
 #[cfg(test)]
 mod test {
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
+
     use crate::http_ext::Request;
-    use http::{HeaderValue, Method, Uri};
 
     #[test]
     fn builder() {

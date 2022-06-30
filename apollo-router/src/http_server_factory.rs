@@ -1,12 +1,22 @@
-use super::router::ApolloRouterError;
-use crate::configuration::{Configuration, ListenAddr};
-use crate::plugin::Handler;
-use crate::router_factory::RouterServiceFactory;
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use std::sync::Arc;
-use std::{collections::HashMap, pin::Pin};
+use futures::stream::BoxStream;
+use tower::BoxError;
+use tower::Service;
+
+use super::router::ApolloRouterError;
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
+use crate::graphql;
+use crate::http_ext::Request;
+use crate::http_ext::Response;
+use crate::plugin::Handler;
+use crate::router_factory::RouterServiceFactory;
 
 /// Factory for creating the http server component.
 ///
@@ -170,11 +180,13 @@ impl Listener {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use futures::channel::oneshot;
     use std::net::SocketAddr;
     use std::str::FromStr;
+
+    use futures::channel::oneshot;
     use test_log::test;
+
+    use super::*;
 
     #[test(tokio::test)]
     async fn sanity() {

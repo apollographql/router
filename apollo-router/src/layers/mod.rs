@@ -1,21 +1,24 @@
 //! Reusable layers
 //! Layers that are specific to one plugin should not be placed in this module.
+use std::future::Future;
+use std::ops::ControlFlow;
+use std::sync::Arc;
+
+use moka::sync::Cache;
+use tokio::sync::RwLock;
+use tower::buffer::BufferLayer;
+use tower::layer::util::Stack;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower_service::Service;
+use tracing::Span;
+
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::cache::CachingLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
-use moka::sync::Cache;
-use std::future::Future;
-use std::ops::ControlFlow;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tower::buffer::BufferLayer;
-use tower::layer::util::Stack;
-use tower::{BoxError, ServiceBuilder};
-use tower_service::Service;
-use tracing::Span;
 
 pub mod map_future_with_context;
 
@@ -50,7 +53,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::ResponseBody;
+    /// # use apollo_router::graphql::Response;
     /// # use apollo_router::services::{RouterRequest, RouterResponse};
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test<S: Service<RouterRequest> + Send>(service: S) {
@@ -99,10 +102,10 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::ResponseBody;
+    /// # use apollo_router::graphql::Response;
     /// # use apollo_router::services::{RouterRequest, RouterResponse};
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, ResponseBody>>, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, Response>>, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ = ServiceBuilder::new()
     ///             .checkpoint(|req:RouterRequest|{
     ///                if req.originating_request.method() == Method::GET {
@@ -162,10 +165,10 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::ResponseBody;
+    /// # use apollo_router::graphql::Response;
     /// # use apollo_router::services::{RouterRequest, RouterResponse};
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, ResponseBody>>, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, Response>>, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ = ServiceBuilder::new()
     ///             .checkpoint_async(|req:RouterRequest| async {
     ///                if req.originating_request.method() == Method::GET {
@@ -273,10 +276,10 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::services::ResponseBody;
+    /// # use apollo_router::graphql::Response;
     /// # use apollo_router::services::{RouterRequest, RouterResponse};
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, Response>>, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ : BoxService<RouterRequest, S::Response, S::Error> = ServiceBuilder::new()
     ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
     ///                 fut.await
@@ -336,11 +339,11 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::services::ResponseBody;
+    /// # use apollo_router::graphql::Response;
     /// # use apollo_router::services::{RouterRequest, RouterResponse};
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse<BoxStream<'static, Response>>, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
     /// let _ : BoxService<RouterRequest, S::Response, S::Error> = service
     ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
     ///                 fut.await

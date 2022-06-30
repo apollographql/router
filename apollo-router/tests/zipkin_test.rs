@@ -1,7 +1,9 @@
 mod common;
-use crate::common::TracingTest;
 use std::path::Path;
+
 use tower::BoxError;
+
+use crate::common::TracingTest;
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tracing() -> Result<(), BoxError> {

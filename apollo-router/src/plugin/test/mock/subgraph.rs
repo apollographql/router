@@ -1,12 +1,19 @@
 //! Mock subgraph implementation
 
-use crate::graphql::{Request, Response};
-use crate::json_ext::Object;
-use crate::{SubgraphRequest, SubgraphResponse};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::task::Poll;
+
 use futures::future;
 use http::StatusCode;
-use std::{collections::HashMap, sync::Arc, task::Poll};
-use tower::{BoxError, Service};
+use tower::BoxError;
+use tower::Service;
+
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 type MockResponses = HashMap<Request, Response>;
 

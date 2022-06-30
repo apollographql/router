@@ -1,14 +1,18 @@
 //! Configuration for the telemetry plugin.
-use super::metrics::MetricsAttributesConf;
-use super::*;
-use crate::plugins::telemetry::metrics;
-use opentelemetry::sdk::Resource;
-use opentelemetry::{Array, KeyValue, Value};
-use schemars::JsonSchema;
-use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
+
+use opentelemetry::sdk::Resource;
+use opentelemetry::Array;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+use super::metrics::MetricsAttributesConf;
+use super::*;
+use crate::plugins::telemetry::metrics;
 
 pub trait GenericWith<T>
 where

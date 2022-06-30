@@ -1,12 +1,15 @@
 //! Namespace for the GraphQL [`Request`], [`Response`], and [`Error`] types.
 
-use crate::error::{FetchError, Location};
+use std::fmt;
+
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::error::FetchError;
+use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
 pub use crate::request::Request;
 pub use crate::response::Response;
 

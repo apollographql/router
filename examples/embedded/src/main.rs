@@ -1,10 +1,13 @@
-use anyhow::{anyhow, Result};
+use std::sync::Arc;
+
+use anyhow::anyhow;
+use anyhow::Result;
 use apollo_router::services::PluggableRouterServiceBuilder;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::SubgraphService;
-use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
-use std::sync::Arc;
-use tower::util::BoxCloneService;
+use apollo_router::subscriber::set_global_subscriber;
+use apollo_router::subscriber::RouterSubscriber;
+use tower::util::BoxService;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 

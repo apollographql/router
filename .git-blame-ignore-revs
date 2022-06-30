@@ -1,0 +1,4 @@
+# .git-blame-ignore-revs
+
+# Reformat with imports_granularity = Item and group_imports = StdExternalCrate
+af3209126ffee9b825b694ee6913745873e8115b

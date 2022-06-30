@@ -17,13 +17,13 @@
 pub mod serde;
 pub mod test;
 
-use crate::graphql::Response;
-use crate::layers::ServiceBuilderExt;
-use crate::{
-    http_ext, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
-use ::serde::{de::DeserializeOwned, Deserialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+
+use ::serde::de::DeserializeOwned;
+use ::serde::Deserialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -31,13 +31,24 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::task::{Context, Poll};
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
-use tower::{BoxError, Service, ServiceBuilder};
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
@@ -110,12 +121,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         service
     }
 
@@ -186,12 +193,8 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>;
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
@@ -241,12 +244,8 @@ where
 
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service(service)
     }
 
@@ -319,14 +318,14 @@ macro_rules! register_plugin {
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<
-        BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
         http_ext::Request<Bytes>,
     >,
 }
 
 impl Handler {
     pub fn new(
-        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
@@ -335,7 +334,7 @@ impl Handler {
 }
 
 impl Service<http_ext::Request<Bytes>> for Handler {
-    type Response = http_ext::Response<ResponseBody>;
+    type Response = http_ext::Response<Bytes>;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -348,11 +347,9 @@ impl Service<http_ext::Request<Bytes>> for Handler {
     }
 }
 
-impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>>
-    for Handler
-{
+impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>> for Handler {
     fn from(
-        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<ResponseBody>, BoxError>,
+        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self::new(original)
     }

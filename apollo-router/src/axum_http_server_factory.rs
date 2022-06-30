@@ -1,46 +1,66 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use crate::configuration::{Configuration, ListenAddr};
-use crate::graphql;
-use crate::http_ext;
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
-use crate::plugin::Handler;
-use crate::router::ApolloRouterError;
-use crate::router_factory::RouterServiceFactory;
-use crate::ResponseBody;
-use async_compression::tokio::write::{BrotliDecoder, GzipDecoder, ZlibDecoder};
-use axum::extract::{Extension, Host, OriginalUri};
-use axum::http::{header::HeaderMap, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::*;
-use axum::routing::get;
-use axum::Router;
-use bytes::Bytes;
-use futures::stream::BoxStream;
-use futures::{channel::oneshot, prelude::*};
-use http::header::CONTENT_ENCODING;
-use http::{HeaderValue, Request, Uri};
-use hyper::server::conn::Http;
-use hyper::Body;
-use opentelemetry::global;
-use opentelemetry::trace::{SpanKind, TraceContextExt};
-use serde_json::json;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
+
+use async_compression::tokio::write::BrotliDecoder;
+use async_compression::tokio::write::GzipDecoder;
+use async_compression::tokio::write::ZlibDecoder;
+use axum::extract::Extension;
+use axum::extract::Host;
+use axum::extract::OriginalUri;
+use axum::http::header::HeaderMap;
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::middleware::{self};
+use axum::response::*;
+use axum::routing::get;
+use axum::Router;
+use bytes::Bytes;
+use futures::channel::oneshot;
+use futures::prelude::*;
+use futures::stream::BoxStream;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
+use http::Request;
+use http::Uri;
+use hyper::server::conn::Http;
+use hyper::Body;
+use opentelemetry::global;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceContextExt;
+use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tower::util::BoxService;
+use tower::BoxError;
 use tower::MakeService;
-use tower::{BoxError, ServiceExt};
+use tower::ServiceExt;
 use tower_http::compression::CompressionLayer;
-use tower_http::trace::{MakeSpan, TraceLayer};
+use tower_http::trace::MakeSpan;
+use tower_http::trace::TraceLayer;
 use tower_service::Service;
-use tracing::{Level, Span};
+use tracing::Level;
+use tracing::Span;
+
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
+use crate::graphql;
+use crate::http_ext;
+use crate::http_server_factory::HttpServerFactory;
+use crate::http_server_factory::HttpServerHandle;
+use crate::http_server_factory::Listener;
+use crate::http_server_factory::NetworkStream;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Handler;
+use crate::router::ApolloRouterError;
+use crate::router_factory::RouterServiceFactory;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -393,38 +413,14 @@ async fn custom_plugin_handler(
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
     let req = Request::from_parts(head, body).into();
-    let res = handler.oneshot(req).await.map_err(|err| err.to_string())?;
-
-    let is_json = matches!(
-        res.body(),
-        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_)
-    );
-
-    let mut res = res.map(|body| match body {
-        ResponseBody::GraphQL(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::RawJSON(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::Text(res) => Bytes::from(res),
-    });
-
-    if is_json {
-        res.headers_mut().insert(
-            http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-    }
-
-    Ok::<_, String>(res)
+    handler.oneshot(req).await.map_err(|err| err.to_string())
 }
 
 async fn handle_get(
     Host(host): Host,
     service: BoxService<
         http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, ResponseBody>>,
+        http_ext::Response<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     http_request: Request<Body>,
@@ -462,7 +458,7 @@ async fn handle_post(
     Json(request): Json<graphql::Request>,
     service: BoxService<
         http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, ResponseBody>>,
+        http_ext::Response<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     header_map: HeaderMap,
@@ -496,7 +492,7 @@ async fn run_graphql_request<RS>(
 where
     RS: Service<
             http_ext::Request<graphql::Request>,
-            Response = http_ext::Response<BoxStream<'static, ResponseBody>>,
+            Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
         > + Send
         + 'static,
@@ -673,25 +669,33 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+
+    use async_compression::tokio::write::GzipEncoder;
+    use http::header::ACCEPT_ENCODING;
+    use http::header::CONTENT_TYPE;
+    use http::header::{self};
+    use mockall::mock;
+    use reqwest::header::ACCEPT;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
+    use reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+    use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
+    use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
+    use reqwest::header::ORIGIN;
+    use reqwest::redirect::Policy;
+    use reqwest::Client;
+    use reqwest::Method;
+    use reqwest::StatusCode;
+    use serde_json::json;
+    use test_log::test;
+    use tower::service_fn;
+
     use super::*;
     use crate::configuration::Cors;
     use crate::http_ext::Request;
-    use crate::new_service::NewService;
-    use async_compression::tokio::write::GzipEncoder;
-    use http::header::{self, ACCEPT_ENCODING, CONTENT_TYPE};
-    use mockall::mock;
-    use reqwest::header::{
-        ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
-        ORIGIN,
-    };
-    use reqwest::redirect::Policy;
-    use reqwest::{Client, Method, StatusCode};
-    use serde_json::json;
-    use std::net::SocketAddr;
-    use std::str::FromStr;
-    use test_log::test;
-    use tower::service_fn;
+    use crate::services::new_service::NewService;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -735,7 +739,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, ResponseBody>>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, graphql::Response>>, BoxError>;
         }
     }
 
@@ -743,14 +747,14 @@ mod tests {
     struct TestRouterServiceFactory {
         inner: tower_test::mock::Mock<
             http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
         >,
     }
 
     impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
         type Service = tower_test::mock::Mock<
             http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
         >;
 
         fn new_service(&self) -> Self::Service {
@@ -761,7 +765,7 @@ mod tests {
     impl RouterServiceFactory for TestRouterServiceFactory {
         type RouterService = tower_test::mock::Mock<
             http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = ResponseBody> + Send>>>,
+            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
         >;
 
         type Future = <<TestRouterServiceFactory as NewService<
@@ -951,7 +955,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1042,7 +1046,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1104,7 +1108,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1206,7 +1210,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1275,7 +1279,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1344,7 +1348,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1436,7 +1440,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1496,7 +1500,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1535,7 +1539,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1630,7 +1634,7 @@ mod tests {
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::GraphQL(example_response))
+                        .body(example_response)
                         .unwrap(),
                 ))
             });
@@ -1662,7 +1666,9 @@ mod tests {
 
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
-        use tokio::io::{AsyncBufReadExt, BufReader, Interest};
+        use tokio::io::AsyncBufReadExt;
+        use tokio::io::BufReader;
+        use tokio::io::Interest;
         use tokio::net::UnixStream;
 
         let content = match method {
@@ -1820,11 +1826,7 @@ Content-Type: application/json\r
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::OK)
-                        .body(ResponseBody::Text(format!(
-                            "{} + {}",
-                            req.method(),
-                            req.uri().path()
-                        )))
+                        .body(format!("{} + {}", req.method(), req.uri().path()).into())
                         .unwrap(),
                 })
             })
@@ -1904,12 +1906,16 @@ Content-Type: application/json\r
                 Ok(http_ext::Response::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
-                        .body(ResponseBody::Text(format!(
-                            "{} + {} + {:?}",
-                            req.method(),
-                            req.uri(),
-                            serde_json::to_string(req.body()).unwrap()
-                        )))
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!(format!(
+                                    "{} + {} + {:?}",
+                                    req.method(),
+                                    req.uri(),
+                                    serde_json::to_string(req.body()).unwrap()
+                                )))
+                                .build(),
+                        )
                         .unwrap(),
                 ))
             });
@@ -1924,11 +1930,14 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.text().await.unwrap(),
-            serde_json::to_string(&format!(
-                "GET + {}?query=query + {:?}",
-                url,
-                serde_json::to_string(&query).unwrap()
-            ))
+            serde_json::to_string(&json!({
+                "data":
+                    format!(
+                        "GET + {}?query=query + {:?}",
+                        url,
+                        serde_json::to_string(&query).unwrap()
+                    )
+            }))
             .unwrap()
         );
         let response = client
@@ -1941,11 +1950,14 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.text().await.unwrap(),
-            serde_json::to_string(&format!(
-                "POST + {} + {:?}",
-                url,
-                serde_json::to_string(&query).unwrap()
-            ))
+            serde_json::to_string(&json!({
+                "data":
+                    format!(
+                        "POST + {} + {:?}",
+                        url,
+                        serde_json::to_string(&query).unwrap()
+                    )
+            }))
             .unwrap()
         );
         server.shutdown().await

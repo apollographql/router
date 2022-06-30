@@ -1,33 +1,40 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use futures::future::ready;
+use futures::future::Ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::stream::Once;
+use futures::stream::StreamExt;
+use futures::Stream;
+use http::header::HeaderName;
+use http::method::Method;
+use http::HeaderValue;
+use http::StatusCode;
+use http::Uri;
+use http_ext::IntoHeaderName;
+use http_ext::IntoHeaderValue;
+use multimap::MultiMap;
+use serde_json_bytes::ByteString;
+use static_assertions::assert_impl_all;
+pub use subgraph_service::SubgraphService;
+use tower::BoxError;
+
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::error::Error;
-use crate::graphql::{Request, Response};
-use crate::json_ext::{Object, Path, Value};
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
 use crate::query_planner::QueryPlanOptions;
 use crate::*;
-use futures::{
-    future::{ready, Ready},
-    stream::{once, BoxStream, Once, StreamExt},
-    Stream,
-};
-use http::{header::HeaderName, HeaderValue, StatusCode};
-use http::{method::Method, Uri};
-use http_ext::IntoHeaderName;
-use http_ext::IntoHeaderValue;
-use multimap::MultiMap;
-use serde::{Deserialize, Serialize};
-use serde_json_bytes::ByteString;
-use static_assertions::assert_impl_all;
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::str::FromStr;
-use std::sync::Arc;
-pub use subgraph_service::SubgraphService;
-use tower::BoxError;
 
 mod execution_service;
 pub mod http_ext;
@@ -35,86 +42,6 @@ pub(crate) mod layers;
 pub mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
-
-/// Different kinds of body we could have as the Router's response
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-#[serde(untagged)]
-pub enum ResponseBody {
-    /// A GraphQL response corresponding to the spec <https://spec.graphql.org/October2021/#sec-Response>
-    GraphQL(Response),
-    /// A json value
-    RawJSON(serde_json::Value),
-    /// Text without any serialization (example: HTML content, Prometheus metrics, ...)
-    Text(String),
-}
-
-impl TryFrom<ResponseBody> for Response {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::GraphQL(res) => Ok(res),
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected Response, found RawJSON")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for String {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
-            }
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
-            }
-            ResponseBody::Text(res) => Ok(res),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for serde_json::Value {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(res) => Ok(res),
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
-        }
-    }
-}
-
-impl From<Response> for ResponseBody {
-    fn from(response: Response) -> Self {
-        Self::GraphQL(response)
-    }
-}
-
-impl From<serde_json::Value> for ResponseBody {
-    fn from(json: serde_json::Value) -> Self {
-        Self::RawJSON(json)
-    }
-}
-
-// This impl is purposefully done this way to hint users this might not be what they would like to do.
-/// Creates a ResponseBody from a &str
-///
-/// /!\ No serialization or deserialization is involved,
-/// please make sure you don't want to send a GraphQL response or a Raw JSON payload instead.
-impl FromStr for ResponseBody {
-    type Err = Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::Text(s.to_owned()))
-    }
-}
 
 assert_impl_all!(RouterRequest: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -213,18 +140,18 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
-/// [`Context`] and [`http_ext::Response<ResponseBody>`] for the response.
+assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]
-pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
+pub struct RouterResponse<T: Stream<Item = Response>> {
     pub response: http_ext::Response<T>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse<Once<Ready<ResponseBody>>> {
+impl RouterResponse<Once<Ready<Response>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -263,7 +190,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
             }
         }
 
-        let http_response = builder.body(once(ready(ResponseBody::GraphQL(res))))?;
+        let http_response = builder.body(once(ready(res)))?;
 
         // Create a compatible Response
         let compat_response = http_ext::Response {
@@ -326,7 +253,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
         )
     }
 
-    pub fn new_from_response_body(response: ResponseBody, context: Context) -> Self {
+    pub fn new_from_graphql_response(response: Response, context: Context) -> Self {
         Self {
             response: http::Response::new(once(ready(response))).into(),
             context,
@@ -334,18 +261,18 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + Unpin + 'static> RouterResponse<T> {
-    pub async fn next_response(&mut self) -> Option<ResponseBody> {
+impl<T: Stream<Item = Response> + Send + Unpin + 'static> RouterResponse<T> {
+    pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
+impl<T: Stream<Item = Response> + Send + 'static> RouterResponse<T> {
     pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = ResponseBody>>(self, f: F) -> RouterResponse<U>
+    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> RouterResponse<U>
     where
         F: FnMut(T) -> U,
     {
@@ -355,8 +282,8 @@ impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
         }
     }
 
-    pub fn boxed(self) -> RouterResponse<BoxStream<'static, ResponseBody>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, ResponseBody>)
+    pub fn boxed(self) -> RouterResponse<BoxStream<'static, Response>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
     }
 }
 
@@ -821,10 +748,15 @@ impl AsRef<Request> for Arc<http_ext::Request<Request>> {
 
 #[cfg(test)]
 mod test {
-    use crate::graphql;
-    use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
-    use http::{HeaderValue, Method, Uri};
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
     use serde_json::json;
+
+    use crate::graphql;
+    use crate::Context;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[test]
     fn router_request_builder() {
@@ -911,12 +843,10 @@ mod test {
             .clone();
         assert_eq!(
             response.next_response().await.unwrap(),
-            ResponseBody::GraphQL(
-                graphql::Response::builder()
-                    .extensions(extensions)
-                    .data(json!({}))
-                    .build()
-            )
+            graphql::Response::builder()
+                .extensions(extensions)
+                .data(json!({}))
+                .build()
         );
     }
 }

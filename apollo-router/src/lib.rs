@@ -56,9 +56,13 @@ mod traits;
 
 pub use configuration::Configuration;
 pub use context::Context;
-pub use executable::{main, Executable};
-pub use router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind};
-pub use services::{http_ext, new_service};
+pub use executable::main;
+pub use executable::Executable;
+pub use router::ApolloRouter;
+pub use router::ConfigurationKind;
+pub use router::SchemaKind;
+pub use router::ShutdownKind;
+pub use services::http_ext;
 pub use spec::Schema;
 
 #[deprecated(note = "use apollo_router::graphql::Request instead")]

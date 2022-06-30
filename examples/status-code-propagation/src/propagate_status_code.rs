@@ -1,13 +1,18 @@
+use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::ResponseBody;
-use apollo_router::services::{RouterRequest, RouterResponse};
-use apollo_router::services::{SubgraphRequest, SubgraphResponse};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use tower::{util::BoxService, BoxError, ServiceExt};
+use serde::Deserialize;
+use serde::Serialize;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceExt;
 
 // This configuration will be used
 // to Deserialize the yml configuration
@@ -68,10 +73,11 @@ impl Plugin for PropagateStatusCode {
         &self,
         service: BoxService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
+    {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -98,14 +104,18 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::{RouterRequest, RouterResponse};
-    use apollo_router::services::{SubgraphRequest, SubgraphResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
+    use apollo_router::services::SubgraphRequest;
+    use apollo_router::services::SubgraphResponse;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
+
+    use crate::propagate_status_code::PropagateStatusCode;
+    use crate::propagate_status_code::PropagateStatusCodeConfig;
 
     // This test ensures the router will be able to
     // find our `propagate_status_code` plugin,

@@ -5,15 +5,22 @@
 
 use std::ops::ControlFlow;
 
-use crate::error::Error;
-use crate::layers::sync_checkpoint::CheckpointService;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::stream::BoxStream;
 use moka::sync::Cache;
 use serde::Deserialize;
-use serde_json_bytes::{json, Value};
-use sha2::{Digest, Sha256};
-use tower::{BoxError, Layer, Service};
+use serde_json_bytes::json;
+use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::error::Error;
+use crate::graphql::Response;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -44,7 +51,7 @@ impl Default for APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -130,13 +137,16 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 
 #[cfg(test)]
 mod apq_tests {
-    use super::*;
-    use crate::error::Error;
-    use crate::{plugin::test::MockRouterService, Context, ResponseBody};
-    use serde_json_bytes::json;
     use std::borrow::Cow;
     use std::collections::HashMap;
+
+    use serde_json_bytes::json;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::error::Error;
+    use crate::plugin::test::MockRouterService;
+    use crate::Context;
 
     #[tokio::test]
     async fn it_works() {
@@ -370,11 +380,7 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
-    fn assert_error_matches(expected_error: &Error, res: crate::ResponseBody) {
-        if let ResponseBody::GraphQL(graphql_response) = res {
-            assert_eq!(&graphql_response.errors[0], expected_error);
-        } else {
-            panic!("expected a graphql response");
-        }
+    fn assert_error_matches(expected_error: &Error, res: Response) {
+        assert_eq!(&res.errors[0], expected_error);
     }
 }

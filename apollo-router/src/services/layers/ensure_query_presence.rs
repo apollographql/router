@@ -4,20 +4,26 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::layers::sync_checkpoint::CheckpointService;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::StatusCode;
 use serde_json_bytes::Value;
-use std::ops::ControlFlow;
-use tower::{BoxError, Layer, Service};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::graphql::Response;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 #[derive(Default)]
 pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -58,10 +64,10 @@ where
 
 #[cfg(test)]
 mod ensure_query_presence_tests {
+    use tower::ServiceExt;
+
     use super::*;
     use crate::plugin::test::MockRouterService;
-    use crate::ResponseBody;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_works_with_query() {
@@ -105,11 +111,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
 
         assert_eq!(expected_error, actual_error);
     }
@@ -133,11 +135,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
     }
 }

@@ -1,15 +1,13 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
+use apollo_router::graphql::Response;
 {{#if type_basic}}
-use apollo_router::services::ResponseBody;
 use apollo_router::services::{ExecutionRequest, ExecutionResponse};
 use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
 use apollo_router::services::{RouterRequest, RouterResponse};
 use apollo_router::services::{SubgraphRequest, SubgraphResponse};
-use apollo_router::Response;
 {{/if}}
 {{#if type_auth}}
-use apollo_router::services::ResponseBody;
 use apollo_router::services::{RouterRequest, RouterResponse};
 use apollo_router::layers::ServiceBuilderExt;
 use std::ops::ControlFlow;
@@ -17,7 +15,6 @@ use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
 {{#if type_tracing}}
-use apollo_router::services::ResponseBody;
 use apollo_router::services::{RouterRequest, RouterResponse};
 use apollo_router::layers::ServiceBuilderExt;
 use tower::ServiceExt;
@@ -56,8 +53,8 @@ impl Plugin for {{pascal_name}} {
     // Delete this function if you are not customizing it.
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -108,8 +105,8 @@ impl Plugin for {{pascal_name}} {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
 
         ServiceBuilder::new()
                     .checkpoint_async(|request : RouterRequest| async {
@@ -135,8 +132,8 @@ impl Plugin for {{pascal_name}} {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
 
         ServiceBuilder::new()
                     .instrument(|_request| {
@@ -166,7 +163,6 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::ResponseBody;
     use tower::BoxError;
 
     #[tokio::test]
@@ -204,11 +200,7 @@ mod tests {
             .await
             .expect("couldn't get primary response");
 
-        if let ResponseBody::GraphQL(graphql) = first_response {
-            assert!(graphql.data.is_some());
-        } else {
-            panic!("expected graphql response")
-        }
+        assert!(first_response.data.is_some());
 
         // You could keep calling result.next_response() until it yields None if you're expexting more parts.
         assert!(result.next_response().await.is_none());

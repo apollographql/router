@@ -1,33 +1,61 @@
 //! Customization via Rhai.
 
-use crate::error::Error;
-use crate::graphql::{Request, Response};
-use crate::http_ext;
-use crate::json_ext::{Object, Value};
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::{
-    register_plugin, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use futures::future::ready;
-use futures::stream::{once, BoxStream};
+use futures::stream::once;
+use futures::stream::BoxStream;
 use futures::StreamExt;
-use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::uri::{Authority, Parts, PathAndQuery};
-use http::{HeaderMap, StatusCode, Uri};
-use rhai::serde::{from_dynamic, to_dynamic};
-use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
+use http::header::HeaderName;
+use http::header::HeaderValue;
+use http::header::InvalidHeaderName;
+use http::uri::Authority;
+use http::uri::Parts;
+use http::uri::PathAndQuery;
+use http::HeaderMap;
+use http::StatusCode;
+use http::Uri;
+use rhai::plugin::*;
+use rhai::serde::from_dynamic;
+use rhai::serde::to_dynamic;
+use rhai::Dynamic;
+use rhai::Engine;
+use rhai::EvalAltResult;
+use rhai::FnPtr;
+use rhai::Instant;
+use rhai::Map;
+use rhai::Scope;
+use rhai::Shared;
+use rhai::AST;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::str::FromStr;
-use std::{
-    ops::ControlFlow,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::error::Error;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::Context;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 pub(crate) trait Accessor<Access>: Send {
     fn accessor(&self) -> &Access;
@@ -228,7 +256,7 @@ mod router_plugin_mod {
     pub(crate) fn get_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_headers_response_response_body)
+        obj.with_mut(get_originating_headers_response_response)
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -248,8 +276,8 @@ mod router_plugin_mod {
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_response(
         obj: &mut SharedRouterResponse,
-    ) -> Result<ResponseBody, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_body_response_response_body)
+    ) -> Result<Response, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_body_response_response)
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
@@ -271,7 +299,7 @@ mod router_plugin_mod {
         obj: &mut SharedRouterResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
+        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -293,9 +321,9 @@ mod router_plugin_mod {
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_response(
         obj: &mut SharedRouterResponse,
-        body: ResponseBody,
+        body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_body_response_response_body(response, body))
+        obj.with_mut(|response| set_originating_body_response_response(response, body))
     }
 
     #[rhai_fn(set = "body", return_raw)]
@@ -346,22 +374,6 @@ mod router_plugin_mod {
         Ok(obj.accessor().uri().clone())
     }
 
-    fn get_originating_headers_response_response_body<
-        T: Accessor<http_ext::Response<ResponseBody>>,
-    >(
-        obj: &mut T,
-    ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Ok(obj.accessor().headers().clone())
-    }
-
-    fn get_originating_body_response_response_body<
-        T: Accessor<http_ext::Response<ResponseBody>>,
-    >(
-        obj: &mut T,
-    ) -> Result<ResponseBody, Box<EvalAltResult>> {
-        Ok(obj.accessor().body().clone())
-    }
-
     fn get_originating_headers_response_response<T: Accessor<http_ext::Response<Response>>>(
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
@@ -395,26 +407,6 @@ mod router_plugin_mod {
         uri: Uri,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().uri_mut() = uri;
-        Ok(())
-    }
-
-    fn set_originating_headers_response_response_body<
-        T: Accessor<http_ext::Response<ResponseBody>>,
-    >(
-        obj: &mut T,
-        headers: HeaderMap,
-    ) -> Result<(), Box<EvalAltResult>> {
-        *obj.accessor_mut().headers_mut() = headers;
-        Ok(())
-    }
-
-    fn set_originating_body_response_response_body<
-        T: Accessor<http_ext::Response<ResponseBody>>,
-    >(
-        obj: &mut T,
-        body: ResponseBody,
-    ) -> Result<(), Box<EvalAltResult>> {
-        *obj.accessor_mut().body_mut() = body;
         Ok(())
     }
 
@@ -475,12 +467,8 @@ impl Plugin for Rhai {
 
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -805,12 +793,12 @@ impl Accessor<http_ext::Response<Response>> for RhaiExecutionResponse {
     }
 }
 
-impl Accessor<http_ext::Response<ResponseBody>> for RhaiRouterResponse {
-    fn accessor(&self) -> &http_ext::Response<ResponseBody> {
+impl Accessor<http_ext::Response<Response>> for RhaiRouterResponse {
+    fn accessor(&self) -> &http_ext::Response<Response> {
         &self.response
     }
 
-    fn accessor_mut(&mut self) -> &mut http_ext::Response<ResponseBody> {
+    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
         &mut self.response
     }
 }
@@ -840,9 +828,7 @@ impl Accessor<http_ext::Response<Response>> for SubgraphResponse {
 #[allow(dead_code)]
 type SharedRouterService = Arc<
     Mutex<
-        Option<
-            BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
-        >,
+        Option<BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>>,
     >,
 >;
 #[allow(dead_code)]
@@ -850,7 +836,7 @@ type SharedRouterRequest = Arc<Mutex<Option<RouterRequest>>>;
 
 pub(crate) struct RhaiRouterResponse {
     context: Context,
-    response: http_ext::Response<ResponseBody>,
+    response: http_ext::Response<Response>,
 }
 
 #[allow(dead_code)]
@@ -955,7 +941,7 @@ impl ServiceStep {
                                 status: StatusCode,
                             ) -> Result<
                                 ControlFlow<
-                                    RouterResponse<BoxStream<'static, ResponseBody>>,
+                                    RouterResponse<BoxStream<'static, Response>>,
                                     RouterRequest,
                                 >,
                                 BoxError,
@@ -1089,97 +1075,101 @@ impl ServiceStep {
             ServiceStep::Router(service) => {
                 // gen_map_response!(router, service, rhai_service, callback);
                 service.replace(|service| {
-                    BoxService::new(service
-                        .and_then(
-                            |router_response: RouterResponse<
-                                BoxStream<'static, ResponseBody>,
-                            >| async move {
-                                // Let's define a local function to build an error response
-                                // XXX: This isn't ideal. We already have a response, so ideally we'd
-                                // like to append this error into the existing response. However,
-                                // the significantly different treatment of errors in different
-                                // response types makes this extremely painful. This needs to be
-                                // re-visited at some point post GA.
-                                fn failure_message(
-                                    context: Context,
-                                    msg: String,
-                                    status: StatusCode,
-                                ) -> RouterResponse<BoxStream<'static, ResponseBody>>
-                                {
-                                    let res = RouterResponse::error_builder()
-                                        .errors(vec![Error {
-                                            message: msg,
-                                            ..Default::default()
-                                        }])
-                                        .status_code(status)
-                                        .context(context)
-                                        .build()
-                                        .expect("can't fail to build our error message");
-                                    res.boxed()
-                                }
+                    BoxService::new(service.and_then(
+                        |router_response: RouterResponse<BoxStream<'static, Response>>| async move {
+                            // Let's define a local function to build an error response
+                            // XXX: This isn't ideal. We already have a response, so ideally we'd
+                            // like to append this error into the existing response. However,
+                            // the significantly different treatment of errors in different
+                            // response types makes this extremely painful. This needs to be
+                            // re-visited at some point post GA.
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> RouterResponse<BoxStream<'static, Response>>
+                            {
+                                let res = RouterResponse::error_builder()
+                                    .errors(vec![Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()
+                                    .expect("can't fail to build our error message");
+                                res.boxed()
+                            }
 
-                                // we split the response stream into headers+first response, then a stream of deferred responses
-                                // for which we will implement mapping later
-                                let RouterResponse { response, context } = router_response;
-                                let (parts, stream) = http::Response::from(response).into_parts();
-                                let (first, rest) = stream.into_future().await;
+                            // we split the response stream into headers+first response, then a stream of deferred responses
+                            // for which we will implement mapping later
+                            let RouterResponse { response, context } = router_response;
+                            let (parts, stream) = http::Response::from(response).into_parts();
+                            let (first, rest) = stream.into_future().await;
 
-                                if first.is_none() {
-                                    return Ok(failure_message(
-                                        context,
-                                        "rhai execution error: empty response".to_string(),
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                    ));
-                                }
-
-                                let response = RhaiRouterResponse {
+                            if first.is_none() {
+                                return Ok(failure_message(
                                     context,
-                                    response: http::Response::from_parts(parts, first.expect("already checked")).into(),
-                                };
-                                let shared_response =
-                                Shared::new(Mutex::new(Some(response)));
+                                    "rhai execution error: empty response".to_string(),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                ));
+                            }
 
-                                let result: Result<Dynamic, String> = if callback.is_curried() {
-                                    callback
-                                        .call(
-                                            &rhai_service.engine,
-                                            &rhai_service.ast,
-                                            (shared_response.clone(),),
-                                        )
-                                        .map_err(|err| err.to_string())
-                                } else {
-                                    let mut scope = rhai_service.scope.clone();
-                                    rhai_service
-                                        .engine
-                                        .call_fn(
-                                            &mut scope,
-                                            &rhai_service.ast,
-                                            callback.fn_name(),
-                                            (shared_response.clone(),),
-                                        )
-                                        .map_err(|err| err.to_string())
-                                };
-                                if let Err(error) = result {
-                                    tracing::error!("map_response callback failed: {error}");
-                                    let mut guard = shared_response.lock().unwrap();
-                                    let response_opt = guard.take();
-                                    return Ok(failure_message(
-                                        response_opt.unwrap().context,
-                                        format!("rhai execution error: '{}'", error),
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                    ));
-                                }
+                            let response = RhaiRouterResponse {
+                                context,
+                                response: http::Response::from_parts(
+                                    parts,
+                                    first.expect("already checked"),
+                                )
+                                .into(),
+                            };
+                            let shared_response = Shared::new(Mutex::new(Some(response)));
 
+                            let result: Result<Dynamic, String> = if callback.is_curried() {
+                                callback
+                                    .call(
+                                        &rhai_service.engine,
+                                        &rhai_service.ast,
+                                        (shared_response.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            } else {
+                                let mut scope = rhai_service.scope.clone();
+                                rhai_service
+                                    .engine
+                                    .call_fn(
+                                        &mut scope,
+                                        &rhai_service.ast,
+                                        callback.fn_name(),
+                                        (shared_response.clone(),),
+                                    )
+                                    .map_err(|err| err.to_string())
+                            };
+                            if let Err(error) = result {
+                                tracing::error!("map_response callback failed: {error}");
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
-                                let RhaiRouterResponse { context, response } = response_opt.unwrap();
-                                let (parts, body)  = http::Response::from(response).into_parts();
+                                return Ok(failure_message(
+                                    response_opt.unwrap().context,
+                                    format!("rhai execution error: '{}'", error),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                ));
+                            }
 
-                                //FIXME we should also map over the stream of future responses
-                                let response = http::Response::from_parts(parts,once(ready(body)).chain(rest).boxed()).into();
-                                Ok(RouterResponse {context, response})
-                            },
-                        ))
+                            let mut guard = shared_response.lock().unwrap();
+                            let response_opt = guard.take();
+                            let RhaiRouterResponse { context, response } = response_opt.unwrap();
+                            let (parts, body) = http::Response::from(response).into_parts();
+
+                            //FIXME we should also map over the stream of future responses
+                            let response = http::Response::from_parts(
+                                parts,
+                                once(ready(body)).chain(rest).boxed(),
+                            )
+                            .into();
+                            Ok(RouterResponse { context, response })
+                        },
+                    ))
                 })
             }
             ServiceStep::QueryPlanner(service) => {
@@ -1363,7 +1353,6 @@ impl Rhai {
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             .register_type::<Request>()
             .register_type::<Object>()
-            .register_type::<ResponseBody>()
             .register_type::<Response>()
             .register_type::<Value>()
             .register_type::<Error>()
@@ -1511,107 +1500,6 @@ impl Rhai {
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
-            // ResponseBody "short-cuts" to bypass the enum
-            // ResponseBody.label
-            .register_get_result("label", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the label from our resp
-                        to_dynamic(resp.label.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("label", |x: &mut ResponseBody, value: Dynamic| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to update the label on our resp
-                        resp.label = from_dynamic(&value)?;
-                        Ok(())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            // ResponseBody.data
-            .register_get_result("data", |x: &mut ResponseBody| match x {
-                ResponseBody::GraphQL(resp) => {
-                    // Because we are short-cutting the response here
-                    // we need to select the data from our resp
-                    to_dynamic(resp.data.clone())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            .register_set_result("data", |x: &mut ResponseBody, om: Map| match x {
-                ResponseBody::GraphQL(resp) => {
-                    // Because we are short-cutting the response here
-                    // we need to update the data on our resp
-                    resp.data = from_dynamic(&om.into())?;
-                    Ok(())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            // ResponseBody.path (Not Implemented)
-            // ResponseBody.errors
-            .register_get_result("errors", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the errors from our resp
-                        to_dynamic(resp.errors.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("errors", |x: &mut ResponseBody, value: Dynamic| match x {
-                ResponseBody::GraphQL(resp) => {
-                    resp.errors = from_dynamic(&value)?;
-                    Ok(())
-                }
-                _ => Err("wrong type of response".into()),
-            })
-            // ResponseBody.extensions
-            .register_get_result("extensions", |x: &mut ResponseBody| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to select the extensions from our resp
-                        to_dynamic(resp.extensions.clone())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            .register_set_result("extensions", |x: &mut ResponseBody, om: Map| {
-                match x {
-                    ResponseBody::GraphQL(resp) => {
-                        // Because we are short-cutting the response here
-                        // we need to update the extensions on our resp
-                        resp.extensions = from_dynamic(&om.into())?;
-                        Ok(())
-                    }
-                    _ => Err("wrong type of response".into()),
-                }
-            })
-            // ResponseBody.response
-            /* We short-cut the treatment of ResponseBody processing to directly
-             * manipulate "data" rather than moving the enum as we probably should.
-             * We do this to "harmonise" the interactions with response data for Rhai
-             * scripts and (effectively) hide the ResponseBody enum from sight.
-             * At some point: ResponseBody should probably be taken out of the
-             * codebase, so this is probably a good decision.
-            .register_get_result("response", |x: &mut ResponseBody| match x {
-                ResponseBody::GraphQL(resp) => Ok(resp.clone()),
-                _ => Err("wrong type of response".into()),
-            })
-            .register_set_result("response", |x: &mut ResponseBody, value: Response| {
-                match x {
-                    ResponseBody::GraphQL(resp) => std::mem::replace(resp, value),
-                    _ => return Err("wrong type of response".into()),
-                };
-                Ok(())
-            })
-            */
             // Response.label
             .register_get("label", |x: &mut Response| {
                 x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
@@ -1707,9 +1595,6 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Request| -> String {
                 format!("{:?}", x)
             })
-            .register_fn("to_string", |x: &mut ResponseBody| -> String {
-                format!("{:?}", x)
-            })
             .register_fn("to_string", |x: &mut Response| -> String {
                 format!("{:?}", x)
             })
@@ -1738,17 +1623,21 @@ register_plugin!("experimental", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
 
-    use crate::plugin::DynPlugin;
-    use crate::{
-        http_ext,
-        plugin::test::{MockExecutionService, MockRouterService},
-        Context, ResponseBody, RouterRequest, RouterResponse,
-    };
     use serde_json::Value;
-    use tower::{util::BoxService, Service, ServiceExt};
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::http_ext;
+    use crate::plugin::test::MockExecutionService;
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::DynPlugin;
+    use crate::Context;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
@@ -1783,23 +1672,16 @@ mod tests {
         let headers = router_resp.response.headers().clone();
         let context = router_resp.context.clone();
         // Check if it fails
-        let body = router_resp.next_response().await.unwrap();
-        match body {
-            ResponseBody::GraphQL(resp) => {
-                if !resp.errors.is_empty() {
-                    panic!(
-                        "Contains errors : {}",
-                        resp.errors
-                            .into_iter()
-                            .map(|err| err.to_string())
-                            .collect::<Vec<String>>()
-                            .join("\n")
-                    );
-                }
-            }
-            _ => {
-                panic!("should not be this kind of response")
-            }
+        let resp = router_resp.next_response().await.unwrap();
+        if !resp.errors.is_empty() {
+            panic!(
+                "Contains errors : {}",
+                resp.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
         }
 
         assert_eq!(headers.get("coucou").unwrap(), &"hello");

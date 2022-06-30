@@ -1,26 +1,38 @@
 //! Tower fetcher for subgraphs.
 
-use crate::error::FetchError;
-use crate::graphql;
+use std::fmt::Display;
+use std::sync::Arc;
+use std::task::Poll;
+
 use ::serde::Deserialize;
-use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder};
+use async_compression::tokio::write::BrotliEncoder;
+use async_compression::tokio::write::GzipEncoder;
+use async_compression::tokio::write::ZlibEncoder;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
-use http::{
-    header::{self, ACCEPT, CONTENT_ENCODING, CONTENT_TYPE},
-    HeaderMap, HeaderValue, StatusCode,
-};
+use http::header::ACCEPT;
+use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
+use http::header::{self};
+use http::HeaderMap;
+use http::HeaderValue;
+use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
-use opentelemetry::{global, trace::SpanKind};
+use opentelemetry::global;
+use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
-use std::task::Poll;
-use std::{fmt::Display, sync::Arc};
 use tokio::io::AsyncWriteExt;
-use tower::{BoxError, ServiceBuilder};
-use tower_http::decompression::{Decompression, DecompressionLayer};
-use tracing::{Instrument, Span};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower_http::decompression::Decompression;
+use tower_http::decompression::DecompressionLayer;
+use tracing::Instrument;
+use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+use crate::error::FetchError;
+use crate::graphql;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -260,14 +272,19 @@ mod tests {
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
-    use serde_json_bytes::{ByteString, Value};
-    use tower::{service_fn, ServiceExt};
-
-    use crate::graphql::{Request, Response};
-    use crate::query_planner::fetch::OperationKind;
-    use crate::{http_ext, json_ext::Object, Context, SubgraphRequest};
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
+    use tower::service_fn;
+    use tower::ServiceExt;
 
     use super::*;
+    use crate::graphql::Request;
+    use crate::graphql::Response;
+    use crate::http_ext;
+    use crate::json_ext::Object;
+    use crate::query_planner::fetch::OperationKind;
+    use crate::Context;
+    use crate::SubgraphRequest;
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(socket_addr: SocketAddr) {

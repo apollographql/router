@@ -2,14 +2,22 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::graphql::{Error, Response};
+use std::ops::ControlFlow;
+
+use futures::stream::BoxStream;
+use http::header::HeaderName;
+use http::Method;
+use http::StatusCode;
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::graphql::Error;
+use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::layers::sync_checkpoint::CheckpointService;
-use crate::{ExecutionRequest, ExecutionResponse};
-use futures::stream::BoxStream;
-use http::{header::HeaderName, Method, StatusCode};
-use std::ops::ControlFlow;
-use tower::{BoxError, Layer, Service};
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
 
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
@@ -58,15 +66,17 @@ where
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
+    use serde_json::json;
+    use tower::ServiceExt;
+
     use super::*;
     use crate::error::Error;
     use crate::graphql;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
-    use crate::query_planner::{fetch::OperationKind, PlanNode, QueryPlan};
-
-    use serde_json::json;
-    use tower::ServiceExt;
+    use crate::query_planner::fetch::OperationKind;
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
