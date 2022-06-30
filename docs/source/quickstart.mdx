@@ -7,9 +7,11 @@ Hello! This tutorial walks you through installing the Apollo Router and running 
 
 ## 1. Download and extract the Apollo Router binary
 
+> The Apollo Router is made available under the Elastic License v2.0 (ELv2).  For details, see our [licensing page](/resources/elastic-license-v2-faq/).
+
+
 ### Download options
 
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
 
 #### Automatic download (Linux, OSX, WSL)
 
@@ -27,7 +29,7 @@ Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographq
 * macOS (x86_64)
 * Windows (x86_64)
 
-> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) for us to consider adding new architectures.
+> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -37,16 +39,16 @@ tar -xf path/to/file.tar.gz
 
 ### Running the binary
 
-You can now try running the Apollo Router from your project's root directory with the following command:
+You can now run the Apollo Router from your project's root directory with the following command:
 
 ```bash
-./dist/router
+./router
 ```
 
 If you do, you'll get the following output:
 
 ```
-APOLLO ROUTER <version>
+Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
@@ -169,21 +171,22 @@ type User
 
 </ExpansionPanel>
 
-This file is all that Apollo Router needs to communicate with our subgraphs!
+This file is all that the router needs to communicate with our subgraphs!
 
 ## 3. Run the router with the default configuration
 
 Now from your project root, run the following:
 
 ```sh
-./dist/router --supergraph supergraph-schema.graphql
+./router --supergraph supergraph-schema.graphql
 ```
 
 The console output should look like the following:
 
 ```sh
-2022-03-14T11:56:55.900207Z  INFO apollo_router: Starting Apollo Router
-2022-03-14T11:56:56.000707Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
+2022-06-29T22:23:24.266542Z  INFO apollo_router::executable: Apollo Router v0.9.5 // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
+2022-06-29T22:23:24.488286Z  INFO apollo_router::router: starting Apollo Router
+2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
 That's it! Visit `http://127.0.0.1:4000` to open [Apollo Sandbox](/studio/explorer/sandbox/). You can inspect the entire federated graph and run your first queries against the Apollo Router!
