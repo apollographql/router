@@ -18,8 +18,8 @@ use crate::http_ext::Request;
 use crate::http_ext::Response;
 use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
-use crate::services::MakeARouter;
 use crate::services::Plugins;
+use crate::services::RouterCreator;
 use crate::PluggableRouterServiceBuilder;
 use crate::Schema;
 use crate::SubgraphService;
@@ -63,7 +63,7 @@ pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceConfigurator for YamlRouterServiceFactory {
-    type RouterServiceFactory = MakeARouter;
+    type RouterServiceFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,

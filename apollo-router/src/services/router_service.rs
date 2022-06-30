@@ -315,7 +315,7 @@ impl PluggableRouterServiceBuilder {
         &mut self.plugins
     }
 
-    pub async fn build(mut self) -> Result<MakeARouter, crate::error::ServiceBuildError> {
+    pub async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -390,7 +390,7 @@ impl PluggableRouterServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        Ok(MakeARouter {
+        Ok(RouterCreator {
             query_planner_service,
             execution_service,
             schema: self.schema,
@@ -401,7 +401,7 @@ impl PluggableRouterServiceBuilder {
 }
 
 #[derive(Clone)]
-pub struct MakeARouter {
+pub struct RouterCreator {
     query_planner_service: Buffer<
         BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
         QueryPlannerRequest,
@@ -415,7 +415,7 @@ pub struct MakeARouter {
     apq: APQLayer,
 }
 
-impl NewService<Request<graphql::Request>> for MakeARouter {
+impl NewService<Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
         Request<graphql::Request>,
         crate::http_ext::Response<BoxStream<'static, Response>>,
@@ -430,19 +430,19 @@ impl NewService<Request<graphql::Request>> for MakeARouter {
     }
 }
 
-impl RouterServiceFactory for MakeARouter {
+impl RouterServiceFactory for RouterCreator {
     type RouterService = BoxService<
         Request<graphql::Request>,
         crate::http_ext::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
 
-    type Future = <<MakeARouter as NewService<Request<graphql::Request>>>::Service as Service<
+    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
         Request<graphql::Request>,
     >>::Future;
 }
 
-impl MakeARouter {
+impl RouterCreator {
     fn make(
         &self,
     ) -> impl Service<
