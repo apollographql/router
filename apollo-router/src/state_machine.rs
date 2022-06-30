@@ -18,7 +18,6 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
-use super::router_factory::RouterServiceFactory;
 use super::state_machine::State::Errored;
 use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
@@ -701,10 +700,10 @@ mod tests {
 
         fn create<RF>(
             &self,
-            service_factory: RF,
+            _service_factory: RF,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
-            plugin_handlers: HashMap<String, Handler>,
+            _plugin_handlers: HashMap<String, Handler>,
         ) -> Self::Future
         where
             RF: RouterServiceFactory,

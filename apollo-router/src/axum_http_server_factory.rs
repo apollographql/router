@@ -57,7 +57,6 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterServiceFactory;
@@ -743,19 +742,18 @@ mod tests {
         }
     }
 
+    type MockRouterServiceType = tower_test::mock::Mock<
+        http_ext::Request<graphql::Request>,
+        http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
+    >;
+
     #[derive(Clone)]
     struct TestRouterServiceFactory {
-        inner: tower_test::mock::Mock<
-            http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
-        >,
+        inner: MockRouterServiceType,
     }
 
     impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
-        type Service = tower_test::mock::Mock<
-            http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
-        >;
+        type Service = MockRouterServiceType;
 
         fn new_service(&self) -> Self::Service {
             self.inner.clone()
@@ -763,10 +761,7 @@ mod tests {
     }
 
     impl RouterServiceFactory for TestRouterServiceFactory {
-        type RouterService = tower_test::mock::Mock<
-            http_ext::Request<graphql::Request>,
-            http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
-        >;
+        type RouterService = MockRouterServiceType;
 
         type Future = <<TestRouterServiceFactory as NewService<
             http_ext::Request<graphql::Request>,

@@ -14,7 +14,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;

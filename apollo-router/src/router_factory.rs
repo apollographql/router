@@ -7,12 +7,8 @@ use futures::stream::BoxStream;
 use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;
-use tower::buffer::Buffer;
 use tower::util::BoxCloneService;
-use tower::util::BoxService;
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
@@ -20,7 +16,6 @@ use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::http_ext::Request;
 use crate::http_ext::Response;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
 use crate::services::MakeARouter;
@@ -284,7 +279,6 @@ mod test {
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterServiceConfigurator;
-    use crate::router_factory::RouterServiceFactory;
     use crate::router_factory::YamlRouterServiceFactory;
     use crate::Schema;
 

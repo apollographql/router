@@ -5,16 +5,10 @@ use std::sync::Arc;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use futures::stream::BoxStream;
-use tower::BoxError;
-use tower::Service;
 
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::graphql;
-use crate::http_ext::Request;
-use crate::http_ext::Response;
 use crate::plugin::Handler;
 use crate::router_factory::RouterServiceFactory;
 
