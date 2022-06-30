@@ -101,6 +101,7 @@ impl BridgeQueryPlanner {
                     options,
                 }),
                 query: Arc::new(selections),
+                errors: Vec::new(),
             }),
             PlanSuccess {
                 data: QueryPlan { node: None },
