@@ -8,7 +8,6 @@ use tokio::sync::Mutex;
 
 use self::storage::CacheStorage;
 
-pub(crate) mod coalescing;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
