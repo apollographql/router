@@ -1,15 +1,18 @@
 //! Provides a CachingLayer used to implement the cache functionality of [`crate::layers::ServiceBuilderExt`].
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use futures::TryFutureExt;
-use moka::sync::Cache;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::Poll;
+
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use futures::TryFutureExt;
+use moka::sync::Cache;
 use tokio::sync::RwLock;
-use tower::{BoxError, Layer, Service};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
 
 type Sentinel<Value> = Arc<RwLock<Option<Value>>>;
 
@@ -168,13 +171,17 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::mock_service;
+    use std::time::Duration;
+
     use mockall::predicate::eq;
     use moka::sync::CacheBuilder;
-    use std::time::Duration;
     use tower::filter::AsyncPredicate;
-    use tower::{BoxError, ServiceBuilder, ServiceExt};
+    use tower::BoxError;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::mock_service;
 
     #[derive(Default, Clone)]
     struct Slow;

@@ -1,28 +1,37 @@
-use crate::axum_http_server_factory::AxumHttpServerFactory;
-use crate::configuration::Configuration;
-use crate::configuration::{validate_configuration, ListenAddr};
-use crate::reload::Error as ReloadError;
-use crate::router_factory::YamlRouterServiceFactory;
-use crate::state_machine::StateMachine;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
+use std::time::Duration;
+
 use derivative::Derivative;
-use derive_more::{Display, From};
+use derive_more::Display;
+use derive_more::From;
 use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
 use url::Url;
-use Event::{NoMoreConfiguration, NoMoreSchema};
-use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
+use Event::NoMoreConfiguration;
+use Event::NoMoreSchema;
+use Event::Shutdown;
+use Event::UpdateConfiguration;
+use Event::UpdateSchema;
+
+use crate::axum_http_server_factory::AxumHttpServerFactory;
+use crate::configuration::validate_configuration;
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
+use crate::reload::Error as ReloadError;
+use crate::router_factory::YamlRouterServiceFactory;
+use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = crate::Schema> + Send>>;
 
@@ -514,12 +523,16 @@ impl ApolloRouter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::files::tests::{create_temp_file, write_and_flush};
-    use crate::Request;
-    use serde_json::to_string_pretty;
     use std::env::temp_dir;
+
+    use serde_json::to_string_pretty;
     use test_log::test;
+
+    use super::*;
+    use crate::files::tests::create_temp_file;
+    use crate::files::tests::write_and_flush;
+    use crate::graphql;
+    use crate::graphql::Request;
 
     fn init_with_server() -> RouterHandle {
         let configuration =
@@ -554,8 +567,8 @@ mod tests {
 
     async fn query(
         listen_addr: &ListenAddr,
-        request: &crate::Request,
-    ) -> Result<crate::Response, crate::error::FetchError> {
+        request: &graphql::Request,
+    ) -> Result<graphql::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
             .post(format!("{}/", listen_addr))
             .json(request)

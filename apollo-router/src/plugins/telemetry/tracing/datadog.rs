@@ -1,12 +1,15 @@
 //! Configuration for datadog tracing.
-use crate::plugins::telemetry::config::{GenericWith, Trace};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 
-use super::{deser_endpoint, AgentEndpoint};
+use super::deser_endpoint;
+use super::AgentEndpoint;
+use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -41,9 +44,8 @@ impl TracingConfigurator for Config {
 mod tests {
     use reqwest::Url;
 
-    use crate::plugins::telemetry::tracing::AgentDefault;
-
     use super::*;
+    use crate::plugins::telemetry::tracing::AgentDefault;
 
     #[test]
     fn endpoint_configuration() {

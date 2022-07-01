@@ -1,4 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::criterion_group;
+use criterion::criterion_main;
+use criterion::Criterion;
 
 include!("../src/shared.rs");
 

@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use futures::Stream;
-use graphql_client::{GraphQLQuery, QueryBody, Response};
+use graphql_client::GraphQLQuery;
+use graphql_client::QueryBody;
+use graphql_client::Response;
 use supergraph_sdl::FetchErrorCode;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;

@@ -14,8 +14,10 @@ fn main() -> Result<()> {
 mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::plugins::rhai::Conf;
+    use apollo_router::plugins::rhai::Rhai;
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -78,13 +80,8 @@ mod tests {
             .expect("x-elapsed-time is present");
 
         // with the expected message
-        if let apollo_router::services::ResponseBody::GraphQL(response) =
-            service_response.next_response().await.unwrap()
-        {
-            assert!(response.errors.is_empty());
-            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-        } else {
-            panic!("unexpected response");
-        }
+        let response = service_response.next_response().await.unwrap();
+        assert!(response.errors.is_empty());
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
     }
 }

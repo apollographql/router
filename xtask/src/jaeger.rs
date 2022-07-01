@@ -1,12 +1,13 @@
-use crate::*;
+use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::thread::sleep;
+use std::time::Duration;
+
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use std::path::PathBuf;
-use std::{
-    process::{Command, Stdio},
-    thread::sleep,
-    time::Duration,
-};
+
+use crate::*;
 
 pub struct JaegerRunner {
     path: Utf8PathBuf,

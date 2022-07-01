@@ -1,7 +1,11 @@
-use crate::json_ext::{Object, Value};
 use bytes::Bytes;
 use derivative::Derivative;
-use serde::{de::Error, Deserialize, Serialize};
+use serde::de::Error;
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
@@ -43,6 +47,21 @@ where
 impl Request {
     #[builder]
     pub fn new(
+        query: Option<String>,
+        operation_name: Option<String>,
+        variables: Option<Object>,
+        extensions: Option<Object>,
+    ) -> Self {
+        Self {
+            query,
+            operation_name,
+            variables: variables.unwrap_or_default(),
+            extensions: extensions.unwrap_or_default(),
+        }
+    }
+
+    #[builder]
+    pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Option<Object>,
@@ -144,10 +163,11 @@ fn get_from_urldecoded<'a, T: Deserialize<'a>>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
     use test_log::test;
+
+    use super::*;
 
     #[test]
     fn test_request() {

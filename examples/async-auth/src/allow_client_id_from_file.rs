@@ -1,14 +1,21 @@
+use std::ops::ControlFlow;
+use std::path::PathBuf;
+
+use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
-use std::{ops::ControlFlow, path::PathBuf};
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 // This structure is the one we'll deserialize the yml configuration into
 #[derive(Deserialize, JsonSchema)]
@@ -45,10 +52,11 @@ impl Plugin for AllowClientIdFromFile {
         &mut self,
         service: BoxService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
+    {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -68,7 +76,7 @@ impl Plugin for AllowClientIdFromFile {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     RouterResponse::error_builder()
-                        .error(apollo_router::error::Error {
+                        .error(graphql::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         })
@@ -102,7 +110,7 @@ impl Plugin for AllowClientIdFromFile {
                             res = Some(
                                 RouterResponse::builder()
                                     .data(Value::default())
-                                    .error(apollo_router::error::Error {
+                                    .error(graphql::Error {
                                         message: "client-id is not allowed".to_string(),
                                         ..Default::default()
                                     })
@@ -117,7 +125,7 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
                             RouterResponse::error_builder()
-                                .error(apollo_router::error::Error {
+                                .error(graphql::Error {
                                     message: format!("'{header_key}' value is not a string"),
                                     ..Default::default()
                                 })
@@ -173,15 +181,17 @@ register_plugin!(
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use crate::allow_client_id_from_file::AllowClientIdConfig;
-
-    use super::AllowClientIdFromFile;
+    use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::{RouterRequest, RouterResponse};
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
+
+    use super::AllowClientIdFromFile;
+    use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     // This test ensures the router will be able to
     // find our `allow-client-id-from-file` plugin,
@@ -229,12 +239,7 @@ mod tests {
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
-            .next_response()
-            .await
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let graphql_response: graphql::Response = service_response.next_response().await.unwrap();
 
         assert_eq!(
             "Missing 'x-client-id' header".to_string(),
@@ -275,12 +280,7 @@ mod tests {
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
-        let graphql_response: apollo_router::Response = service_response
-            .next_response()
-            .await
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let graphql_response: graphql::Response = service_response.next_response().await.unwrap();
 
         assert_eq!(
             "client-id is not allowed".to_string(),
@@ -349,12 +349,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // ...with the expected data
-        let graphql_response: apollo_router::Response = service_response
-            .next_response()
-            .await
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let graphql_response: graphql::Response = service_response.next_response().await.unwrap();
 
         assert_eq!(
             // we're allowed to unwrap() here because we know the json is a str()

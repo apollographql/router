@@ -2,26 +2,34 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
-use apollo_router::http_compat;
-use apollo_router::json_ext::{Object, ValueExt};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use apollo_router::graphql;
+use apollo_router::graphql::Request;
+use apollo_router::http_ext;
+use apollo_router::json_ext::Object;
+use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugins::csrf;
+use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
+use apollo_router::plugins::telemetry::Telemetry;
+use apollo_router::plugins::telemetry::{self};
 use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::{ResponseBody, RouterRequest, RouterResponse};
-use apollo_router::services::{SubgraphRequest, SubgraphService};
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphService;
 use apollo_router::Context;
-use apollo_router::Request;
 use apollo_router::Schema;
 use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
 use tower::BoxError;
@@ -48,7 +56,7 @@ macro_rules! assert_federated_response {
             }
         };
 
-        let originating_request = http_compat::Request::fake_builder().method(Method::POST)
+        let originating_request = http_ext::Request::fake_builder().method(Method::POST)
             // otherwise the query would be a simple one,
             // and CSRF protection would reject it
             .header("content-type", "application/json")
@@ -111,7 +119,7 @@ async fn api_schema_hides_field() {
         ]))
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -191,7 +199,7 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -205,7 +213,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error = apollo_router::error::Error {
+    let expected_error = graphql::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -221,7 +229,7 @@ async fn simple_queries_should_not_work() {
         ]))
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -256,7 +264,7 @@ async fn queries_should_work_with_compression() {
         "accounts".to_string()=>1,
     };
 
-    let http_request = http_compat::Request::fake_builder()
+    let http_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .header("accept-encoding", "gzip")
@@ -291,7 +299,7 @@ async fn queries_should_work_over_post() {
         "accounts".to_string()=>1,
     };
 
-    let http_request = http_compat::Request::fake_builder()
+    let http_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -311,7 +319,7 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error = apollo_router::error::Error {
+    let expected_error = apollo_router::graphql::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
@@ -323,7 +331,7 @@ async fn service_errors_should_be_propagated() {
 
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -362,7 +370,7 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -403,7 +411,7 @@ async fn mutation_should_work_over_post() {
         "reviews".to_string()=>2,
     };
 
-    let http_request = http_compat::Request::fake_builder()
+    let http_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -433,7 +441,7 @@ async fn automated_persisted_queries() {
                 {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
         }),
     );
-    let expected_apq_miss_error = apollo_router::error::Error {
+    let expected_apq_miss_error = apollo_router::graphql::Error {
         message: "PersistedQueryNotFound".to_string(),
         extensions,
         ..Default::default()
@@ -457,7 +465,7 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_only_request)
         .header("content-type", "application/json")
         .build()
@@ -481,7 +489,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_request_with_query)
         .header("content-type", "application/json")
         .build()
@@ -500,7 +508,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_only_request)
         .header("content-type", "application/json")
         .build()
@@ -557,7 +565,7 @@ async fn missing_variables() {
         )
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -583,8 +591,8 @@ async fn missing_variables() {
 }
 
 async fn query_node(
-    request: &apollo_router::Request,
-) -> Result<apollo_router::Response, apollo_router::error::FetchError> {
+    request: &graphql::Request,
+) -> Result<graphql::Response, apollo_router::error::FetchError> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
@@ -606,13 +614,15 @@ async fn query_node(
         )
 }
 
-async fn query_rust(request: RouterRequest) -> (apollo_router::Response, CountingServiceRegistry) {
+async fn query_rust(
+    request: RouterRequest,
+) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry().await;
     (query_with_router(router, request).await, counting_registry)
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -657,25 +667,18 @@ async fn setup_router_and_registry() -> (
 async fn query_with_router(
     router: BoxCloneService<
         RouterRequest,
-        RouterResponse<BoxStream<'static, ResponseBody>>,
+        RouterResponse<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     request: RouterRequest,
-) -> apollo_router::Response {
-    let response = router
+) -> graphql::Response {
+    router
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
-        .unwrap();
-
-    match response {
-        ResponseBody::GraphQL(response) => response,
-        _ => {
-            panic!("Expected graphql response")
-        }
-    }
+        .unwrap()
 }
 
 #[derive(Debug, Clone)]

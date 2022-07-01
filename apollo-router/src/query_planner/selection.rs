@@ -1,8 +1,11 @@
-use crate::error::FetchError;
-use crate::json_ext::{Object, Value, ValueExt};
-use crate::*;
 use serde::Deserialize;
 use serde_json_bytes::Entry;
+
+use crate::error::FetchError;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::*;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -130,11 +133,13 @@ fn select_value(
 
 #[cfg(test)]
 mod tests {
-    use super::Selection;
-    use super::*;
-    use crate::json_ext::Path;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
+
+    use super::Selection;
+    use super::*;
+    use crate::graphql::Response;
+    use crate::json_ext::Path;
 
     fn select<'a>(
         response: &Response,

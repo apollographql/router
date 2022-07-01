@@ -1,8 +1,7 @@
-use std::{
-    error::Error,
-    fs::File,
-    io::{copy, Read},
-};
+use std::error::Error;
+use std::fs::File;
+use std::io::copy;
+use std::io::Read;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Retrieve a live version of the reports.proto file

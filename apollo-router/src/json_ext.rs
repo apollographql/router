@@ -1,9 +1,14 @@
-use crate::error::FetchError;
-use serde::{Deserialize, Serialize};
-pub use serde_json_bytes::Value;
-use serde_json_bytes::{ByteString, Entry, Map};
 use std::cmp::min;
 use std::fmt;
+
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
+use serde_json_bytes::Map;
+pub use serde_json_bytes::Value;
+
+use crate::error::FetchError;
 
 /// A JSON object.
 pub type Object = Map<ByteString, Value>;
@@ -547,8 +552,9 @@ impl fmt::Display for Path {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json_bytes::json;
+
+    use super::*;
 
     macro_rules! assert_is_subset {
         ($a:expr, $b:expr $(,)?) => {

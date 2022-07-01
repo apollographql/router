@@ -3,19 +3,24 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-use std::task::Poll;
-
-use crate::cache::storage::CacheStorage;
-use crate::cache::DedupCache;
-use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use serde::Deserialize;
-use serde_json_bytes::{json, Value};
-use sha2::{Digest, Sha256};
+use serde_json_bytes::json;
+use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::buffer::Buffer;
-use tower::{BoxError, Layer, Service, ServiceExt};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+use tower::ServiceExt;
+
+use crate::cache::DedupCache;
+use crate::graphql::Response;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -48,7 +53,7 @@ impl Default for APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -76,18 +81,18 @@ impl<S> Service<RouterRequest> for APQService<S>
 where
     S: Service<
             RouterRequest,
-            Response = RouterResponse<BoxStream<'static, ResponseBody>>,
+            Response = RouterResponse<BoxStream<'static, Response>>,
             Error = BoxError,
         > + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
 {
-    type Response = RouterResponse<BoxStream<'static, ResponseBody>>;
+    type Response = RouterResponse<BoxStream<'static, Response>>;
 
     type Error = BoxError;
 
     type Future =
-        BoxFuture<'static, Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>>;
+        BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>;
 
     fn poll_ready(
         &mut self,
@@ -168,13 +173,16 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 
 #[cfg(test)]
 mod apq_tests {
-    use super::*;
-    use crate::error::Error;
-    use crate::{plugin::test::MockRouterService, Context, ResponseBody};
-    use serde_json_bytes::json;
     use std::borrow::Cow;
     use std::collections::HashMap;
+
+    use serde_json_bytes::json;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::error::Error;
+    use crate::plugin::test::MockRouterService;
+    use crate::Context;
 
     #[tokio::test]
     async fn it_works() {
@@ -410,11 +418,7 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
-    fn assert_error_matches(expected_error: &Error, res: crate::ResponseBody) {
-        if let ResponseBody::GraphQL(graphql_response) = res {
-            assert_eq!(&graphql_response.errors[0], expected_error);
-        } else {
-            panic!("expected a graphql response");
-        }
+    fn assert_error_matches(expected_error: &Error, res: Response) {
+        assert_eq!(&res.errors[0], expected_error);
     }
 }

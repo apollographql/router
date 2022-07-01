@@ -1,3 +1,13 @@
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::task;
+
+use async_trait::async_trait;
+use futures::future::BoxFuture;
+use router_bridge::planner::UsageReporting;
+
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
 use crate::cache::DedupCache;
@@ -8,13 +18,6 @@ use crate::traits::CacheResolver;
 use crate::traits::QueryKey;
 use crate::traits::QueryPlanner;
 use crate::*;
-use async_trait::async_trait;
-use futures::future::BoxFuture;
-use router_bridge::planner::UsageReporting;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::Arc;
-use std::task;
 
 type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 
@@ -167,10 +170,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mockall::{mock, predicate::*};
-    use router_bridge::planner::{PlanErrors, UsageReporting};
+    use mockall::mock;
+    use mockall::predicate::*;
+    use router_bridge::planner::PlanErrors;
+    use router_bridge::planner::UsageReporting;
     use test_log::test;
+
+    use super::*;
 
     mock! {
         #[derive(Debug)]

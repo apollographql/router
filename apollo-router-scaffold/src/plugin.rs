@@ -1,10 +1,12 @@
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use cargo_scaffold::ScaffoldDescription;
 use clap::Subcommand;
 use inflector::Inflector;
 use regex::Regex;
-use std::fs;
-use std::path::{Path, PathBuf};
 use toml::Value;
 
 #[derive(Subcommand, Debug)]

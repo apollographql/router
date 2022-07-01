@@ -1,40 +1,55 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::sync::Arc;
+use std::task::Poll;
+
+use futures::future::ready;
+use futures::future::BoxFuture;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::stream::StreamExt;
+use futures::Stream;
+use futures::TryFutureExt;
+use http::StatusCode;
+use indexmap::IndexMap;
+use lazy_static::__Deref;
+use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+use tower_service::Service;
+use tracing_futures::Instrument;
+
+use super::QueryPlannerContent;
 use crate::cache::storage::CacheStorage;
 use crate::cache::DedupCache;
+use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
+use crate::graphql;
+use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
-use crate::{
-    query_planner::{BridgeQueryPlanner, CachingQueryPlanner, QueryPlanOptions},
-    services::{
-        execution_service::ExecutionService,
-        layers::{
-            allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer, apq::APQLayer,
-            ensure_query_presence::EnsureQueryPresence,
-        },
-    },
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, Response,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphResponse,
-};
-use futures::future::ready;
-use futures::stream::{once, BoxStream, StreamExt};
-use futures::Stream;
-use futures::{future::BoxFuture, TryFutureExt};
-use http::StatusCode;
-use indexmap::IndexMap;
-use std::sync::Arc;
-use std::task::Poll;
-use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, ServiceBuilder, ServiceExt};
-use tower_service::Service;
-use tracing_futures::Instrument;
-
-use super::QueryPlannerContent;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanOptions;
+use crate::services::execution_service::ExecutionService;
+use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::Schema;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -82,7 +97,7 @@ where
     ExecutionService::Future: Send + 'static,
     ResponseStream: Stream<Item = Response> + Send + 'static,
 {
-    type Response = RouterResponse<BoxStream<'static, ResponseBody>>;
+    type Response = RouterResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -131,20 +146,18 @@ where
 
             match content {
                 QueryPlannerContent::Introspection { response } => {
-                    return Ok(RouterResponse::new_from_response_body(
-                        ResponseBody::GraphQL(*response),
-                        context,
-                    )
-                    .boxed());
+                    return Ok(
+                        RouterResponse::new_from_graphql_response(*response, context).boxed(),
+                    );
                 }
                 QueryPlannerContent::IntrospectionDisabled => {
-                    let mut resp = http::Response::new(once(ready(ResponseBody::GraphQL(
-                        crate::Response::builder()
+                    let mut resp = http::Response::new(once(ready(
+                        graphql::Response::builder()
                             .errors(vec![crate::error::Error::builder()
                                 .message(String::from("introspection has been disabled"))
                                 .build()])
                             .build(),
-                    ))));
+                    )));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
                     return Ok(RouterResponse {
@@ -155,11 +168,7 @@ where
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_response_body(
-                            ResponseBody::GraphQL(err),
-                            context,
-                        )
-                        .boxed())
+                        Ok(RouterResponse::new_from_graphql_response(err, context).boxed())
                     } else {
                         let operation_name = body.operation_name.clone();
 
@@ -175,10 +184,10 @@ where
                             )
                             .await?;
 
-                        let (parts, response_stream) = response.into_parts();
+                        let (parts, response_stream) = http::Response::from(response).into_parts();
                         Ok(RouterResponse {
                             context,
-                            response: crate::http_compat::Response::from_parts(
+                            response: http::Response::from_parts(
                                 parts,
                                 response_stream
                                     .map(move |mut response: Response| {
@@ -190,10 +199,11 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
-                                        ResponseBody::GraphQL(response)
+                                        response
                                     })
                                     .in_current_span(),
-                            ),
+                            )
+                            .into(),
                         }
                         .boxed())
                     }
@@ -205,10 +215,22 @@ where
                 message: error.to_string(),
                 ..Default::default()
             }];
+            let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
+                Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
+                    if matches!(
+                        retrieval_error.deref(),
+                        QueryPlannerError::SpecError(_)
+                            | QueryPlannerError::SchemaValidationErrors(_)
+                    ) =>
+                {
+                    StatusCode::BAD_REQUEST
+                }
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
 
             Ok(RouterResponse::builder()
                 .errors(errors)
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .status_code(status_code)
                 .context(context_cloned)
                 .build()
                 .expect("building a response like this should not fail")
@@ -292,11 +314,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
     ) -> Result<
         (
-            BoxCloneService<
-                RouterRequest,
-                RouterResponse<BoxStream<'static, ResponseBody>>,
-                BoxError,
-            >,
+            BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
             Plugins,
         ),
         crate::error::ServiceBuildError,

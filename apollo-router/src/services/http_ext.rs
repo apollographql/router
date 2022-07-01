@@ -2,29 +2,27 @@
 //!
 //! To improve their usability.
 
-use axum::{body::boxed, response::IntoResponse};
-use bytes::Bytes;
-use futures::{
-    future::ready,
-    stream::{once, BoxStream},
-};
-use http::{
-    header::{self, HeaderName},
-    request::Parts,
-    uri::InvalidUri,
-    HeaderValue, Method,
-};
-use multimap::MultiMap;
-use std::{
-    cmp::PartialEq,
-    hash::Hash,
-    ops::{Deref, DerefMut},
-};
+use std::cmp::PartialEq;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
-use crate::ResponseBody;
+use axum::body::boxed;
+use axum::response::IntoResponse;
+use bytes::Bytes;
+use futures::future::ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use http::header::HeaderName;
+use http::header::{self};
+use http::HeaderValue;
+use http::Method;
+use multimap::MultiMap;
+
+use crate::graphql;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
-/// because header name creation is faillable.
+/// because header name creation is fallible.
 #[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderName {
     String(String),
@@ -32,12 +30,13 @@ pub enum IntoHeaderName {
 }
 
 /// Temporary holder of header value while for use while building requests and responses. Required
-/// because header value creation is faillable.
+/// because header value creation is fallible.
 #[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderValue {
     String(String),
     HeaderValue(HeaderValue),
 }
+
 impl<T> From<T> for IntoHeaderName
 where
     T: std::fmt::Display,
@@ -131,45 +130,6 @@ impl<T> Request<T> {
             body,
         )
     }
-
-    /// Update the associated URL
-    pub fn from_parts(head: Parts, body: T) -> Request<T> {
-        Request {
-            inner: http::Request::from_parts(head, body),
-        }
-    }
-
-    /// Consumes the request, returning just the body.
-    pub fn into_body(self) -> T {
-        self.inner.into_body()
-    }
-
-    /// Consumes the request returning the head and body parts.
-    pub fn into_parts(self) -> (http::request::Parts, T) {
-        self.inner.into_parts()
-    }
-
-    /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
-    pub fn map<F, U>(self, f: F) -> Result<Request<U>, InvalidUri>
-    where
-        F: FnOnce(T) -> U,
-    {
-        Ok(Request {
-            inner: self.inner.map(f),
-        })
-    }
-}
-
-impl<T> Request<T>
-where
-    T: Default,
-{
-    // Only used for tests
-    pub fn mock() -> Request<T> {
-        Request {
-            inner: http::Request::default(),
-        }
-    }
 }
 
 impl<T> Deref for Request<T> {
@@ -183,6 +143,18 @@ impl<T> Deref for Request<T> {
 impl<T> DerefMut for Request<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl<T> From<http::Request<T>> for Request<T> {
+    fn from(inner: http::Request<T>) -> Self {
+        Request { inner }
+    }
+}
+
+impl<T> From<Request<T>> for http::Request<T> {
+    fn from(request: Request<T>) -> http::Request<T> {
+        request.inner
     }
 }
 
@@ -252,7 +224,7 @@ impl<T: PartialEq> PartialEq for Request<T> {
     }
 }
 
-impl<T: PartialEq> Eq for Request<T> {}
+impl<T: Eq> Eq for Request<T> {}
 
 /// Wrap an http Response.
 #[derive(Debug, Default)]
@@ -261,20 +233,6 @@ pub struct Response<T> {
 }
 
 impl<T> Response<T> {
-    pub fn into_parts(self) -> (http::response::Parts, T) {
-        self.inner.into_parts()
-    }
-
-    pub fn from_parts(head: http::response::Parts, body: T) -> Response<T> {
-        Response {
-            inner: http::Response::from_parts(head, body),
-        }
-    }
-
-    pub fn into_body(self) -> T {
-        self.inner.into_body()
-    }
-
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
         F: FnMut(T) -> U,
@@ -283,14 +241,15 @@ impl<T> Response<T> {
     }
 }
 
-impl Response<BoxStream<'static, ResponseBody>> {
-    pub fn from_response_to_stream(http: http::response::Response<ResponseBody>) -> Self {
+impl Response<BoxStream<'static, graphql::Response>> {
+    pub fn from_response_to_stream(http: http::response::Response<graphql::Response>) -> Self {
         let (parts, body) = http.into_parts();
         Response {
             inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
         }
     }
 }
+
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 
@@ -338,10 +297,10 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-impl IntoResponse for Response<ResponseBody> {
+impl IntoResponse for Response<graphql::Response> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
-        let (mut parts, body) = self.into_parts();
+        let (mut parts, body) = http::Response::from(self).into_parts();
         let json_body_bytes =
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
         parts.headers.insert(
@@ -356,7 +315,7 @@ impl IntoResponse for Response<ResponseBody> {
 impl IntoResponse for Response<Bytes> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
-        let (parts, body) = self.into_parts();
+        let (parts, body) = http::Response::from(self).into_parts();
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
     }
@@ -364,8 +323,11 @@ impl IntoResponse for Response<Bytes> {
 
 #[cfg(test)]
 mod test {
-    use crate::http_compat::Request;
-    use http::{HeaderValue, Method, Uri};
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
+
+    use crate::http_ext::Request;
 
     #[test]
     fn builder() {

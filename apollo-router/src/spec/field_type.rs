@@ -1,7 +1,9 @@
-use crate::json_ext::{Value, ValueExt};
-use crate::*;
 use apollo_parser::ast;
 use displaydoc::Display;
+
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::*;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
@@ -73,6 +75,8 @@ impl FieldType {
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
                 .try_for_each(|x| inner_ty.validate_input_value(x, schema)),
+            // For coercion from single value to list
+            (FieldType::List(inner_ty), val) => inner_ty.validate_input_value(val, schema),
             (FieldType::NonNull(inner_ty), value) => {
                 if value.is_null() {
                     Err(InvalidValue)
