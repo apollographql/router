@@ -44,7 +44,7 @@
       "Custom binary": "/customizations/custom-binary",
       "Rhai scripts (experimental)": "/customizations/rhai"
     },
-    "Third-Party Support": {
+    "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
     }

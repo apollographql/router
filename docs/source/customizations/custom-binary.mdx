@@ -2,49 +2,53 @@
 title: Creating a custom Apollo Router binary
 ---
 
-To use plugins that are not bundled with the default Apollo Router distribution you will need to create your own Apollo Router binary.
+import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-This page will walk you through creating your own Router binary from scratch, and creating a simple plugin.
+To use [custom plugins](./native/) that aren't bundled with the default Apollo Router distribution, you need to compile your own custom router binary. This page walks you through creating that binary from scratch and adding a plugin to it.
 
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).
-> Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+<ElasticNotice />
 
-# Prerequisites
+## Prerequisites
 
-To compile the Apollo Router you will need to have the following installed.
+To compile the Apollo Router, you need to have the following installed:
 
 <!-- renovate-automation: rustc version -->
-* [rust 1.61.0](https://www.rust-lang.org/tools/install)
-* nodejs 16.9.1
+* [Rust 1.61.0 or later](https://www.rust-lang.org/tools/install)
+* [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
 
-Once you have the basics installed, install `cargo-xtask` and `cargo-scaffold`
-```bash
+After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
+
+```sh
 cargo install cargo-xtask
 cargo install cargo-scaffold
 ```
 
-# Create new project
+## 1. Create a new project
 
-1. Use `cargo-scaffold` to create the project.
-   
+1. Use the `cargo-scaffold` command to create a project for your custom router:
+
    ```bash
    cargo-scaffold scaffold https://github.com/apollographql/router.git -r apollo-router-scaffold/templates/base
    ```
-   You will be asked some questions about your project. For the purposes of this tutorial name your project `starstuff`.
-   
-2. After the project has been created change to the `starstuff` directory
+
+2. The `cargo-scaffold` command prompts you for some configuration settings. For the purposes of this tutorial, set your project's name to `starstuff`.
+
+3. After your project is created, change to the `starstuff` directory:
+
    ```bash
    cd starstuff
    ```
+
 The generated project has the following layout:
+
 ```bash
 starstuff
 ├── Cargo.toml       # Dependencies are declared here
 ├── README.md
 ├── router.yaml      # Router yaml config
 ├── src
-│   ├── main.rs      # Entry point.
-│   └── plugins      # Custom plugins are located here.
+│   ├── main.rs      # Entry point
+│   └── plugins      # Custom plugins are located here
 │       └── mod.rs
 └── xtask            # Build support files
     ├── Cargo.toml
@@ -52,81 +56,99 @@ starstuff
         └── main.rs
 ```
 
-The Apollo Router uses an auto discovery mechanism for plugin discovery, so any plugins that are added via dependency will automatically be available to the Router at runtime. 
+The Apollo Router uses an auto-discovery mechanism for plugins, so any plugins you add via dependency are automatically available to the Router at runtime.
 
-# Compile the Router
+## 2. Compile the router
 
-To create a debug build use the following command.
+Create a debug build of the Apollo Router with the following command:
+
 ```bash
 cargo build
 ```
-Your debug binary is now located in `target/debug/router`
 
-For production, you will want to create a release build.
+The resulting debug binary is located in `target/debug/router`.
+
+To create a release build for production environments, use this command instead:
+
 ```bash
 cargo build --release
 ```
-Your release binary is now located in `target/release/router`
 
-# Run the Apollo Router
+The resulting release binary is now located in `target/release/router`.
 
-1. Download the example schema
+## 3. Run the compiled binary
+
+Now you can test out your compiled router with an example supergraph schema.
+
+1. Download the example schema with the following command:
 
    ```bash
    curl -sSL https://supergraph.demo.starstuff.dev/ > supergraph-schema.graphql
    ```
 
-2. Run the Apollo Router
-   
-   During development it is convenient to use `cargo run` to run the Apollo Router as it will 
-   ```bash 
+2. Run the router and provide the example schema like so:
+
+   ```bash
    cargo run -- --hot-reload --config router.yaml --supergraph supergraph-schema.graphql
    ```
-   
-> If you are using managed federation you can set APOLLO_KEY and APOLLO_GRAPH_REF environment variables instead of specifying the supergraph as a file.
 
-# Create a plugin
+   During development, it's helpful to use `cargo run` to run the router.
 
-1. From within your project directory scaffold a new plugin
+> If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](../managed-federation/setup#4-connect-the-router-to-studio).
+
+## 4. Create a plugin
+
+1. From within your project directory, scaffold a new plugin with the following command:
+
    ```bash
    cargo router plugin create hello_world
    ```
-2. Select the type of plugin you want to scaffold:
-   ```bash
+
+2. The command prompts you to choose a starting template:
+
+   ```bash {2}
    Select a plugin template:
    > "basic"
    "auth"
    "tracing"
    ```
-   
-   The different templates are:
-   * basic - a barebones plugin.
-   * auth - a basic authentication plugin that could make an external call.
-   * tracing - a plugin that adds a custom span and a log message.
-   
-   Choose `basic`.
 
-4. Add the plugin to the `router.yaml`
-   ```yaml
+   The available templates are:
+
+   * `basic` - a barebones plugin
+   * `auth` - an authentication plugin for making an external call
+   * `tracing` - a telemetry plugin that adds a custom metric span and a log message
+
+   For the purposes of this tutorial, choose `basic`.
+
+4. Add configuration options for the created plugin to your `router.yaml` file:
+
+   ```yaml title="router.yaml"
    plugins:
      starstuff.hello_world:
        message: "starting my plugin"
    ```
 
-5. Run the Apollo Router and see your plugin start up
-   ```bash
-   cargo run -- --hot-reload --config router.yaml --supergraph supergraph-schema.graphql
-   ```
-    
-   In your output you should see something like:
-   ```bash
-   2022-05-21T09:16:33.160288Z  INFO router::plugins::hello_world: starting my plugin
-   ```
+5. Run the router again:
 
-# Remove a plugin
+    ```bash
+    cargo run -- --hot-reload --config router.yaml --supergraph supergraph-schema.graphql
+    ```
 
-From within your project run the following command. It makes a best effort to remove the plugin, but your mileage may vary. 
+    This time, you should see a log line like the following:
+
+    ```bash
+    2022-05-21T09:16:33.160288Z  INFO router::plugins::hello_world: starting my plugin
+    ```
+
+Nice work! You now have a custom router binary with an associated plugin. Next, you can extend the plugin with the functionality you need or add more plugins.
+
+## Removing a plugin
+
+To remove a previously added plugin from your router project, use the following command:
+
 ```bash
 cargo router plugin remove hello_world
 ```
 
+Note that depending on the structure of your plugin, the command might fail to remove all of its associated files.
