@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
@@ -7,6 +9,8 @@ use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::Instrument;
 
 use crate::error::Error;
@@ -142,6 +146,8 @@ impl QueryPlan {
                 schema,
                 originating_request,
                 &Value::default(),
+                &HashMap::new(),
+                sender.clone(),
                 &self.options,
             )
             .await;
@@ -166,6 +172,8 @@ impl PlanNode {
         schema: &'a Schema,
         originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
+        deferred_fetches: &'a HashMap<String, Sender<Value>>,
+        sender: futures::channel::mpsc::Sender<Response>,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
@@ -187,6 +195,8 @@ impl PlanNode {
                                 schema,
                                 originating_request.clone(),
                                 &value,
+                                deferred_fetches,
+                                sender.clone(),
                                 options,
                             )
                             .instrument(span.clone())
@@ -211,6 +221,8 @@ impl PlanNode {
                                 schema,
                                 originating_request.clone(),
                                 parent_value,
+                                deferred_fetches,
+                                sender.clone(),
                                 options,
                             )
                             .instrument(span.clone())
@@ -237,6 +249,8 @@ impl PlanNode {
                             schema,
                             originating_request,
                             parent_value,
+                            deferred_fetches,
+                            sender,
                             options,
                         )
                         .instrument(tracing::trace_span!("flatten"))
@@ -254,6 +268,7 @@ impl PlanNode {
                             service_registry,
                             originating_request,
                             schema,
+                            deferred_fetches,
                             options,
                         )
                         .instrument(tracing::info_span!(
@@ -273,8 +288,106 @@ impl PlanNode {
                         }
                     }
                 }
-                PlanNode::Defer { primary, deferred } => {
-                    unimplemented!()
+                PlanNode::Defer {
+                    primary:
+                        Primary {
+                            path,
+                            subselection,
+                            node,
+                        },
+                    deferred, /*DeferredNode {
+                                  depends,
+                                  label,
+                                  path,
+                                  subselection,
+                                  node,
+                              },*/
+                } => {
+                    //FIXME: what about nested fetches
+                    let mut deferred_fetches = HashMap::new();
+                    let mut deferred_receivers = Vec::new();
+
+                    for d in deferred.depends.iter() {
+                        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+                        deferred_fetches.insert(d.id.clone(), sender.clone());
+                        //FIXME: we should know about the path
+                        // should we know about the fetch id too?
+                        deferred_receivers.push(ReceiverStream::new(receiver).into_future());
+                    }
+
+                    let mut stream: stream::FuturesUnordered<_> =
+                        deferred_receivers.into_iter().collect();
+                    //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
+                    let deferred_node = deferred.node.clone();
+                    let deferred_path = deferred.path.clone();
+                    let mut tx = sender.clone();
+                    let sc = schema.clone();
+                    let orig = originating_request.clone();
+                    let sr = service_registry.clone();
+                    let ctx = context.clone();
+                    let opt = options.clone();
+                    tokio::task::spawn(async move {
+                        //FIXME: do we go from an empty object?
+                        let mut value = Value::default();
+
+                        while let Some(v) = stream
+                            .next()
+                            //.instrument(span.clone())
+                            //.in_current_span()
+                            .await
+                        {
+                            let deferred_value = v.0.unwrap();
+                            println!("got deferred value: {:?}", deferred_value);
+                            value.deep_merge(deferred_value);
+                        }
+
+                        let mut errors = Vec::new();
+                        let span = tracing::info_span!("deferred");
+                        let (v, err) = deferred_node
+                            .unwrap()
+                            .execute_recursively(
+                                &deferred_path,
+                                &ctx,
+                                &sr,
+                                &sc,
+                                orig,
+                                &value,
+                                &HashMap::new(),
+                                tx.clone(),
+                                &opt,
+                            )
+                            .instrument(span.clone())
+                            .in_current_span()
+                            .await;
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+
+                        let _ = tx
+                            .send(Response::builder().data(value).errors(errors).build())
+                            .await;
+                    });
+
+                    value = parent_value.clone();
+                    errors = Vec::new();
+                    //let (sender, receiver) = tokio::sync::oneshot::channel();
+                    let span = tracing::info_span!("primary");
+                    let (v, err) = node
+                        .execute_recursively(
+                            current_dir,
+                            context,
+                            service_registry,
+                            schema,
+                            originating_request.clone(),
+                            &value,
+                            &deferred_fetches,
+                            sender,
+                            options,
+                        )
+                        .instrument(span.clone())
+                        .in_current_span()
+                        .await;
+                    value.deep_merge(v);
+                    errors.extend(err.into_iter());
                 }
             }
 
@@ -332,6 +445,7 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
+    use tokio::sync::mpsc::Sender;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
@@ -398,7 +512,7 @@ pub(crate) mod fetch {
         operation_kind: OperationKind,
 
         /// Optional id used by Deferred nodes
-        id: Option<String>,
+        pub(crate) id: Option<String>,
     }
 
     struct Variables {
@@ -497,6 +611,7 @@ pub(crate) mod fetch {
             service_registry: &'a ServiceRegistry,
             originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
+            deferred_fetches: &'a HashMap<String, Sender<Value>>,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
@@ -601,7 +716,13 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            self.response_at_path(current_dir, paths, response.data.unwrap_or_default())
+            let data = response.data.unwrap_or_default();
+            if let Some(id) = &self.id {
+                if let Some(sender) = deferred_fetches.get(id.as_str()) {
+                    sender.clone().send(data.clone()).await;
+                }
+            }
+            self.response_at_path(current_dir, paths, data)
                 .map(|value| (value, errors))
         }
 
@@ -707,7 +828,7 @@ pub(crate) struct DeferredNode {
     /// Will be set _unless_ `node` is a `DeferNode` itself.
     subselection: Option<String>,
     /// The plan to get all the data for that deferred part
-    node: Option<Box<PlanNode>>,
+    node: Option<Arc<PlanNode>>,
 }
 
 /// A deferred node.
@@ -1006,7 +1127,7 @@ mod tests {
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
         let jh = tokio::task::spawn(async move {
-            let schema = Schema::from_str(test_schema!()).unwrap();
+            let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
 
             query_plan
                 .execute(
@@ -1036,8 +1157,11 @@ mod tests {
                 .await
         });
         let response = receiver.next().await.unwrap();
-        println!("got response: {:?}", response);
+        println!("got primary response: {:?}", response);
         jh.await.unwrap();
-        //panic!();
+        let response = receiver.next().await.unwrap();
+        println!("got deferred response: {:?}", response);
+
+        panic!();
     }
 }

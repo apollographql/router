@@ -192,6 +192,7 @@ dependencies = [
  "test-span",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util 0.7.3",
  "tonic",
  "tower",

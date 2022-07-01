@@ -12,6 +12,7 @@ use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
 /// Collection of subgraph services.
+#[derive(Clone)]
 pub struct ServiceRegistry {
     services: HashMap<
         String,
