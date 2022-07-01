@@ -946,12 +946,11 @@ mod tests {
         );
     }
 
-    /*
     #[tokio::test]
     async fn defer() {
         // plan for { t { x ... @defer { y } }}
         let query_plan: QueryPlan = QueryPlan {
-            root: serde_json::from_value(json! {{
+            root: serde_json::from_value(serde_json::json! {{
                 "kind": "Defer",
                 "primary": {
                     "path":["t", "x"],
@@ -967,9 +966,9 @@ mod tests {
                     }
                 },
                 "deferred": {
-                    "depends": {
+                    "depends": [{
                         "id": "fetch1",
-                    },
+                    }],
                     "path":["t"],
                     "subselection": "{ ... on T { y } }",
                     "node": {
@@ -988,15 +987,16 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            options: QueryPlanOptions::default(),
         };
 
-        let mut mock_x_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_x_service = plugin::test::MockSubgraphService::new();
         mock_x_service
             .expect_call()
             .times(1)
             .withf(move |_request| true)
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        let mut mock_y_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_y_service = plugin::test::MockSubgraphService::new();
         mock_y_service
             .expect_call()
             .times(1)
@@ -1025,7 +1025,11 @@ mod tests {
                                 .service(mock_y_service.build().boxed()),
                         ),
                     ])),
-                    http_compat::Request::mock(),
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
                     &schema,
                     sender,
                 )
@@ -1035,5 +1039,5 @@ mod tests {
         println!("got response: {:?}", response);
         jh.await.unwrap();
         //panic!();
-    }*/
+    }
 }
