@@ -92,7 +92,6 @@ impl PlanNode {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
-            // FIXME: not sure about that one, can there be mutations in the deferred part?
             Self::Defer { primary, .. } => primary.node.contains_mutations(),
             Self::Flatten(_) => false,
         }
@@ -697,7 +696,7 @@ pub(crate) struct DeferredNode {
     /// References one or more fetch node(s) (by `id`) within
     /// `primary.node`. The plan of this deferred part should not
     /// be started before all those fetches returns.
-    depends: Depends,
+    depends: Vec<Depends>,
 
     /// The optional defer label.
     label: Option<String>,
