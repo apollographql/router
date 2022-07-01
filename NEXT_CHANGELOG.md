@@ -433,6 +433,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
+### Update rhai to latest release (1.8.0)  ([PR #1337](https://github.com/apollographql/router/pull/1337)
+
+We had been depending on a pinned git version which had a fix we required. This now updates to the latest release.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1337
+
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
 Migrate all typed-builders code to buildstructor
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
