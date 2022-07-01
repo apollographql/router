@@ -34,6 +34,8 @@
   ],
   "packageRules": [
     {
+      // This "rust" name maps to the Docker Hub "rust" image above on account
+      // of the `regexManagers[0]` defined above being `datasourceTemplate` = `docker`.
       "matchPackageNames": ["rust"],
       "matchManagers": "regex",
       "groupName": "rustc",
