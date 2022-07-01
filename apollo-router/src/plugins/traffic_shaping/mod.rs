@@ -10,6 +10,7 @@
 //!
 
 mod deduplication;
+mod rate;
 mod timeout;
 
 use std::collections::HashMap;
@@ -21,12 +22,12 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::limit::RateLimitLayer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::rate::RateLimitLayer;
 use self::timeout::TimeoutLayer;
 use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
@@ -131,6 +132,7 @@ impl Merge for RateLimitConf {
 
 struct TrafficShaping {
     config: Config,
+    rate_limit_router: Option<RateLimitLayer>,
 }
 
 #[async_trait::async_trait]
@@ -138,12 +140,23 @@ impl Plugin for TrafficShaping {
     type Config = Config;
 
     async fn new(config: Self::Config) -> Result<Self, BoxError> {
+        let rate_limit_router = config
+            .router
+            .as_ref()
+            .and_then(|r| r.rate_limit.as_ref())
+            .map(|router_rate_limit_conf| {
+                println!("rate limiting");
+                RateLimitLayer::new(router_rate_limit_conf.num, router_rate_limit_conf.per)
+            });
         // TODO display some warnings regarding the configuration with timeout and rate limit
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            rate_limit_router,
+        })
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         ServiceBuilder::new()
@@ -151,21 +164,13 @@ impl Plugin for TrafficShaping {
                 self.config
                     .router
                     .as_ref()
-                    .and_then(|r| r.timeout)
+                    .and_then(|r| {
+                        println!("timeout : {r:?}");
+                        r.timeout
+                    })
                     .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
             ))
-            .option_layer(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.rate_limit.as_ref())
-                    .map(|router_rate_limit_conf| {
-                        ServiceBuilder::new().layer(RateLimitLayer::new(
-                            router_rate_limit_conf.num,
-                            router_rate_limit_conf.per,
-                        ))
-                    }),
-            )
+            .option_layer(self.rate_limit_router.clone())
             .service(service)
             .boxed()
     }
@@ -198,18 +203,17 @@ impl Plugin for TrafficShaping {
 
         if let Some(config) = final_config {
             ServiceBuilder::new()
-                .layer(TimeoutLayer::new(
-                    config
-                    .timeout
-                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
-                ))
                 .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
                     // Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
                         .buffered()
                 }))
-                
+                .layer(TimeoutLayer::new(
+                    config
+                    .timeout
+                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
+                ))
                 .option_layer(config.rate_limit.as_ref().map(|rate_limit_conf| {
                     RateLimitLayer::new(
                         rate_limit_conf.num,
