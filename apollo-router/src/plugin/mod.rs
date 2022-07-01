@@ -14,13 +14,16 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
-pub mod utils;
+pub mod serde;
+pub mod test;
 
-use crate::layers::ServiceBuilderExt;
-use crate::{
-    http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
-    Response, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+
+use ::serde::de::DeserializeOwned;
+use ::serde::Deserialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -28,14 +31,24 @@ use futures::stream::BoxStream;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize};
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::task::{Context, Poll};
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
-use tower::{BoxError, Service, ServiceBuilder};
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
@@ -108,12 +121,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         service
     }
 
@@ -184,12 +193,8 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>;
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
@@ -239,12 +244,8 @@ where
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service(service)
     }
 
@@ -290,7 +291,7 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $value: ident) => {
-        $crate::reexports::startup::on_startup! {
+        $crate::_private::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
             }
@@ -298,11 +299,17 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| Box::pin(async move {
-                let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
-                let plugin = $value::new(configuration).await?;
-                Ok(Box::new(plugin) as Box<dyn $crate::DynPlugin>)
-            }), |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
+            $crate::plugin::register_plugin(
+                qualified_name,
+                $crate::plugin::PluginFactory::new(
+                    |configuration| Box::pin(async move {
+                        let configuration = $crate::_private::serde_json::from_value(configuration.clone())?;
+                        let plugin = $value::new(configuration).await?;
+                        Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
+                    }),
+                    |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()
+                )
+            );
         }
     };
 }
@@ -311,18 +318,14 @@ macro_rules! register_plugin {
 #[derive(Clone)]
 pub struct Handler {
     service: Buffer<
-        BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>,
-        http_compat::Request<Bytes>,
+        BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
+        http_ext::Request<Bytes>,
     >,
 }
 
 impl Handler {
     pub fn new(
-        service: BoxService<
-            http_compat::Request<Bytes>,
-            http_compat::Response<ResponseBody>,
-            BoxError,
-        >,
+        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
@@ -330,8 +333,8 @@ impl Handler {
     }
 }
 
-impl Service<http_compat::Request<Bytes>> for Handler {
-    type Response = http_compat::Response<ResponseBody>;
+impl Service<http_ext::Request<Bytes>> for Handler {
+    type Response = http_ext::Response<Bytes>;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -339,20 +342,14 @@ impl Service<http_compat::Request<Bytes>> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http_compat::Request<Bytes>) -> Self::Future {
+    fn call(&mut self, req: http_ext::Request<Bytes>) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>>
-    for Handler
-{
+impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>> for Handler {
     fn from(
-        original: BoxService<
-            http_compat::Request<Bytes>,
-            http_compat::Response<ResponseBody>,
-            BoxError,
-        >,
+        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
     ) -> Self {
         Self::new(original)
     }

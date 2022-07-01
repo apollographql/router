@@ -12,10 +12,13 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router::utils::test::IntoSchema::Canned;
-    use apollo_router::utils::test::PluginTestHarness;
-    use apollo_router::{Context, Plugin, RouterRequest};
+    use apollo_router::plugin::test::IntoSchema::Canned;
+    use apollo_router::plugin::test::PluginTestHarness;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::plugins::rhai::Conf;
+    use apollo_router::plugins::rhai::Rhai;
+    use apollo_router::services::RouterRequest;
+    use apollo_router::Context;
     use http::StatusCode;
 
     #[tokio::test]
@@ -69,14 +72,9 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        if let apollo_router::ResponseBody::GraphQL(response) =
-            service_response.response.body()
-        {
-            assert!(response.errors.is_empty());
-            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-        } else {
-            panic!("unexpected response");
-        }
+        let response = service_response.response.body();
+        assert!(response.errors.is_empty());
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         */
     }
 }

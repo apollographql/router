@@ -1,16 +1,28 @@
-mod bridge_query_planner;
-mod caching_query_planner;
-mod selection;
-use crate::prelude::graphql::*;
-pub use bridge_query_planner::*;
-pub use caching_query_planner::*;
-use fetch::OperationKind;
+use std::collections::HashSet;
+
+pub(crate) use bridge_query_planner::*;
+pub(crate) use caching_query_planner::*;
+pub use fetch::OperationKind;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use std::collections::HashSet;
 use tracing::Instrument;
+
+use crate::error::Error;
+use crate::error::FetchError;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::service_registry::ServiceRegistry;
+use crate::*;
+
+mod bridge_query_planner;
+mod caching_query_planner;
+mod selection;
+
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {
@@ -18,7 +30,7 @@ pub struct QueryPlanOptions {
     pub enable_variable_deduplication: bool,
 }
 
-/// A plan for a [`crate::Query`]
+/// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {
     pub usage_reporting: UsageReporting,
@@ -26,7 +38,7 @@ pub struct QueryPlan {
     options: QueryPlanOptions,
 }
 
-/// This default impl is useful for plugin::utils users
+/// This default impl is useful for test users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
 #[buildstructor::buildstructor]
 impl QueryPlan {
@@ -75,7 +87,7 @@ pub(crate) enum PlanNode {
 }
 
 impl PlanNode {
-    pub fn contains_mutations(&self) -> bool {
+    pub(crate) fn contains_mutations(&self) -> bool {
         match self {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
@@ -114,7 +126,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
         mut sender: futures::channel::mpsc::Sender<Response>,
     ) {
@@ -153,7 +165,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -315,15 +327,30 @@ impl PlanNode {
 }
 
 pub(crate) mod fetch {
-    use super::selection::{select_object, Selection};
-    use crate::prelude::graphql::*;
+    use std::collections::HashMap;
+    use std::fmt::Display;
+    use std::sync::Arc;
+
     use indexmap::IndexSet;
     use serde::Deserialize;
-    use std::{collections::HashMap, fmt::Display, sync::Arc};
     use tower::ServiceExt;
-    use tracing::{instrument, Instrument};
+    use tracing::instrument;
+    use tracing::Instrument;
 
-    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    use super::selection::select_object;
+    use super::selection::Selection;
+    use super::QueryPlanOptions;
+    use crate::error::Error;
+    use crate::error::FetchError;
+    use crate::graphql::Request;
+    use crate::json_ext::Object;
+    use crate::json_ext::Path;
+    use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
+    use crate::service_registry::ServiceRegistry;
+    use crate::*;
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
         Query,
@@ -338,6 +365,12 @@ pub(crate) mod fetch {
                 OperationKind::Mutation => write!(f, "Mutation"),
                 OperationKind::Subscription => write!(f, "Subscription"),
             }
+        }
+    }
+
+    impl Default for OperationKind {
+        fn default() -> Self {
+            OperationKind::Query
         }
     }
 
@@ -381,7 +414,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: http_compat::Request<crate::Request>,
+            request: http_ext::Request<Request>,
             schema: &Schema,
             enable_variable_deduplication: bool,
         ) -> Option<Variables> {
@@ -463,7 +496,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
-            originating_request: http_compat::Request<Request>,
+            originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
@@ -496,7 +529,7 @@ pub(crate) mod fetch {
             let subgraph_request = SubgraphRequest::builder()
                 .originating_request(Arc::new(originating_request))
                 .subgraph_request(
-                    http_compat::Request::builder()
+                    http_ext::Request::builder()
                         .method(http::Method::POST)
                         .uri(
                             schema
@@ -512,9 +545,9 @@ pub(crate) mod fetch {
                         )
                         .body(
                             Request::builder()
-                                .query(Some(operation.to_string()))
-                                .operation_name(operation_name.clone())
-                                .variables(Arc::new(variables.clone()))
+                                .query(operation)
+                                .and_operation_name(operation_name.clone())
+                                .variables(variables.clone())
                                 .build(),
                         )
                         .build()
@@ -531,16 +564,22 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = service
-                .oneshot(subgraph_request)
-                .instrument(tracing::trace_span!("subfetch_stream"))
-                .await
-                .map_err(|e| FetchError::SubrequestHttpError {
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                })?
-                .response
-                .into_parts();
+            let (_parts, response) = http::Response::from(
+                service
+                    .oneshot(subgraph_request)
+                    .instrument(tracing::trace_span!("subfetch_stream"))
+                    .await
+                    // TODO this is a problem since it restores details about failed service
+                    // when errors have been redacted in the include_subgraph_errors module.
+                    // Unfortunately, not easy to fix here, because at this point we don't
+                    // know if we should be redacting errors for this subgraph...
+                    .map_err(|e| FetchError::SubrequestHttpError {
+                        service: service_name.to_string(),
+                        reason: e.to_string(),
+                    })?
+                    .response,
+            )
+            .into_parts();
 
             super::log::trace_subfetch(service_name, operation, &variables, &response);
 
@@ -684,8 +723,11 @@ pub(crate) struct Depends {
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
 mod log {
-    use crate::PlanNode;
-    use serde_json_bytes::{ByteString, Map, Value};
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Map;
+    use serde_json_bytes::Value;
+
+    use crate::query_planner::PlanNode;
 
     pub(crate) fn trace_query_plan(plan: &PlanNode) {
         tracing::trace!("query plan\n{:?}", plan);
@@ -695,7 +737,7 @@ mod log {
         service_name: &str,
         operation: &str,
         variables: &Map<ByteString, Value>,
-        response: &crate::prelude::graphql::Response,
+        response: &crate::graphql::Response,
     ) {
         tracing::trace!(
             "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
@@ -709,13 +751,17 @@ mod log {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use http::Method;
+    use std::collections::HashMap;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::{collections::HashMap, sync::atomic::AtomicBool};
-    use tower::{ServiceBuilder, ServiceExt};
+
+    use http::Method;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
+    use super::*;
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
@@ -764,7 +810,7 @@ mod tests {
             },
         };
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
@@ -780,7 +826,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -808,7 +858,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
@@ -831,7 +881,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -855,7 +909,7 @@ mod tests {
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
 
-        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
@@ -876,7 +930,11 @@ mod tests {
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
-                http_compat::Request::mock(),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )

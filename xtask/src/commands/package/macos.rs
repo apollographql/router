@@ -1,8 +1,13 @@
-use anyhow::{bail, ensure, Context, Result};
-use serde_json_traversal::serde_json_traversal;
 use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::process::Stdio;
+
+use anyhow::bail;
+use anyhow::ensure;
+use anyhow::Context;
+use anyhow::Result;
+use serde_json_traversal::serde_json_traversal;
 use structopt::StructOpt;
 use xtask::*;
 

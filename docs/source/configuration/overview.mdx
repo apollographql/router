@@ -327,7 +327,7 @@ For more information on APQ, including client configuration, see [this article](
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
 
-```yaml title="example-plugin-router.yaml"
+```yaml {4,8} title="example-plugin-router.yaml"
 plugins:
   example.plugin:
     var1: "hello"
@@ -336,16 +336,18 @@ plugins:
 
 ### Environment variable expansion
 
-You can reference environment variables directly in your YAML file in any section _outside of_ the top-level `server` key. This is useful for referencing secrets without including them in the file.
+You can reference environment variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
 
 Unix-style expansion is used. For example:
 
 - `${ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
 - `${ENV_VAR_NAME:some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
 
-Environment varaible expansions are valid only for YAML _values_, not keys:
+Environment variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
+server:
+  listen: "${MY_LISTEN_ADDRESS}"
 example:
   password: "${MY_PASSWORD}"
 ```
@@ -354,7 +356,7 @@ example:
 
 You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
 
-```yaml {4,8} title="router.yaml"
+```yaml title="router.yaml"
 headers:
   subgraphs:
     products:

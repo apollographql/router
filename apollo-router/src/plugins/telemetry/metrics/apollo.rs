@@ -1,21 +1,28 @@
 // This entire file is license key functionality
 //! Apollo metrics
-use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
-use apollo_spaceport::{ReportHeader, Reporter, ReporterError};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use apollo_spaceport::ReportHeader;
+use apollo_spaceport::Reporter;
+use apollo_spaceport::ReporterError;
 use async_trait::async_trait;
+use deadpool::managed;
 use deadpool::managed::Pool;
-use deadpool::{managed, Runtime};
+use deadpool::Runtime;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use studio::Report;
 use studio::SingleReport;
 use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
+
+use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
 
 mod duration_histogram;
 pub(crate) mod studio;
@@ -216,7 +223,7 @@ impl ApolloMetricsExporter {
     }
 }
 
-pub struct ReporterManager {
+pub(crate) struct ReporterManager {
     endpoint: Url,
 }
 
@@ -237,17 +244,20 @@ impl managed::Manager for ReporterManager {
 
 #[cfg(test)]
 mod test {
-    use crate::utils::test::IntoSchema::Canned;
-    use crate::utils::test::PluginTestHarness;
-    use crate::RouterRequest;
-    use crate::{Context, Plugin};
-    use http::header::HeaderName;
     use std::future::Future;
 
-    use crate::plugins::telemetry::{apollo, Telemetry, STUDIO_EXCLUDE};
+    use http::header::HeaderName;
 
     use super::super::super::config;
     use super::*;
+    use crate::plugin::test::IntoSchema::Canned;
+    use crate::plugin::test::PluginTestHarness;
+    use crate::plugin::Plugin;
+    use crate::plugins::telemetry::apollo;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::Context;
+    use crate::RouterRequest;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {

@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-version = "0.9.4"
+version = "0.9.5"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
@@ -8,10 +8,10 @@ publish = false
 
 [dependencies]
 ansi_term = "0.12"
-anyhow = "1"
+anyhow = "1.0.58"
 base64 = "0.13"
 camino = "1"
-cargo_metadata = "0.14"
+cargo_metadata = "0.15"
 flate2 = "1"
 libc = "0.2"
 once_cell = "1"
@@ -25,5 +25,5 @@ structopt = { version = "0.3", default-features = false }
 tar = "0.4"
 tempfile = "3"
 which = "4"
-zip = { version = "0.5", default-features = false }
+zip = { version = "0.6", default-features = false }
 sha2 = "0.10"

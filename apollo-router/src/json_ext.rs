@@ -1,39 +1,38 @@
-use crate::prelude::graphql::*;
-use serde::{Deserialize, Serialize};
-pub use serde_json_bytes::Value;
-use serde_json_bytes::{ByteString, Entry, Map};
 use std::cmp::min;
 use std::fmt;
+
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
+use serde_json_bytes::Map;
+pub use serde_json_bytes::Value;
+
+use crate::error::FetchError;
 
 /// A JSON object.
 pub type Object = Map<ByteString, Value>;
 
-/// NOT PUBLIC API
-#[doc(hidden)]
-#[macro_export]
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
             Some($pattern) => Ok(Some($var)),
-            None | Some(Value::Null) => Ok(None),
+            None | Some(crate::json_ext::Value::Null) => Ok(None),
             _ => Err(concat!("invalid type for key: ", $key)),
         }
     }};
     ($object:expr, $key:literal) => {{
         match $object.remove($key) {
-            None | Some(Value::Null) => None,
+            None | Some(crate::json_ext::Value::Null) => None,
             Some(value) => Some(value),
         }
     }};
 }
 
-/// NOT PUBLIC API
-#[doc(hidden)]
-#[macro_export]
 macro_rules! ensure_object {
     ($value:expr) => {{
         match $value {
-            Value::Object(o) => Ok(o),
+            crate::json_ext::Value::Object(o) => Ok(o),
             _ => Err("invalid type, expected an object"),
         }
     }};
@@ -396,7 +395,6 @@ where
 
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
-#[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(untagged)]
 pub enum PathElement {
@@ -455,7 +453,6 @@ where
 /// A path into the result document.
 ///
 /// This can be composed of strings and numbers
-#[doc(hidden)]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default, Hash)]
 #[serde(transparent)]
 pub struct Path(pub Vec<PathElement>);
@@ -555,8 +552,9 @@ impl fmt::Display for Path {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json_bytes::json;
+
+    use super::*;
 
     macro_rules! assert_is_subset {
         ($a:expr, $b:expr $(,)?) => {

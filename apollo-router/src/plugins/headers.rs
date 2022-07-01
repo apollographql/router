@@ -1,23 +1,39 @@
-use crate::plugin::utils::serde::{
-    deserialize_header_name, deserialize_header_value, deserialize_option_header_name,
-    deserialize_option_header_value, deserialize_regex,
-};
-use crate::plugin::Plugin;
-use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
-use http::header::{
-    HeaderName, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, PROXY_AUTHENTICATE,
-    PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
-};
+use std::collections::HashMap;
+use std::task::Context;
+use std::task::Poll;
+
+use http::header::HeaderName;
+use http::header::CONNECTION;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
+use http::header::HOST;
+use http::header::PROXY_AUTHENTICATE;
+use http::header::PROXY_AUTHORIZATION;
+use http::header::TE;
+use http::header::TRAILER;
+use http::header::TRANSFER_ENCODING;
+use http::header::UPGRADE;
 use http::HeaderValue;
 use lazy_static::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::task::{Context, Poll};
 use tower::util::BoxService;
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::Layer;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
+
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_header_value;
+use crate::plugin::serde::deserialize_option_header_name;
+use crate::plugin::serde::deserialize_option_header_value;
+use crate::plugin::serde::deserialize_regex;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -232,16 +248,23 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::fetch::OperationKind;
-    use crate::http_compat;
-    use crate::plugin::utils::test::MockSubgraphService;
-    use crate::plugins::headers::{Config, HeadersLayer};
-    use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use std::collections::HashSet;
     use std::str::FromStr;
     use std::sync::Arc;
+
     use tower::BoxError;
+
+    use super::*;
+    use crate::graphql::Request;
+    use crate::graphql::Response;
+    use crate::http_ext;
+    use crate::plugin::test::MockSubgraphService;
+    use crate::plugins::headers::Config;
+    use crate::plugins::headers::HeadersLayer;
+    use crate::query_planner::fetch::OperationKind;
+    use crate::Context;
+    use crate::SubgraphRequest;
+    use crate::SubgraphResponse;
 
     #[test]
     fn test_subgraph_config() {
@@ -516,25 +539,25 @@ mod test {
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
-                http_compat::Request::fake_builder()
+                http_ext::Request::fake_builder()
                     .header("da", "vda")
                     .header("db", "vdb")
                     .header("db", "vdb")
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
-                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .body(Request::builder().query("query").build())
                     .build()
                     .expect("expecting valid request"),
             ),
-            subgraph_request: http_compat::Request::fake_builder()
+            subgraph_request: http_ext::Request::fake_builder()
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
                 .header(HOST, "rhost")
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query(Some("query".to_string())).build())
+                .body(Request::builder().query("query").build())
                 .build()
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,

@@ -1,6 +1,11 @@
-use crate::{FieldType, Object, Schema, SpecError};
-use apollo_parser::ast::{self, Value};
+use apollo_parser::ast::Value;
+use apollo_parser::ast::{self};
 use serde_json_bytes::ByteString;
+
+use crate::json_ext::Object;
+use crate::FieldType;
+use crate::Schema;
+use crate::SpecError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {
@@ -108,7 +113,7 @@ impl Selection {
                                         .and_then(|ty| ty.field(&field_name))
                                 })
                         })
-                        .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?
+                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?
                         .clone()
                 };
 
@@ -189,7 +194,7 @@ impl Selection {
                     // if we can't get a type name from the current type, that means we're applying
                     // a fragment onto a scalar
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
-                    .ok_or_else(|| SpecError::InvalidType(current_type.clone()))?;
+                    .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
                 let fragment_type = FieldType::Named(type_condition.clone());
 

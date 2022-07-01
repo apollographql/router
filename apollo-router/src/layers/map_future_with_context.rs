@@ -4,7 +4,9 @@
 //!
 
 use std::future::Future;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
+
 use tower::Layer;
 use tower::Service;
 
@@ -76,12 +78,18 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::utils::test::MockRouterService;
-    use crate::{ResponseBody, RouterRequest, RouterResponse, ServiceBuilderExt};
     use futures::stream::BoxStream;
     use http::HeaderValue;
-    use tower::{BoxError, Service};
-    use tower::{ServiceBuilder, ServiceExt};
+    use tower::BoxError;
+    use tower::Service;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
+    use crate::graphql::Response;
+    use crate::layers::ServiceBuilderExt;
+    use crate::plugin::test::MockRouterService;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test]
     async fn test_layer() -> Result<(), BoxError> {
@@ -101,7 +109,7 @@ mod test {
                         .unwrap()
                 },
                 |ctx: HeaderValue, resp| async move {
-                    let resp: Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> =
+                    let resp: Result<RouterResponse<BoxStream<'static, Response>>, BoxError> =
                         resp.await;
                     resp.map(|mut response| {
                         response.response.headers_mut().insert("hello", ctx.clone());

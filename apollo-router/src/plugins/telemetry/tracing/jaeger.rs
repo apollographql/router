@@ -1,18 +1,25 @@
 //! Configuration for jaeger tracing.
-use crate::plugins::telemetry::config::{GenericWith, Trace};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
-use opentelemetry::sdk::trace::{BatchSpanProcessor, Builder};
-use schemars::gen::SchemaGenerator;
-use schemars::schema::{Schema, SchemaObject};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use url::Url;
 
-use super::{deser_endpoint, AgentEndpoint};
+use super::deser_endpoint;
+use super::AgentEndpoint;
+use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+// Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint
 pub struct Config {
     #[serde(flatten)]
     #[schemars(schema_with = "endpoint_schema")]

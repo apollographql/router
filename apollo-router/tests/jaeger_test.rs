@@ -1,24 +1,30 @@
 mod common;
 
-use crate::common::TracingTest;
-use crate::common::ValueExt;
-use http::{Request, Response, StatusCode};
-use hyper::{
-    server::Server,
-    service::{make_service_fn, service_fn},
-    Body,
-};
-use opentelemetry::{
-    propagation::TextMapPropagator,
-    trace::{Span, Tracer, TracerProvider},
-};
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
+
+use http::Request;
+use http::Response;
+use http::StatusCode;
+use hyper::server::Server;
+use hyper::service::make_service_fn;
+use hyper::service::service_fn;
+use hyper::Body;
+use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::trace::Span;
+use opentelemetry::trace::Tracer;
+use opentelemetry::trace::TracerProvider;
+use serde_json::json;
+use serde_json::Value;
 use tower::BoxError;
+
+use crate::common::TracingTest;
+use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {

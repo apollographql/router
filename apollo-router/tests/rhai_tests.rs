@@ -1,10 +1,13 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_router::{
-    http_compat, prelude::graphql, DynPlugin, PluggableRouterServiceBuilder, Schema,
-    SubgraphService,
-};
+use apollo_router::graphql::Request;
+use apollo_router::http_ext;
+use apollo_router::plugin::plugins;
+use apollo_router::plugin::DynPlugin;
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::services::SubgraphService;
+use apollo_router::Schema;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -19,7 +22,7 @@ async fn all_rhai_callbacks_are_invoked() {
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
 
-    let dyn_plugin: Box<dyn DynPlugin> = apollo_router::plugins()
+    let dyn_plugin: Box<dyn DynPlugin> = plugins()
         .get("experimental.rhai")
         .expect("Plugin not found")
         .create_instance(
@@ -44,10 +47,10 @@ async fn all_rhai_callbacks_are_invoked() {
     }
     let (router, _) = builder.build().await.unwrap();
 
-    let request = http_compat::Request::fake_builder()
+    let request = http_ext::Request::fake_builder()
         .body(
-            graphql::Request::builder()
-                .query(Some(r#"{ topProducts { name } }"#.to_string()))
+            Request::builder()
+                .query(r#"{ topProducts { name } }"#.to_string())
                 .build(),
         )
         .build()

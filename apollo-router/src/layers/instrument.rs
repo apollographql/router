@@ -7,7 +7,7 @@
 //! # use tower::ServiceBuilder;
 //! # use tower_service::Service;
 //! # use tracing::info_span;
-//! # use apollo_router::ServiceBuilderExt;
+//! # use apollo_router::layers::ServiceBuilderExt;
 //! # fn test<T>(service: impl Service<T>) {
 //! let instrumented = ServiceBuilder::new()
 //!             .instrument(|_request| info_span!("query_planning"))
@@ -18,7 +18,9 @@
 //!
 
 use std::marker::PhantomData;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
+
 use tower::Layer;
 use tower_service::Service;
 use tracing::Instrument;

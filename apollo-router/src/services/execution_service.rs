@@ -1,20 +1,28 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use crate::{ExecutionRequest, ExecutionResponse, Response, SubgraphRequest, SubgraphResponse};
-use crate::{Schema, ServiceRegistry};
-use futures::future::{ready, BoxFuture};
-use futures::stream::{once, BoxStream};
-use futures::StreamExt;
-use http::StatusCode;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
+
+use futures::future::ready;
+use futures::future::BoxFuture;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use http::StatusCode;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower_service::Service;
 use tracing::Instrument;
+
+use crate::graphql::Response;
+use crate::service_registry::ServiceRegistry;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::Schema;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
@@ -81,7 +89,7 @@ impl Service<ExecutionRequest> for ExecutionService {
             let (first, rest) = receiver.into_future().await;
             match first {
                 None => Ok(ExecutionResponse::error_builder()
-                    .errors(vec![crate::Error {
+                    .errors(vec![crate::error::Error {
                         message: "empty response".to_string(),
                         ..Default::default()
                     }])

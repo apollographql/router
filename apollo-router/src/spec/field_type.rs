@@ -1,13 +1,16 @@
-use crate::*;
 use apollo_parser::ast;
 use displaydoc::Display;
+
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::*;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
-pub enum FieldType {
+pub(crate) enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
     /// Named type {0}_
@@ -72,6 +75,8 @@ impl FieldType {
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
                 .try_for_each(|x| inner_ty.validate_input_value(x, schema)),
+            // For coercion from single value to list
+            (FieldType::List(inner_ty), val) => inner_ty.validate_input_value(val, schema),
             (FieldType::NonNull(inner_ty), value) => {
                 if value.is_null() {
                     Err(InvalidValue)
@@ -102,7 +107,7 @@ impl FieldType {
     /// return the name of the type on which selections happen
     ///
     /// Example if we get the field `list: [User!]!`, it will return "User"
-    pub fn inner_type_name(&self) -> Option<&str> {
+    pub(crate) fn inner_type_name(&self) -> Option<&str> {
         match self {
             FieldType::Named(name) | FieldType::Introspection(name) => Some(name.as_str()),
             FieldType::List(inner) | FieldType::NonNull(inner) => inner.inner_type_name(),
@@ -114,7 +119,7 @@ impl FieldType {
         }
     }
 
-    pub fn is_builtin_scalar(&self) -> bool {
+    pub(crate) fn is_builtin_scalar(&self) -> bool {
         match self {
             FieldType::Named(_)
             | FieldType::Introspection(_)
@@ -128,7 +133,7 @@ impl FieldType {
         }
     }
 
-    pub fn is_non_null(&self) -> bool {
+    pub(crate) fn is_non_null(&self) -> bool {
         matches!(self, FieldType::NonNull(_))
     }
 }

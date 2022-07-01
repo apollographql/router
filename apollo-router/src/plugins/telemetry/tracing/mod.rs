@@ -1,18 +1,21 @@
-use crate::plugins::telemetry::config::Trace;
 use opentelemetry::sdk::trace::Builder;
 use reqwest::Url;
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
 use tower::BoxError;
 
-pub mod apollo;
-pub mod apollo_telemetry;
-pub mod datadog;
-pub mod jaeger;
-pub mod otlp;
-pub mod zipkin;
+use crate::plugins::telemetry::config::Trace;
 
-pub trait TracingConfigurator {
+pub(crate) mod apollo;
+pub(crate) mod apollo_telemetry;
+pub(crate) mod datadog;
+pub(crate) mod jaeger;
+pub(crate) mod otlp;
+pub(crate) mod zipkin;
+
+pub(crate) trait TracingConfigurator {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
 }
 

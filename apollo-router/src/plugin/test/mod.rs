@@ -1,36 +1,42 @@
 //! Utilities which make it easy to test with [`crate::plugin`].
 
-pub mod mock;
-pub mod service;
+mod mock;
+mod service;
 
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::CachingQueryPlanner;
-use crate::ExecutionService;
-use crate::Introspection;
-use crate::Plugin;
-use crate::QueryCache;
-use crate::ResponseBody;
-use crate::RouterService;
-use crate::Schema;
-use crate::{BridgeQueryPlanner, DEFAULT_BUFFER_SIZE};
-use crate::{RouterRequest, RouterResponse};
-use futures::stream::BoxStream;
-pub use service::{
-    MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
-};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use futures::stream::BoxStream;
+pub use mock::subgraph::MockSubgraph;
+pub use service::MockExecutionService;
+pub use service::MockQueryPlanningService;
+pub use service::MockRouterService;
+pub use service::MockSubgraphService;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
+use tower::BoxError;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::{BoxError, ServiceBuilder};
+
+use crate::graphql::Response;
+use crate::introspection::Introspection;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugin::Plugin;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::CachingQueryPlanner;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::ExecutionService;
+use crate::RouterService;
+use crate::Schema;
 
 pub struct PluginTestHarness {
     router_service:
-        BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+        BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
 }
 pub enum IntoSchema {
     String(String),
@@ -54,10 +60,10 @@ impl From<IntoSchema> for Schema {
         match s {
             IntoSchema::String(s) => Schema::from_str(&s).expect("test schema must be valid"),
             IntoSchema::Schema(s) => *s,
-            IntoSchema::Canned => Schema::from_str(include_str!(
-                "../../../../../examples/graphql/local.graphql"
-            ))
-            .expect("test schema must be valid"),
+            IntoSchema::Canned => {
+                Schema::from_str(include_str!("../../../../examples/graphql/local.graphql"))
+                    .expect("test schema must be valid")
+            }
         }
     }
 }
@@ -128,7 +134,11 @@ impl PluginTestHarness {
         let schema = Arc::new(Schema::from(schema));
 
         let query_planner = CachingQueryPlanner::new(
-            BridgeQueryPlanner::new(schema.clone()).await?,
+            BridgeQueryPlanner::new(
+                schema.clone(),
+                Some(Arc::new(Introspection::from_schema(&schema))),
+            )
+            .await?,
             DEFAULT_BUFFER_SIZE,
         )
         .boxed();
@@ -169,8 +179,6 @@ impl PluginTestHarness {
                                         DEFAULT_BUFFER_SIZE,
                                     ))
                                     .schema(schema.clone())
-                                    .query_cache(Arc::new(QueryCache::new(0, schema.clone())))
-                                    .introspection(Arc::new(Introspection::from_schema(&schema)))
                                     .build(),
                             )
                         }),
@@ -184,14 +192,14 @@ impl PluginTestHarness {
     pub async fn call(
         &mut self,
         request: RouterRequest,
-    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service.ready().await?.call(request).await
     }
 
     /// If using the canned schema this canned request will give a response.
     pub async fn call_canned(
         &mut self,
-    ) -> Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service
             .ready()
             .await?
@@ -207,8 +215,9 @@ impl PluginTestHarness {
 
 #[cfg(test)]
 mod testing {
-    use super::*;
     use insta::assert_json_snapshot;
+
+    use super::*;
 
     struct EmptyPlugin {}
     #[async_trait::async_trait]
@@ -227,14 +236,10 @@ mod testing {
             .schema(IntoSchema::Canned)
             .build()
             .await?;
-        let result = harness.call_canned().await?.next_response().await.unwrap();
-        if let crate::ResponseBody::GraphQL(graphql) = result {
-            insta::with_settings!({sort_maps => true}, {
-                assert_json_snapshot!(graphql.data);
-            });
-        } else {
-            panic!("Should have got response body");
-        }
+        let graphql = harness.call_canned().await?.next_response().await.unwrap();
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(graphql.data);
+        });
         Ok(())
     }
 }

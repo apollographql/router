@@ -2,21 +2,34 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use apollo_router::graphql;
+use apollo_router::graphql::Request;
+use apollo_router::http_ext;
+use apollo_router::json_ext::Object;
+use apollo_router::json_ext::ValueExt;
+use apollo_router::plugin::Plugin;
+use apollo_router::plugins::csrf;
+use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
-use apollo_router::{
-    http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
-    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, SubgraphService,
-    ValueExt,
-};
+use apollo_router::plugins::telemetry::Telemetry;
+use apollo_router::plugins::telemetry::{self};
+use apollo_router::services::PluggableRouterServiceBuilder;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphService;
+use apollo_router::Context;
+use apollo_router::Schema;
 use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
 use tower::BoxError;
@@ -24,16 +37,14 @@ use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
-        let request = graphql::Request::builder()
-            .query(Some($query.to_string()))
-            .variables(Arc::new(
+        let request = Request::builder()
+            .query($query)
+            .variables(Object::from_iter(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
                     ("reviewsForAuthorAuthorId".into(), 1.into()),
-                ]
-                .into_iter()
-                .collect(),
-            ))
+                ]),
+            )
             .build();
 
 
@@ -45,7 +56,7 @@ macro_rules! assert_federated_response {
             }
         };
 
-        let originating_request = http_compat::Request::fake_builder().method(Method::POST)
+        let originating_request = http_ext::Request::fake_builder().method(Method::POST)
             // otherwise the query would be a simple one,
             // and CSRF protection would reject it
             .header("content-type", "application/json")
@@ -100,19 +111,15 @@ async fn basic_composition() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
-    let request = graphql::Request::builder()
-        .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2i32.into()),
-                ("reviewsForAuthorAuthorId".into(), 1i32.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2i32.into()),
+            ("reviewsForAuthorAuthorId".into(), 1i32.into()),
+        ]))
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -178,19 +185,12 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = graphql::Request::builder()
-        .query(Some(
-            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-                .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -199,7 +199,7 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -213,7 +213,7 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error =apollo_router::Error {
+    let expected_error = graphql::Error {
         message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
         Please either specify a 'content-type' header \
         (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
@@ -221,22 +221,15 @@ async fn simple_queries_should_not_work() {
         ..Default::default()
     };
 
-    let request = graphql::Request::builder()
-        .query(Some(
-            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-                .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -253,20 +246,16 @@ async fn simple_queries_should_not_work() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn queries_should_work_over_post() {
-    let request = graphql::Request::builder()
-        .query(Some(
+async fn queries_should_work_with_compression() {
+    let request = Request::builder()
+        .query(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
                 .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -275,16 +264,51 @@ async fn queries_should_work_over_post() {
         "accounts".to_string()=>1,
     };
 
-    let http_request = http_compat::Request::fake_builder()
+    let http_request = http_ext::Request::fake_builder()
+        .method(Method::POST)
+        .header("content-type", "application/json")
+        .header("accept-encoding", "gzip")
+        .body(request)
+        .build()
+        .expect("expecting valid request");
+
+    let request = RouterRequest {
+        originating_request: http_request,
+        context: Context::new(),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queries_should_work_over_post() {
+    let request = Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
 
-    let request = graphql::RouterRequest {
+    let request = RouterRequest {
         originating_request: http_request,
-        context: graphql::Context::new(),
+        context: Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -295,19 +319,19 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error =apollo_router::Error {
+    let expected_error = apollo_router::graphql::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
 
-    let request = graphql::Request::builder()
-        .query(Some(r#"{ topProducts { name } }"#.to_string()))
-        .operation_name(Some("invalidOperationName".to_string()))
+    let request = Request::builder()
+        .query(r#"{ topProducts { name } }"#)
+        .operation_name("invalidOperationName")
         .build();
 
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -321,8 +345,8 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = graphql::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -335,23 +359,18 @@ async fn mutation_should_not_work_over_get() {
                   id
                   body
                 }
-              }"#
-            .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+              }"#,
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(request)
         .header("content-type", "application/json")
         .build()
@@ -365,8 +384,8 @@ async fn mutation_should_not_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_work_over_post() {
-    let request = graphql::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -379,17 +398,12 @@ async fn mutation_should_work_over_post() {
                   id
                   body
                 }
-              }"#
-            .to_string(),
-        ))
-        .variables(Arc::new(
-            vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
-            ]
-            .into_iter()
-            .collect(),
-        ))
+              }"#,
+        )
+        .variables(Object::from_iter(vec![
+            ("topProductsFirst".into(), 2.into()),
+            ("reviewsForAuthorAuthorId".into(), 1.into()),
+        ]))
         .build();
 
     let expected_service_hits = hashmap! {
@@ -397,16 +411,16 @@ async fn mutation_should_work_over_post() {
         "reviews".to_string()=>2,
     };
 
-    let http_request = http_compat::Request::fake_builder()
+    let http_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
 
-    let request = graphql::RouterRequest {
+    let request = RouterRequest {
         originating_request: http_request,
-        context: graphql::Context::new(),
+        context: Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -427,7 +441,7 @@ async fn automated_persisted_queries() {
                 {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
         }),
     );
-    let expected_apq_miss_error = apollo_router::Error {
+    let expected_apq_miss_error = apollo_router::graphql::Error {
         message: "PersistedQueryNotFound".to_string(),
         extensions,
         ..Default::default()
@@ -441,15 +455,17 @@ async fn automated_persisted_queries() {
             "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
         }),
     );
-    let request_builder = graphql::Request::builder().extensions(request_extensions.clone());
-    let apq_only_request = request_builder.clone().build();
+    let request_builder = Request::builder().extensions(request_extensions.clone());
+    let apq_only_request = Request::builder()
+        .extensions(request_extensions.clone())
+        .build();
 
     // First query, apq hash but no query, it will be a cache miss.
 
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_only_request)
         .header("content-type", "application/json")
         .build()
@@ -463,9 +479,9 @@ async fn automated_persisted_queries() {
 
     // Second query, apq hash with corresponding query, it will be inserted into the cache.
 
-    let apq_request_with_query = request_builder
-        .clone()
-        .query(Some("query Query { me { name } }".to_string()))
+    let apq_request_with_query = Request::builder()
+        .extensions(request_extensions.clone())
+        .query("query Query { me { name } }")
         .build();
 
     // Services should have been queried once
@@ -473,7 +489,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_request_with_query)
         .header("content-type", "application/json")
         .build()
@@ -492,7 +508,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .body(apq_only_request)
         .header("content-type", "application/json")
         .build()
@@ -531,13 +547,12 @@ async fn variables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
-    let request = graphql::Request::builder()
-        .query(Some(
+    let request = Request::builder()
+        .query(
             r#"
             query ExampleQuery(
                 $missingVariable: Int!,
                 $yetAnotherMissingVariable: ID!,
-                $notRequiredVariable: Int,
             ) {
                 topProducts(first: $missingVariable) {
                     name
@@ -546,12 +561,11 @@ async fn missing_variables() {
                     }
                 }
             }
-            "#
-            .to_string(),
-        ))
+            "#,
+        )
         .build();
 
-    let originating_request = http_compat::Request::fake_builder()
+    let originating_request = http_ext::Request::fake_builder()
         .method(Method::POST)
         .header("content-type", "application/json")
         .body(request)
@@ -560,11 +574,11 @@ async fn missing_variables() {
 
     let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
-        graphql::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        graphql::FetchError::ValidationInvalidTypeVariable {
+        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
@@ -576,33 +590,39 @@ async fn missing_variables() {
     );
 }
 
-async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
+async fn query_node(
+    request: &graphql::Request,
+) -> Result<graphql::Response, apollo_router::error::FetchError> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
         .send()
         .await
-        .map_err(|err| graphql::FetchError::SubrequestHttpError {
-            service: "test node".to_string(),
-            reason: err.to_string(),
-        })?
+        .map_err(
+            |err| apollo_router::error::FetchError::SubrequestHttpError {
+                service: "test node".to_string(),
+                reason: err.to_string(),
+            },
+        )?
         .json()
         .await
-        .map_err(|err| graphql::FetchError::SubrequestMalformedResponse {
-            service: "test node".to_string(),
-            reason: err.to_string(),
-        })
+        .map_err(
+            |err| apollo_router::error::FetchError::SubrequestMalformedResponse {
+                service: "test node".to_string(),
+                reason: err.to_string(),
+            },
+        )
 }
 
 async fn query_rust(
-    request: graphql::RouterRequest,
-) -> (graphql::Response, CountingServiceRegistry) {
+    request: RouterRequest,
+) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry().await;
     (query_with_router(router, request).await, counting_registry)
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>,
     CountingServiceRegistry,
 ) {
     std::panic::set_hook(Box::new(|e| {
@@ -647,25 +667,18 @@ async fn setup_router_and_registry() -> (
 async fn query_with_router(
     router: BoxCloneService<
         RouterRequest,
-        RouterResponse<BoxStream<'static, ResponseBody>>,
+        RouterResponse<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
-    request: graphql::RouterRequest,
+    request: RouterRequest,
 ) -> graphql::Response {
-    let response = router
+    router
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
-        .unwrap();
-
-    match response {
-        ResponseBody::GraphQL(response) => response,
-        _ => {
-            panic!("Expected graphql response")
-        }
-    }
+        .unwrap()
 }
 
 #[derive(Debug, Clone)]

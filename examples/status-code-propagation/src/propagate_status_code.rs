@@ -1,12 +1,18 @@
-use apollo_router::{
-    register_plugin, Plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
-    SubgraphResponse,
-};
+use apollo_router::graphql;
+use apollo_router::plugin::Plugin;
+use apollo_router::register_plugin;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
 use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use tower::{util::BoxService, BoxError, ServiceExt};
+use serde::Deserialize;
+use serde::Serialize;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceExt;
 
 // This configuration will be used
 // to Deserialize the yml configuration
@@ -67,10 +73,11 @@ impl Plugin for PropagateStatusCode {
         &mut self,
         service: BoxService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
+    {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -97,13 +104,18 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
-    use apollo_router::{
-        plugin::utils, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-    };
+    use apollo_router::plugin::test;
+    use apollo_router::plugin::Plugin;
+    use apollo_router::services::RouterRequest;
+    use apollo_router::services::RouterResponse;
+    use apollo_router::services::SubgraphRequest;
+    use apollo_router::services::SubgraphResponse;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
+
+    use crate::propagate_status_code::PropagateStatusCode;
+    use crate::propagate_status_code::PropagateStatusCodeConfig;
 
     // This test ensures the router will be able to
     // find our `propagate_status_code` plugin,
@@ -111,7 +123,7 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugins()
+        apollo_router::plugin::plugins()
             .get("example.propagate_status_code")
             .expect("Plugin not found")
             .create_instance(&json!({ "status_codes" : [500, 403, 401] }))
@@ -127,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
-        let mut mock_service = utils::test::MockSubgraphService::new();
+        let mut mock_service = test::MockSubgraphService::new();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -162,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
-        let mut mock_service = utils::test::MockSubgraphService::new();
+        let mut mock_service = test::MockSubgraphService::new();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -199,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = utils::test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         mock_service
             .expect_call()
@@ -244,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = utils::test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         mock_service
             .expect_call()

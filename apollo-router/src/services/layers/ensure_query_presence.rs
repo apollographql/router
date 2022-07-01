@@ -4,20 +4,26 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::sync_checkpoint::CheckpointService;
-use crate::{ResponseBody, RouterRequest, RouterResponse};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::StatusCode;
 use serde_json_bytes::Value;
-use std::ops::ControlFlow;
-use tower::{BoxError, Layer, Service};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use crate::graphql::Response;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 #[derive(Default)]
-pub struct EnsureQueryPresence {}
+pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, ResponseBody>>>
+    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
         + Send
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
@@ -31,7 +37,7 @@ where
                 // A query must be available at this point
                 let query = req.originating_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
-                    let errors = vec![crate::Error {
+                    let errors = vec![crate::error::Error {
                         message: "Must provide query string.".to_string(),
                         locations: Default::default(),
                         path: Default::default(),
@@ -58,10 +64,10 @@ where
 
 #[cfg(test)]
 mod ensure_query_presence_tests {
-    use super::*;
-    use crate::plugin::utils::test::MockRouterService;
-    use crate::ResponseBody;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::plugin::test::MockRouterService;
 
     #[tokio::test]
     async fn it_works_with_query() {
@@ -105,11 +111,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
 
         assert_eq!(expected_error, actual_error);
     }
@@ -133,11 +135,7 @@ mod ensure_query_presence_tests {
             .next_response()
             .await
             .unwrap();
-        let actual_error = if let ResponseBody::GraphQL(b) = response {
-            b.errors[0].message.clone()
-        } else {
-            panic!("response body should have been GraphQL");
-        };
+        let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
     }
 }

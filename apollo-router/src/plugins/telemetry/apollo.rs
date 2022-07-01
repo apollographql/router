@@ -1,10 +1,11 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
-use crate::plugin::utils::serde::deserialize_header_name;
 use http::header::HeaderName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use url::Url;
+
+use crate::plugin::serde::deserialize_header_name;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

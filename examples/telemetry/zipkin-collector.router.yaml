@@ -3,6 +3,5 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      collector:
-        endpoint: "https://example.com"
+      endpoint: "https://example.com"
 

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 784
 expression: error.to_string()
 ---
 configuration had errors: 

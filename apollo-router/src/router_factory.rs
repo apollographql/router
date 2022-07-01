@@ -1,31 +1,38 @@
 // This entire file is license key functionality
-use crate::configuration::{Configuration, ConfigurationError};
-use crate::prelude::*;
-use crate::{
-    http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
-};
-use crate::{DynPlugin, SubgraphService};
-use envmnt::types::ExpandOptions;
-use envmnt::ExpansionType;
-use futures::stream::BoxStream;
-use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
+
+use futures::stream::BoxStream;
+use serde_json::Map;
+use serde_json::Value;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxCloneService;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
+
+use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
+use crate::graphql;
+use crate::http_ext::Request;
+use crate::http_ext::Response;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
+use crate::PluggableRouterServiceBuilder;
+use crate::Schema;
+use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = Response<BoxStream<'static, ResponseBody>>,
+            Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -37,21 +44,21 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterService>,
     ) -> Result<(Self::RouterService, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default)]
-pub struct YamlRouterServiceFactory;
+pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<
             Request<graphql::Request>,
-            Response<BoxStream<'static, ResponseBody>>,
+            Response<BoxStream<'static, graphql::Response>>,
             BoxError,
         >,
         Request<graphql::Request>,
@@ -84,7 +91,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let (pluggable_router_service, mut plugins) = builder.build().await?;
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(|http_request: Request<crate::Request>| http_request.into())
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );
@@ -106,15 +113,22 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
-) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
+) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
+    // List of mandatory plugins. Ordering is important!!
+    let mut mandatory_plugins = vec!["experimental.include_subgraph_errors", "apollo.csrf"];
+
+    // Telemetry is *only* mandatory if the global subscriber is set
+    if crate::subscriber::is_global_subscriber_set() {
+        mandatory_plugins.insert(0, "apollo.telemetry");
+    }
+
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugins();
+    let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
-        // Ugly hack to get the schema sha into the the telemetry plugin
-
         let name = name.clone();
+
         match plugin_registry.get(name.as_str()) {
             Some(factory) => {
                 tracing::debug!(
@@ -123,13 +137,12 @@ async fn create_plugins(
                     configuration
                 );
                 if name == "apollo.telemetry" {
-                    inject_schema_id(schema, &mut configuration)
+                    inject_schema_id(schema, &mut configuration);
                 }
                 // expand any env variables in the config before processing.
-                let configuration = expand_env_variables(&configuration);
                 match factory.create_instance(&configuration).await {
                     Ok(plugin) => {
-                        plugin_instances.push((name.clone(), plugin));
+                        plugin_instances.push((name, plugin));
                     }
                     Err(err) => errors.push(ConfigurationError::PluginConfiguration {
                         plugin: name,
@@ -140,6 +153,59 @@ async fn create_plugins(
             None => errors.push(ConfigurationError::PluginUnknown(name)),
         }
     }
+
+    // At this point we've processed all of the plugins that were provided in configuration.
+    // We now need to do process our list of mandatory plugins:
+    //  - If a mandatory plugin is already in the list, then it must be re-located
+    //    to its mandatory location
+    //  - If it is missing, it must be added at its mandatory location
+
+    for (desired_position, name) in mandatory_plugins.iter().enumerate() {
+        let position_maybe = plugin_instances.iter().position(|(x, _)| x == name);
+        match position_maybe {
+            Some(actual_position) => {
+                // Found it, re-locate if required.
+                if actual_position != desired_position {
+                    let temp = plugin_instances.remove(actual_position);
+                    plugin_instances.insert(desired_position, temp);
+                }
+            }
+            None => {
+                // Didn't find it, insert
+                match plugin_registry.get(*name) {
+                    // Create an instance
+                    Some(factory) => {
+                        // Create default (empty) config
+                        let mut config = Value::Object(Map::new());
+                        // The apollo.telemetry" plugin isn't happy with empty config, so we
+                        // give it some. If any of the other mandatory plugins need special
+                        // treatment, then we'll have to perform it here.
+                        // This is *required* by the telemetry module or it will fail...
+                        if *name == "apollo.telemetry" {
+                            inject_schema_id(schema, &mut config);
+                        }
+                        match factory.create_instance(&config).await {
+                            Ok(plugin) => {
+                                plugin_instances
+                                    .insert(desired_position, (name.to_string(), plugin));
+                            }
+                            Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                                plugin: name.to_string(),
+                                error: err.to_string(),
+                            }),
+                        }
+                    }
+                    None => errors.push(ConfigurationError::PluginUnknown(name.to_string())),
+                }
+            }
+        }
+    }
+
+    let plugin_details = plugin_instances
+        .iter()
+        .map(|(name, plugin)| (name, plugin.name()))
+        .collect::<Vec<(&String, &str)>>();
+    tracing::info!(?plugin_details, "list of plugins");
 
     if !errors.is_empty() {
         for error in &errors {
@@ -154,7 +220,7 @@ async fn create_plugins(
                 .join("\n"),
         ))
     } else {
-        Ok(plugin_instances.into_iter().collect())
+        Ok(plugin_instances)
     }
 }
 
@@ -178,43 +244,24 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     }
 }
 
-fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
-    let mut configuration = configuration.clone();
-    visit(&mut configuration);
-    configuration
-}
-
-fn visit(value: &mut serde_json::Value) {
-    match value {
-        Value::String(value) => {
-            *value = envmnt::expand(
-                value,
-                Some(
-                    ExpandOptions::new()
-                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
-                ),
-            );
-        }
-        Value::Array(a) => a.iter_mut().for_each(visit),
-        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::configuration::Configuration;
-    use crate::router_factory::YamlRouterServiceFactory;
-    use crate::router_factory::{inject_schema_id, RouterServiceFactory};
-    use crate::Schema;
-    use crate::{register_plugin, Plugin};
-    use schemars::JsonSchema;
-    use serde::Deserialize;
-    use serde_json::json;
     use std::error::Error;
     use std::fmt;
     use std::sync::Arc;
+
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use serde_json::json;
     use tower_http::BoxError;
+
+    use crate::configuration::Configuration;
+    use crate::plugin::Plugin;
+    use crate::register_plugin;
+    use crate::router_factory::inject_schema_id;
+    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::YamlRouterServiceFactory;
+    use crate::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -329,8 +376,10 @@ mod test {
     // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
     #[tokio::test(flavor = "multi_thread")]
     async fn test_telemetry_doesnt_hang_with_invalid_schema() {
-        use crate::subscriber::{set_global_subscriber, RouterSubscriber};
         use tracing_subscriber::EnvFilter;
+
+        use crate::subscriber::set_global_subscriber;
+        use crate::subscriber::RouterSubscriber;
 
         // A global subscriber must be set before we start up the telemetry plugin
         let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(

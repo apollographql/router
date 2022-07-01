@@ -2,26 +2,35 @@
 // This entire file is license key functionality
 mod yaml;
 
-use crate::plugins;
-use crate::subscriber::is_global_subscriber_set;
-use derivative::Derivative;
-use displaydoc::Display;
-use envmnt::{ExpandOptions, ExpansionType};
-use itertools::Itertools;
-use jsonschema::{Draft, JSONSchema};
-use schemars::gen::{SchemaGenerator, SchemaSettings};
-use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::Map;
-use serde_json::Value;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
 use std::net::SocketAddr;
 use std::str::FromStr;
+
+use derivative::Derivative;
+use displaydoc::Display;
+use envmnt::ExpandOptions;
+use envmnt::ExpansionType;
+use itertools::Itertools;
+use jsonschema::Draft;
+use jsonschema::JSONSchema;
+use schemars::gen::SchemaGenerator;
+use schemars::gen::SchemaSettings;
+use schemars::schema::ObjectValidation;
+use schemars::schema::RootSchema;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 use thiserror::Error;
-use tower_http::cors::{self, CorsLayer};
-use typed_builder::TypedBuilder;
+use tower_http::cors::CorsLayer;
+use tower_http::cors::{self};
+
+use crate::plugin::plugins;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -58,54 +67,59 @@ pub enum ConfigurationError {
         error: String,
     },
     /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_yaml::Error),
+    DeserializeConfigError(serde_json::Error),
 }
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
-#[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder, JsonSchema)]
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
-    #[builder(default)]
-    pub server: Server,
+    pub(crate) server: Server,
 
     /// Plugin configuration
     #[serde(default)]
-    #[builder(default)]
     plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
-    #[builder(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
-// Add your plugin to this list so it gets automatically set up if its not been provided a custom configuration.
-// ! requires the plugin configuration to implement Default
-const MANDATORY_APOLLO_PLUGINS: &[&str] = &["csrf"];
-
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
+#[buildstructor::buildstructor]
 impl Configuration {
+    #[builder]
+    pub(crate) fn new(
+        server: Option<Server>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+    ) -> Self {
+        Self {
+            server: server.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+        }
+    }
+
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
     }
 
-    pub fn plugins(&self) -> Map<String, Value> {
-        let mut plugins = Vec::default();
-
-        if is_global_subscriber_set() {
-            // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
-            // Note that this can only be done if the global subscriber has been set, i.e. we're not unit testing.
-            plugins.push(("apollo.telemetry".into(), Value::Object(Map::new())));
-        }
+    pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
+        let mut plugins = vec![];
 
         // Add all the apollo plugins
         for (plugin, config) in &self.apollo_plugins.plugins {
@@ -117,19 +131,6 @@ impl Configuration {
             plugins.push((plugin_full_name, config.clone()));
         }
 
-        // Add the mandatory apollo plugins with defaults,
-        // if a custom configuration hasn't been provided by the user
-        MANDATORY_APOLLO_PLUGINS.iter().for_each(|plugin_name| {
-            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin_name);
-            if !plugins.iter().any(|p| p.0 == plugin_full_name) {
-                tracing::debug!(
-                    "adding plugin {} with default configuration",
-                    plugin_full_name.as_str()
-                );
-                plugins.push((plugin_full_name, Value::Object(Map::new())));
-            }
-        });
-
         // Add all the user plugins
         if let Some(config_map) = self.plugins.plugins.as_ref() {
             for (plugin, config) in config_map {
@@ -137,19 +138,7 @@ impl Configuration {
             }
         }
 
-        // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
-        plugins.sort_by_key(|(name, _)| match name.as_str() {
-            "apollo.telemetry" => -100,
-            "apollo.rhai" => 100,
-            _ => 0,
-        });
-
-        let mut final_plugins = Map::new();
-        for (plugin, config) in plugins {
-            final_plugins.insert(plugin, config);
-        }
-
-        final_plugins
+        plugins
     }
 }
 
@@ -184,10 +173,10 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
 /// These plugins are processed prior to user plugins. Also, their configuration
 /// is "hoisted" to the top level of the config rather than being processed
 /// under "plugins" as for user plugins.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct ApolloPlugins {
-    pub plugins: Map<String, Value>,
+pub(crate) struct ApolloPlugins {
+    pub(crate) plugins: Map<String, Value>,
 }
 
 impl JsonSchema for ApolloPlugins {
@@ -199,7 +188,7 @@ impl JsonSchema for ApolloPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = plugins()
+        let plugins = crate::plugin::plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
             .filter(|(name, _)| name.starts_with(APOLLO_PLUGIN_PREFIX))
@@ -218,10 +207,10 @@ impl JsonSchema for ApolloPlugins {
 ///
 /// These plugins are compiled into a router by and their configuration is performed
 /// under the "plugins" section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct UserPlugins {
-    pub plugins: Option<Map<String, Value>>,
+pub(crate) struct UserPlugins {
+    pub(crate) plugins: Option<Map<String, Value>>,
 }
 
 impl JsonSchema for UserPlugins {
@@ -233,7 +222,7 @@ impl JsonSchema for UserPlugins {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
-        let plugins = plugins()
+        let plugins = crate::plugin::plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
             .filter(|(name, _)| !name.starts_with(APOLLO_PLUGIN_PREFIX))
@@ -244,43 +233,59 @@ impl JsonSchema for UserPlugins {
 }
 
 /// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Server {
+pub(crate) struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_listen")]
-    #[builder(default_code = "default_listen()", setter(into))]
-    pub listen: ListenAddr,
+    pub(crate) listen: ListenAddr,
 
     /// Cross origin request headers.
     #[serde(default)]
-    #[builder(default)]
-    pub cors: Option<Cors>,
+    pub(crate) cors: Option<Cors>,
 
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
-    #[builder(default_code = "default_introspection()", setter(into))]
-    pub introspection: bool,
+    pub(crate) introspection: bool,
 
     /// display landing page
     /// enabled by default
     #[serde(default = "default_landing_page")]
-    #[builder(default_code = "default_landing_page()", setter(into))]
-    pub landing_page: bool,
+    pub(crate) landing_page: bool,
 
     /// GraphQL endpoint
     /// default: "/"
     #[serde(default = "default_endpoint")]
-    #[builder(default_code = "default_endpoint()", setter(into))]
-    pub endpoint: String,
+    pub(crate) endpoint: String,
 
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
-    #[builder(default_code = "default_health_check_path()", setter(into))]
-    pub health_check_path: String,
+    pub(crate) health_check_path: String,
+}
+
+#[buildstructor::buildstructor]
+impl Server {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        cors: Option<Cors>,
+        introspection: Option<bool>,
+        landing_page: Option<bool>,
+        endpoint: Option<String>,
+        health_check_path: Option<String>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_listen),
+            cors,
+            introspection: introspection.unwrap_or_else(default_introspection),
+            landing_page: landing_page.unwrap_or_else(default_landing_page),
+            endpoint: endpoint.unwrap_or_else(default_endpoint),
+            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
+        }
+    }
 }
 
 /// Listening address.
@@ -329,21 +334,19 @@ impl fmt::Display for ListenAddr {
 }
 
 /// Cross origin request configuration.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Cors {
-    #[serde(default)]
-    #[builder(default)]
+pub(crate) struct Cors {
     /// Set to true to allow any origin.
     ///
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
-    pub allow_any_origin: Option<bool>,
+    #[serde(default)]
+    pub(crate) allow_any_origin: Option<bool>,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
     #[serde(default)]
-    #[builder(default)]
-    pub allow_credentials: Option<bool>,
+    pub(crate) allow_credentials: Option<bool>,
 
     /// The headers to allow.
     /// If this is not set, we will default to
@@ -357,25 +360,34 @@ pub struct Cors {
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
     #[serde(default)]
-    #[builder(default)]
-    pub allow_headers: Option<Vec<String>>,
+    pub(crate) allow_headers: Option<Vec<String>>,
 
-    #[serde(default)]
-    #[builder(default)]
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
-    pub expose_headers: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
     /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
-    #[serde(default)]
-    #[builder(default_code = "default_origins()")]
-    pub origins: Vec<String>,
+    #[serde(default = "default_origins")]
+    pub(crate) origins: Vec<String>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
-    #[builder(default_code = "default_cors_methods()")]
-    pub methods: Vec<String>,
+    pub(crate) methods: Vec<String>,
+}
+
+impl Default for Cors {
+    fn default() -> Self {
+        Self {
+            allow_any_origin: None,
+            allow_credentials: None,
+            allow_headers: Default::default(),
+            expose_headers: Default::default(),
+            origins: default_origins(),
+            methods: default_cors_methods(),
+        }
+    }
 }
 
 fn default_origins() -> Vec<String> {
@@ -408,8 +420,31 @@ impl Default for Server {
     }
 }
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
 impl Cors {
-    pub fn into_layer(self) -> Result<CorsLayer, String> {
+    #[builder]
+    pub(crate) fn new(
+        allow_any_origin: Option<bool>,
+        allow_credentials: Option<bool>,
+        allow_headers: Option<Vec<String>>,
+        expose_headers: Option<Vec<String>>,
+        origins: Option<Vec<String>>,
+        methods: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            allow_any_origin,
+            allow_credentials,
+            allow_headers,
+            expose_headers,
+            origins: origins.unwrap_or_else(default_origins),
+            methods: methods.unwrap_or_else(default_cors_methods),
+        }
+    }
+}
+
+impl Cors {
+    pub(crate) fn into_layer(self) -> Result<CorsLayer, String> {
         // Ensure configuration is valid before creating CorsLayer
 
         self.ensure_usable_cors_rules()?;
@@ -501,7 +536,7 @@ impl Cors {
 }
 
 /// Generate a JSON schema for the configuration.
-pub fn generate_config_schema() -> RootSchema {
+pub(crate) fn generate_config_schema() -> RootSchema {
     let settings = SchemaSettings::draft07().with(|s| {
         s.option_nullable = true;
         s.option_add_null_type = false;
@@ -525,12 +560,13 @@ pub fn generate_config_schema() -> RootSchema {
 ///
 /// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
 ///
-pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
+pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
     let yaml =
         &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
         })?;
+    let expanded_yaml = expand_env_variables(yaml);
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",
@@ -544,116 +580,109 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
             message: "failed to compile schema",
             error: e.to_string(),
         })?;
-    if let Err(errors) = schema.validate(yaml) {
+    if let Err(errors) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.
         match yaml::parse(raw_yaml) {
             Ok(yaml) => {
                 let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-                let errors =
-                    errors
-                        .enumerate()
-                        .filter_map(|(idx, e)| {
-                            if let Some(element) = yaml.get_element(&e.instance_path) {
-                                const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
-                                match element {
-                                    yaml::Value::String(value, marker) => {
-                                        // Dirty hack.
-                                        // If the element is a string and it has env variable expansion then we can't validate
-                                        // Leave it up to serde to catch these.
-                                        if &envmnt::expand(
-                                            value,
-                                            Some(ExpandOptions::new().clone_with_expansion_type(
-                                                ExpansionType::UnixBracketsWithDefaults,
-                                            )),
-                                        ) != value
-                                        {
-                                            return None;
-                                        }
+                let errors = errors
+                    .enumerate()
+                    .filter_map(|(idx, mut e)| {
+                        if let Some(element) = yaml.get_element(&e.instance_path) {
+                            const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
+                            match element {
+                                yaml::Value::String(value, marker) => {
+                                    let lines = yaml_split_by_lines[0.max(
+                                        marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    )
+                                        ..marker.line()]
+                                        .iter()
+                                        .join("\n");
 
-                                        let lines =
-                                            yaml_split_by_lines[0.max(marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ))
-                                                ..marker.line()]
-                                                .iter()
-                                                .join("\n");
+                                    // Replace the value in the error message with the one from the raw config.
+                                    // This guarantees that if the env variable contained a secret it won't be leaked.
+                                    e.instance = Cow::Owned(coerce(value));
 
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n{}^----- {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            " ".repeat(0.max(marker.col())),
-                                            e
-                                        ))
-                                    }
-                                    seq_element @ yaml::Value::Sequence(_, m) => {
-                                        let (start_marker, end_marker) =
-                                            (m, seq_element.end_marker());
-
-                                        let offset =
-                                            0.max(start_marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ));
-                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(idx, line)| {
-                                                let real_line = idx + offset;
-                                                match real_line.cmp(&start_marker.line()) {
-                                                    Ordering::Equal => format!("┌ {line}"),
-                                                    Ordering::Greater => format!("| {line}"),
-                                                    Ordering::Less => line.to_string(),
-                                                }
-                                            })
-                                            .join("\n");
-
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n└-----> {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            e
-                                        ))
-                                    }
-                                    map_value @ yaml::Value::Mapping(current_label, _, _marker) => {
-                                        let (start_marker, end_marker) = (
-                                            current_label.as_ref()?.marker.as_ref()?,
-                                            map_value.end_marker(),
-                                        );
-                                        let offset =
-                                            0.max(start_marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ));
-                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(idx, line)| {
-                                                let real_line = idx + offset;
-                                                match real_line.cmp(&start_marker.line()) {
-                                                    Ordering::Equal => format!("┌ {line}"),
-                                                    Ordering::Greater => format!("| {line}"),
-                                                    Ordering::Less => line.to_string(),
-                                                }
-                                            })
-                                            .join("\n");
-
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n└-----> {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            e
-                                        ))
-                                    }
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n{}^----- {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        " ".repeat(0.max(marker.col())),
+                                        e
+                                    ))
                                 }
-                            } else {
-                                None
+                                seq_element @ yaml::Value::Sequence(_, m) => {
+                                    let (start_marker, end_marker) = (m, seq_element.end_marker());
+
+                                    let offset = 0.max(
+                                        start_marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    );
+                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, line)| {
+                                            let real_line = idx + offset;
+                                            match real_line.cmp(&start_marker.line()) {
+                                                Ordering::Equal => format!("┌ {line}"),
+                                                Ordering::Greater => format!("| {line}"),
+                                                Ordering::Less => line.to_string(),
+                                            }
+                                        })
+                                        .join("\n");
+
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n└-----> {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        e
+                                    ))
+                                }
+                                map_value
+                                @ yaml::Value::Mapping(current_label, _value, _marker) => {
+                                    let (start_marker, end_marker) = (
+                                        current_label.as_ref()?.marker.as_ref()?,
+                                        map_value.end_marker(),
+                                    );
+                                    let offset = 0.max(
+                                        start_marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    );
+                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, line)| {
+                                            let real_line = idx + offset;
+                                            match real_line.cmp(&start_marker.line()) {
+                                                Ordering::Equal => format!("┌ {line}"),
+                                                Ordering::Greater => format!("| {line}"),
+                                                Ordering::Less => line.to_string(),
+                                            }
+                                        })
+                                        .join("\n");
+
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n└-----> {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        e
+                                    ))
+                                }
                             }
-                        })
-                        .join("\n\n");
+                        } else {
+                            None
+                        }
+                    })
+                    .join("\n\n");
 
                 if !errors.is_empty() {
                     return Err(ConfigurationError::InvalidConfiguration {
@@ -672,8 +701,35 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
         }
     }
 
-    let config: Configuration =
-        serde_yaml::from_str(raw_yaml).map_err(ConfigurationError::DeserializeConfigError)?;
+    let config: Configuration = serde_json::from_value(expanded_yaml)
+        .map_err(ConfigurationError::DeserializeConfigError)?;
+
+    // ------------- Check for unknown fields at runtime ----------------
+    // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
+    let registered_plugins = plugins();
+    let apollo_plugin_names: Vec<&str> = registered_plugins
+        .keys()
+        .filter_map(|n| n.strip_prefix(APOLLO_PLUGIN_PREFIX))
+        .collect();
+    let unknown_fields: Vec<&String> = config
+        .apollo_plugins
+        .plugins
+        .keys()
+        .filter(|ap_name| {
+            let ap_name = ap_name.as_str();
+            ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
+        })
+        .collect();
+
+    if !unknown_fields.is_empty() {
+        return Err(ConfigurationError::InvalidConfiguration {
+            message: "unknown fields",
+            error: format!(
+                "additional properties are not allowed ('{}' was/were unexpected)",
+                unknown_fields.iter().join(", ")
+            ),
+        });
+    }
 
     // Custom validations
     if !config.server.endpoint.starts_with('/') {
@@ -710,21 +766,63 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
     Ok(config)
 }
 
+fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+    let mut configuration = configuration.clone();
+    visit(&mut configuration);
+    configuration
+}
+
+fn visit(value: &mut Value) {
+    let mut expanded: Option<String> = None;
+    match value {
+        Value::String(value) => {
+            let new_value = envmnt::expand(
+                value,
+                Some(
+                    ExpandOptions::new()
+                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
+                ),
+            );
+
+            if &new_value != value {
+                expanded = Some(new_value);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(visit),
+        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        _ => {}
+    }
+    // The expansion may have resulted in a primitive, reparse and replace
+    if let Some(expanded) = expanded {
+        *value = coerce(&expanded)
+    }
+}
+
+fn coerce(expanded: &str) -> Value {
+    match serde_yaml::from_str(expanded) {
+        Ok(Value::Bool(b)) => Value::Bool(b),
+        Ok(Value::Number(n)) => Value::Number(n),
+        Ok(Value::Null) => Value::Null,
+        _ => Value::String(expanded.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::prelude::*;
-    use crate::SchemaError;
+    use std::collections::HashMap;
+    use std::fs;
+
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;
     use regex::Regex;
     #[cfg(unix)]
     use schemars::gen::SchemaSettings;
-    use std::collections::HashMap;
-    use std::fs;
     use walkdir::DirEntry;
     use walkdir::WalkDir;
+
+    use super::*;
+    use crate::error::SchemaError;
 
     #[cfg(unix)]
     #[test]
@@ -741,7 +839,7 @@ mod tests {
 
     #[test]
     fn routing_url_in_schema() {
-        let schema: graphql::Schema = r#"
+        let schema: crate::Schema = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -815,7 +913,7 @@ mod tests {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#
-        .parse::<graphql::Schema>()
+        .parse::<crate::Schema>()
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
         if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -869,6 +967,20 @@ server:
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    }
+
+    #[test]
+    fn unknown_fields() {
+        let error = validate_configuration(
+            r#"
+server:
+  endpoint: /
+subgraphs:
+  account: true
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
     }
 
     #[test]
@@ -1078,5 +1190,71 @@ server:
                 }
             }
         }
+    }
+
+    #[test]
+    fn it_does_not_leak_env_variable_values() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        let error = validate_configuration(
+            r#"
+server:
+  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+        "#,
+        )
+        .expect_err("Must have an error because we expect a boolean");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_inline_sequence_env_expansion() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_sequence_env_expansion() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers:
+      - Content-Type
+      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
+  another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
     }
 }

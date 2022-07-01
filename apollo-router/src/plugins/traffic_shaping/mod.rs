@@ -13,22 +13,33 @@ mod deduplication;
 
 use std::collections::HashMap;
 
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
-use crate::{
-    register_plugin, QueryPlannerRequest, QueryPlannerResponse, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse,
-};
+use crate::register_plugin;
+use crate::services::subgraph_service::Compression;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
     query_deduplication: Option<bool>,
+    /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
+    compression: Option<Compression>,
 }
 
 impl Shaping {
@@ -37,12 +48,14 @@ impl Shaping {
             None => self.clone(),
             Some(fallback) => Shaping {
                 query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
+                compression: self.compression.or(fallback.compression),
             },
         }
     }
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Config {
     #[serde(default)]
     all: Option<Shaping>,
@@ -77,12 +90,21 @@ impl Plugin for TrafficShaping {
         if let Some(config) = final_config {
             ServiceBuilder::new()
                 .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
-                    //Buffer is required because dedup layer requires a clone service.
+                    // Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
                         .buffered()
                 }))
                 .service(service)
+                .map_request(move |mut req: SubgraphRequest| {
+                    if let Some(compression) = config.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
+                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+
+                    req
+                })
                 .boxed()
         } else {
             service
@@ -116,7 +138,7 @@ impl TrafficShaping {
     }
 }
 
-register_plugin!("experimental", "traffic_shaping", TrafficShaping);
+register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
@@ -124,28 +146,33 @@ mod test {
 
     use futures::stream::BoxStream;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::{ByteString, Value};
-    use tower::{util::BoxCloneService, Service};
-
-    use crate::{
-        utils::test::mock::subgraph::MockSubgraph, DynPlugin, Object,
-        PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
-    };
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
+    use tower::util::BoxCloneService;
+    use tower::Service;
 
     use super::*;
+    use crate::graphql::Response;
+    use crate::json_ext::Object;
+    use crate::plugin::test::MockSubgraph;
+    use crate::plugin::DynPlugin;
+    use crate::PluggableRouterServiceBuilder;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
+    use crate::Schema;
 
-    static EXPECTED_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap())
+    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
+        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
     async fn execute_router_test(
         query: &str,
-        body: &ResponseBody,
+        body: &Response,
         mut router_service: BoxCloneService<
             RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
+            RouterResponse<BoxStream<'static, Response>>,
             BoxError,
         >,
     ) {
@@ -170,7 +197,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>
+    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>
     {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
@@ -215,7 +242,7 @@ mod test {
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         let builder = builder
-            .with_dyn_plugin("experimental.traffic_shaping".to_string(), plugin)
+            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -227,8 +254,8 @@ mod test {
 
     async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
-        crate::plugins()
-            .get("experimental.traffic_shaping")
+        crate::plugin::plugins()
+            .get("apollo.traffic_shaping")
             .expect("Plugin not found")
             .create_instance(config)
             .await
@@ -247,6 +274,46 @@ mod test {
         let plugin = get_taffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+    }
+
+    #[tokio::test]
+    async fn it_add_correct_headers_for_compression() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        subgraphs:
+            test:
+                compression: gzip
+        "#,
+        )
+        .unwrap();
+
+        let mut plugin = get_taffic_shaping_plugin(&config).await;
+        let request = SubgraphRequest::fake_builder().build();
+
+        let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&CONTENT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip")
+            );
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get(&ACCEPT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip, br, deflate")
+            );
+
+            req
+        });
+
+        let _response = plugin
+            .subgraph_service("test", test_service.boxed())
+            .oneshot(request)
+            .await
+            .unwrap();
     }
 
     #[test]

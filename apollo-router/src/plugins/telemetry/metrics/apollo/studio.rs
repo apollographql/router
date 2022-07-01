@@ -1,10 +1,15 @@
-use super::duration_histogram::DurationHistogram;
-use apollo_spaceport::{ReferencedFieldsForType, ReportHeader, StatsContext};
-use itertools::Itertools;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::AddAssign;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
+
+use apollo_spaceport::ReferencedFieldsForType;
+use apollo_spaceport::ReportHeader;
+use apollo_spaceport::StatsContext;
+use itertools::Itertools;
+use serde::Serialize;
+
+use super::duration_histogram::DurationHistogram;
 
 impl Report {
     #[cfg(test)]
@@ -308,10 +313,11 @@ impl From<FieldStat> for apollo_spaceport::FieldStat {
     }
 }
 
-pub mod vectorize {
-    use serde::{Serialize, Serializer};
+pub(crate) mod vectorize {
+    use serde::Serialize;
+    use serde::Serializer;
 
-    pub fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
+    pub(crate) fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
         T: IntoIterator<Item = (&'a K, &'a V)>,
@@ -325,10 +331,12 @@ pub mod vectorize {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use apollo_spaceport::ReferencedFieldsForType;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    use apollo_spaceport::ReferencedFieldsForType;
+
+    use super::*;
 
     #[test]
     fn test_aggregation() {

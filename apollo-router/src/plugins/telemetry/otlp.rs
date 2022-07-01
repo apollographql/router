@@ -1,17 +1,23 @@
 //! Shared configuration for Otlp tracing and metrics.
-use crate::configuration::ConfigurationError;
-use crate::plugins::telemetry::config::GenericWith;
-use opentelemetry_otlp::{HttpExporterBuilder, TonicExporterBuilder, WithExportConfig};
-use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+
+use opentelemetry_otlp::HttpExporterBuilder;
+use opentelemetry_otlp::TonicExporterBuilder;
+use opentelemetry_otlp::WithExportConfig;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde_json::Value;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
+
+use crate::configuration::ConfigurationError;
+use crate::plugins::telemetry::config::GenericWith;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -157,13 +163,13 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Secret {
+pub(crate) enum Secret {
     Env(String),
     File(PathBuf),
 }
 
 impl Secret {
-    pub fn read(&self) -> Result<String, ConfigurationError> {
+    pub(crate) fn read(&self) -> Result<String, ConfigurationError> {
         match self {
             Secret::Env(s) => std::env::var(s).map_err(ConfigurationError::CannotReadSecretFromEnv),
             Secret::File(path) => {
@@ -187,9 +193,12 @@ impl Default for Protocol {
 }
 
 mod metadata_map_serde {
-    use super::*;
     use std::collections::HashMap;
-    use tonic::metadata::{KeyAndValueRef, MetadataKey};
+
+    use tonic::metadata::KeyAndValueRef;
+    use tonic::metadata::MetadataKey;
+
+    use super::*;
 
     pub(crate) fn serialize<S>(map: &Option<MetadataMap>, serializer: S) -> Result<S::Ok, S::Error>
     where

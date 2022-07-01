@@ -1,114 +1,46 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
-pub use self::execution_service::*;
-pub use self::router_service::*;
-use crate::fetch::OperationKind;
-use crate::prelude::graphql::*;
-use futures::{
-    future::{ready, Ready},
-    stream::{once, BoxStream, Once, StreamExt},
-    Stream,
-};
-use http::{header::HeaderName, HeaderValue, StatusCode};
-use http::{method::Method, Uri};
-use http_compat::IntoHeaderName;
-use http_compat::IntoHeaderValue;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use futures::future::ready;
+use futures::future::Ready;
+use futures::stream::once;
+use futures::stream::BoxStream;
+use futures::stream::Once;
+use futures::stream::StreamExt;
+use futures::Stream;
+use http::header::HeaderName;
+use http::method::Method;
+use http::HeaderValue;
+use http::StatusCode;
+use http::Uri;
+use http_ext::IntoHeaderName;
+use http_ext::IntoHeaderValue;
 use multimap::MultiMap;
-use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::str::FromStr;
-use std::sync::Arc;
 pub use subgraph_service::SubgraphService;
 use tower::BoxError;
 
+pub use self::execution_service::*;
+pub use self::router_service::*;
+use crate::error::Error;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::Value;
+use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlanOptions;
+use crate::*;
+
 mod execution_service;
-pub mod http_compat;
+pub mod http_ext;
 pub(crate) mod layers;
 mod router_service;
-mod subgraph_service;
-
-/// Different kinds of body we could have as the Router's response
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-#[serde(untagged)]
-pub enum ResponseBody {
-    /// A GraphQL response corresponding to the spec <https://spec.graphql.org/October2021/#sec-Response>
-    GraphQL(Response),
-    /// A json value
-    RawJSON(serde_json::Value),
-    /// Text without any serialization (example: HTML content, Prometheus metrics, ...)
-    Text(String),
-}
-
-impl TryFrom<ResponseBody> for Response {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::GraphQL(res) => Ok(res),
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected Response, found RawJSON")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for String {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
-            }
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
-            }
-            ResponseBody::Text(res) => Ok(res),
-        }
-    }
-}
-
-impl TryFrom<ResponseBody> for serde_json::Value {
-    type Error = &'static str;
-
-    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
-        match value {
-            ResponseBody::RawJSON(res) => Ok(res),
-            ResponseBody::GraphQL(_) => {
-                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
-            }
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
-        }
-    }
-}
-
-impl From<Response> for ResponseBody {
-    fn from(response: Response) -> Self {
-        Self::GraphQL(response)
-    }
-}
-
-impl From<serde_json::Value> for ResponseBody {
-    fn from(json: serde_json::Value) -> Self {
-        Self::RawJSON(json)
-    }
-}
-
-// This impl is purposefully done this way to hint users this might not be what they would like to do.
-/// Creates a ResponseBody from a &str
-///
-/// /!\ No serialization or deserialization is involved,
-/// please make sure you don't want to send a GraphQL response or a Raw JSON payload instead.
-impl FromStr for ResponseBody {
-    type Err = Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::Text(s.to_owned()))
-    }
-}
+pub(crate) mod subgraph_service;
 
 assert_impl_all!(RouterRequest: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -116,14 +48,14 @@ assert_impl_all!(RouterRequest: Send);
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
 
     /// Context for extension
     pub context: Context,
 }
 
-impl From<http_compat::Request<Request>> for RouterRequest {
-    fn from(originating_request: http_compat::Request<Request>) -> Self {
+impl From<http_ext::Request<Request>> for RouterRequest {
+    fn from(originating_request: http_ext::Request<Request>) -> Self {
         Self {
             originating_request,
             context: Context::new(),
@@ -159,13 +91,13 @@ impl RouterRequest {
             .collect();
 
         let gql_request = Request::builder()
-            .query(query)
-            .operation_name(operation_name)
+            .and_query(query)
+            .and_operation_name(operation_name)
             .variables(variables)
             .extensions(extensions)
             .build();
 
-        let originating_request = http_compat::Request::builder()
+        let originating_request = http_ext::Request::builder()
             .headers(headers)
             .uri(uri)
             .method(method)
@@ -207,18 +139,18 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse<BoxStream<'static, ResponseBody>>: Send);
-/// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
+assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
 #[derive(Clone, Debug)]
-pub struct RouterResponse<T: Stream<Item = ResponseBody>> {
-    pub response: http_compat::Response<T>,
+pub struct RouterResponse<T: Stream<Item = Response>> {
+    pub response: http_ext::Response<T>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse<Once<Ready<ResponseBody>>> {
+impl RouterResponse<Once<Ready<Response>>> {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -227,7 +159,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -239,7 +171,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
             .collect();
         // Build a response
         let b = Response::builder()
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions);
         let res = match data {
@@ -257,10 +189,10 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
             }
         }
 
-        let http_response = builder.body(once(ready(ResponseBody::GraphQL(res))))?;
+        let http_response = builder.body(once(ready(res)))?;
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -282,7 +214,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     pub fn fake_new(
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -304,7 +236,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -320,7 +252,7 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
         )
     }
 
-    pub fn new_from_response_body(response: ResponseBody, context: Context) -> Self {
+    pub fn new_from_graphql_response(response: Response, context: Context) -> Self {
         Self {
             response: http::Response::new(once(ready(response))).into(),
             context,
@@ -328,18 +260,18 @@ impl RouterResponse<Once<Ready<ResponseBody>>> {
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + Unpin + 'static> RouterResponse<T> {
-    pub async fn next_response(&mut self) -> Option<ResponseBody> {
+impl<T: Stream<Item = Response> + Send + Unpin + 'static> RouterResponse<T> {
+    pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
 }
 
-impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
-    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+impl<T: Stream<Item = Response> + Send + 'static> RouterResponse<T> {
+    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = ResponseBody>>(self, f: F) -> RouterResponse<U>
+    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> RouterResponse<U>
     where
         F: FnMut(T) -> U,
     {
@@ -349,8 +281,8 @@ impl<T: Stream<Item = ResponseBody> + Send + 'static> RouterResponse<T> {
         }
     }
 
-    pub fn boxed(self) -> RouterResponse<BoxStream<'static, ResponseBody>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, ResponseBody>)
+    pub fn boxed(self) -> RouterResponse<BoxStream<'static, Response>> {
+        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
     }
 }
 
@@ -359,7 +291,7 @@ assert_impl_all!(QueryPlannerRequest: Send);
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
     /// Query plan options
     pub query_plan_options: QueryPlanOptions,
 
@@ -373,7 +305,7 @@ impl QueryPlannerRequest {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub fn new(
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
@@ -388,9 +320,20 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
-    pub query_plan: Arc<QueryPlan>,
-
+    pub content: QueryPlannerContent,
     pub context: Context,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueryPlannerContent {
+    Plan {
+        query: Arc<Query>,
+        plan: Arc<QueryPlan>,
+    },
+    Introspection {
+        response: Box<Response>,
+    },
+    IntrospectionDisabled,
 }
 
 #[buildstructor::buildstructor]
@@ -399,11 +342,8 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
-        Self {
-            query_plan,
-            context,
-        }
+    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+        Self { content, context }
     }
 
     /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
@@ -412,26 +352,29 @@ impl QueryPlannerResponse {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(QueryPlan::fake_builder().build()),
+            QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_builder().build()),
+                query: Arc::new(Query::default()),
+            },
             context,
         ))
     }
 }
 
 assert_impl_all!(SubgraphRequest: Send);
-/// [`Context`], [`OperationKind`] and [`http_compat::Request<Request>`] for the request.
+/// [`Context`], [`OperationKind`] and [`http_ext::Request<Request>`] for the request.
 pub struct SubgraphRequest {
     /// Original request to the Router.
-    pub originating_request: Arc<http_compat::Request<Request>>,
+    pub originating_request: Arc<http_ext::Request<Request>>,
 
-    pub subgraph_request: http_compat::Request<Request>,
+    pub subgraph_request: http_ext::Request<Request>,
 
     pub operation_kind: OperationKind,
 
@@ -445,8 +388,8 @@ impl SubgraphRequest {
     /// Required parameters are required in non-testing code to create a SubgraphRequest.
     #[builder]
     pub fn new(
-        originating_request: Arc<http_compat::Request<Request>>,
-        subgraph_request: http_compat::Request<Request>,
+        originating_request: Arc<http_ext::Request<Request>>,
+        subgraph_request: http_ext::Request<Request>,
         operation_kind: OperationKind,
         context: Context,
     ) -> SubgraphRequest {
@@ -465,14 +408,28 @@ impl SubgraphRequest {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder]
     pub fn fake_new(
-        originating_request: Option<Arc<http_compat::Request<Request>>>,
-        subgraph_request: Option<http_compat::Request<Request>>,
+        originating_request: Option<Arc<http_ext::Request<Request>>>,
+        subgraph_request: Option<http_ext::Request<Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
     ) -> SubgraphRequest {
         SubgraphRequest::new(
-            originating_request.unwrap_or_else(|| Arc::new(http_compat::Request::mock())),
-            subgraph_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                )
+            }),
+            subgraph_request.unwrap_or_else(|| {
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
         )
@@ -480,12 +437,12 @@ impl SubgraphRequest {
 }
 
 assert_impl_all!(SubgraphResponse: Send);
-/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the subgraph response and the context.
 #[derive(Clone, Debug)]
 pub struct SubgraphResponse {
-    pub response: http_compat::Response<Response>,
+    pub response: http_ext::Response<Response>,
 
     pub context: Context,
 }
@@ -497,7 +454,7 @@ impl SubgraphResponse {
     /// In this case, you already have a valid response and just wish to associate it with a context
     /// and create a SubgraphResponse.
     pub fn new_from_response(
-        response: http_compat::Response<Response>,
+        response: http_ext::Response<Response>,
         context: Context,
     ) -> SubgraphResponse {
         Self { response, context }
@@ -512,16 +469,16 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> SubgraphResponse {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -533,7 +490,7 @@ impl SubgraphResponse {
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -553,7 +510,7 @@ impl SubgraphResponse {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -574,7 +531,7 @@ impl SubgraphResponse {
     /// This is useful for things such as authentication errors.
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -594,7 +551,7 @@ assert_impl_all!(ExecutionRequest: Send);
 /// [`Context`] and [`QueryPlan`] for the request.
 pub struct ExecutionRequest {
     /// Original request to the Router.
-    pub originating_request: http_compat::Request<Request>,
+    pub originating_request: http_ext::Request<Request>,
 
     pub query_plan: Arc<QueryPlan>,
 
@@ -609,7 +566,7 @@ impl ExecutionRequest {
     /// set and be correct to create a ExecutionRequest.
     #[builder]
     pub fn new(
-        originating_request: http_compat::Request<Request>,
+        originating_request: http_ext::Request<Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> ExecutionRequest {
@@ -627,12 +584,18 @@ impl ExecutionRequest {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder]
     pub fn fake_new(
-        originating_request: Option<http_compat::Request<Request>>,
+        originating_request: Option<http_ext::Request<Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
     ) -> ExecutionRequest {
         ExecutionRequest::new(
-            originating_request.unwrap_or_else(http_compat::Request::mock),
+            originating_request.unwrap_or_else(|| {
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed")
+            }),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
@@ -640,11 +603,11 @@ impl ExecutionRequest {
 }
 
 assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
-/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+/// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
 pub struct ExecutionResponse<T: Stream<Item = Response>> {
-    pub response: http_compat::Response<T>,
+    pub response: http_ext::Response<T>,
 
     pub context: Context,
 }
@@ -660,16 +623,16 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
     ) -> Self {
         // Build a response
         let res = Response::builder()
-            .label(label)
+            .and_label(label)
             .data(data.unwrap_or_default())
-            .path(path)
+            .and_path(path)
             .errors(errors)
             .extensions(extensions)
             .build();
@@ -681,7 +644,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
-        let compat_response = http_compat::Response {
+        let compat_response = http_ext::Response {
             inner: http_response,
         };
 
@@ -701,7 +664,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
@@ -723,7 +686,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
     #[allow(unused_variables)]
     #[builder]
     pub fn error_new(
-        errors: Vec<crate::Error>,
+        errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
@@ -745,7 +708,7 @@ impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_from_response(response: http_compat::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
         Self { response, context }
     }
 
@@ -770,13 +733,13 @@ impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
     }
 }
 
-impl AsRef<Request> for http_compat::Request<Request> {
+impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {
         self.body()
     }
 }
 
-impl AsRef<Request> for Arc<http_compat::Request<Request>> {
+impl AsRef<Request> for Arc<http_ext::Request<Request>> {
     fn as_ref(&self) -> &Request {
         self.body()
     }
@@ -784,10 +747,15 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 
 #[cfg(test)]
 mod test {
-    use crate::prelude::graphql;
-    use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
-    use http::{HeaderValue, Method, Uri};
+    use http::HeaderValue;
+    use http::Method;
+    use http::Uri;
     use serde_json::json;
+
+    use crate::graphql;
+    use crate::Context;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[test]
     fn router_request_builder() {
@@ -842,8 +810,8 @@ mod test {
             &graphql::Request::builder()
                 .variables(variables)
                 .extensions(extensions)
-                .operation_name(Some("Default".to_string()))
-                .query(Some("query { topProducts }".to_string()))
+                .operation_name("Default")
+                .query("query { topProducts }")
                 .build()
         );
     }
@@ -874,12 +842,10 @@ mod test {
             .clone();
         assert_eq!(
             response.next_response().await.unwrap(),
-            ResponseBody::GraphQL(
-                graphql::Response::builder()
-                    .extensions(extensions)
-                    .data(json!({}))
-                    .build()
-            )
+            graphql::Response::builder()
+                .extensions(extensions)
+                .data(json!({}))
+                .build()
         );
     }
 }

@@ -1,46 +1,75 @@
 //! Telemetry plugin.
 // This entire file is license key functionality
-use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::studio::{
-    SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
-};
-use crate::plugins::telemetry::metrics::{
-    AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
-    MetricsExporterHandle,
-};
-use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::reexports::router_bridge::planner::UsageReporting;
-use crate::subscriber::replace_layer;
-use crate::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, Response, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
-};
-use ::tracing::{info_span, Span};
-use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::StatsContext;
-use bytes::Bytes;
-use futures::{stream::BoxStream, FutureExt, StreamExt};
-use http::{HeaderValue, StatusCode};
-use metrics::apollo::Sender;
-use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::{
-    BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
-};
-use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
-use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
+
+use ::tracing::info_span;
+use ::tracing::Span;
+use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::StatsContext;
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
+use futures::FutureExt;
+use futures::StreamExt;
+use http::HeaderValue;
+use http::StatusCode;
+use metrics::apollo::Sender;
+use opentelemetry::global;
+use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::propagation::BaggagePropagator;
+use opentelemetry::sdk::propagation::TextMapCompositePropagator;
+use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::Tracer;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
+use router_bridge::planner::UsageReporting;
+use tower::service_fn;
 use tower::steer::Steer;
 use tower::util::BoxService;
-use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use url::Url;
 
 use self::config::Conf;
-use self::metrics::{Forward, MetricsAttributesConf};
+use self::metrics::AttributesForwardConf;
+use self::metrics::MetricsAttributesConf;
+use crate::graphql::Response;
+use crate::http_ext;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Handler;
+use crate::plugin::Plugin;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleReport;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleTracesAndStats;
+use crate::plugins::telemetry::metrics::AggregateMeterProvider;
+use crate::plugins::telemetry::metrics::BasicMetrics;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::USAGE_REPORTING;
+use crate::register_plugin;
+use crate::subscriber::replace_layer;
+use crate::Context;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
+use crate::QueryPlannerRequest;
+use crate::QueryPlannerResponse;
+use crate::RouterRequest;
+use crate::RouterResponse;
+use crate::SubgraphRequest;
+use crate::SubgraphResponse;
 
 pub mod apollo;
 pub mod config;
@@ -52,6 +81,7 @@ pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
+const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
@@ -194,6 +224,8 @@ impl Plugin for Telemetry {
         // The trace provider will not be shut down if drop is not called and it will result in a hang.
         // Don't add anything fallible after the tracer provider has been created.
         let tracer_provider = Self::create_tracer_provider(&config)?;
+        //
+        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
 
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
@@ -203,6 +235,7 @@ impl Plugin for Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
+            // metrics_response_queries,
         });
 
         // We're safe now for shutdown.
@@ -227,34 +260,39 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, ResponseBody>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, ResponseBody>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
-        let config = self.config.clone();
+        let config = Arc::new(self.config.clone());
+        let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::router_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
             .map_future_with_context(
                 move |req: &RouterRequest| {
-                    Self::populate_context(&config, req);
+                    Self::populate_context(config.clone(), req);
                     req.context.clone()
                 },
-                move |ctx, fut| {
+                move |ctx: Context, fut| {
+                    let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let result: Result<
-                            RouterResponse<BoxStream<'static, ResponseBody>>,
+                        let mut result: Result<
+                            RouterResponse<BoxStream<'static, Response>>,
                             BoxError,
                         > = fut.await;
-                        Self::update_metrics(&ctx, metrics, &result);
+                        result = Self::update_metrics(
+                            config.clone(),
+                            ctx.clone(),
+                            metrics,
+                            result,
+                            start.elapsed(),
+                        )
+                        .await;
                         match result {
                             Err(e) => {
                                 if !matches!(sender, Sender::Noop) {
@@ -277,10 +315,7 @@ impl Plugin for Telemetry {
                                         let ctx = ctx.clone();
 
                                         response_stream.map(move |response| {
-                                            let response_has_errors = match &response {
-                                                ResponseBody::GraphQL(r) => !r.errors.is_empty(),
-                                                _ => false,
-                                            };
+                                            let response_has_errors = !response.errors.is_empty();
 
                                             if !matches!(sender, Sender::Noop) {
                                                 Self::update_apollo_metrics(
@@ -336,6 +371,68 @@ impl Plugin for Telemetry {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
+        let subgraph_metrics = Arc::new(
+            self.config
+                .metrics
+                .as_ref()
+                .and_then(|m| m.common.as_ref())
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|c| c.subgraph.as_ref())
+                .map(|subgraph_cfg| {
+                    macro_rules! extend_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.extend(
+                                    subgraphs
+                                        .get(&name)
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    macro_rules! merge_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.merge(
+                                    subgraphs
+                                        .get(&name)
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    let insert = extend_config!(insert);
+                    let context = extend_config!(context);
+                    let request = merge_config!(request);
+                    let response = merge_config!(response);
+
+                    AttributesForwardConf {
+                        insert: (!insert.is_empty()).then(|| insert),
+                        request: (request.header.is_some() || request.body.is_some())
+                            .then(|| request),
+                        response: (response.header.is_some() || response.body.is_some())
+                            .then(|| response),
+                        context: (!context.is_empty()).then(|| context),
+                    }
+                }),
+        );
+        let subgraph_metrics_conf = subgraph_metrics.clone();
         ServiceBuilder::new()
             .instrument(move |_| {
                 info_span!("subgraph",
@@ -343,38 +440,94 @@ impl Plugin for Telemetry {
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
-            .service(service)
-            .map_future(move |f| {
-                let metrics = metrics.clone();
-                let subgraph_attribute = subgraph_attribute.clone();
-                // Using Instant because it is guaranteed to be monotonically increasing.
-                let now = Instant::now();
-                f.map(move |r| {
-                    match &r {
-                        Ok(response) => {
-                            metrics.http_requests_total.add(
-                                1,
-                                &[
-                                    KeyValue::new(
-                                        "status",
-                                        response.response.status().as_u16().to_string(),
-                                    ),
-                                    subgraph_attribute.clone(),
-                                ],
+            .map_future_with_context(
+                move |sub_request: &SubgraphRequest| {
+                    let subgraph_metrics_conf = subgraph_metrics_conf.clone();
+                    let mut attributes = HashMap::new();
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
+                            sub_request.subgraph_request.headers(),
+                            sub_request.subgraph_request.body(),
+                        ));
+                        attributes.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_context(&sub_request.context),
+                        );
+                    }
+                    sub_request
+                        .context
+                        .insert(SUBGRAPH_ATTRIBUTES, attributes)
+                        .unwrap();
+
+                    sub_request.context.clone()
+                },
+                move |context: Context,
+                      f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
+                    let metrics = metrics.clone();
+                    let subgraph_attribute = subgraph_attribute.clone();
+                    let subgraph_metrics = subgraph_metrics.clone();
+                    // Using Instant because it is guaranteed to be monotonically increasing.
+                    let now = Instant::now();
+                    f.map(move |r: Result<SubgraphResponse, BoxError>| {
+                        let subgraph_metrics_conf = subgraph_metrics.clone();
+                        let mut metric_attrs = context
+                            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+                            .ok()
+                            .flatten()
+                            .map(|attrs| {
+                                attrs
+                                    .into_iter()
+                                    .map(|(attr_name, attr_value)| {
+                                        KeyValue::new(attr_name, attr_value)
+                                    })
+                                    .collect::<Vec<KeyValue>>()
+                            })
+                            .unwrap_or_default();
+                        metric_attrs.push(subgraph_attribute.clone());
+                        // Fill attributes from context
+                        if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                            metric_attrs.extend(
+                                subgraph_attributes_conf
+                                    .get_attributes_from_context(&context)
+                                    .into_iter()
+                                    .map(|(k, v)| KeyValue::new(k, v)),
                             );
                         }
-                        Err(_) => {
-                            metrics
-                                .http_requests_error_total
-                                .add(1, &[subgraph_attribute.clone()]);
+
+                        match &r {
+                            Ok(response) => {
+                                metric_attrs.push(KeyValue::new(
+                                    "status",
+                                    response.response.status().as_u16().to_string(),
+                                ));
+
+                                // Fill attributes from response
+                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_response(
+                                                response.response.headers(),
+                                                response.response.body(),
+                                            )
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
+                                }
+
+                                metrics.http_requests_total.add(1, &metric_attrs);
+                            }
+                            Err(_) => {
+                                metrics.http_requests_error_total.add(1, &metric_attrs);
+                            }
                         }
-                    }
-                    metrics
-                        .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[subgraph_attribute.clone()]);
-                    r
-                })
-            })
+                        metrics
+                            .http_requests_duration
+                            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+                        r
+                    })
+                },
+            )
+            .service(service)
             .boxed()
     }
 
@@ -388,7 +541,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_compat::Request<Bytes>, _services: &[_]| {
+            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -468,11 +621,11 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_compat::Request<Bytes>| async {
-                Ok::<_, BoxError>(http_compat::Response {
+            service_fn(|_req: http_ext::Request<Bytes>| async {
+                Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
-                        .body(ResponseBody::Text("Not found".to_string()))
+                        .body("Not found".into())
                         .unwrap(),
                 })
             })
@@ -595,13 +748,13 @@ impl Telemetry {
         sender.send(metrics);
     }
 
-    fn update_metrics(
-        context: &Context,
+    async fn update_metrics(
+        config: Arc<Conf>,
+        context: Context,
         metrics: BasicMetrics,
-        result: &Result<RouterResponse<BoxStream<'static, ResponseBody>>, BoxError>,
-    ) {
-        // Using Instant because it is guaranteed to be monotonically increasing.
-        let now = Instant::now();
+        result: Result<RouterResponse<BoxStream<'static, Response>>, BoxError>,
+        request_duration: Duration,
+    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -613,25 +766,49 @@ impl Telemetry {
                     .collect::<Vec<KeyValue>>()
             })
             .unwrap_or_default();
-        match &result {
+        let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
                     "status",
                     response.response.status().as_u16().to_string(),
                 ));
+                if let Some(MetricsCommon {
+                    attributes:
+                        Some(MetricsAttributesConf {
+                            router: Some(forward_attributes),
+                            ..
+                        }),
+                    ..
+                }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
+                {
+                    let (resp, attributes) = forward_attributes
+                        .get_attributes_from_router_response(response)
+                        .await;
 
-                metrics.http_requests_total.add(1, &metric_attrs);
+                    metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
+                    metrics.http_requests_total.add(1, &metric_attrs);
+
+                    Ok(resp)
+                } else {
+                    metrics.http_requests_total.add(1, &metric_attrs);
+
+                    Ok(response)
+                }
             }
-            Err(_) => {
+            Err(err) => {
                 metrics.http_requests_error_total.add(1, &[]);
+
+                Err(err)
             }
-        }
+        };
         metrics
             .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+            .record(request_duration.as_secs_f64(), &metric_attrs);
+
+        res
     }
 
-    fn populate_context(config: &Conf, req: &RouterRequest) {
+    fn populate_context(config: Arc<Conf>, req: &RouterRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
@@ -665,46 +842,17 @@ impl Telemetry {
                 attributes.insert("operation_name".to_string(), operation_name.clone());
             }
 
-            if let Some(MetricsCommon {
-                attributes:
-                    Some(MetricsAttributesConf {
-                        from_headers: Some(from_headers),
-                        ..
-                    }),
-                ..
-            }) = &metrics_conf.common
+            if let Some(router_attributes_conf) = metrics_conf
+                .common
+                .as_ref()
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|a| a.router.as_ref())
             {
-                for propagate_header in from_headers {
-                    match propagate_header {
-                        Forward::Named {
-                            named,
-                            rename,
-                            default,
-                        } => {
-                            let value = req.originating_request.headers().get(named);
-                            if let Some(value) = value
-                                .and_then(|v| v.to_str().ok()?.to_string().into())
-                                .or_else(|| default.clone())
-                            {
-                                attributes.insert(
-                                    rename.clone().unwrap_or_else(|| named.to_string()),
-                                    value,
-                                );
-                            }
-                        }
-                        Forward::Matching { matching } => {
-                            req.originating_request
-                                .headers()
-                                .iter()
-                                .filter(|(name, _)| matching.is_match(name.as_str()))
-                                .for_each(|(name, value)| {
-                                    if let Ok(value) = value.to_str() {
-                                        attributes.insert(name.to_string(), value.to_string());
-                                    }
-                                });
-                        }
-                    }
-                }
+                attributes.extend(
+                    router_attributes_conf
+                        .get_attributes_from_request(headers, req.originating_request.body()),
+                );
+                attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
 
             let _ = context.insert(ATTRIBUTES, attributes);
@@ -723,7 +871,7 @@ fn operation_count(stats_report_key: &str) -> u64 {
 }
 
 fn convert(
-    referenced_fields: crate::reexports::router_bridge::planner::ReferencedFieldsForType,
+    referenced_fields: router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
@@ -754,17 +902,32 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use crate::{
-        http_compat, utils::test::MockRouterService, DynPlugin, RouterRequest, RouterResponse,
-    };
     use bytes::Bytes;
-    use http::{Method, StatusCode, Uri};
+    use http::Method;
+    use http::StatusCode;
+    use http::Uri;
     use serde_json::Value;
-    use tower::{util::BoxService, Service, ServiceExt};
+    use serde_json_bytes::json;
+    use serde_json_bytes::ByteString;
+    use tower::util::BoxService;
+    use tower::Service;
+    use tower::ServiceExt;
+
+    use crate::graphql::Error;
+    use crate::graphql::Request;
+    use crate::http_ext;
+    use crate::json_ext::Object;
+    use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::DynPlugin;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
+    use crate::RouterRequest;
+    use crate::RouterResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
@@ -774,7 +937,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
-        crate::plugins()
+        crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
@@ -791,25 +954,124 @@ mod tests {
                             "int_arr": [1, 2],
                             "float_arr": [1.0, 2.0],
                             "bool_arr": [true, false]
-                            }
                         }
-                    },
+                    }
+                },
                 "metrics": {
                     "common": {
                         "attributes": {
-                            "from_headers": [
-                                {
-                                    "named": "test",
-                                    "default": "default_value",
-                                    "rename": "renamed_value",
+                            "router": {
+                                "static": [
+                                    {
+                                        "name": "myname",
+                                        "value": "label_value"
+                                    }
+                                ],
+                                "request": {
+                                    "header": [{
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value"
+                                    }],
+                                    "body": [{
+                                        "path": ".data.test",
+                                        "name": "my_new_name",
+                                        "default": "default_value"
+                                    }]
+                                },
+                                "response": {
+                                    "header": [{
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value",
+                                    }, {
+                                        "named": "test",
+                                        "default": "default_value",
+                                        "rename": "renamed_value",
+                                    }],
+                                    "body": [{
+                                        "path": ".data.test",
+                                        "name": "my_new_name",
+                                        "default": "default_value"
+                                    }]
                                 }
-                            ],
-                            "static": [
-                                {
-                                    "name": "myname",
-                                    "value": "label_value"
+                            },
+                            "subgraph": {
+                                "all": {
+                                    "static": [
+                                        {
+                                            "name": "myname",
+                                            "value": "label_value"
+                                        }
+                                    ],
+                                    "request": {
+                                        "header": [{
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }],
+                                        "body": [{
+                                            "path": ".data.test",
+                                            "name": "my_new_name",
+                                            "default": "default_value"
+                                        }]
+                                    },
+                                    "response": {
+                                        "header": [{
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }, {
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value",
+                                        }],
+                                        "body": [{
+                                            "path": ".data.test",
+                                            "name": "my_new_name",
+                                            "default": "default_value"
+                                        }]
+                                    }
+                                },
+                                "subgraphs": {
+                                    "subgraph_name_test": {
+                                         "static": [
+                                            {
+                                                "name": "myname",
+                                                "value": "label_value"
+                                            }
+                                        ],
+                                        "request": {
+                                            "header": [{
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }],
+                                            "body": [{
+                                                "path": ".data.test",
+                                                "name": "my_new_name",
+                                                "default": "default_value"
+                                            }]
+                                        },
+                                        "response": {
+                                            "header": [{
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }, {
+                                                "named": "test",
+                                                "default": "default_value",
+                                                "rename": "renamed_value",
+                                            }],
+                                            "body": [{
+                                                "path": ".data.test",
+                                                "name": "my_new_name",
+                                                "default": "default_value"
+                                            }]
+                                        }
+                                    }
                                 }
-                            ]
+                            }
                         }
                     }
                 }
@@ -827,12 +1089,39 @@ mod tests {
             .returning(move |req: RouterRequest| {
                 Ok(RouterResponse::fake_builder()
                     .context(req.context)
+                    .header("x-custom", "coming_from_header")
+                    .data(json!({"data": {"my_value": 2}}))
                     .build()
                     .unwrap()
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugins()
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                let mut extension = Object::new();
+                extension.insert(
+                    serde_json_bytes::ByteString::from("status"),
+                    serde_json_bytes::Value::String(ByteString::from("INTERNAL_SERVER_ERROR")),
+                );
+                let _ = req
+                    .context
+                    .insert("my_key", "my_custom_attribute_from_context".to_string())
+                    .unwrap();
+                Ok(SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .error(
+                        Error::builder()
+                            .message(String::from("an error occured"))
+                            .extensions(extension)
+                            .build(),
+                    )
+                    .build())
+            });
+
+        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
@@ -846,23 +1135,66 @@ mod tests {
                 "metrics": {
                     "common": {
                         "attributes": {
-                            "from_headers": [
-                                {
-                                    "named": "test",
-                                    "default": "default_value",
-                                    "rename": "renamed_value"
+                            "router": {
+                                "static": [
+                                    {
+                                        "name": "myname",
+                                        "value": "label_value"
+                                    }
+                                ],
+                                "request": {
+                                    "header": [
+                                        {
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value"
+                                        },
+                                        {
+                                            "named": "another_test",
+                                            "default": "my_default_value"
+                                        }
+                                    ]
                                 },
-                                {
-                                    "named": "another_test",
-                                    "default": "my_default_value"
+                                "response": {
+                                    "header": [{
+                                        "named": "x-custom"
+                                    }],
+                                    "body": [{
+                                        "path": ".data.data.my_value",
+                                        "name": "my_value"
+                                    }]
                                 }
-                            ],
-                            "static": [
-                                {
-                                    "name": "myname",
-                                    "value": "label_value"
+                            },
+                            "subgraph": {
+                                "subgraphs": {
+                                    "my_subgraph_name": {
+                                        "request": {
+                                            "body": [{
+                                                "path": ".query",
+                                                "name": "query_from_request"
+                                            }, {
+                                                "path": ".data",
+                                                "name": "unknown_data",
+                                                "default": "default_value"
+                                            }, {
+                                                "path": ".data2",
+                                                "name": "unknown_data_bis"
+                                            }]
+                                        },
+                                        "response": {
+                                            "body": [{
+                                                "path": ".errors[0].extensions.status",
+                                                "name": "error"
+                                            }]
+                                        },
+                                        "context": [
+                                            {
+                                                "named": "my_key"
+                                            }
+                                        ]
+                                    }
                                 }
-                            ]
+                            }
                         }
                     },
                     "prometheus": {
@@ -889,8 +1221,33 @@ mod tests {
             .await
             .unwrap();
 
+        let mut subgraph_service = dyn_plugin.subgraph_service(
+            "my_subgraph_name",
+            BoxService::new(mock_subgraph_service.build()),
+        );
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_ext::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
+            .await
+            .unwrap();
+
         let handler = dyn_plugin.custom_endpoint().unwrap();
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
             ))
@@ -901,7 +1258,7 @@ mod tests {
         let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom = http_compat::Request::fake_builder()
+        let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/plugins/apollo.telemetry/prometheus",
             ))
@@ -911,25 +1268,22 @@ mod tests {
             .unwrap();
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        match resp.body() {
-            crate::ResponseBody::Text(prom_metrics) => {
-                assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"} 1"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.001"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.005"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.015"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.05"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.3"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.4"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="0.5"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="1"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="5"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="10"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200",le="+Inf"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
-                assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",myname="label_value",renamed_value="my_value_set",status="200"}"#));
-            }
-            _ => panic!("body does not have the right format"),
-        }
+        let prom_metrics = String::from_utf8_lossy(resp.body());
+        assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"} 1"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.001"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.005"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.015"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.05"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.3"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.4"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="0.5"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="1"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="5"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="10"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header",le="+Inf"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"}"#));
     }
 }

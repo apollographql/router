@@ -1,12 +1,20 @@
-use crate::{
-    register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, Response,
-    ServiceBuilderExt,
-};
+use std::ops::ControlFlow;
+
 use futures::stream::BoxStream;
 use http::StatusCode;
-use std::ops::ControlFlow;
 use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::error::Error;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::register_plugin;
+use crate::ExecutionRequest;
+use crate::ExecutionResponse;
 
 #[derive(Debug, Clone)]
 struct ForbidMutations {
@@ -34,7 +42,7 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let error = crate::Error {
+                        let error = Error {
                             message: "Mutations are forbidden".to_string(),
                             locations: Default::default(),
                             path: Default::default(),
@@ -61,13 +69,18 @@ impl Plugin for ForbidMutations {
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-    use super::*;
-    use crate::http_compat::Request;
-    use crate::query_planner::fetch::OperationKind;
-    use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
-    use http::{Method, StatusCode};
+    use http::Method;
+    use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::graphql;
+    use crate::http_ext::Request;
+    use crate::plugin::test::MockExecutionService;
+    use crate::query_planner::fetch::OperationKind;
+    use crate::query_planner::PlanNode;
+    use crate::query_planner::QueryPlan;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {
@@ -98,7 +111,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_mutations_pass_through() {
-        let expected_error = crate::Error {
+        let expected_error = Error {
             message: "Mutations are forbidden".to_string(),
             locations: Default::default(),
             path: Default::default(),
@@ -146,7 +159,7 @@ mod forbid_http_get_mutations_tests {
             .unwrap();
     }
 
-    fn assert_error_matches(expected_error: &crate::Error, response: Response) {
+    fn assert_error_matches(expected_error: &Error, response: Response) {
         assert_eq!(&response.errors[0], expected_error);
     }
 
@@ -183,7 +196,7 @@ mod forbid_http_get_mutations_tests {
 
         let request = Request::fake_builder()
             .method(method)
-            .body(crate::Request::default())
+            .body(graphql::Request::default())
             .build()
             .expect("expecting valid request");
         ExecutionRequest::fake_builder()

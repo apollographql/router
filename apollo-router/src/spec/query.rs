@@ -2,17 +2,26 @@
 //!
 //! Parsing, formatting and manipulation of queries.
 
-use crate::{fetch::OperationKind, prelude::graphql::*};
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde_json_bytes::ByteString;
-use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
+
+use crate::error::FetchError;
+use crate::graphql::Request;
+use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::query_planner::fetch::OperationKind;
+use crate::*;
 
 const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative)]
+#[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
     string: String,
@@ -443,11 +452,9 @@ impl Query {
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            //First determine if fragment is for interface
-                            //Otherwise we assume concrete type is expected
-                            if let Some(interface) = known_type
-                                .as_deref()
-                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            // First determine if the fragment matches an interface
+                            // Otherwise we assume a concrete type is expected
+                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
                             {
                                 //Check if input implements interface
                                 schema.is_subtype(interface.name.as_str(), input_type)
@@ -550,13 +557,10 @@ impl Query {
                     known_type: _,
                 } => {
                     // top level objects will not provide a __typename field
-                    match (type_condition.as_str(), operation.kind) {
-                        ("Query", OperationKind::Query) | ("Mutation", OperationKind::Mutation) => {
-                        }
-                        _ => {
-                            return Err(InvalidValue);
-                        }
+                    if type_condition.as_str() != schema.root_operation_name(operation.kind) {
+                        return Err(InvalidValue);
                     }
+
                     self.apply_selection_set(selection_set, variables, input, output, schema)?;
                 }
                 Selection::FragmentSpread {
@@ -566,14 +570,23 @@ impl Query {
                     include: _,
                 } => {
                     if let Some(fragment) = self.fragments.get(name) {
-                        // top level objects will not provide a __typename field
-                        match (fragment.type_condition.as_str(), operation.kind) {
-                            ("Query", OperationKind::Query)
-                            | ("Mutation", OperationKind::Mutation) => {}
-                            _ => {
-                                return Err(InvalidValue);
+                        let operation_type_name = schema.root_operation_name(operation.kind);
+                        let is_apply = {
+                            // First determine if the fragment is for an interface
+                            // Otherwise we assume a concrete type is expected
+                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
+                            {
+                                // Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), operation_type_name)
+                            } else {
+                                operation_type_name == fragment.type_condition.as_str()
                             }
+                        };
+
+                        if !is_apply {
+                            return Err(InvalidValue);
                         }
+
                         self.apply_selection_set(
                             &fragment.selection_set,
                             variables,
@@ -726,20 +739,18 @@ impl Operation {
 
     fn is_introspection(&self) -> bool {
         self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => name.as_str().starts_with("__"),
+            Selection::Field { name, .. } => {
+                let name = name.as_str();
+                // `__typename` can only be resolved in runtime,
+                // so this query cannot be seen as an introspection query
+                name == "__schema" || name == "__type"
+            }
             _ => false,
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-enum OperationType {
-    Query,
-    Mutation,
-    Subscription,
-}
-
-impl From<ast::OperationType> for OperationType {
+impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
     fn from(operation_type: ast::OperationType) -> Self {
         if operation_type.query_token().is_some() {
@@ -805,9 +816,11 @@ fn parse_value(value: &ast::Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json_bytes::json;
     use test_log::test;
+
+    use super::*;
+    use crate::json_ext::ValueExt;
 
     macro_rules! assert_eq_and_ordered {
         ($a:expr, $b:expr $(,)?) => {
@@ -1240,7 +1253,7 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
-                .query(Some($query.to_string()))
+                .query($query.to_string())
                 .build();
             let query = Query::parse(
                 request
@@ -1347,7 +1360,14 @@ mod tests {
 
         // https://spec.graphql.org/June2018/#sec-Type-System.List
         assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
-        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation!(schema, "query($foo:[String]){x}", json!({"foo":"bar"}));
+        assert_validation!(schema, "query($foo:[[Int]]){x}", json!({"foo":1}));
+        assert_validation!(
+            schema,
+            "query($foo:[[Int]]){x}",
+            json!({"foo":[[1], [2, 3]]})
+        );
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
         assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
@@ -4565,6 +4585,237 @@ mod tests {
                 },
                 "test_enum": null,
                 "test_enum2": "Z"
+            }},
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface_on_query() {
+        let schema = r#"schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+        {
+            query: MyQueryObject
+        }
+
+        directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ENUM | ENUM_VALUE | SCALAR | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ARGUMENT_DEFINITION
+
+        scalar join__FieldSet
+        scalar link__Import
+        enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+        }
+
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type MyQueryObject implements Interface {
+            object: MyObject
+            other: String
+        }
+
+        type MyObject {
+            data: String
+            foo: String
+        }
+
+        interface Interface {
+            object: MyObject
+        }"#;
+
+        let query = "{
+            ...FragmentTest
+        }
+        fragment FragmentTest on Interface {
+            object {
+                data
+            }
+        }";
+
+        let schema = schema.parse::<Schema>().expect("could not parse schema");
+        let api_schema = schema.api_schema();
+        let query = Query::parse(query, &schema).expect("could not parse query");
+        let mut response = Response::builder()
+            .data(json! {{
+                "object": {
+                    "__typename": "MyObject",
+                    "data": "a",
+                    "foo": "bar"
+                }
+            }})
+            .build();
+
+        query.format_response(&mut response, None, Default::default(), api_schema);
+        assert_eq_and_ordered!(
+            response.data.as_ref().unwrap(),
+            &json! {{
+                "object": {
+                    "data": "a"
+                }
+            }}
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface() {
+        let schema = "type Query
+        {
+            test_interface: Interface
+        }
+
+        interface Interface {
+            foo: String
+        }
+
+        type MyTypeA implements Interface {
+            foo: String
+            something: String
+        }
+
+        type MyTypeB implements Interface {
+            foo: String
+            somethingElse: String!
+        }
+        ";
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentA
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    ...FragmentI
+                }
+            }
+
+            fragment FragmentI on Interface {
+                foo
+            }
+            ",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ... on MyTypeA {
+                        something
+                    }
+                    ... on MyTypeB {
+                        somethingElse
+                    }
+                }
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+        );
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                    ...FragmentB
+                }
+            }
+
+            fragment FragmentA on MyTypeA {
+                something
+            }
+
+            fragment FragmentB on MyTypeB {
+                somethingElse
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                    "something": "something"
+                }
+            }},
+            None,
+            json! {{
+                "test_interface": {
+                    "__typename": "MyTypeA",
+                    "foo": "bar",
+                }
             }},
         );
     }

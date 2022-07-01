@@ -52,7 +52,7 @@ services:
 
   collector:
     container_name: collector
-    image: otel/opentelemetry-collector:0.46.0
+    image: otel/opentelemetry-collector:0.54.0
     command: ["--config=/conf/collector-config.yml"]
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/collector-config.yml:/conf/collector-config.yml
@@ -66,12 +66,12 @@ services:
 
   zipkin:
     container_name: zipkin
-    image: openzipkin/zipkin:2.23.16
+    image: openzipkin/zipkin:2.23.17
     ports:
       - "9411:9411"
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:v2.35.0
+    image: prom/prometheus:v2.36.2
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
