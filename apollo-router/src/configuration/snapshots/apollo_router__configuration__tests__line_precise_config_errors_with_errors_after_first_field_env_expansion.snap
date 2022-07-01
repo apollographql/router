@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/configuration/mod.rs
+expression: error.to_string()
+---
+configuration had errors: 
+1. /server
+
+
+server:
+┌   # The socket address and port to listen on
+|   # Defaults to 127.0.0.1:4000
+|   listen: 127.0.0.1:4000
+|   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
+|   another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+└-----> Additional properties are not allowed ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}', 'another_one' were unexpected)

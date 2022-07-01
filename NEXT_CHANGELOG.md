@@ -365,6 +365,17 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Improve configuration validation and environment expansion ([PR #1331](https://github.com/apollographql/router/pull/1331))
+
+Environment expansion now covers the entire configuration file, and supports non string types.
+This means that it is now possible to use environment variable in the server section of the yaml, and also in numeric and boolean fields.
+
+Environment variables will always be shown in their original form in error messages preventing leakage of secrets.
+
+These changes allow more of the configuration file to be validated via json schema, as previously we just skipped errors where fields contained env variables.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1331
+
 ### Fix input coercion for a list ([PR #1327](https://github.com/apollographql/router/pull/1327))
 
 The router is now following coercion rules for List regarding [the specs](https://spec.graphql.org/June2018/#sec-Type-System.List). Especially it fixes the case when for an input type `[Int]` only `1` was provided as a value. It's now working and it's coerced to `[1]`.
