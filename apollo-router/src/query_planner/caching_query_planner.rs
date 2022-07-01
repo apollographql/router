@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
@@ -109,7 +108,6 @@ where
             body.operation_name.to_owned(),
             request.query_plan_options,
         );
-        let cm = self.cm.clone();
         let qp = self.clone();
         Box::pin(async move {
             qp.get(key.0, key.1, key.2)

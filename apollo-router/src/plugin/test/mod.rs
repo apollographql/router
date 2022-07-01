@@ -20,7 +20,6 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::cache::storage::CacheStorage;
 use crate::cache::DedupCache;
 use crate::graphql::Response;
 use crate::introspection::Introspection;

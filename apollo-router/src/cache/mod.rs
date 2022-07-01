@@ -33,13 +33,13 @@ where
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
         //loop {
         let mut locked_wait_map = self.wait_map.lock().await;
-        match locked_wait_map.get(&key) {
+        match locked_wait_map.get(key) {
             Some(waiter) => {
                 // Register interest in key
                 let receiver = waiter.subscribe();
-                return Entry {
+                Entry {
                     inner: EntryInner::Receiver { receiver },
-                };
+                }
             }
             None => {
                 let (sender, _receiver) = broadcast::channel(1);
@@ -48,9 +48,9 @@ where
 
                 drop(locked_wait_map);
 
-                if let Some(value) = self.storage.get(&key).await {
+                if let Some(value) = self.storage.get(key).await {
                     let mut locked_wait_map = self.wait_map.lock().await;
-                    let _ = locked_wait_map.remove(&key);
+                    let _ = locked_wait_map.remove(key);
                     let _ = sender.send(value.clone());
 
                     return Entry {
@@ -70,16 +70,14 @@ where
                     let _ = locked_wait_map.remove(&k);
                 });
 
-                let res = Entry {
+                Entry {
                     inner: EntryInner::First {
                         sender,
                         key: key.clone(),
                         cache: self.clone(),
                         _drop_signal,
                     },
-                };
-
-                res
+                }
             }
         }
     }
@@ -90,7 +88,7 @@ where
 
     pub(crate) async fn remove_wait(&self, key: &K) {
         let mut locked_wait_map = self.wait_map.lock().await;
-        let _ = locked_wait_map.remove(&key);
+        let _ = locked_wait_map.remove(key);
     }
 }
 
@@ -122,11 +120,7 @@ where
     V: Clone + Send + 'static,
 {
     pub(crate) fn is_first(&self) -> bool {
-        if let EntryInner::First { .. } = self.inner {
-            true
-        } else {
-            false
-        }
+        matches!(self.inner, EntryInner::First { .. })
     }
 
     pub(crate) async fn get(self) -> Result<V, EntryError> {
@@ -141,31 +135,27 @@ where
     }
 
     pub(crate) async fn insert(self, value: V) {
-        match self.inner {
-            EntryInner::First {
-                key,
-                sender,
-                cache,
-                _drop_signal,
-            } => {
-                cache.insert(key.clone(), value.clone()).await;
-                cache.remove_wait(&key).await;
-                let _ = sender.send(value);
-            }
-            _ => {}
+        if let EntryInner::First {
+            key,
+            sender,
+            cache,
+            _drop_signal,
+        } = self.inner
+        {
+            cache.insert(key.clone(), value.clone()).await;
+            cache.remove_wait(&key).await;
+            let _ = sender.send(value);
         }
     }
 
     /// sends the value without storing it into the cache
     pub(crate) async fn send(self, value: V) {
-        match self.inner {
-            EntryInner::First {
-                sender, cache, key, ..
-            } => {
-                let _ = sender.send(value);
-                cache.remove_wait(&key).await;
-            }
-            _ => {}
+        if let EntryInner::First {
+            sender, cache, key, ..
+        } = self.inner
+        {
+            let _ = sender.send(value);
+            cache.remove_wait(&key).await;
         }
     }
 }

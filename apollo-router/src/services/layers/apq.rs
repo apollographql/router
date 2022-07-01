@@ -112,7 +112,7 @@ where
 
         let body_query = req.originating_request.body().query.clone();
 
-        let mut cache = self.cache.clone();
+        let cache = self.cache.clone();
         let service = self.inner.clone();
         Box::pin(async move {
             match (maybe_query_hash, body_query) {
@@ -128,7 +128,7 @@ where
                     Ok(service.oneshot(req).await?)
                 }
                 (Some(apq_hash), _) => {
-                    if let Some(cached_query) = cache.get(&apq_hash).await.get().await.ok() {
+                    if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
                         let _ = req.context.insert("persisted_query_hit", true);
                         tracing::trace!("apq: cache hit");
                         req.originating_request.body_mut().query = Some(cached_query);

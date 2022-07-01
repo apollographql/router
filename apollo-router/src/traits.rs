@@ -1,10 +1,7 @@
-use std::fmt::Debug;
-
 use async_trait::async_trait;
 
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
-use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
 use crate::services::QueryPlannerContent;
 
@@ -38,30 +35,3 @@ pub(crate) trait QueryPlanner: Send + Sync {
         options: QueryPlanOptions,
     ) -> Result<QueryPlannerContent, QueryPlannerError>;
 }
-
-/*FIXME: should we keep this trait?
-/// With caching trait.
-///
-/// Adds with_caching to any query planner.
-pub(crate) trait WithCaching: QueryPlanner
-where
-    Self: Sized + QueryPlanner + 'static,
-{
-    /// Wrap this query planner in a caching decorator.
-    /// The original query planner is consumed.
-    fn with_caching(self, plan_cache_limit: usize) -> CachingQueryPlanner<Self> {
-        CachingQueryPlanner::new(self, plan_cache_limit)
-    }
-}
-
-impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
-
-#[cfg(test)]
-mod tests {
-    use static_assertions::*;
-
-    use super::*;
-
-    assert_obj_safe!(QueryPlanner);
-}
-*/

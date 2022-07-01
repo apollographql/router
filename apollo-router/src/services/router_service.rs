@@ -23,7 +23,6 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::QueryPlannerContent;
-use crate::cache::storage::CacheStorage;
 use crate::cache::DedupCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
