@@ -18,7 +18,6 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
-use super::router_factory::RouterServiceFactory;
 use super::state_machine::State::Errored;
 use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
@@ -26,6 +25,7 @@ use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
+use crate::router_factory::RouterServiceConfigurator;
 use crate::services::Plugins;
 use crate::Schema;
 
@@ -42,7 +42,7 @@ enum State<RS> {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         #[derivative(Debug = "ignore")]
-        router_service: RS,
+        router_service_factory: RS,
         server_handle: HttpServerHandle,
         #[derivative(Debug = "ignore")]
         plugins: Plugins,
@@ -71,10 +71,10 @@ impl<T> Display for State<T> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory,
+    FA: RouterServiceConfigurator,
 {
     http_server_factory: S,
-    router_factory: FA,
+    router_configurator: FA,
 
     // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
     pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
@@ -84,14 +84,14 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory + Send,
+    FA: RouterServiceConfigurator + Send,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         let ready = Arc::new(RwLock::new(None));
         let ready_guard = ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
-            router_factory,
+            router_configurator: router_factory,
             listen_address: ready,
             listen_address_guard: Some(ready_guard),
         }
@@ -155,7 +155,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        router_service,
+                        router_service_factory: router_service,
                         server_handle,
                         plugins,
                     },
@@ -180,7 +180,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        router_service,
+                        router_service_factory: router_service,
                         server_handle,
                         plugins,
                     },
@@ -238,7 +238,7 @@ where
 
     async fn maybe_update_listen_address(
         &mut self,
-        state: &mut State<<FA as RouterServiceFactory>::RouterService>,
+        state: &mut State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     ) {
         let listen_address = if let Running { server_handle, .. } = &state {
             let listen_address = server_handle.listen_address().clone();
@@ -258,10 +258,10 @@ where
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: State<<FA as RouterServiceFactory>::RouterService>,
+        state: State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     ) -> Result<
-        State<<FA as RouterServiceFactory>::RouterService>,
-        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -272,8 +272,8 @@ where
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
 
-            let (router, plugins) = self
-                .router_factory
+            let (router_factory, plugins) = self
+                .router_configurator
                 .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
@@ -292,7 +292,12 @@ where
 
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None, plugin_handlers)
+                .create(
+                    router_factory.clone(),
+                    configuration.clone(),
+                    None,
+                    plugin_handlers,
+                )
                 .await
                 .map_err(|err| {
                     tracing::error!("cannot start the router: {}", err);
@@ -302,7 +307,7 @@ where
             Ok(Running {
                 configuration,
                 schema,
-                router_service: router,
+                router_service_factory: router_factory,
                 server_handle,
                 plugins,
             })
@@ -316,20 +321,20 @@ where
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        router_service: <FA as RouterServiceFactory>::RouterService,
+        router_service: <FA as RouterServiceConfigurator>::RouterServiceFactory,
         server_handle: HttpServerHandle,
         plugins: Plugins,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        State<<FA as RouterServiceFactory>::RouterService>,
-        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
+        State<<FA as RouterServiceConfigurator>::RouterServiceFactory>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
 
         match self
-            .router_factory
+            .router_configurator
             .create(
                 new_configuration.clone(),
                 new_schema.clone(),
@@ -364,7 +369,7 @@ where
                 Ok(Running {
                     configuration: new_configuration,
                     schema: new_schema,
-                    router_service: new_router_service,
+                    router_service_factory: new_router_service,
                     server_handle,
                     plugins,
                 })
@@ -377,7 +382,7 @@ where
                 Err(Running {
                     configuration,
                     schema,
-                    router_service,
+                    router_service_factory: router_service,
                     server_handle,
                     plugins,
                 })
@@ -423,7 +428,9 @@ mod tests {
     use crate::http_ext::Request;
     use crate::http_ext::Response;
     use crate::http_server_factory::Listener;
+    use crate::router_factory::RouterServiceConfigurator;
     use crate::router_factory::RouterServiceFactory;
+    use crate::services::new_service::NewService;
 
     fn example_schema() -> Schema {
         include_str!("testdata/supergraph.graphql").parse().unwrap()
@@ -431,7 +438,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn no_configuration() {
-        let router_factory = create_mock_router_factory(0);
+        let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
@@ -441,7 +448,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn no_schema() {
-        let router_factory = create_mock_router_factory(0);
+        let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(server_factory, router_factory, vec![NoMoreSchema],).await,
@@ -451,7 +458,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn shutdown_during_startup() {
-        let router_factory = create_mock_router_factory(0);
+        let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(server_factory, router_factory, vec![Shutdown],).await,
@@ -461,7 +468,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_shutdown() {
-        let router_factory = create_mock_router_factory(1);
+        let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -482,7 +489,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_schema() {
-        let router_factory = create_mock_router_factory(2);
+        let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert!(matches!(
@@ -504,7 +511,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let router_factory = create_mock_router_factory(2);
+        let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -535,7 +542,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls() {
-        let router_factory = create_mock_router_factory(1);
+        let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -556,7 +563,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn router_factory_error_startup() {
-        let mut router_factory = MockMyRouterFactory::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
             .expect_create()
             .times(1)
@@ -582,14 +589,14 @@ mod tests {
     #[test(tokio::test)]
     async fn router_factory_error_restart() {
         let mut seq = Sequence::new();
-        let mut router_factory = MockMyRouterFactory::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _| {
-                let mut router = MockMyRouter::new();
-                router.expect_clone().return_once(MockMyRouter::new);
+                let mut router = MockMyRouterFactory::new();
+                router.expect_clone().return_once(MockMyRouterFactory::new);
                 Ok((router, Default::default()))
             });
         router_factory
@@ -619,19 +626,36 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
-        MyRouterFactory {}
+        MyRouterConfigurator {}
 
         #[async_trait::async_trait]
-        impl RouterServiceFactory for MyRouterFactory {
-            type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<crate::graphql::Request>>>::Future;
+        impl RouterServiceConfigurator for MyRouterConfigurator {
+            type RouterServiceFactory = MockMyRouterFactory;
 
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
                 schema: Arc<crate::Schema>,
-                previous_router: Option<&'a MockMyRouter>,
-            ) -> Result<(MockMyRouter, Plugins), BoxError>;
+                previous_router: Option<&'a MockMyRouterFactory>,
+            ) -> Result<(MockMyRouterFactory, Plugins), BoxError>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        MyRouterFactory {}
+
+        impl RouterServiceFactory for MyRouterFactory {
+            type RouterService = MockMyRouter;
+            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+        }
+        impl  NewService<Request<graphql::Request>> for MyRouterFactory {
+            type Service = MockMyRouter;
+            fn new_service(&self) -> MockMyRouter;
+        }
+
+        impl Clone for MyRouterFactory {
+            fn clone(&self) -> MockMyRouterFactory;
         }
     }
 
@@ -674,23 +698,15 @@ mod tests {
         type Future =
             Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
-        fn create<RS>(
+        fn create<RF>(
             &self,
-            _service: RS,
+            _service_factory: RF,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
             _plugin_handlers: HashMap<String, Handler>,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>
+        ) -> Self::Future
         where
-            RS: Service<
-                    Request<crate::graphql::Request>,
-                    Response = Response<BoxStream<'static, graphql::Response>>,
-                    Error = BoxError,
-                > + Send
-                + Sync
-                + Clone
-                + 'static,
-            <RS as Service<Request<crate::graphql::Request>>>::Future: std::marker::Send,
+            RF: RouterServiceFactory,
         {
             let res = self.create_server(configuration, listener);
             Box::pin(async move { res })
@@ -699,7 +715,7 @@ mod tests {
 
     async fn execute(
         server_factory: MockMyHttpServerFactory,
-        router_factory: MockMyRouterFactory,
+        router_factory: MockMyRouterConfigurator,
         events: Vec<Event>,
     ) -> Result<(), ApolloRouterError> {
         let state_machine = StateMachine::new(server_factory, router_factory);
@@ -749,15 +765,15 @@ mod tests {
         (server_factory, shutdown_receivers)
     }
 
-    fn create_mock_router_factory(expect_times_called: usize) -> MockMyRouterFactory {
-        let mut router_factory = MockMyRouterFactory::new();
+    fn create_mock_router_configurator(expect_times_called: usize) -> MockMyRouterConfigurator {
+        let mut router_factory = MockMyRouterConfigurator::new();
 
         router_factory
             .expect_create()
             .times(expect_times_called)
             .returning(move |_, _, _| {
-                let mut router = MockMyRouter::new();
-                router.expect_clone().return_once(MockMyRouter::new);
+                let mut router = MockMyRouterFactory::new();
+                router.expect_clone().return_once(MockMyRouterFactory::new);
                 Ok((router, Default::default()))
             });
         router_factory

@@ -308,6 +308,15 @@ Do not silently skip some bad configuration, now if you add an unknown configura
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1278
 
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+
+the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
+they work like a tower Layer, they can use `&self` instead. This change
+then allows us to move from Buffer to service factories for the query
+planner, execution and subgraph services
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1340 https://github.com/apollographql/router/pull/1289
+
 ## 🚀 Features ( :rocket: )
 
 ### Add support to add custom attributes on metrics. [PR #1300](https://github.com/apollographql/router/pull/1300)
@@ -448,5 +457,12 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
 Migrate all typed-builders code to buildstructor
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
+
 ## 📚 Documentation ( :books: )
 
+### Replace Buffers of tower services with service factories([PR #1289](https://github.com/apollographql/router/pull/1289)
+
+tower services should be used by creating a new service instance for each new session
+instead of going through a Buffer.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289

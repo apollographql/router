@@ -466,7 +466,7 @@ impl Plugin for Rhai {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
@@ -486,7 +486,7 @@ impl Plugin for Rhai {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
@@ -506,7 +506,7 @@ impl Plugin for Rhai {
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -531,7 +531,7 @@ impl Plugin for Rhai {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -1654,7 +1654,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
@@ -1707,7 +1707,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(

@@ -1,4 +1,5 @@
 //! Limit the rate at which requests are processed.
+//! Almost the same layer/service than in the tower codebase but this one is a global rate limit
 
 mod layer;
 #[allow(clippy::module_inception)]

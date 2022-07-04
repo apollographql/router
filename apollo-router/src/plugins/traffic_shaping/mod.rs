@@ -14,6 +14,7 @@ mod rate;
 mod timeout;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::stream::BoxStream;
@@ -134,7 +135,7 @@ impl Merge for RateLimitConf {
 struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
-    rate_limit_subgraphs: HashMap<String, RateLimitLayer>,
+    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
 #[async_trait::async_trait]
@@ -153,7 +154,7 @@ impl Plugin for TrafficShaping {
         Ok(Self {
             config,
             rate_limit_router,
-            rate_limit_subgraphs: HashMap::new(),
+            rate_limit_subgraphs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -174,24 +175,8 @@ impl Plugin for TrafficShaping {
             .boxed()
     }
 
-    fn query_planning_service(
-        &mut self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        if matches!(self.config.variables_deduplication, Some(true)) {
-            service
-                .map_request(|mut req: QueryPlannerRequest| {
-                    req.query_plan_options.enable_variable_deduplication = true;
-                    req
-                })
-                .boxed()
-        } else {
-            service
-        }
-    }
-
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -203,6 +188,8 @@ impl Plugin for TrafficShaping {
         if let Some(config) = final_config {
             let rate_limit = config.rate_limit.as_ref().map(|rate_limit_conf| {
                 self.rate_limit_subgraphs
+                    .lock()
+                    .unwrap()
                     .entry(name.to_string())
                     .or_insert_with(|| {
                         RateLimitLayer::new(rate_limit_conf.num, rate_limit_conf.per)
@@ -230,6 +217,22 @@ impl Plugin for TrafficShaping {
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
+                    req
+                })
+                .boxed()
+        } else {
+            service
+        }
+    }
+
+    fn query_planning_service(
+        &self,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        if matches!(self.config.variables_deduplication, Some(true)) {
+            service
+                .map_request(|mut req: QueryPlannerRequest| {
+                    req.query_plan_options.enable_variable_deduplication = true;
                     req
                 })
                 .boxed()
@@ -358,12 +361,12 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let (router, _) = builder.build().await.expect("should build");
+        let router = builder.build().await.expect("should build").test_service();
 
         router
     }
 
-    async fn get_taffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
+    async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
@@ -382,7 +385,7 @@ mod test {
         )
         .unwrap();
         // Build a redacting plugin
-        let plugin = get_taffic_shaping_plugin(&config).await;
+        let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
@@ -398,7 +401,7 @@ mod test {
         )
         .unwrap();
 
-        let mut plugin = get_taffic_shaping_plugin(&config).await;
+        let plugin = get_traffic_shaping_plugin(&config).await;
         let request = SubgraphRequest::fake_builder().build();
 
         let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
