@@ -61,7 +61,7 @@ impl Plugin for HelloWorld {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         // This is the default implementation and does not modify the default service.
@@ -70,7 +70,7 @@ impl Plugin for HelloWorld {
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -85,7 +85,7 @@ impl Plugin for HelloWorld {
 
     // Called for each subgraph
     fn subgraph_service(
-        &mut self,
+        &self,
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
