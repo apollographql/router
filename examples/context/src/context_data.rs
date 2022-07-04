@@ -81,7 +81,7 @@ impl Plugin for ContextData {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {

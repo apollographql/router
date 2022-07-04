@@ -78,7 +78,7 @@ impl Plugin for TrafficShaping {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -112,7 +112,7 @@ impl Plugin for TrafficShaping {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         if matches!(self.config.variables_deduplication, Some(true)) {
@@ -287,7 +287,7 @@ mod test {
         )
         .unwrap();
 
-        let mut plugin = get_traffic_shaping_plugin(&config).await;
+        let plugin = get_traffic_shaping_plugin(&config).await;
         let request = SubgraphRequest::fake_builder().build();
 
         let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
