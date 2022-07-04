@@ -439,6 +439,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
+### chore: Run scaffold tests in CI and xtask only ([PR #1345](https://github.com/apollographql/router/pull/1345))
+Run the scaffold tests in CI and through xtask, to keep a steady feedback loop while developping against `cargo test`.
+
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
 Migrate all typed-builders code to buildstructor
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
