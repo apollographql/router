@@ -1,8 +1,6 @@
 // This entire file is license key functionality
 use std::sync::Arc;
 
-use envmnt::types::ExpandOptions;
-use envmnt::ExpansionType;
 use futures::stream::BoxStream;
 use indexmap::IndexMap;
 use serde_json::Map;
@@ -158,7 +156,6 @@ async fn create_plugins(
                     inject_schema_id(schema, &mut configuration);
                 }
                 // expand any env variables in the config before processing.
-                let configuration = expand_env_variables(&configuration);
                 match factory.create_instance(&configuration).await {
                     Ok(plugin) => {
                         plugin_instances.push((name, plugin));
@@ -260,29 +257,6 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
                 Value::String(schema_id.to_string()),
             );
         }
-    }
-}
-
-fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
-    let mut configuration = configuration.clone();
-    visit(&mut configuration);
-    configuration
-}
-
-fn visit(value: &mut serde_json::Value) {
-    match value {
-        Value::String(value) => {
-            *value = envmnt::expand(
-                value,
-                Some(
-                    ExpandOptions::new()
-                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
-                ),
-            );
-        }
-        Value::Array(a) => a.iter_mut().for_each(visit),
-        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
-        _ => {}
     }
 }
 

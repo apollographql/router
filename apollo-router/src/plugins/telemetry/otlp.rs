@@ -18,6 +18,7 @@ use url::Url;
 
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -85,19 +86,13 @@ fn deser_endpoint<'de, D>(deserializer: D) -> Result<Endpoint, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let mut s = String::deserialize(deserializer)?;
+    let s = String::deserialize(deserializer)?;
     if s == "default" {
         return Ok(Endpoint::Default(EndpointDefault::Default));
     }
-    let mut url = Url::parse(&s).map_err(serde::de::Error::custom)?;
 
-    // support the case of 'collector:4317' where url parses 'collector'
-    // as the scheme instead of the host
-    if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-        s = format!("http://{}", s);
+    let url = parse_url_for_endpoint(s).map_err(serde::de::Error::custom)?;
 
-        url = Url::parse(&s).map_err(serde::de::Error::custom)?;
-    }
     Ok(Endpoint::Url(url))
 }
 
@@ -286,6 +281,12 @@ mod tests {
         let config: Config = serde_yaml::from_str("endpoint: https://collector:1234").unwrap();
         assert_eq!(
             Endpoint::Url(Url::parse("https://collector:1234").unwrap()),
+            config.endpoint
+        );
+
+        let config: Config = serde_yaml::from_str("endpoint: 127.0.0.1:1234").unwrap();
+        assert_eq!(
+            Endpoint::Url(Url::parse("http://127.0.0.1:1234").unwrap()),
             config.endpoint
         );
     }

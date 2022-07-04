@@ -9,5 +9,5 @@ configuration had errors:
   cors:
     allow_headers:
       - Content-Type
-      - 5
-        ^----- 5 is not of type "string"
+      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+        ^----- "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}" is not of type "string"

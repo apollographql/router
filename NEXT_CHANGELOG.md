@@ -374,6 +374,23 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Improve URL parsing in endpoint configuration ([PR #1341](https://github.com/apollographql/router/pull/1341))
+
+Specifying an endpoint in this form '127.0.0.1:431' resulted in an error: 'relative URL without a base'. The fix enhances the URL parsing logic to check for these errors and re-parses with a default scheme 'http://' so that parsing succeeds.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1341
+
+### Improve configuration validation and environment expansion ([PR #1331](https://github.com/apollographql/router/pull/1331))
+
+Environment expansion now covers the entire configuration file, and supports non string types.
+This means that it is now possible to use environment variable in the server section of the yaml, and also in numeric and boolean fields.
+
+Environment variables will always be shown in their original form in error messages preventing leakage of secrets.
+
+These changes allow more of the configuration file to be validated via json schema, as previously we just skipped errors where fields contained env variables.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1331
+
 ### Fix input coercion for a list ([PR #1327](https://github.com/apollographql/router/pull/1327))
 
 The router is now following coercion rules for List regarding [the specs](https://spec.graphql.org/June2018/#sec-Type-System.List). Especially it fixes the case when for an input type `[Int]` only `1` was provided as a value. It's now working and it's coerced to `[1]`.
@@ -430,6 +447,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Update rhai to latest release (1.8.0)  ([PR #1337](https://github.com/apollographql/router/pull/1337)
+
+We had been depending on a pinned git version which had a fix we required. This now updates to the latest release.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1337
 
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
 Migrate all typed-builders code to buildstructor
