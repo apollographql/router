@@ -5,7 +5,14 @@ use anyhow::Result;
 use structopt::StructOpt;
 use xtask::*;
 
-const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked"];
+const TEST_DEFAULT_ARGS: &[&str] = &[
+    "test",
+    "-p",
+    "apollo-router",
+    "-p",
+    "apollo-router-scaffold",
+    "--locked",
+];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {

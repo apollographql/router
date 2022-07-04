@@ -1,5 +1,5 @@
 [workspace]
-default-members = ["apollo-router", "apollo-router-scaffold"]
+default-members = ["apollo-router"]
 members = [
     "apollo-spaceport",
     "apollo-router",
