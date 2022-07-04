@@ -259,7 +259,7 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();

@@ -466,7 +466,7 @@ impl Plugin for Rhai {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
@@ -1654,7 +1654,7 @@ mod tests {
                     .boxed())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(

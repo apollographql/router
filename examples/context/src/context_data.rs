@@ -46,7 +46,7 @@ impl Plugin for ContextData {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, graphql::Response>>,

@@ -62,6 +62,7 @@ pub use router::ApolloRouter;
 pub use router::ConfigurationKind;
 pub use router::SchemaKind;
 pub use router::ShutdownKind;
+pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
 pub use spec::Schema;
 
