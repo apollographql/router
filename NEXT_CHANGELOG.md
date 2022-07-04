@@ -439,6 +439,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
+### chore: Run scaffold tests in CI and xtask only ([PR #1345](https://github.com/apollographql/router/pull/1345))
+
+Run the scaffold tests in CI and through xtask, to keep a steady feedback loop while developping against `cargo test`.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1345
+
 ### Update rhai to latest release (1.8.0)  ([PR #1337](https://github.com/apollographql/router/pull/1337)
 
 We had been depending on a pinned git version which had a fix we required. This now updates to the latest release.
