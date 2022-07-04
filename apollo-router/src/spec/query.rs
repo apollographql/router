@@ -410,7 +410,7 @@ impl Query {
                         // check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
-                            || schema.is_subtype(&type_condition, input_type)
+                            || schema.is_subtype(type_condition, input_type)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
