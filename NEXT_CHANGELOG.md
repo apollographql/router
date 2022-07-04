@@ -365,11 +365,11 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### Improve URL parsing in endpoint configuration ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Improve URL parsing in endpoint configuration ([PR #1341](https://github.com/apollographql/router/pull/1341))
 
 Specifying an endpoint in this form '127.0.0.1:431' resulted in an error: 'relative URL without a base'. The fix enhances the URL parsing logic to check for these errors and re-parses with a default scheme 'http://' so that parsing succeeds.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1341
 
 ### Improve configuration validation and environment expansion ([PR #1331](https://github.com/apollographql/router/pull/1331))
 
