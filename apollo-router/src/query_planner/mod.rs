@@ -454,6 +454,19 @@ pub(crate) mod fetch {
 
                 Some(Variables { variables, paths })
             } else {
+                if !current_dir.is_empty() {
+                    match data.pointer(current_dir.to_string().as_str()) {
+                        Some(matched_value) => {
+                            if matched_value.is_null() {
+                                return None
+                            }
+                        }
+                        None => {
+                            return None
+                        }
+                    }
+                }
+
                 Some(Variables {
                     variables: variable_usages
                         .iter()
@@ -501,22 +514,7 @@ pub(crate) mod fetch {
             )
             .await
             {
-                Some(variables) => {
-                    if variables.variables.is_empty() && !current_dir.is_empty() {
-                        match data.pointer(&current_dir.to_string()) {
-                            Some(matched_value) => {
-                                if matched_value.is_null() {
-                                    return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
-                                }
-                            },
-                            None => {
-                                return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
-                            }
-                        }
-                    }
-
-                    variables
-                },
+                Some(variables) => variables,
                 None => {
                     return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
                 }
