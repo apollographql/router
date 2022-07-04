@@ -1,9 +1,12 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
-use anyhow::{ensure, Context, Result};
-use camino::Utf8PathBuf;
 use std::path::Path;
+
+use anyhow::ensure;
+use anyhow::Context;
+use anyhow::Result;
+use camino::Utf8PathBuf;
 use structopt::StructOpt;
 use xtask::*;
 
@@ -40,12 +43,11 @@ impl Package {
             self.output.to_owned()
         } else if self.output.is_dir() {
             self.output.join(format!(
-                "{}-{}-{}-{}.tar.gz",
-                RELEASE_BIN,
+                "router-{}-{}-{}.tar.gz",
                 *PKG_VERSION,
                 // NOTE: same as xtask
-                platforms::TARGET_ARCH,
-                platforms::TARGET_OS,
+                std::env::consts::ARCH,
+                std::env::consts::OS,
             ))
         } else {
             self.output.to_owned()

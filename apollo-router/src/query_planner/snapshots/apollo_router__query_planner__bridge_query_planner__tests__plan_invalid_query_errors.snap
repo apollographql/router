@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: plan_errors.errors
+---
+[
+    PlanError {
+        message: Some(
+            "Fragment \"UnusedTestFragment\" is never used.",
+        ),
+        extensions: None,
+    },
+]

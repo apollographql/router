@@ -1,0 +1,33 @@
+---
+title: Subgraph error inclusion
+description: Configuring subgraph error inclusion
+---
+
+import { Link } from "gatsby";
+
+> ⚠️ Apollo Router support for subgraph error inclusion is currently experimental.
+
+The Apollo Router provides experimental support for subgraph error inclusion.
+
+By default, the router will redact subgraph errors from clients. This is to prevent potential
+leaks of information to the client. This plugin makes it possible to configure your router so
+that subgraph errors are propagated to the client. This may be done for all subgraphs or on a
+per subgraph basis.
+
+## Configuration
+To configure subgraph error inclusion add the `include_subgraph_errors` plugin to `your router.yaml`:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.include_subgraph_errors:
+    all: true # Propagate errors for all subraphs
+    subgraphs: 
+      products: false # Do not propagate errors from the products subgraph
+```
+
+Note that configuration in the `subgraphs` section will take precedence over that in the `all` section.
+
+### Subgraph error reporting
+
+If a subgraph error is not included (default behaviour) then errors in subgraphs will be replaced with a default error containing this message: "Subgraph errors redacted"
+

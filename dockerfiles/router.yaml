@@ -1,0 +1,5 @@
+# Configuration of the router's HTTP server
+# Default configuration for container
+server:
+  # The socket address and port to listen on
+  listen: 0.0.0.0:4000

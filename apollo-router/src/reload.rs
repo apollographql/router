@@ -17,19 +17,21 @@
 //!
 //! [`Layer` type]: struct.Layer.html
 //! [`Layer` trait]: ../layer/trait.Layer.html
-use tracing_subscriber::layer;
+use std::any::TypeId;
+use std::error;
+use std::fmt;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::Weak;
 
-use std::{
-    any::TypeId,
-    error, fmt,
-    marker::PhantomData,
-    sync::{Arc, RwLock, Weak},
-};
-use tracing_core::{
-    callsite, span,
-    subscriber::{Interest, Subscriber},
-    Event, Metadata,
-};
+use tracing_core::callsite;
+use tracing_core::span;
+use tracing_core::subscriber::Interest;
+use tracing_core::subscriber::Subscriber;
+use tracing_core::Event;
+use tracing_core::Metadata;
+use tracing_subscriber::layer;
 
 macro_rules! try_lock {
     ($lock:expr) => {
@@ -48,7 +50,7 @@ macro_rules! try_lock {
 
 /// Wraps a `Layer`, allowing it to be reloaded dynamically at runtime.
 #[derive(Debug)]
-pub struct Layer<L, S> {
+pub(crate) struct Layer<L, S> {
     // TODO(eliza): this once used a `crossbeam_util::ShardedRwLock`. We may
     // eventually wish to replace it with a sharded lock implementation on top
     // of our internal `RwLock` wrapper type. If possible, we should profile
@@ -59,7 +61,7 @@ pub struct Layer<L, S> {
 
 /// Allows reloading the state of an associated `Layer`.
 #[derive(Debug)]
-pub struct Handle<L, S> {
+pub(crate) struct Handle<L, S> {
     inner: Weak<RwLock<L>>,
     _s: PhantomData<fn(S)>,
 }
@@ -158,7 +160,7 @@ where
 {
     /// Wraps the given `Layer`, returning a `Layer` and a `Handle` that allows
     /// the inner type to be modified at runtime.
-    pub fn new(inner: L) -> (Self, Handle<L, S>) {
+    pub(crate) fn new(inner: L) -> (Self, Handle<L, S>) {
         let this = Self {
             inner: Arc::new(RwLock::new(inner)),
             _s: PhantomData,
@@ -168,7 +170,7 @@ where
     }
 
     /// Returns a `Handle` that can be used to reload the wrapped `Layer`.
-    pub fn handle(&self) -> Handle<L, S> {
+    pub(crate) fn handle(&self) -> Handle<L, S> {
         Handle {
             inner: Arc::downgrade(&self.inner),
             _s: PhantomData,
@@ -184,7 +186,7 @@ where
     S: Subscriber,
 {
     /// Replace the current layer with the provided `new_layer`.
-    pub fn reload(&self, new_layer: impl Into<L>) -> Result<(), Error> {
+    pub(crate) fn reload(&self, new_layer: impl Into<L>) -> Result<(), Error> {
         self.modify(|layer| {
             *layer = new_layer.into();
         })
@@ -192,7 +194,7 @@ where
 
     /// Invokes a closure with a mutable reference to the current layer,
     /// allowing it to be modified in place.
-    pub fn modify(&self, f: impl FnOnce(&mut L)) -> Result<(), Error> {
+    pub(crate) fn modify(&self, f: impl FnOnce(&mut L)) -> Result<(), Error> {
         let inner = self.inner.upgrade().ok_or(Error {
             kind: ErrorKind::SubscriberGone,
         })?;
@@ -210,7 +212,7 @@ where
     /// Returns a clone of the layer's current value if it still exists.
     /// Otherwise, if the subscriber has been dropped, returns `None`.
     #[allow(dead_code)]
-    pub fn clone_current(&self) -> Option<L>
+    pub(crate) fn clone_current(&self) -> Option<L>
     where
         L: Clone,
     {
@@ -220,7 +222,7 @@ where
     /// Invokes a closure with a borrowed reference to the current layer,
     /// returning the result (or an error if the subscriber no longer exists).
     #[allow(dead_code)]
-    pub fn with_current<T>(&self, f: impl FnOnce(&L) -> T) -> Result<T, Error> {
+    pub(crate) fn with_current<T>(&self, f: impl FnOnce(&L) -> T) -> Result<T, Error> {
         let inner = self.inner.upgrade().ok_or(Error {
             kind: ErrorKind::SubscriberGone,
         })?;

@@ -1,7 +1,9 @@
 use anyhow::Result;
 use structopt::StructOpt;
 
-use super::{Compliance, Lint, Test};
+use super::Compliance;
+use super::Lint;
+use super::Test;
 
 #[derive(Debug, StructOpt)]
 pub struct All {
@@ -16,10 +18,10 @@ pub struct All {
 impl All {
     pub fn run(&self) -> Result<()> {
         eprintln!("Checking format and clippy...");
-        self.lint.run()?;
-        eprintln!("Checking licenses...");
-        self.compliance.run()?;
+        self.lint.run_local()?;
         eprintln!("Running tests...");
-        self.test.run()
+        self.test.run()?;
+        eprintln!("Checking licenses...");
+        self.compliance.run_local()
     }
 }

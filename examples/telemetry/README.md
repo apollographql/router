@@ -16,8 +16,5 @@ cargo run -- -s ../graphql/supergraph.graphql -c ./jaeger.router.yaml
 ```bash
 cargo run -- -s ../graphql/supergraph.graphql -c ./oltp.router.yaml
 ```
-## Spaceport
-```bash
-cargo run -- -s ../graphql/supergraph.graphql -c ./sapceport.router.yaml
-```
+
 

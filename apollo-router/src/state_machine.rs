@@ -1,45 +1,63 @@
-use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
-use super::router_factory::RouterServiceFactory;
-use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
-use super::Event::{UpdateConfiguration, UpdateSchema};
-use super::FederatedServerError::{NoConfiguration, NoSchema};
-use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
-use apollo_router_core::prelude::*;
-use apollo_router_core::Schema;
-use futures::channel::mpsc;
-use futures::prelude::*;
-use std::fmt::{Display, Formatter};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
-use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
+
+use futures::prelude::*;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
+use Event::NoMoreConfiguration;
+use Event::NoMoreSchema;
+use Event::Shutdown;
+
+use super::http_server_factory::HttpServerFactory;
+use super::http_server_factory::HttpServerHandle;
+use super::router::ApolloRouterError::NoConfiguration;
+use super::router::ApolloRouterError::NoSchema;
+use super::router::ApolloRouterError::{self};
+use super::router::Event::UpdateConfiguration;
+use super::router::Event::UpdateSchema;
+use super::router::Event::{self};
+use super::router_factory::RouterServiceFactory;
+use super::state_machine::State::Errored;
+use super::state_machine::State::Running;
+use super::state_machine::State::Startup;
+use super::state_machine::State::Stopped;
+use crate::configuration::Configuration;
+use crate::configuration::ListenAddr;
+use crate::plugin::Handler;
+use crate::services::Plugins;
+use crate::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
 #[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<RS> {
+enum State<RS> {
     Startup {
         configuration: Option<Configuration>,
-        schema: Option<graphql::Schema>,
+        schema: Option<Schema>,
     },
     Running {
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<Schema>,
         #[derivative(Debug = "ignore")]
         router_service: RS,
         server_handle: HttpServerHandle,
+        #[derivative(Debug = "ignore")]
+        plugins: Plugins,
     },
     Stopped,
-    Errored(FederatedServerError),
+    Errored(ApolloRouterError),
 }
 
-impl<T> Display for PrivateState<T> {
+impl<T> Display for State<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PrivateState::Startup { .. } => write!(f, "startup"),
-            PrivateState::Running { .. } => write!(f, "running"),
-            PrivateState::Stopped => write!(f, "stopped"),
-            PrivateState::Errored { .. } => write!(f, "errored"),
+            Startup { .. } => write!(f, "startup"),
+            Running { .. } => write!(f, "running"),
+            Stopped => write!(f, "stopped"),
+            Errored { .. } => write!(f, "errored"),
         }
     }
 }
@@ -56,26 +74,11 @@ where
     FA: RouterServiceFactory,
 {
     http_server_factory: S,
-    state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-}
 
-impl<RS> From<&PrivateState<RS>> for State {
-    fn from(private_state: &PrivateState<RS>) -> Self {
-        match private_state {
-            Startup { .. } => State::Startup,
-            Running {
-                server_handle,
-                schema,
-                ..
-            } => State::Running {
-                address: server_handle.listen_address().to_owned(),
-                schema: schema.as_str().to_string(),
-            },
-            Stopped => State::Stopped,
-            Errored { .. } => State::Errored,
-        }
-    }
+    // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
+    pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -83,32 +86,27 @@ where
     S: HttpServerFactory,
     FA: RouterServiceFactory + Send,
 {
-    pub(crate) fn new(
-        http_server_factory: S,
-        state_listener: Option<mpsc::Sender<State>>,
-        router_factory: FA,
-    ) -> Self {
+    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
+        let ready = Arc::new(RwLock::new(None));
+        let ready_guard = ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
-            state_listener,
             router_factory,
+            listen_address: ready,
+            listen_address_guard: Some(ready_guard),
         }
     }
 
     pub(crate) async fn process_events(
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
-    ) -> Result<(), FederatedServerError> {
+    ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
         let mut state = Startup {
             configuration: None,
             schema: None,
         };
-        let mut state_listener = self.state_listener.take();
-        let initial_state = State::from(&state);
-        <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
-            let last_public_state = State::from(&state);
             let new_state = match (state, message) {
                 // Startup: Handle configuration updates, maybe transition to running.
                 (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
@@ -159,6 +157,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                     },
                     UpdateSchema(new_schema),
                 ) => {
@@ -168,6 +167,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                         None,
                         Some(Arc::new(*new_schema)),
                     )
@@ -182,6 +182,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
@@ -191,10 +192,15 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                         Some(Arc::new(*new_configuration)),
                         None,
                     )
                     .await
+                    .map(|s| {
+                        tracing::info!("reloaded");
+                        s
+                    })
                     .into_ok_or_err2()
                 }
 
@@ -205,13 +211,11 @@ where
                 }
             };
 
-            let new_public_state = State::from(&new_state);
-            if last_public_state != new_public_state {
-                <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
-                    .await;
-            }
-            tracing::debug!("transitioned to state {}", &new_state);
+            tracing::info!("transitioned to {}", &new_state);
             state = new_state;
+
+            // If we're running then let those waiting proceed.
+            self.maybe_update_listen_address(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -219,6 +223,9 @@ where
             }
         }
         tracing::debug!("stopped");
+
+        // If the listen_address_guard has not been taken, take it so that anything waiting on listen_address will proceed.
+        self.listen_address_guard.take();
 
         match state {
             Stopped => Ok(()),
@@ -229,21 +236,32 @@ where
         }
     }
 
-    async fn notify_state_listener(
-        state_listener: &mut Option<mpsc::Sender<State>>,
-        new_public_state: State,
+    async fn maybe_update_listen_address(
+        &mut self,
+        state: &mut State<<FA as RouterServiceFactory>::RouterService>,
     ) {
-        if let Some(state_listener) = state_listener {
-            let _ = state_listener.send(new_public_state).await;
+        let listen_address = if let Running { server_handle, .. } = &state {
+            let listen_address = server_handle.listen_address().clone();
+            Some(listen_address)
+        } else {
+            None
+        };
+
+        if let Some(listen_address) = listen_address {
+            if let Some(mut listen_address_guard) = self.listen_address_guard.take() {
+                *listen_address_guard = Some(listen_address);
+            } else {
+                *self.listen_address.write().await = Some(listen_address);
+            }
         }
     }
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        state: State<<FA as RouterServiceFactory>::RouterService>,
     ) -> Result<
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -253,21 +271,31 @@ where
             tracing::debug!("starting http");
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
-            let router = self
+
+            let (router, plugins) = self
                 .router_factory
                 .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot create the router: {}", err);
-                    Errored(FederatedServerError::ServiceCreationError(err))
+                    tracing::error!("cannot create the router: {}", err);
+                    Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
+            let plugin_handlers: HashMap<String, Handler> = plugins
+                .iter()
+                .filter_map(|(plugin_name, plugin)| {
+                    (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
+                        .then(|| plugin.custom_endpoint())
+                        .flatten()
+                        .map(|h| (plugin_name.clone(), h))
+                })
+                .collect();
 
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None)
+                .create(router.clone(), configuration.clone(), None, plugin_handlers)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot start the router: {}", err);
+                    tracing::error!("cannot start the router: {}", err);
                     Errored(err)
                 })?;
 
@@ -276,25 +304,30 @@ where
                 schema,
                 router_service: router,
                 server_handle,
+                plugins,
             })
         } else {
             Ok(state)
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
     async fn reload_server(
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         router_service: <FA as RouterServiceFactory>::RouterService,
         server_handle: HttpServerHandle,
+        plugins: Plugins,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
-        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
+        State<<FA as RouterServiceFactory>::RouterService>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
+
         match self
             .router_factory
             .create(
@@ -304,16 +337,28 @@ where
             )
             .await
         {
-            Ok(new_router_service) => {
+            Ok((new_router_service, plugins)) => {
+                let plugin_handlers: HashMap<String, Handler> = plugins
+                    .iter()
+                    .filter_map(|(plugin_name, plugin)| {
+                        (plugin_name.starts_with("apollo.")
+                            || plugin_name.starts_with("experimental."))
+                        .then(|| plugin.custom_endpoint())
+                        .flatten()
+                        .map(|handler| (plugin_name.clone(), handler))
+                    })
+                    .collect();
+
                 let server_handle = server_handle
                     .restart(
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
+                        plugin_handlers,
                     )
                     .await
                     .map_err(|err| {
-                        tracing::error!("Cannot start the router: {}", err);
+                        tracing::error!("cannot start the router: {}", err);
                         Errored(err)
                     })?;
                 Ok(Running {
@@ -321,11 +366,12 @@ where
                     schema: new_schema,
                     router_service: new_router_service,
                     server_handle,
+                    plugins,
                 })
             }
             Err(err) => {
                 tracing::error!(
-                    "Cannot create new router, keeping previous configuration: {}",
+                    "cannot create new router, keeping previous configuration: {}",
                     err
                 );
                 Err(Running {
@@ -333,11 +379,13 @@ where
                     schema,
                     router_service,
                     server_handle,
+                    plugins,
                 })
             }
         }
     }
 }
+
 trait ResultExt<T> {
     // Unstable method can be deleted in future
     fn into_ok_or_err2(self) -> T;
@@ -354,21 +402,28 @@ impl<T> ResultExt<T> for Result<T, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::http_server_factory::Listener;
-    use crate::router_factory::RouterServiceFactory;
-    use apollo_router_core::http_compat::{Request, Response};
-    use apollo_router_core::ResponseBody;
-    use futures::channel::oneshot;
-    use futures::future::BoxFuture;
-    use mockall::{mock, Sequence};
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
-    use std::task::{Context, Poll};
+    use std::task::Context;
+    use std::task::Poll;
+
+    use futures::channel::oneshot;
+    use futures::future::BoxFuture;
+    use futures::stream::BoxStream;
+    use mockall::mock;
+    use mockall::Sequence;
     use test_log::test;
-    use tower::{BoxError, Service};
+    use tower::BoxError;
+    use tower::Service;
+
+    use super::*;
+    use crate::graphql;
+    use crate::http_ext::Request;
+    use crate::http_ext::Response;
+    use crate::http_server_factory::Listener;
+    use crate::router_factory::RouterServiceFactory;
 
     fn example_schema() -> Schema {
         include_str!("testdata/supergraph.graphql").parse().unwrap()
@@ -379,13 +434,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![NoMoreConfiguration],
-                vec![State::Startup, State::Errored]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
             Err(NoConfiguration),
         ));
     }
@@ -395,13 +444,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![NoMoreSchema],
-                vec![State::Startup, State::Errored]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![NoMoreSchema],).await,
             Err(NoSchema),
         ));
     }
@@ -411,13 +454,7 @@ mod tests {
         let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
-            execute(
-                server_factory,
-                router_factory,
-                vec![Shutdown],
-                vec![State::Startup, State::Stopped]
-            )
-            .await,
+            execute(server_factory, router_factory, vec![Shutdown],).await,
             Ok(()),
         ));
     }
@@ -436,14 +473,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -455,10 +484,7 @@ mod tests {
     async fn startup_reload_schema() {
         let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
-        let minimal_schema = r#"       
-        type Query {
-          me: String
-        }"#;
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert!(matches!(
             execute(
                 server_factory,
@@ -469,18 +495,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: minimal_schema.to_string()
-                    },
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string(),
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -512,18 +526,6 @@ mod tests {
                     ),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -545,14 +547,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -567,6 +561,7 @@ mod tests {
             .expect_create()
             .times(1)
             .returning(|_, _, _| Err(BoxError::from("Error")));
+
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
@@ -577,10 +572,9 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                 ],
-                vec![State::Startup, State::Errored,]
             )
             .await,
-            Err(FederatedServerError::ServiceCreationError(_)),
+            Err(ApolloRouterError::ServiceCreationError(_)),
         ));
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
@@ -596,13 +590,14 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok(router)
+                Ok((router, Default::default()))
             });
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _| Err(BoxError::from("error")));
+
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -615,14 +610,6 @@ mod tests {
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: example_schema().as_str().to_string()
-                    },
-                    State::Stopped
-                ]
             )
             .await,
             Ok(()),
@@ -637,14 +624,14 @@ mod tests {
         #[async_trait::async_trait]
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
-            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+            type Future = <Self::RouterService as Service<Request<crate::graphql::Request>>>::Future;
 
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                schema: Arc<graphql::Schema>,
+                schema: Arc<crate::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
-            ) -> Result<MockMyRouter, BoxError>;
+            ) -> Result<(MockMyRouter, Plugins), BoxError>;
         }
     }
 
@@ -652,7 +639,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: Request<graphql::Request>) -> <MockMyRouter as Service<Request<graphql::Request>>>::Future;
+            fn service_call(&mut self, req: Request<crate::graphql::Request>) -> <MockMyRouter as Service<Request<crate::graphql::Request>>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -661,15 +648,15 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = Response<ResponseBody>;
+    impl Service<Request<crate::graphql::Request>> for MockMyRouter {
+        type Response = Response<BoxStream<'static, graphql::Response>>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
+        fn call(&mut self, req: Request<crate::graphql::Request>) -> Self::Future {
             self.service_call(req)
         }
     }
@@ -679,30 +666,31 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listener: Option<Listener>,) -> Result<HttpServerHandle, FederatedServerError>;
+                listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
         }
     }
 
     impl HttpServerFactory for MockMyHttpServerFactory {
         type Future =
-            Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
+            Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
         fn create<RS>(
             &self,
             _service: RS,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+            _plugin_handlers: HashMap<String, Handler>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>
         where
             RS: Service<
-                    Request<graphql::Request>,
-                    Response = Response<ResponseBody>,
+                    Request<crate::graphql::Request>,
+                    Response = Response<BoxStream<'static, graphql::Response>>,
                     Error = BoxError,
                 > + Send
                 + Sync
                 + Clone
                 + 'static,
-            <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+            <RS as Service<Request<crate::graphql::Request>>>::Future: std::marker::Send,
         {
             let res = self.create_server(configuration, listener);
             Box::pin(async move { res })
@@ -713,15 +701,11 @@ mod tests {
         server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterFactory,
         events: Vec<Event>,
-        expected_states: Vec<State>,
-    ) -> Result<(), FederatedServerError> {
-        let (state_listener, state_receiver) = mpsc::channel(100);
-        let state_machine = StateMachine::new(server_factory, Some(state_listener), router_factory);
+    ) -> Result<(), ApolloRouterError> {
+        let state_machine = StateMachine::new(server_factory, router_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())
             .await;
-        let states = state_receiver.collect::<Vec<State>>().await;
-        assert_eq!(states, expected_states);
         result
     }
 
@@ -774,7 +758,7 @@ mod tests {
             .returning(move |_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok(router)
+                Ok((router, Default::default()))
             });
         router_factory
     }

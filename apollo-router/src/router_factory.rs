@@ -1,26 +1,38 @@
-use crate::configuration::{Configuration, ConfigurationError};
-use apollo_router_core::deduplication::QueryDeduplicationLayer;
-use apollo_router_core::{
-    http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
-};
-use apollo_router_core::{prelude::*, Context};
-use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
+// This entire file is license key functionality
 use std::sync::Arc;
+
+use futures::stream::BoxStream;
+use serde_json::Map;
+use serde_json::Value;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::util::BoxCloneService;
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
+
+use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
+use crate::graphql;
+use crate::http_ext::Request;
+use crate::http_ext::Response;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
+use crate::PluggableRouterServiceBuilder;
+use crate::Schema;
+use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = Response<ResponseBody>,
+            Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -32,33 +44,23 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<graphql::Schema>,
+        schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<Self::RouterService, BoxError>;
+    ) -> Result<(Self::RouterService, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default)]
-pub struct YamlRouterServiceFactory {
-    plugins: Vec<Box<dyn DynPlugin>>,
-}
-
-impl Drop for YamlRouterServiceFactory {
-    fn drop(&mut self) {
-        // If we get here, everything is good so shutdown our old plugins
-        // If we fail to shutdown a plugin, just log it and move on...
-        for mut plugin in self.plugins.drain(..).rev() {
-            if let Err(err) = futures::executor::block_on(plugin.shutdown()) {
-                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-            }
-        }
-    }
-}
+pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
-        BoxCloneService<Request<graphql::Request>, Response<ResponseBody>, BoxError>,
+        BoxCloneService<
+            Request<graphql::Request>,
+            Response<BoxStream<'static, graphql::Response>>,
+            BoxError,
+        >,
         Request<graphql::Request>,
     >;
     type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
@@ -68,136 +70,198 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<Self::RouterService, BoxError> {
-        let mut errors: Vec<ConfigurationError> = Vec::default();
-        let configuration = (*configuration).clone();
-
+    ) -> Result<(Self::RouterService, Plugins), BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        if configuration.server.introspection {
+            builder = builder.with_naive_introspection();
+        }
 
         for (name, _) in schema.subgraphs() {
-            let dedup_layer = QueryDeduplicationLayer;
-            let subgraph_service =
-                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
+            let subgraph_service = BoxService::new(SubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
-        {
-            async fn process_plugin(
-                mut builder: PluggableRouterServiceBuilder,
-                errors: &mut Vec<ConfigurationError>,
-                name: String,
-                configuration: &serde_json::Value,
-            ) -> PluggableRouterServiceBuilder {
-                let plugin_registry = apollo_router_core::plugins();
-                match plugin_registry.get(name.as_str()) {
-                    Some(factory) => {
-                        tracing::debug!(
-                            "creating plugin: '{}' with configuration:\n{:#}",
-                            name,
-                            configuration
-                        );
-                        match factory.create_instance(configuration) {
-                            Ok(mut plugin) => {
-                                tracing::debug!("starting plugin: {}", name);
-                                match plugin.startup().await {
-                                    Ok(_v) => {
-                                        tracing::debug!("started plugin: {}", name);
-                                        builder = builder.with_dyn_plugin(plugin);
-                                    }
-                                    Err(err) => {
-                                        (*errors).push(ConfigurationError::PluginStartup {
-                                            plugin: name,
-                                            error: err.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                (*errors).push(ConfigurationError::PluginConfiguration {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
-                        }
-                    }
-                    None => {
-                        (*errors).push(ConfigurationError::PluginUnknown(name));
-                    }
-                }
-                builder
-            }
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema).await?;
 
-            // Process the plugins.
-            for (name, configuration) in configuration.plugins().iter() {
-                let name = name.clone();
-                builder = process_plugin(builder, &mut errors, name, configuration).await;
-            }
-        }
-        if !errors.is_empty() {
-            // Shutdown all the plugins we started
-            for plugin in builder.plugins().iter_mut().rev() {
-                tracing::debug!("stopping plugin: {}", plugin.name());
-                if let Err(err) = plugin.shutdown().await {
-                    // If we can't shutdown a plugin, we terminate the router since we can't
-                    // assume that it is safe to continue.
-                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                    tracing::error!("terminating router...");
-                    std::process::exit(1);
-                } else {
-                    tracing::debug!("stopped plugin: {}", plugin.name());
-                }
-            }
-            for error in errors {
-                tracing::error!("{:#}", error);
-            }
-            return Err(Box::new(ConfigurationError::InvalidConfiguration));
+        for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // This **must** run after:
-        //  - the Reporting plugin is initialized.
-        //  - all configuration errors are checked
-        // and **before** build() is called.
-        //
-        // This is because our tracing configuration is initialized by
-        // the startup() method of our Reporting plugin.
-        let (pluggable_router_service, plugins) = builder.build().await;
-        let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
-        let service = ServiceBuilder::new().buffer(20_000).service(
+        let (pluggable_router_service, mut plugins) = builder.build().await?;
+        let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(
-                    |http_request: Request<apollo_router_core::Request>| RouterRequest {
-                        context: Context::new().with_request(http_request),
-                    },
-                )
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );
-        // If we get here, everything is good so shutdown our previous plugins
-        for mut plugin in previous_plugins.drain(..).rev() {
-            if let Err(err) = plugin.shutdown().await {
-                // If we can't shutdown a plugin, we terminate the router since we can't
-                // assume that it is safe to continue.
-                tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
-                tracing::error!("Terminating router...");
-                std::process::exit(1);
+
+        // We're good to go with the new service. Let the plugins know that this is about to happen.
+        // This is needed so that the Telemetry plugin can swap in the new propagator.
+        // The alternative is that we introduce another service on Plugin that wraps the request
+        // at a much earlier stage.
+        for (_, plugin) in &mut plugins {
+            tracing::debug!("activating plugin {}", plugin.name());
+            plugin.activate();
+            tracing::debug!("activated plugin {}", plugin.name());
+        }
+
+        Ok((service, plugins))
+    }
+}
+
+async fn create_plugins(
+    configuration: &Configuration,
+    schema: &Schema,
+) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
+    // List of mandatory plugins. Ordering is important!!
+    let mut mandatory_plugins = vec!["experimental.include_subgraph_errors", "apollo.csrf"];
+
+    // Telemetry is *only* mandatory if the global subscriber is set
+    if crate::subscriber::is_global_subscriber_set() {
+        mandatory_plugins.insert(0, "apollo.telemetry");
+    }
+
+    let mut errors = Vec::new();
+    let plugin_registry = crate::plugin::plugins();
+    let mut plugin_instances = Vec::new();
+
+    for (name, mut configuration) in configuration.plugins().into_iter() {
+        let name = name.clone();
+
+        match plugin_registry.get(name.as_str()) {
+            Some(factory) => {
+                tracing::debug!(
+                    "creating plugin: '{}' with configuration:\n{:#}",
+                    name,
+                    configuration
+                );
+                if name == "apollo.telemetry" {
+                    inject_schema_id(schema, &mut configuration);
+                }
+                // expand any env variables in the config before processing.
+                match factory.create_instance(&configuration).await {
+                    Ok(plugin) => {
+                        plugin_instances.push((name, plugin));
+                    }
+                    Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                        plugin: name,
+                        error: err.to_string(),
+                    }),
+                }
+            }
+            None => errors.push(ConfigurationError::PluginUnknown(name)),
+        }
+    }
+
+    // At this point we've processed all of the plugins that were provided in configuration.
+    // We now need to do process our list of mandatory plugins:
+    //  - If a mandatory plugin is already in the list, then it must be re-located
+    //    to its mandatory location
+    //  - If it is missing, it must be added at its mandatory location
+
+    for (desired_position, name) in mandatory_plugins.iter().enumerate() {
+        let position_maybe = plugin_instances.iter().position(|(x, _)| x == name);
+        match position_maybe {
+            Some(actual_position) => {
+                // Found it, re-locate if required.
+                if actual_position != desired_position {
+                    let temp = plugin_instances.remove(actual_position);
+                    plugin_instances.insert(desired_position, temp);
+                }
+            }
+            None => {
+                // Didn't find it, insert
+                match plugin_registry.get(*name) {
+                    // Create an instance
+                    Some(factory) => {
+                        // Create default (empty) config
+                        let mut config = Value::Object(Map::new());
+                        // The apollo.telemetry" plugin isn't happy with empty config, so we
+                        // give it some. If any of the other mandatory plugins need special
+                        // treatment, then we'll have to perform it here.
+                        // This is *required* by the telemetry module or it will fail...
+                        if *name == "apollo.telemetry" {
+                            inject_schema_id(schema, &mut config);
+                        }
+                        match factory.create_instance(&config).await {
+                            Ok(plugin) => {
+                                plugin_instances
+                                    .insert(desired_position, (name.to_string(), plugin));
+                            }
+                            Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                                plugin: name.to_string(),
+                                error: err.to_string(),
+                            }),
+                        }
+                    }
+                    None => errors.push(ConfigurationError::PluginUnknown(name.to_string())),
+                }
             }
         }
-        Ok(service)
+    }
+
+    let plugin_details = plugin_instances
+        .iter()
+        .map(|(name, plugin)| (name, plugin.name()))
+        .collect::<Vec<(&String, &str)>>();
+    tracing::info!(?plugin_details, "list of plugins");
+
+    if !errors.is_empty() {
+        for error in &errors {
+            tracing::error!("{:#}", error);
+        }
+
+        Err(BoxError::from(
+            errors
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<String>>()
+                .join("\n"),
+        ))
+    } else {
+        Ok(plugin_instances)
+    }
+}
+
+fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
+    if configuration.get("apollo").is_none() {
+        if let Some(telemetry) = configuration.as_object_mut() {
+            telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+        }
+    }
+
+    if let (Some(schema_id), Some(apollo)) = (
+        &schema.api_schema().schema_id,
+        configuration.get_mut("apollo"),
+    ) {
+        if let Some(apollo) = apollo.as_object_mut() {
+            apollo.insert(
+                "schema_id".to_string(),
+                Value::String(schema_id.to_string()),
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::router_factory::RouterServiceFactory;
-    use crate::{Configuration, YamlRouterServiceFactory};
-    use apollo_router_core::Schema;
-    use apollo_router_core::{register_plugin, Plugin};
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use std::error::Error;
     use std::fmt;
     use std::sync::Arc;
+
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use serde_json::json;
     use tower_http::BoxError;
+
+    use crate::configuration::Configuration;
+    use crate::plugin::Plugin;
+    use crate::register_plugin;
+    use crate::router_factory::inject_schema_id;
+    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::YamlRouterServiceFactory;
+    use crate::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -224,15 +288,7 @@ mod test {
     impl Plugin for AlwaysStartsAndStopsPlugin {
         type Config = Conf;
 
-        async fn startup(&mut self) -> Result<(), BoxError> {
-            Ok(())
-        }
-
-        async fn shutdown(&mut self) -> Result<(), BoxError> {
-            Ok(())
-        }
-
-        fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
             tracing::debug!("{}", configuration.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
@@ -253,17 +309,9 @@ mod test {
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
-        async fn startup(&mut self) -> Result<(), BoxError> {
-            Err(Box::new(PluginError {}))
-        }
-
-        async fn shutdown(&mut self) -> Result<(), BoxError> {
-            Ok(())
-        }
-
-        fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
             tracing::debug!("{}", configuration.name);
-            Ok(AlwaysFailsToStartPlugin {})
+            Err(BoxError::from("Error"))
         }
     }
 
@@ -271,64 +319,6 @@ mod test {
         "apollo.test",
         "always_fails_to_start",
         AlwaysFailsToStartPlugin
-    );
-
-    // Always fails to stop plugin
-
-    #[derive(Debug)]
-    struct AlwaysFailsToStopPlugin {}
-
-    #[async_trait::async_trait]
-    impl Plugin for AlwaysFailsToStopPlugin {
-        type Config = Conf;
-
-        async fn startup(&mut self) -> Result<(), BoxError> {
-            Ok(())
-        }
-
-        async fn shutdown(&mut self) -> Result<(), BoxError> {
-            Err(Box::new(PluginError {}))
-        }
-
-        fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
-            Ok(AlwaysFailsToStopPlugin {})
-        }
-    }
-
-    register_plugin!(
-        "apollo.test",
-        "always_fails_to_stop",
-        AlwaysFailsToStopPlugin
-    );
-
-    // Always fails to stop plugin
-
-    #[derive(Debug)]
-    struct AlwaysFailsToStartAndStopPlugin {}
-
-    #[async_trait::async_trait]
-    impl Plugin for AlwaysFailsToStartAndStopPlugin {
-        type Config = Conf;
-
-        async fn startup(&mut self) -> Result<(), BoxError> {
-            Err(Box::new(PluginError {}))
-        }
-
-        async fn shutdown(&mut self) -> Result<(), BoxError> {
-            Err(Box::new(PluginError {}))
-        }
-
-        fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
-            Ok(AlwaysFailsToStartAndStopPlugin {})
-        }
-    }
-
-    register_plugin!(
-        "apollo.test",
-        "always_fails_to_start_and_stop",
-        AlwaysFailsToStartAndStopPlugin
     );
 
     #[tokio::test]
@@ -367,31 +357,58 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_yaml_plugins_always_fails_to_stop() {
+    async fn test_yaml_plugins_combo_start_and_fail() {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_fails_to_stop:
+                apollo.test.always_starts_and_stops:
                     name: albert
-        "#,
-        )
-        .unwrap();
-        let service = create_service(config).await;
-        assert!(service.is_ok())
-    }
-
-    #[tokio::test]
-    async fn test_yaml_plugins_always_fails_to_start_and_stop() {
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            plugins:
-                apollo.test.always_fails_to_start_and_stop:
+                apollo.test.always_fails_to_start:
                     name: albert
         "#,
         )
         .unwrap();
         let service = create_service(config).await;
         assert!(service.is_err())
+    }
+
+    // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
+    // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_telemetry_doesnt_hang_with_invalid_schema() {
+        use tracing_subscriber::EnvFilter;
+
+        use crate::subscriber::set_global_subscriber;
+        use crate::subscriber::RouterSubscriber;
+
+        // A global subscriber must be set before we start up the telemetry plugin
+        let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(
+            tracing_subscriber::fmt::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .json()
+                .finish(),
+        ));
+
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            telemetry:
+              tracing:
+                trace_config:
+                  service_name: router
+                otlp:
+                  endpoint: default
+        "#,
+        )
+        .unwrap();
+
+        let schema: Schema = include_str!("testdata/invalid_supergraph.graphql")
+            .parse()
+            .unwrap();
+
+        let service = YamlRouterServiceFactory::default()
+            .create(Arc::new(config), Arc::new(schema), None)
+            .await;
+        service.map(|_| ()).unwrap_err();
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
@@ -401,5 +418,20 @@ mod test {
             .create(Arc::new(config), Arc::new(schema), None)
             .await;
         service.map(|_| ())
+    }
+
+    #[test]
+    fn test_inject_schema_id() {
+        let schema = include_str!("testdata/starstuff@current.graphql")
+            .parse()
+            .unwrap();
+        let mut config = json!({});
+        inject_schema_id(&schema, &mut config);
+        let config =
+            serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
+        assert_eq!(
+            &config.apollo.unwrap().schema_id,
+            "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
+        );
     }
 }

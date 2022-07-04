@@ -1,26 +1,80 @@
 ---
 title: Configuring the Apollo Router
-description: YAML configuration
+description: Command arguments and YAML config
 ---
-
-import { Link } from "gatsby";
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
-You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
+You run the Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
 ```bash
 ./router --config router.yaml --supergraph supergraph-schema.graphql
 ```
 
-Options are described below.
+Arguments for this command are described below.
 
-## Options
+## Environment variables
+
+To use [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/)
+set these environment variables when running the router:
+
+```bash
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+```
 
 <table class="field-table api-ref">
   <thead>
     <tr>
-      <th>Name</th>
+      <th>Argument / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_REF`
+
+</td>
+<td>
+
+The graph ref of the registered Apollo graph and variant that the router fetches its supergraph schema from.
+
+One of this or [`-s` / `--supergraph`](#-s----supergraph) is **required**.
+
+If you provide this argument, you must also provide [`APOLLO_KEY`](#APOLLO_KEY).
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY`
+
+</td>
+<td>
+
+The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with Apollo Studio when fetching its supergraph schema.
+
+If you provide the [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) env variable, this argument is **required**.
+
+</td>
+</tr>
+
+<tr>
+</tr>
+</tbody>
+</table>
+
+## Command arguments
+
+Where indicated, some of these arguments can also be set via an environment variable. Command-line arguments always take precedence over environment variables if an option is provided both ways.
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Argument / Environment Variable</th>
       <th>Description</th>
     </tr>
   </thead>
@@ -32,12 +86,16 @@ Options are described below.
 
 ##### `-s` / `--supergraph`
 
+`APOLLO_ROUTER_SUPERGRAPH_PATH`
+
 </td>
 <td>
 
-**Required.** The absolute or relative path to the Apollo Router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
+The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
+
+One of this or env [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) is **required**.
 
 </td>
 </tr>
@@ -47,10 +105,13 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 
 ##### `-c` / `--config`
 
+`APOLLO_ROUTER_CONFIG_PATH`
+
 </td>
 <td>
 
-The absolute or relative path to the router's optional [YAML configuration file](#configuration-file).
+The absolute or relative path to the router's optional [YAML configuration file](#yaml-config-file).
+
 </td>
 </tr>
 
@@ -59,12 +120,64 @@ The absolute or relative path to the router's optional [YAML configuration file]
 
 ##### `--log`
 
+`APOLLO_ROUTER_LOG`
+
 </td>
 <td>
 
-The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--hr` / `--hot-reload`
+
+`APOLLO_ROUTER_HOT_RELOAD`
+
+</td>
+<td>
+
+If provided, the router watches for changes to its schema and configuration files and reloads them automatically without downtime.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-endpoints`
+
+`APOLLO_UPLINK_ENDPOINTS`
+
+</td>
+<td>
+
+The Apollo Uplink URL that the Apollo Router should poll to fetch its latest supergraph schema.
+
+This argument supports providing a comma-separated list of URLs.
+
+For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
+
+</td>
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-poll-interval`
+
+`APOLLO_UPLINK_POLL_INTERVAL`
+
+</td>
+<td>
+
+The amount of time between polls to Apollo Uplink.
+
+The default value is 10s, which is also the minimum allowed value.
 
 </td>
 </tr>
@@ -85,19 +198,6 @@ Prints out a JSON schema of the configuration file, including plugin configurati
 <tr>
 <td style="min-width: 150px;">
 
-##### `-w` / `--watch`
-
-</td>
-<td>
-
-If provided, the router watches for changes to the schema and configuration files and reloads them automatically without downtime.
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
 ##### `-V` / `--version`
 
 </td>
@@ -111,9 +211,9 @@ Prints out the Apollo Router's version.
 </tbody>
 </table>
 
-## Configuration file
+## YAML config file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed, the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `APOLLO_ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 
@@ -121,32 +221,80 @@ This file enables you to customize the router's behavior in many ways:
 
 By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address like so:
 
-```yaml title="router.yaml"
+```yaml title="router_unix.yaml"
 #
 # server: Configuration of the HTTP server
 #
 server:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1:5000
+  listen: 127.0.0.1
 ```
 
-It can also listen on a Unix socket (not supported on Windows):
+The router can also listen on a Unix socket (not supported on Windows):
 
-```yaml title="router.yaml"
+```yaml title="router_unix.yaml"
 server:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
+```
 
+### Endpoint path
+
+By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
+
+You can change this path by setting `server.endpoint`:
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  # The exposed endpoint to answer to GraphQL queries
+  # (Defaults to /)
+  endpoint: /graphql
+```
+
+The endpoint path must start with `/`.
+
+Path parameters and wildcards are supported. For example:
+
+- `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
+- `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
+
+> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter.
+
+### Introspection
+
+By default, the router answers to some introspection queries. You can override this behavior to disable the introspection like so:
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  introspection: false
+```
+
+### Landing page
+
+By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  landing_page: false
 ```
 
 ### Subgraph routing URLs
 
 By default, the Apollo Router extracts the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
 
-However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so in your [YAML configuration file](./overview/#configuration-file) with the `override_subgraph_url` option:
+However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so in your YAML configuration file with the `override_subgraph_url` option:
 
-```yaml
+```yaml title="router.yaml"
 override_subgraph_url:
   accounts: http://localhost:8080
 ```
@@ -165,32 +313,50 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 ### OpenTelemetry tracing
 
-See [OpenTelemetry in the Apollo Router](./opentelemetry/).
+See [Tracing in the Apollo Router](./tracing/).
 
 ### Automatic persisted queries (APQ)
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
 
-The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release of the Apollo Router.
+The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
 
 For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
 
 ### Plugins
 
-You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section with arbitrary values in the configuration file:
+You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
 
-```yaml title="router.yaml"
+```yaml {4,8} title="example-plugin-router.yaml"
 plugins:
   example.plugin:
     var1: "hello"
     var2: 1
 ```
 
+### Environment variable expansion
+
+You can reference environment variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+
+Unix-style expansion is used. For example:
+
+- `${ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
+- `${ENV_VAR_NAME:some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+
+Environment variable expansions are valid only for YAML _values_, not keys:
+
+```yaml {4,8} title="router.yaml"
+server:
+  listen: "${MY_LISTEN_ADDRESS}"
+example:
+  password: "${MY_PASSWORD}"
+```
+
 ### Reusing configuration
 
 You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
 
-```yaml {4,8} title="router.yaml"
+```yaml title="router.yaml"
 headers:
   subgraphs:
     products:
@@ -202,7 +368,6 @@ headers:
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
-
 
 ## Configuration awareness in your text editor
 
@@ -216,8 +381,8 @@ Generate the schema with the following command:
 
 After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
 
-* [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
-* [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
-* [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
-* [Sublime](https://github.com/sublimelsp/LSP-yaml)
-* [Vim](https://github.com/Quramy/vison)
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)

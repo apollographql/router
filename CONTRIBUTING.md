@@ -29,7 +29,7 @@ To run the CLI:
 
 ```bash
 cargo run -- <args>
-# e.g. 'cargo run -- help' will run the Apollo Router's help command
+# e.g. 'cargo run -- --help' will run the Apollo Router's help command
 ```
 
 Refer to [the README file](README.md) or run `cargo run --help` for more information.
@@ -41,16 +41,15 @@ Refer to [the README file](README.md) or run `cargo run --help` for more informa
 
 ## Project Structure
 
-- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc.
+- `crates/apollo-router`: the web `Apollo Router` sources. This includes everything required to expose Apollo Router's functionality as a web server, such as serialization / deserialization, configuration management, web server set up, logging configuration etc. As well as everything required to handle graphql queries:
 
-- `crates/apollo-router/src/main.rs`: the entry point for the executable
-
-- `crates/apollo-router-core`: the `Apollo Router` functionalities. This includes everything required to handle graphql queries:
   - query plan building
   - query plan execution
   - subservices fetching mechanism
   - response building
   - response streaming
+
+- `crates/apollo-router/src/main.rs`: the entry point for the executable
 
 Some of the functionalities rely on the current Javascript / TypeScript implementation, provided by [apollo federation](https://github.com/apollographql/federation), which is exposed through the [federation router-bridge](https://github.com/apollographql/federation/tree/main/router-bridge).
 
@@ -62,17 +61,13 @@ and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-the
 
 To contribute to these docs, you can add or edit the markdown & MDX files in the `docs/source` directory.
 
-To build and run the documentation site locally, you'll have to install the relevant packages by doing the following
-from the root of the `router` repository:
-
-```sh
-cd docs
-npm i
-npm start
-```
+To build and run the documentation site locally, you'll also need a clone of 
+the [apollographql/docs](https://github.com/apollographql/docs/) repository
+and run `npm run start:router` from there, after following 
+[installation instructions](https://github.com/apollographql/docs/#developing-locally).
 
 This will start up a development server with live reload enabled. You can see the docs by
-opening [localhost:8000](http://localhost:8000) in your browser.
+opening [localhost:8888](http://localhost:8888) in your browser.
 
 ### Adding a new page to the documentation
 

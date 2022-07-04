@@ -12,33 +12,42 @@ If you are releasing a beta or a release candidate, no official changelog is
 needed, but you're not off the hook! You'll need to write testing instructions
 in lieu of an official changelog.
 
-1.  Open the associated milestone. All issues and PRs should be closed. If
+1. Open the associated milestone. All issues and PRs should be closed. If
     they are not you should reassign all open issues and PRs to future
     milestones.
-2.  Go through the commit history since the last release. Ensure that all PRs
+2. Go through the commit history since the last release. Ensure that all PRs
     that have landed are marked with the milestone. You can use this to
     show all the PRs that are merged on or after YYYY-MM-DD:
     `https://github.com/issues?utf8=%E2%9C%93&q=repo%3Aapollographql%2Frouter+merged%3A%3E%3DYYYY-MM-DD`
-3.  Go through the closed PRs in the milestone. Each should have a changelog
+3. Go through the closed PRs in the milestone. Each should have a changelog
     label indicating if the change is documentation, feature, fix, or
     maintenance. If there is a missing label, please add one. If it is a
     breaking change, also add a BREAKING label.
-4.  Add this release to the `CHANGELOG.md`. Use the structure of previous
-    entries.
+4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
+    `CHANGELOG.md`. Use the structure of previous entries.
+5. Update `docker.mdx` and `kubernetes.mdx` with the release version.
+6. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
+   - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
+   - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
+7. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+8. Update the version in docker-compose files in `dockerfiles` directory.
 
 ### Start a release PR
 
-1.  Make sure you have `cargo` installed on your machine and in your `PATH`.
-2.  Create a new branch "#.#.#" where "#.#.#" is this release's version
+1. Make sure you have `cargo` installed on your machine and in your `PATH`.
+2. Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
-3.  Update the version in `*/Cargo.toml`.
-3.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core` and `apollo-router`.
-4.  Run `cargo check` so the lock file gets updated.
-5.  Run `cargo xtask check-compliance` so the lock file gets updated.
-6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock` and
-    `CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
+3. Update the version in `*/Cargo.toml` (do not forget the ones in scaffold templates).
+4. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
+5. Put a Release date and the version number on the new `CHANGELOG.md` section
+4. Update the version in `NEXT_CHANGELOG.md`.
+5. Clear `NEXT_CHANGELOG.md` leaving only the template.
+6. Run `cargo check` so the lock file gets updated.
+7. Run `cargo xtask check-compliance`.
+8. Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
+    `NEXT_CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
-7.  Request review from the Router team.
+9. Request review from the Router team.
 
 ### Review
 
@@ -72,7 +81,8 @@ After CI builds the release binaries, a new release will appear on the
 
 #### If this is a stable release (not a release candidate)
 
-1. Paste the current release notes from `CHANGELOG.md` into the release body.
+1. Paste the current release notes from `NEXT_CHANGELOG.md` into the release body.
+2. Reset the content of `NEXT_CHANGELOG.md`.
 
 #### If this is a release candidate
 

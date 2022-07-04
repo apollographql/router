@@ -2,8 +2,4 @@
 # ./router -c ./examples/forbid_mutations/router.yaml -s ./examples/graphql/supergraph.graphql
 # You can then open http://localhost:4000 on your browser,
 # and try to run a Query and a Mutation in apollo studio.
-server:
-  cors:
-    origins:
-      - "https://studio.apollographql.com/"
 forbid_mutations: true

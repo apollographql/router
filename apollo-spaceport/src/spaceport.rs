@@ -1,4 +1,5 @@
 //! Main entry point for CLI command to start spaceport.
+// This entire file is license key functionality
 use std::net::SocketAddr;
 
 use apollo_spaceport::server::ReportSpaceport;
@@ -32,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .init();
     tracing::info!("spaceport starting");
-    let spaceport = ReportSpaceport::new(args.address);
+    let spaceport = ReportSpaceport::new(args.address, None).await?;
     spaceport.serve().await?;
 
     Ok(())

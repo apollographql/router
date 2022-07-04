@@ -44,7 +44,7 @@ allow = [
     "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
-    "MPL-2.0"
+    "MPL-2.0",
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"
@@ -59,30 +59,6 @@ name = "ring"
 expression = "LicenseRef-ring"
 version = "0.16.20"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
-
-# TODO: remove this if / once there is an SPDX entry for ELv2
-[[licenses.clarify]]
-name = "apollo-router"
-expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.0"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
-
-[[licenses.clarify]]
-name = "apollo-router-core"
-expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.0"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
-
-[[licenses.clarify]]
-name = "router-bridge"
-expression = "LicenseRef-ELv2"
-license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
-
-[[licenses.clarify]]
-name = "apollo-spaceport"
-expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.0"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "encoding_rs"
@@ -121,4 +97,4 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["open-telemetry", "apollographql", "tokio-rs"]
+github = ["open-telemetry", "apollographql", "tokio-rs", "rhaiscript"]

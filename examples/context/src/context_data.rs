@@ -1,8 +1,16 @@
-use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
+use apollo_router::graphql;
+use apollo_router::plugin::Plugin;
+use apollo_router::register_plugin;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
+use futures::stream::BoxStream;
 use http::StatusCode;
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::util::BoxService;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
@@ -28,18 +36,24 @@ struct ContextData {}
 // 3. For each subgraph response merge some information into the `Context`. (response_count)
 // 4. Pick up and print it out at router response. (response_count)
 //
+#[async_trait::async_trait]
 impl Plugin for ContextData {
     // Config is a unit, and `ContextData` derives default.
     type Config = ();
 
-    fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<
+            RouterRequest,
+            RouterResponse<BoxStream<'static, graphql::Response>>,
+            BoxError,
+        >,
+    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
+    {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
@@ -56,12 +70,12 @@ impl Plugin for ContextData {
                 req
             })
             .service(service)
-            .map_response(|resp| {
+            .map_response(|response| {
                 // Pick up a value from the context on the response.
-                if let Ok(Some(data)) = resp.context.get::<_, u64>("response_count") {
+                if let Ok(Some(data)) = response.context.get::<_, u64>("response_count") {
                     tracing::info!("subrequest count {}", data);
                 }
-                resp
+                response
             })
             .boxed()
     }
@@ -84,7 +98,7 @@ impl Plugin for ContextData {
                 // A single context is created for the entire request.
                 // We use upsert because there may be multiple downstream subgraph requests.
                 // Upserts are guaranteed to be applied serially.
-                match &resp.context.upsert("response_count", |v| v + 1, || 0) {
+                match &resp.context.upsert("response_count", |v: usize| v + 1) {
                     Ok(_) => (),
                     Err(_) => {
                         // This code will never be executed because we know that an integer can be

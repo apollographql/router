@@ -1,0 +1,4 @@
+# renovate-automation: rustc version
+rust 1.61.0
+
+nodejs 16.9.1

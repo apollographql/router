@@ -1,0 +1,14 @@
+server:
+  listen: 0.0.0.0:4000
+  cors:
+    origins:
+      - https://studio.apollographql.com
+
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    datadog:
+      endpoint: datadog-agent:8126
+    propagation:
+      datadog: true

@@ -1,5 +1,5 @@
 ---
-title: Migrating to the Apollo Router from @apollo/gateway
+title: Moving to the Apollo Router from @apollo/gateway
 ---
 
 The Apollo Router is a graph router for federated graphs that's written in the Rust programming language. It's a new, higher-performance alternative to the Node.js-based `@apollo/gateway` library.
@@ -8,9 +8,9 @@ If you're currently using the `@apollo/gateway` library in your federated graph,
 
 ## What's different?
 
-Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. You can pass this binary a [YAML configuration file](./configuration/overview/#configuration-file) at startup to customize its behavior.  Additionally, if you start your router with the `--watch` flag, you can even _modify_ that configuration and have changes picked up without restarting the router.
+Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. You can pass this binary a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup to customize its behavior.  Additionally, if you start your router with the `--hot-reload` flag, or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true` you can even _modify_ that configuration and have changes picked up without restarting the router.
 
-You _can_ use the Apollo Router as a library in a larger project, but our goal is to remove the need to write custom code in your graph router (as is necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
+You _can_ use the Apollo Router as a library in a larger project, but our goal is to remove the need to write custom code in your graph router (which is necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
 
 ## Take inventory of your gateway configuration
 
@@ -20,12 +20,12 @@ Because the Apollo Router is an entirely new tool with a different configuration
 
 Start by looking for configuration and customizations in these places:
 
-- Environment variables
-- Non-Apollo telemetry and instrumentation (e.g., OpenTelemetry, Datadog)
-- Constructor options passed to `new ApolloGateway({ ... })`
-- Constructor options passed to `new ApolloServer({ ... })`
-- Specific `plugins` passed to `new ApolloServer({ plugins: [ ... ] })`
-- Custom middleware (e.g., Express, Koa, Fastify)
+* Environment variables
+* Non-Apollo telemetry and instrumentation (e.g., OpenTelemetry or Datadog)
+* Constructor options passed to `new ApolloGateway({ ... })`
+* Constructor options passed to `new ApolloServer({ ... })`
+* Specific `plugins` passed to `new ApolloServer({ plugins: [ ... ] })`
+* Custom middleware (e.g., Express, Koa, Fastify)
 
 The sections below provide more details on what to look for in each of these categories.
 
@@ -35,14 +35,15 @@ Many Apollo tools use environment variables prefixed with `APOLLO_` to set certa
 
 Make sure to note any environment variables you set in your existing gateway's environment, _especially_ those prefixed with `APOLLO_`
 
-The Apollo Router supports most (non-deprecated) `APOLLO_`-prefixed environment variables, including:
+The Apollo Router supports the following environment variables used by `@apollo/gateway`:
 
-- `APOLLO_KEY`
-- `APOLLO_GRAPH_REF`
+* `APOLLO_KEY`
+* `APOLLO_GRAPH_REF`
 
-> Deprecated Apollo environment variables (such as `ENGINE_API_KEY`) are _not_ supported.
->
-> Additionally, the Apollo Router does not currently support the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you require this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
+The Apollo Router **renames** the following environment variables used by `@apollo/gateway`:
+
+* [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) → `APOLLO_UPLINK_ENDPOINTS`
+    * This argument supports providing a comma-separated list of URLs.
 
 ## `ApolloGateway` constructor options
 
@@ -61,7 +62,7 @@ You can achieve this option's effect with the Apollo Router in one of the follow
     ./router --supergraph supergraph-schema.graphql
     ```
 
-    The router watches this file and hot-reloads its supergraph schema whenever it changes.
+    The router watches this schema file and hot-reloads it whenever it changes.
 
 ### `serviceList` / `IntrospectAndCompose`
 
@@ -76,51 +77,57 @@ The buildService function enables you to customize the requests that the gateway
 Common use cases include:
 
 * Overriding subgraph URLs at runtime
-    * In the Apollo Router, you can use [the `override_subgraph_urls` option](./configuration/overview#subgraph-routing-urls).
+    * In the Apollo Router, you can use the [`override_subgraph_urls` option](./configuration/overview#subgraph-routing-urls).
 * Propagating headers to subgraphs via `RemoteGraphQLDataSource`
-    * In the Apollo Router, you can use [the `headers` option](./configuration/header-propagation).
+    * In the Apollo Router, you can use the [`headers` option](./configuration/header-propagation).
 
 ### `logger`
 
-This constructor option enables you to specify a different logger for messages that were produced by the `ApolloGateway`. By default, it inherits from the `logger` on your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
+This constructor option enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
 
-In the Apollo Router, logging is JSON-structured in production environments by default, and the verbosity can be adjusted. More advanced logging can be enabled through the use of [plugins](#plugins).
+In the Apollo Router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 
-For more information, see [Logging](./configuration/logging/).
+For more information, see [Logging in the Apollo Router](./configuration/logging/).
 
 ## `ApolloServer` constructor options
 
-The `ApolloServer` constructor supports a large variety of options, but for the purposes of migrating to the Apollo Router, we'll focus on the following:
+The `ApolloServer` constructor supports a large variety of options, but for the purposes of moving to the Apollo Router, we'll focus on the following:
 
 - `context`
 - `plugins`
 
-> For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional migration steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
+> For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
 
 ### `context`
 
-The `context` parameter is an object that is which allows you to propagate information across the request lifecycle. Use cases include:
-* Authentication information.
-* Header propagation.
+This constructor option is an object that enables you to propagate information across the request lifecycle. Use cases include:
 
-The Apollo Router provides [similar functionality](./customizations/native#context).
+* Authentication information
+* Header propagation
+
+The Apollo Router provides [similar functionality](./customizations/native#5-define-necessary-context).
 
 ### `plugins`
 
-It was often necessary to write various plugins for Apollo Server, which is the foundation that Apollo Gateway runs on.  These plugins are passed to the `new ApolloServer({ ... })` constructor options in the `plugins` array.  First, take note of each plugin and its use-cases and add it to your check-list, then consider approaches to accomplish the same thing in the Apollo Router.  Plugins might not map one-to-one to plugins in the Apollo Router, but you'll find similar techniques.
+This constructor option is an array of built-in or custom `plugins` that extend Apollo Server's functionality.
 
-Generally speaking, Apollo Router is trying to minimize the number of cases where custom plugins are necessary to perform common behaviors. For example, setting custom HTTP status codes, transmitting telemetry data, etc.  To facilitate this, Apollo Router has a YAML-structured configuration that enables common behaviors:
+If you provide `plugins` to your `ApolloServer` instance, take note of each plugin's functionality and add it to your migration checklist. Then, before attempting to replicate a plugin's functionality via an _Apollo Router_ plugin, check whether any router [configuration options](./configuration/overview/) can achieve the same behavior. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
-- Propagating particular/all headers to subgraphs
-- OpenTelemetry instrumentation and distributed tracing support
-- Adjusting logging verbosity
+> In general, the Apollo Router seeks to minimize the number of cases where custom plugins are necessary. Before you re-implement existing `@apollo/gateway` plugin behavior in a new language (Rust), we encourage you to communicate about your desired customizations in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box, and we'd like help to discuss their design.
 
-Prior to re-implementing existing Apollo Gateway plugin behavior in a new language (Rust), we encourage our community to start (or engage on existing) conversations about desired customizations in the [GitHub Discussions on the Router repository](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box and we'd like help to discuss their design.
+For less common use cases, we also want to help build an ecosystem of plugins for the Apollo Router, allowing users to enable custom behaviors and ship the functionality they need before native support is available.
 
-For less common use-cases, we also want to help build an ecosystem of plugins that can exist for Apollo Router, allowing users to enable more custom behaviors and to be able to ship the functionality they need before native support is available.
+#### Supported customizations
 
-Apollo Router enables a variety of customizations to built through its request-pipeline plugins.  Today all of its plugins are written in Rust.  In the future, we expect to offer the ability to enable functionality in other languages, in the supergraph itself, or by communicating with services alongside the Router (e.g., gRPC, etc).
+The Apollo Router currently supports two types of customizations that hook into its request pipeline:
 
-To facilitate writing Rust plugins, we've put together a series of examples of common plugins and those can be found in the [Customizations](./customizations/overview) documentation.   There we talk about the integration-points of the request-pipeline which can be customized, the types of plugins which can be written, and also offer examples of how they can be used.
+* [Native Rust plugins](./customizations/native/)
+* [Rhai scripts](./customizations/rhai/) (experimental)
 
-If you don't find the migration answers you need in our documentation, we'd love to know.  Please search for existing [Discussions on GitHub](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.
+Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
+
+In the future, we expect to offer the ability to enable functionality in other languages, in the supergraph itself, or by communicating with services alongside the Router (e.g., gRPC).
+
+## Reporting migration issues
+
+If you don't find the migration answers you need in these docs, we'd love to know. Please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.

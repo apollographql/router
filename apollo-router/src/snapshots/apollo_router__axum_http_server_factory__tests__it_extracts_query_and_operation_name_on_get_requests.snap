@@ -1,0 +1,69 @@
+---
+source: apollo-router/src/axum_http_server_factory.rs
+assertion_line: 932
+expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_span::Filter::new(Level::INFO))"
+---
+{
+  "name": "apollo_router::axum_http_server_factory::tests::root",
+  "record": {
+    "entries": [],
+    "metadata": {
+      "name": "root",
+      "target": "apollo_router::axum_http_server_factory::tests",
+      "level": "INFO",
+      "module_path": "apollo_router::axum_http_server_factory::tests",
+      "fields": {
+        "names": []
+      }
+    }
+  },
+  "children": {
+    "apollo_router::axum_http_server_factory::request": {
+      "name": "apollo_router::axum_http_server_factory::request",
+      "record": {
+        "entries": [
+          [
+            "method",
+            "GET"
+          ],
+          [
+            "uri",
+            "/graphql?query=query&operationName=operationName"
+          ],
+          [
+            "version",
+            "HTTP/1.1"
+          ],
+          [
+            "otel.kind",
+            "server"
+          ],
+          [
+            "otel.status_code",
+            ""
+          ],
+          [
+            "otel.status_code",
+            "OK"
+          ]
+        ],
+        "metadata": {
+          "name": "request",
+          "target": "apollo_router::axum_http_server_factory",
+          "level": "INFO",
+          "module_path": "apollo_router::axum_http_server_factory",
+          "fields": {
+            "names": [
+              "method",
+              "uri",
+              "version",
+              "otel.kind",
+              "otel.status_code"
+            ]
+          }
+        }
+      },
+      "children": {}
+    }
+  }
+}

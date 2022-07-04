@@ -1,0 +1,116 @@
+{
+  "kind": "Sequence",
+  "nodes": [
+    {
+      "kind": "Fetch",
+      "serviceName": "product",
+      "variableUsages": [],
+      "operation": "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
+      "operationKind": "query",
+      "operationName": "topProducts_product_0"
+    },
+    {
+      "kind": "Parallel",
+      "nodes": [
+        {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Flatten",
+              "path": ["topProducts", "@"],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "books",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Book",
+                    "selections": [
+                      { "kind": "Field", "name": "__typename" },
+                      { "kind": "Field", "name": "isbn" }
+                    ]
+                  }
+                ],
+                "variableUsages": ["test_variable"],
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
+                "operationKind": "query"
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": ["topProducts", "@"],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "product",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Book",
+                    "selections": [
+                      { "kind": "Field", "name": "__typename" },
+                      { "kind": "Field", "name": "isbn" },
+                      { "kind": "Field", "name": "title" },
+                      { "kind": "Field", "name": "year" }
+                    ]
+                  }
+                ],
+                "variableUsages": [],
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
+                "operationKind": "query"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Flatten",
+              "path": ["product"],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "books",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Book",
+                    "selections": [
+                      { "kind": "Field", "name": "__typename" },
+                      { "kind": "Field", "name": "isbn" }
+                    ]
+                  }
+                ],
+                "variableUsages": [],
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
+                "operationKind": "query"
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": ["product"],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "product",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "Book",
+                    "selections": [
+                      { "kind": "Field", "name": "__typename" },
+                      { "kind": "Field", "name": "isbn" },
+                      { "kind": "Field", "name": "title" },
+                      { "kind": "Field", "name": "year" }
+                    ]
+                  }
+                ],
+                "variableUsages": [],
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
+                "operationKind": "query"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

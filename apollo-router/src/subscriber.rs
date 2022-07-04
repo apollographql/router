@@ -59,24 +59,39 @@
 //!     a pointer and execute through that pointer.
 //!  We will need to validate that this remains true as the various moving
 //!  parts change (upgrade) over time.
-use crate::reload::{Handle, Layer as ReloadLayer};
-use crate::FederatedServerError;
-use once_cell::sync::OnceCell;
 use std::any::TypeId;
-use tracing::span::{Attributes, Record};
+
+use once_cell::sync::OnceCell;
+use tracing::span::Attributes;
+use tracing::span::Record;
 use tracing::subscriber::set_global_default;
-use tracing::{Event as TracingEvent, Id, Metadata, Subscriber};
+use tracing::Event as TracingEvent;
+use tracing::Id;
+use tracing::Metadata;
+use tracing::Subscriber;
 use tracing_core::span::Current;
-use tracing_core::{Interest, LevelFilter};
-use tracing_subscriber::fmt::format::{DefaultFields, Format, Json, JsonFields};
-use tracing_subscriber::registry::{Data, LookupSpan};
-use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
+use tracing_core::Interest;
+use tracing_core::LevelFilter;
+use tracing_subscriber::fmt::format::DefaultFields;
+use tracing_subscriber::fmt::format::Format;
+use tracing_subscriber::fmt::format::Json;
+use tracing_subscriber::fmt::format::JsonFields;
+use tracing_subscriber::registry::Data;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::Layer;
+
+use crate::reload::Handle;
+use crate::reload::Layer as ReloadLayer;
+use crate::router::ApolloRouterError;
 
 pub(crate) type BoxedLayer = Box<dyn Layer<RouterSubscriber> + Send + Sync>;
 
 type FmtSubscriberTextEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 type FmtSubscriberJsonEnv = FmtSubscriber<JsonFields, Format<Json>, EnvFilter>;
 
+/// Choice of JSON or Text output.
 pub enum RouterSubscriber {
     JsonSubscriber(FmtSubscriberJsonEnv),
     TextSubscriber(FmtSubscriberTextEnv),
@@ -216,11 +231,16 @@ impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span
 
 static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
 
+/// Check if the router reloading global subscriber is set.
 pub fn is_global_subscriber_set() -> bool {
     matches!(RELOAD_HANDLE.get(), Some(_))
 }
 
-pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
+/// Set the router reloading global subscriber.
+///
+/// The provided subscriber is composed with a reloadable layer so that the default
+/// global subscriber is now reloadable.
+pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), ApolloRouterError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {
             // First create a boxed BaseLayer
@@ -241,18 +261,21 @@ pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), Federat
             // Return our handle to store in OnceCell
             Ok(handle)
         })
-        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
+        .map_err(ApolloRouterError::SetGlobalSubscriberError)?;
     Ok(())
 }
 
-pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
+/// Replace the tracing layer.
+///
+/// Reload the current tracing layer with new_layer.
+pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), ApolloRouterError> {
     match RELOAD_HANDLE.get() {
         Some(hdl) => {
             hdl.reload(new_layer)
-                .map_err(FederatedServerError::ReloadTracingLayerError)?;
+                .map_err(ApolloRouterError::ReloadTracingLayerError)?;
         }
         None => {
-            return Err(FederatedServerError::NoReloadTracingHandleError);
+            return Err(ApolloRouterError::NoReloadTracingHandleError);
         }
     }
     Ok(())
