@@ -28,6 +28,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::rate::RateLimitLayer;
+pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
@@ -133,6 +134,7 @@ impl Merge for RateLimitConf {
 struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
+    rate_limit_subgraphs: HashMap<String, RateLimitLayer>,
 }
 
 #[async_trait::async_trait]
@@ -145,13 +147,13 @@ impl Plugin for TrafficShaping {
             .as_ref()
             .and_then(|r| r.rate_limit.as_ref())
             .map(|router_rate_limit_conf| {
-                println!("rate limiting");
                 RateLimitLayer::new(router_rate_limit_conf.num, router_rate_limit_conf.per)
             });
         // TODO display some warnings regarding the configuration with timeout and rate limit
         Ok(Self {
             config,
             rate_limit_router,
+            rate_limit_subgraphs: HashMap::new(),
         })
     }
 
@@ -164,10 +166,7 @@ impl Plugin for TrafficShaping {
                 self.config
                     .router
                     .as_ref()
-                    .and_then(|r| {
-                        println!("timeout : {r:?}");
-                        r.timeout
-                    })
+                    .and_then(|r| r.timeout)
                     .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
             ))
             .option_layer(self.rate_limit_router.clone())
@@ -202,6 +201,14 @@ impl Plugin for TrafficShaping {
         let final_config = Self::merge_config(all_config, subgraph_config);
 
         if let Some(config) = final_config {
+            let rate_limit = config.rate_limit.as_ref().map(|rate_limit_conf| {
+                self.rate_limit_subgraphs
+                    .entry(name.to_string())
+                    .or_insert_with(|| {
+                        RateLimitLayer::new(rate_limit_conf.num, rate_limit_conf.per)
+                    })
+                    .clone()
+            });
             ServiceBuilder::new()
                 .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
                     // Buffer is required because dedup layer requires a clone service.
@@ -214,12 +221,7 @@ impl Plugin for TrafficShaping {
                     .timeout
                     .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
                 ))
-                .option_layer(config.rate_limit.as_ref().map(|rate_limit_conf| {
-                    RateLimitLayer::new(
-                        rate_limit_conf.num,
-                        rate_limit_conf.per,
-                    )
-                }))
+                .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {

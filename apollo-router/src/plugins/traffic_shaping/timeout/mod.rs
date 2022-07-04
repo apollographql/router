@@ -21,7 +21,7 @@ use tower::Service;
 
 use self::future::ResponseFuture;
 pub(crate) use self::layer::TimeoutLayer;
-use crate::plugins::traffic_shaping::timeout::error::Elapsed;
+pub(crate) use crate::plugins::traffic_shaping::timeout::error::Elapsed;
 
 /// Applies a timeout to requests.
 #[derive(Debug)]
@@ -79,7 +79,6 @@ where
         {
             tracing::trace!("timeout exceeded.");
             self.sleep = None;
-            println!("iciiiiii");
 
             return Poll::Ready(Err(Elapsed::new().into()));
         }

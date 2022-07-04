@@ -48,10 +48,7 @@ where
         // Now check the sleep
         match Pin::new(&mut this.sleep).poll(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(_) => {
-                println!("laaaaa");
-                Poll::Ready(Err(Elapsed(()).into()))
-            }
+            Poll::Ready(_) => Poll::Ready(Err(Elapsed(()).into())),
         }
     }
 }

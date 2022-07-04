@@ -60,6 +60,7 @@ use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
+use crate::plugins::traffic_shaping::Elapsed;
 use crate::router::ApolloRouterError;
 
 /// A basic http server using Axum.
@@ -519,11 +520,15 @@ async fn run_graphql_request(
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "router service is not available to process request",
-            )
-                .into_response()
+            if e.is::<Elapsed>() {
+                Elapsed::new().into_response()
+            } else {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "router service is not available to process request",
+                )
+                    .into_response()
+            }
         }
     }
 }
