@@ -409,7 +409,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
 
-Release v0.9.4 changed the way we deal with `Response` objects, which can now be streams.  The scaffold template now generates plugins that are compatible with this new Plugin API.
+Release v0.9.4 changed the way we deal with `Response` objects, which can now be streams. The scaffold template now generates plugins that are compatible with this new Plugin API.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
