@@ -13,9 +13,14 @@ use http::StatusCode;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use super::new_service::NewService;
+use super::Plugins;
 use crate::graphql::Response;
 use crate::service_registry::ServiceRegistry;
 use crate::ExecutionRequest;
@@ -111,4 +116,52 @@ impl Service<ExecutionRequest> for ExecutionService {
         .in_current_span();
         Box::pin(fut)
     }
+}
+
+pub(crate) trait ExecutionServiceFactory:
+    NewService<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
+{
+    type ExecutionService: Service<
+            ExecutionRequest,
+            Response = ExecutionResponse<BoxStream<'static, Response>>,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send;
+    type Future: Send;
+}
+
+#[derive(Clone)]
+pub(crate) struct ExecutionCreator {
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) plugins: Arc<Plugins>,
+    pub(crate) subgraph_services: Arc<ServiceRegistry>,
+}
+
+impl NewService<ExecutionRequest> for ExecutionCreator {
+    type Service =
+        BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
+
+    fn new_service(&self) -> Self::Service {
+        ServiceBuilder::new()
+            .layer(AllowOnlyHttpPostMutationsLayer::default())
+            .service(
+                self.plugins.iter().rev().fold(
+                    crate::services::execution_service::ExecutionService {
+                        schema: self.schema.clone(),
+                        subgraph_services: self.subgraph_services.clone(),
+                    }
+                    .boxed(),
+                    |acc, (_, e)| e.execution_service(acc),
+                ),
+            )
+            .boxed()
+    }
+}
+
+impl ExecutionServiceFactory for ExecutionCreator {
+    type ExecutionService =
+        BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
+    type Future = <<ExecutionCreator as NewService<ExecutionRequest>>::Service as Service<
+        ExecutionRequest,
+    >>::Future;
 }

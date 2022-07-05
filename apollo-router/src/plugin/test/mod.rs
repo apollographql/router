@@ -29,6 +29,7 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::service_registry::ServiceRegistry;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::services::ExecutionCreator;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::RouterService;
@@ -161,10 +162,13 @@ impl PluginTestHarness {
                                         query_planner_service,
                                         DEFAULT_BUFFER_SIZE,
                                     ))
-                                    .subgraph_services(Arc::new(ServiceRegistry::new(
-                                        subgraph_services,
-                                    )))
-                                    .plugins(Default::default())
+                                    .execution_service_factory(ExecutionCreator {
+                                        schema: schema.clone(),
+                                        plugins: Default::default(),
+                                        subgraph_services: Arc::new(ServiceRegistry::new(
+                                            subgraph_services,
+                                        )),
+                                    })
                                     .schema(schema.clone())
                                     .build(),
                             )
