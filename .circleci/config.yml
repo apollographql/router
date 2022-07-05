@@ -42,7 +42,6 @@ common_job_environment: &common_job_environment
   NPM_VERSION: 7.10.0
 
 commands:
-
   linux_install_baseline:
     steps:
       - run:
@@ -292,7 +291,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --locked
+      - run: cargo test -p "apollo-router" -p "apollo-router-scaffold" --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -319,12 +318,12 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 3 --locked
+            - run: cargo test --jobs 3 -p "apollo-router" -p "apollo-router-scaffold" --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
           steps:
-            - run: cargo test --locked
+            - run: cargo test -p "apollo-router" -p "apollo-router-scaffold" --locked
 
       - save_cache:
           name: Save .cargo
