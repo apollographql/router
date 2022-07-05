@@ -429,12 +429,19 @@ or valid data being nullified.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1295
 
-### Fix fragment selection on interfaces ([PR #1296](https://github.com/apollographql/router/pull/1296))
+### Fix fragment selection on queries ([PR #1296](https://github.com/apollographql/router/pull/1296))
 
 The schema object can specify objects for queries, mutations or subscriptions that are not named `Query`, `Mutation` or
-`Subscription`. Response formatting now supports it
+`Subscription`. Response formatting now supports it.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1296
+
+### Reduce `poll_ready` calls in query deduplication ([PR #1350](https://github.com/apollographql/router/pull/1350))
+
+The query deduplication service was making assumptions on the underlying service's behaviour, which could result in
+subgraph services panicking.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1350
 
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
