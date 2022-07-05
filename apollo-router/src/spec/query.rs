@@ -407,14 +407,10 @@ impl Query {
                     let is_apply = if let Some(input_type) =
                         input.get(TYPENAME).and_then(|val| val.as_str())
                     {
-                        //First determine if fragment is for interface
-                        //Otherwise we assume concrete type is expected
-                        if let Some(interface) = schema.interfaces.get(type_condition) {
-                            //Check if input implements interface
-                            schema.is_subtype(interface.name.as_str(), input_type)
-                        } else {
-                            input_type == type_condition.as_str()
-                        }
+                        // check if the fragment matches the input type directly, and if not, check if the
+                        // input type is a subtype of the fragment's type condition (interface, union)
+                        input_type == type_condition.as_str()
+                            || schema.is_subtype(type_condition, input_type)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
@@ -452,15 +448,10 @@ impl Query {
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            // First determine if the fragment matches an interface
-                            // Otherwise we assume a concrete type is expected
-                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
-                            {
-                                //Check if input implements interface
-                                schema.is_subtype(interface.name.as_str(), input_type)
-                            } else {
-                                input_type == fragment.type_condition.as_str()
-                            }
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            input_type == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, input_type)
                         } else {
                             known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
@@ -572,15 +563,10 @@ impl Query {
                     if let Some(fragment) = self.fragments.get(name) {
                         let operation_type_name = schema.root_operation_name(operation.kind);
                         let is_apply = {
-                            // First determine if the fragment is for an interface
-                            // Otherwise we assume a concrete type is expected
-                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
-                            {
-                                // Check if input implements interface
-                                schema.is_subtype(interface.name.as_str(), operation_type_name)
-                            } else {
-                                operation_type_name == fragment.type_condition.as_str()
-                            }
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            operation_type_name == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, operation_type_name)
                         };
 
                         if !is_apply {
@@ -4860,5 +4846,67 @@ mod tests {
           }";
 
         let _ = Query::parse(query, api_schema).unwrap();
+    }
+
+    #[test]
+    fn fragment_on_union() {
+        let schema = "type Query {
+            settings: ServiceSettings
+        }
+
+        type ServiceSettings {
+            location: ServiceLocation
+        }
+
+        union ServiceLocation = AccountLocation | Address
+
+        type AccountLocation {
+            id: ID
+            address: Address
+        }
+
+        type Address {
+            city: String
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            "{
+                settings {
+                  location {
+                    ...SettingsLocation
+                  }
+                }
+              }
+
+              fragment SettingsLocation on ServiceLocation {
+                ... on Address {
+                  city
+                }
+                 ... on AccountLocation {
+                   id
+                   address {
+                     city
+                   }
+                 }
+              }",
+            json! {{
+                "settings": {
+                    "location": {
+                        "__typename": "AccountLocation",
+                        "id": "1234"
+                    }
+                }
+            }},
+            None,
+            json! {{
+                "settings": {
+                    "location": {
+                        "id": "1234",
+                        "address": null
+                    }
+                }
+            }},
+        );
     }
 }
