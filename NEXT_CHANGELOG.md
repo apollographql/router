@@ -13,7 +13,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
-## 🐛 Fixes
 
 ## Example section entry format
 
@@ -30,4 +29,3 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
-## 🐛 Fixes
