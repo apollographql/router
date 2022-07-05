@@ -80,7 +80,7 @@ unfold the listing below and use your browser’s search function (CTRL+F or ⌘
 
 <details>
 <summary>
-  Output of <code>./scripts/public_items.sh</code> for 0.9.6
+  Output of <code>./scripts/public_items.sh</code> for 0.10.0
 </summary>
 <pre>
 use apollo_router::ApolloRouter;
