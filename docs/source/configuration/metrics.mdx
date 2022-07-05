@@ -151,5 +151,9 @@ telemetry:
   metrics:
     common:
       resources:
-        service_name: "apollo-router"
+        # Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+        service.name: "apollo-router"
 ```
+
+> Check these [conventions](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md) if you want to provide some standard resources following the opentelemtry specs.
+> For example if you want to use Datadog agent and specify a service name you should use `service.name` as a name for the resource as mentioned in the specs.
