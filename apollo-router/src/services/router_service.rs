@@ -450,8 +450,7 @@ impl RouterCreator {
         Response = RouterResponse<BoxStream<'static, Response>>,
         Error = BoxError,
         Future = BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>,
-    > + Send
-           + 'static {
+    > + Send {
         ServiceBuilder::new()
             .layer(self.apq.clone())
             .layer(EnsureQueryPresence::default())

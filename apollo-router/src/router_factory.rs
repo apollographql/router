@@ -34,8 +34,7 @@ pub(crate) trait RouterServiceFactory:
             Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
-        > + Send
-        + 'static;
+        > + Send;
     type Future: Send;
 }
 
