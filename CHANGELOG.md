@@ -10,6 +10,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Change configuration for custom attributes for metrics in telemetry plugin ([PR #1300](https://github.com/apollographql/router/pull/1300)
 
+To create a distinction between subgraph metrics and router metrics, a distiction has been made in the configuration.  Therefore, a new configuration section called `router` has been introduced and Router-specific properties are now listed there, as seen here:
+
 ```diff
 telemetry:
   metrics:
@@ -37,24 +39,24 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Rename http_compat to http_ext ([PR #1291](https://github.com/apollographql/router/pull/1291)
+### Rename `http_compat` to `http_ext` ([PR #1291](https://github.com/apollographql/router/pull/1291)
 
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
-such as the Request::mock() fn.
+such as the `Request::mock()` function.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1291
 
 ### Rework the entire public API structure ([PR #1216](https://github.com/apollographql/router/pull/1216),  [PR #1242](https://github.com/apollographql/router/pull/1242),  [PR #1267](https://github.com/apollographql/router/pull/1267),  [PR #1277](https://github.com/apollographql/router/pull/1277), [PR #1303](https://github.com/apollographql/router/pull/1303))
 
 * Many items have been removed from the public API and made private.
-  If you still need some of them, please file an issue.
+  If you were relying on these previously-public methods and find that they are no longer available, please open an issue with your use case so we can consider how we want to re-introduce them.
 
-* Many reexports have been removed, 
-  notably from the crate root and all of the `prelude` module.
-  Corresponding items need to be imported from another location instead,
-  usually the module that define them.
+* Many re-exports have been removed.
+  Most notably from the crate root and all of the `prelude` modules.
+  These items now need to be imported from another location instead,
+  most often the module that defines them.
 
-* Some items have moved and need to be imported from a different location.
+* Some items have moved and need to be imported from a new location.
 
 For example, here are the changes made to `examples/add-timestamp-header/src/main.rs`:
 
@@ -75,8 +77,8 @@ For example, here are the changes made to `examples/add-timestamp-header/src/mai
  {
 ```
 
-If you’re unsure where a given item needs to be imported from when porting code,
-unfold the listing below and use your browser’s search function (CTRL+F or ⌘+F).
+If you're unsure where a given item needs to be imported from when porting code,
+unfold the listing below and use your browser's search function (CTRL+F or ⌘+F).
 
 <details>
 <summary>
@@ -217,13 +219,13 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
 
-The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required. 
+The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required.
 Most users will continue to use:
 ```rust
-apollo_router::main()  
+apollo_router::main()
 ```
 
-However, if you want to specify extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior. 
+However, if you want to specify extra customization to configuration/schema/shutdown then you may use `Executable::builder()` to override behavior.
 
 ```rust
 use apollo_router::Executable;
@@ -280,21 +282,21 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Fixed control flow in helm chart for volume mounts & environment variables ([PR #1283](https://github.com/apollographql/router/issues/1283))
 
-You will now be able to actually use the helm chart without being on a managed graph. 
+You will now be able to actually use the helm chart without being on a managed graph.
 
 By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
+### Fail when unknown fields are encountered in configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
 
-### Deny unknown fields on configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
-Do not silently skip some bad configuration, now if you add an unknown configuration field at the root of your configuration file it will return an error.
+Now if you add an unknown configuration field at the root of your configuration file it will return an error, rather than silently continuing with un-recognized options.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1278
 
-## 🚀 Features ( :rocket: )
+## 🚀 Features
 
-### Add support to add custom attributes on metrics. [PR #1300](https://github.com/apollographql/router/pull/1300)
+### Allow custom subgraph-specific attributes to be added to emitted metrics [PR #1300](https://github.com/apollographql/router/pull/1300)
 
-Previously, it was only possible to add custom attributes coming from headers from router request. Now you are able to add custom attributes coming from headers and body of router response/request and subgraph response/request. You also have the ability to add an attribute coming from the context. Example:
+Previously, it was only possible to add custom attributes from headers which the router received from the external GraphQL client. Now, you are able to add custom attributes coming from both the headers and the body of either the Router's or the Subgraph's router request or response. You also have the ability to add an attributes from the context. For example:
 
 ```yaml
 telemetry:
@@ -313,20 +315,21 @@ telemetry:
               - named: "x-custom-header-to-add"
           response:
             body:
-              # Take element from the response body of the router located at this path
+              # Take element from the Router's JSON response body router located at a specific path
               - path: .errors[0].extensions.status
                 name: error_from_body
           context:
-            # Take element from context in plugin chains and add it in attributes
+            # Take element from the context within plugin chains and add it in attributes
             - named: my_key
         subgraph:
           all:
             static:
-              # Always insert on all metrics for all subgraphs
+              # Always insert this static value on all metrics for ALL Subgraphs
               - name: kind
                 value: subgraph_request
           subgraphs:
-            my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+            # Apply these only for the SPECIFIC subgraph named `my_subgraph_name`
+            my_subgraph_name:
               request:
                 header:
                   - named: "x-custom-header"
@@ -339,18 +342,17 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Add support for modifying variables from a plugin. [PR #1257](https://github.com/apollographql/router/pull/1257)
+### Add support for modifying variables from a plugin [PR #1257](https://github.com/apollographql/router/pull/1257)
 
-Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported in both Rust and Rhai plugins.
+Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported via both Rust and Rhai plugins.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1257
 
 ## 🐛 Fixes
 
+### Extend fix for compression support to include the DIY Dockerfiles ([PR #1352](https://github.com/apollographql/router/pull/1352))
 
-### extend fix for compression support to DIY dockerfiles ([PR #1352](https://github.com/apollographql/router/pull/1352))
-
-Compression support is now shown in the DIY dockerfiles (followup to [PR #1279](https://github.com/apollographql/router/pull/1279)).
+Compression support is now shown in the DIY Dockerfiles, as a followup to [PR #1279](https://github.com/apollographql/router/pull/1279).
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1352
 
@@ -362,28 +364,31 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Improve configuration validation and environment expansion ([PR #1331](https://github.com/apollographql/router/pull/1331))
 
-Environment expansion now covers the entire configuration file, and supports non string types.
-This means that it is now possible to use environment variable in the server section of the yaml, and also in numeric and boolean fields.
+Environment expansion now covers the entire configuration file, and supports non-string types.
 
-Environment variables will always be shown in their original form in error messages preventing leakage of secrets.
+This means that it is now possible to use environment variables in the `server` section of the YAML configuration, including numeric and boolean fields.
 
-These changes allow more of the configuration file to be validated via json schema, as previously we just skipped errors where fields contained env variables.
+Environment variables will always be shown in their original form within error messages to prevent leakage of secrets.
+
+These changes allow more of the configuration file to be validated via JSON-schema, as previously we just skipped errors where fields contained environment variables.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1331
 
 ### Fix input coercion for a list ([PR #1327](https://github.com/apollographql/router/pull/1327))
 
-The router is now following coercion rules for List regarding [the specs](https://spec.graphql.org/June2018/#sec-Type-System.List). Especially it fixes the case when for an input type `[Int]` only `1` was provided as a value. It's now working and it's coerced to `[1]`.
+The router is now following coercion rules for lists in accordance with [the GraphQL specification](https://spec.graphql.org/June2018/#sec-Type-System.List). In particular, this fixes the case when an input type of `[Int]` with only `1` provided as a value will now be properly coerced to `[1]`.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1327
 
-### Returns HTTP 400 bad request instead of 500 when it's a query plan error ([PR #1321](https://github.com/apollographql/router/pull/1321))
+### Returns HTTP 400 Bad Request, rather than a 500, when hitting a query planning error ([PR #1321](https://github.com/apollographql/router/pull/1321))
+
+A query planning error cannot be retried, so this error code more correctly matches the failure mode and indicates to the client that it should not be retried without changing the request.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1321
 
-### Re-enable the subgraph error redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317))
+### Re-enable the subgraph error-redaction functionality ([PR #1317](https://github.com/apollographql/router/pull/1317))
 
-In a re-factoring the "include_subgraph_errors" plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialisation mechanism was improved to ensure that plugins start in the required sequence.
+In a re-factoring the `include_subgraph_errors` plugin was disabled. This meant that subgraph error handling was not working as intended. This change re-enables it and improves the functionality with additional logging. As part of the fix, the plugin initialization mechanism was improved to ensure that plugins start in the required sequence.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1317
 
@@ -392,36 +397,31 @@ Queries with selected field names starting with `__` are recognized as introspec
 
 By [@dingxiangfei2009](https://github.com/dingxiangfei2009) in https://github.com/apollographql/router/pull/1299
 
-### Fix scaffold support ([PR #1293](https://github.com/apollographql/router/pull/1293))
+### Fix plugin scaffolding support ([PR #1293](https://github.com/apollographql/router/pull/1293))
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1293
 
 ### Support introspection object types ([PR #1240](https://github.com/apollographql/router/pull/1240))
 
-Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them,
-resulting in some introspection queries not working.
+Introspection queries can use a set of object types defined in the specification. The query parsing code was not recognizing them, resulting in some introspection queries not working.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1240
 
 ### Update the scaffold template so it works with streams ([#1247](https://github.com/apollographql/router/issues/1247))
 
-Release v0.9.4 changed the way we deal with Response objects, which can now be streams.
-This Pull request updates the scaffold template so it generates plugins that are compatible with the new Plugin API.
+Release v0.9.4 changed the way we deal with `Response` objects, which can now be streams. The scaffold template now generates plugins that are compatible with this new Plugin API.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
-
 ### Fix fragment selection on interfaces ([PR #1295](https://github.com/apollographql/router/pull/1295))
 
-Fragments type conditions were not checked correctly on interfaces, resulting in invalid null fields added to the response
-or valid data being nullified.
+Fragments type conditions were not being checked correctly on interfaces, resulting in invalid null fields added to the response or valid data being incorrectly `null`-ified.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1295
 
 ### Fix fragment selection on queries ([PR #1296](https://github.com/apollographql/router/pull/1296))
 
-The schema object can specify objects for queries, mutations or subscriptions that are not named `Query`, `Mutation` or
-`Subscription`. Response formatting now supports it.
+The schema object can specify objects for queries, mutations or subscriptions that are not named `Query`, `Mutation` or `Subscription`. Response formatting now supports it.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1296
 
@@ -433,12 +433,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Reduce `poll_ready` calls in query deduplication ([PR #1350](https://github.com/apollographql/router/pull/1350))
 
-The query deduplication service was making assumptions on the underlying service's behaviour, which could result in
-subgraph services panicking.
+The query deduplication service was making assumptions on the underlying service's behaviour, which could result in subgraph services panicking.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1350
 
-## 🛠 Maintenance ( :hammer_and_wrench: )
+## 🛠 Maintenance
 
 ### chore: Run scaffold tests in CI and xtask only ([PR #1345](https://github.com/apollographql/router/pull/1345))
 
@@ -448,14 +447,14 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Update rhai to latest release (1.8.0)  ([PR #1337](https://github.com/apollographql/router/pull/1337)
 
-We had been depending on a pinned git version which had a fix we required. This now updates to the latest release.
+We had been depending on a pinned git version which had a fix we required. This now updates to the latest release which includes the fix upstream.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1337
 
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
-Migrate all typed-builders code to buildstructor
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
+Migrate all typed-builders code to `buildstructor`.
 
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
 
 # [0.9.5] - 2022-06-17
 ## ❗ BREAKING ❗
