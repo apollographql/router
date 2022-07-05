@@ -448,7 +448,6 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Remove typed-builder ([PR #1218](https://github.com/apollographql/router/pull/1218))
 Migrate all typed-builders code to buildstructor
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1218
-## 📚 Documentation ( :books: )
 
 
 # [0.9.5] - 2022-06-17
