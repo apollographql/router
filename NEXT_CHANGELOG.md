@@ -436,13 +436,18 @@ The schema object can specify objects for queries, mutations or subscriptions th
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1296
 
+### Fix fragment selection on unions ([PR #1346](https://github.com/apollographql/router/pull/1346))
+
+Fragments type conditions were not checked correctly on unions, resulting in data being absent.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1346
+
 ### Reduce `poll_ready` calls in query deduplication ([PR #1350](https://github.com/apollographql/router/pull/1350))
 
 The query deduplication service was making assumptions on the underlying service's behaviour, which could result in
 subgraph services panicking.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1350
-
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 
