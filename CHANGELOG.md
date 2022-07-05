@@ -54,7 +54,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 * Many re-exports have been removed.
   Most notably from the crate root and all of the `prelude` modules.
   These items now need to be imported from another location instead,
-  most often the module that define them.
+  most often the module that defines them.
 
 * Some items have moved and need to be imported from a new location.
 
