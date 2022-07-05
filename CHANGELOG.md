@@ -347,6 +347,13 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+
+### extend fix for compression support to DIY dockerfiles ([PR #1352](https://github.com/apollographql/router/pull/1352))
+
+Compression support is now shown in the DIY dockerfiles (followup to [PR #1279](https://github.com/apollographql/router/pull/1279)).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1352
+
 ### Improve URL parsing in endpoint configuration ([PR #1341](https://github.com/apollographql/router/pull/1341))
 
 Specifying an endpoint in this form '127.0.0.1:431' resulted in an error: 'relative URL without a base'. The fix enhances the URL parsing logic to check for these errors and re-parses with a default scheme 'http://' so that parsing succeeds.
