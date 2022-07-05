@@ -1149,7 +1149,7 @@ mod tests {
                 "metrics": {
                     "common": {
                         "resources": {
-                            "service_name": "apollo-router"
+                            "service.name": "apollo-router"
                         },
                         "attributes": {
                             "router": {
