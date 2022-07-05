@@ -26,11 +26,11 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::service_registry::ServiceRegistry;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
-use crate::ExecutionService;
 use crate::RouterService;
 use crate::Schema;
 
@@ -90,7 +90,6 @@ impl PluginTestHarness {
         schema: IntoSchema,
         mock_router_service: Option<MockRouterService>,
         mock_query_planner_service: Option<MockQueryPlanningService>,
-        mock_execution_service: Option<MockExecutionService>,
         mock_subgraph_services: HashMap<String, MockSubgraphService>,
     ) -> Result<PluginTestHarness, BoxError> {
         let mut subgraph_services = mock_subgraph_services
@@ -148,18 +147,6 @@ impl PluginTestHarness {
                 .unwrap_or(query_planner),
         );
 
-        let execution_service = plugin.execution_service(
-            mock_execution_service
-                .map(|s| s.build().boxed())
-                .unwrap_or_else(|| {
-                    ExecutionService::builder()
-                        .schema(schema.clone())
-                        .subgraph_services(subgraph_services)
-                        .build()
-                        .boxed()
-                }),
-        );
-
         let router_service = ServiceBuilder::new()
             .layer(APQLayer::default())
             .layer(EnsureQueryPresence::default())
@@ -174,10 +161,10 @@ impl PluginTestHarness {
                                         query_planner_service,
                                         DEFAULT_BUFFER_SIZE,
                                     ))
-                                    .query_execution_service(Buffer::new(
-                                        execution_service,
-                                        DEFAULT_BUFFER_SIZE,
-                                    ))
+                                    .subgraph_services(Arc::new(ServiceRegistry::new(
+                                        subgraph_services,
+                                    )))
+                                    .plugins(Default::default())
                                     .schema(schema.clone())
                                     .build(),
                             )

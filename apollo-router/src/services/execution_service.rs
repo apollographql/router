@@ -27,8 +27,8 @@ use crate::SubgraphResponse;
 /// [`Service`] for query execution.
 #[derive(Clone)]
 pub struct ExecutionService {
-    schema: Arc<Schema>,
-    subgraph_services: Arc<ServiceRegistry>,
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) subgraph_services: Arc<ServiceRegistry>,
 }
 
 #[buildstructor::buildstructor]
