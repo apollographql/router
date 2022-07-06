@@ -140,3 +140,20 @@ If you have this data:
 ```
 
 And want to fetch the field `whatever` here is the syntax `.items[1].whatever`. You can also try to fetch the field `x` by using this query `.items[0].wanted.x`. A JSON Query is always starting with a dot.
+
+## Add custom resources
+
+Resources are almost like attributes but there are more globals. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics. It could be pretty useful to set
+a service name for example to let you more easily find metrics related to a specific service.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      resources:
+        # Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+        service.name: "apollo-router"
+```
+
+> Check these [conventions](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md) if you want to provide some standard resources following the opentelemtry specs.
+> For example if you want to use Datadog agent and specify a service name you should use `service.name` as a name for the resource as mentioned in the specs.

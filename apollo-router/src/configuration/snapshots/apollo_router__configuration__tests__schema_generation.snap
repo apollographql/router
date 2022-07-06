@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 825
+assertion_line: 837
 expression: "&schema"
 ---
 {
@@ -1127,6 +1127,14 @@ expression: "&schema"
                     }
                   },
                   "nullable": true
+                },
+                "resources": {
+                  "description": "Resources",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
               },
               "additionalProperties": false,
