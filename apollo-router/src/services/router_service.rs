@@ -13,6 +13,7 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -25,6 +26,8 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use super::SubgraphRequest;
+use super::SubgraphResponse;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -227,7 +230,10 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
-    subgraph_services: Vec<String>,
+    subgraph_services: Vec<(
+        String,
+        BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>,
+    )>,
     introspection: bool,
 }
 
@@ -259,8 +265,23 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_subgraph_service(mut self, name: &str) -> PluggableRouterServiceBuilder {
-        self.subgraph_services.push(name.to_string());
+    pub fn with_subgraph_service<S>(
+        mut self,
+        name: &str,
+        service: S,
+    ) -> PluggableRouterServiceBuilder
+    where
+        S: Service<
+                SubgraphRequest,
+                Response = SubgraphResponse,
+                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
+            > + Clone
+            + Send
+            + 'static,
+        <S as tower_service::Service<SubgraphRequest>>::Future: std::marker::Send,
+    {
+        self.subgraph_services
+            .push((name.to_string(), BoxCloneService::new(service)));
         self
     }
 
@@ -312,24 +333,6 @@ impl PluggableRouterServiceBuilder {
                     |acc, (_, e)| e.query_planning_service(acc),
                 ));
 
-        /*// SubgraphService takes a SubgraphRequest and outputs a RouterResponse
-        let subgraphs = self
-            .subgraph_services
-            .into_iter()
-            .map(|(name, s)| {
-                let service = self
-                    .plugins
-                    .iter_mut()
-                    .rev()
-                    .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
-
-                let service = ServiceBuilder::new().buffered().service(service);
-
-                (name.clone(), service)
-            })
-            .collect();
-
-            let subgraph_services = Arc::new(ServiceRegistry::new(subgraphs));*/
         let plugins = Arc::new(self.plugins);
 
         let subgraph_creator = Arc::new(SubgraphCreator::new(

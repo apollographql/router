@@ -24,6 +24,7 @@ use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
+use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
@@ -39,6 +40,8 @@ use crate::error::FetchError;
 use crate::graphql;
 
 use super::Plugins;
+use super::SubgraphRequest;
+use super::SubgraphResponse;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -267,7 +270,7 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
+pub trait SubgraphServiceFactory: Clone + Send + 'static {
     type SubgraphService: Service<
             crate::SubgraphRequest,
             Response = crate::SubgraphResponse,
@@ -281,17 +284,21 @@ pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCreator {
-    pub(crate) services: HashMap<String, SubgraphService>,
+    pub(crate) services:
+        Arc<HashMap<String, BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>>>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphCreator {
-    pub(crate) fn new(services: Vec<String>, plugins: Arc<Plugins>) -> Self {
+    pub(crate) fn new(
+        services: Vec<(
+            String,
+            BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>,
+        )>,
+        plugins: Arc<Plugins>,
+    ) -> Self {
         SubgraphCreator {
-            services: services
-                .into_iter()
-                .map(|name| (name.clone(), SubgraphService::new(name)))
-                .collect(),
+            services: Arc::new(services.into_iter().collect()),
             plugins,
         }
     }

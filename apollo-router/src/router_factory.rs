@@ -17,6 +17,7 @@ use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
 use crate::services::Plugins;
 use crate::services::RouterCreator;
+use crate::services::SubgraphService;
 use crate::PluggableRouterServiceBuilder;
 use crate::Schema;
 
@@ -25,7 +26,7 @@ use crate::Schema;
 /// Instances of this traits are used by the HTTP server to generate a new
 /// RouterService on each request
 pub(crate) trait RouterServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + 'static
 {
     type RouterService: Service<
             Request<graphql::Request>,
@@ -72,7 +73,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            builder = builder.with_subgraph_service(name);
+            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
 
         // Process the plugins.
