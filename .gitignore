@@ -30,3 +30,4 @@ apollo-spaceport/proto/reports.proto
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
 /jaeger/
+*.tgz
