@@ -44,5 +44,13 @@ telemetry:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1354
 
 ## 🐛 Fixes
+
+### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
+
+Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1363
+
+
 ## 🛠 Maintenance
 ## 📚 Documentation
