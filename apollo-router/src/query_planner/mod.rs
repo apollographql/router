@@ -767,7 +767,6 @@ mod tests {
                 sender,
             )
             .await;
-        //let result = receiver.next().await.unwrap();
         assert_eq!(result.errors.len(), 1);
         let reason: String = serde_json_bytes::from_value(
             result.errors[0].extensions.get("reason").unwrap().clone(),
@@ -823,7 +822,6 @@ mod tests {
             )
             .await;
 
-        //receiver.next().await.unwrap();
         assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
     }
 
@@ -872,7 +870,6 @@ mod tests {
             )
             .await;
 
-        //receiver.next().await.unwrap();
         assert!(
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
