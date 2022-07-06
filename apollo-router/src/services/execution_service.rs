@@ -1,6 +1,5 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -10,7 +9,6 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::StatusCode;
-use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -20,40 +18,35 @@ use tracing::Instrument;
 
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::new_service::NewService;
+use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::Response;
-use crate::service_registry::ServiceRegistry;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::Schema;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
-pub struct ExecutionService {
+pub struct ExecutionService<SF: SubgraphServiceFactory> {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_services: Arc<ServiceRegistry>,
+    pub(crate) subgraph_creator: Arc<SF>,
 }
 
-#[buildstructor::buildstructor]
-impl ExecutionService {
-    #[builder]
-    pub fn new(
-        schema: Arc<Schema>,
-        subgraph_services: HashMap<
-            String,
-            Buffer<BoxService<SubgraphRequest, SubgraphResponse, BoxError>, SubgraphRequest>,
-        >,
-    ) -> Self {
+//#[buildstructor::buildstructor]
+impl<SF: SubgraphServiceFactory> ExecutionService<SF> {
+    //#[builder]
+    pub fn new(schema: Arc<Schema>, subgraph_creator: Arc<SF>) -> Self {
         Self {
             schema,
-            subgraph_services: Arc::new(ServiceRegistry::new(subgraph_services)),
+            subgraph_creator,
         }
     }
 }
 
-impl Service<ExecutionRequest> for ExecutionService {
+impl<SF> Service<ExecutionRequest> for ExecutionService<SF>
+where
+    SF: SubgraphServiceFactory,
+{
     type Response = ExecutionResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -81,7 +74,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                     req.query_plan
                         .execute(
                             &context,
-                            &this.subgraph_services,
+                            &this.subgraph_creator,
                             req.originating_request.clone(),
                             &this.schema,
                             sender,
@@ -131,13 +124,16 @@ pub(crate) trait ExecutionServiceFactory:
 }
 
 #[derive(Clone)]
-pub(crate) struct ExecutionCreator {
+pub(crate) struct ExecutionCreator<SF: SubgraphServiceFactory> {
     pub(crate) schema: Arc<Schema>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_services: Arc<ServiceRegistry>,
+    pub(crate) subgraph_creator: Arc<SF>,
 }
 
-impl NewService<ExecutionRequest> for ExecutionCreator {
+impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
+where
+    SF: SubgraphServiceFactory,
+{
     type Service =
         BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
 
@@ -148,7 +144,7 @@ impl NewService<ExecutionRequest> for ExecutionCreator {
                 self.plugins.iter().rev().fold(
                     crate::services::execution_service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_services: self.subgraph_services.clone(),
+                        subgraph_creator: self.subgraph_creator.clone(),
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),
@@ -158,10 +154,10 @@ impl NewService<ExecutionRequest> for ExecutionCreator {
     }
 }
 
-impl ExecutionServiceFactory for ExecutionCreator {
+impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
     type ExecutionService =
         BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
-    type Future = <<ExecutionCreator as NewService<ExecutionRequest>>::Service as Service<
+    type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
         ExecutionRequest,
     >>::Future;
 }

@@ -21,6 +21,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::new_service::NewService;
+use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
@@ -37,7 +38,6 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
 use crate::router_factory::RouterServiceFactory;
-use crate::service_registry::ServiceRegistry;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::ExecutionRequest;
@@ -47,8 +47,6 @@ use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::Schema;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -229,10 +227,7 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
-    subgraph_services: Vec<(
-        String,
-        BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    )>,
+    subgraph_services: Vec<String>,
     introspection: bool,
 }
 
@@ -264,24 +259,8 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_subgraph_service<
-        S: Service<
-                SubgraphRequest,
-                Response = SubgraphResponse,
-                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
-            > + Send
-            + 'static,
-    >(
-        mut self,
-        name: &str,
-        service: S,
-    ) -> PluggableRouterServiceBuilder
-    where
-        S: Clone,
-        <S as Service<SubgraphRequest>>::Future: Send,
-    {
-        self.subgraph_services
-            .push((name.to_string(), BoxService::new(service)));
+    pub fn with_subgraph_service(mut self, name: &str) -> PluggableRouterServiceBuilder {
+        self.subgraph_services.push(name.to_string());
         self
     }
 
@@ -333,7 +312,7 @@ impl PluggableRouterServiceBuilder {
                     |acc, (_, e)| e.query_planning_service(acc),
                 ));
 
-        // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
+        /*// SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
             .subgraph_services
             .into_iter()
@@ -349,13 +328,20 @@ impl PluggableRouterServiceBuilder {
                 (name.clone(), service)
             })
             .collect();
-        let subgraph_services = Arc::new(ServiceRegistry::new(subgraphs));
+
+            let subgraph_services = Arc::new(ServiceRegistry::new(subgraphs));*/
+        let plugins = Arc::new(self.plugins);
+
+        let subgraph_creator = Arc::new(SubgraphCreator::new(
+            self.subgraph_services,
+            plugins.clone(),
+        ));
 
         Ok(RouterCreator {
             query_planner_service,
-            subgraph_services,
+            subgraph_creator,
             schema: self.schema,
-            plugins: Arc::new(self.plugins),
+            plugins,
             apq: APQLayer::default(),
         })
     }
@@ -367,7 +353,7 @@ pub struct RouterCreator {
         BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
         QueryPlannerRequest,
     >,
-    subgraph_services: Arc<ServiceRegistry>,
+    subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
     apq: APQLayer,
@@ -420,7 +406,7 @@ impl RouterCreator {
                             .execution_service_factory(ExecutionCreator {
                                 schema: self.schema.clone(),
                                 plugins: self.plugins.clone(),
-                                subgraph_services: self.subgraph_services.clone(),
+                                subgraph_creator: self.subgraph_creator.clone(),
                             })
                             .schema(self.schema.clone())
                             .build(),

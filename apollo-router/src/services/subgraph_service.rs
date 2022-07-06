@@ -1,5 +1,6 @@
 //! Tower fetcher for subgraphs.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
@@ -23,8 +24,11 @@ use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
+use tower::util::BoxService;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
@@ -33,6 +37,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::error::FetchError;
 use crate::graphql;
+
+use super::Plugins;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -258,6 +264,54 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
             }
         },
         None => Ok(body.into_bytes()),
+    }
+}
+
+pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
+    type SubgraphService: Service<
+            crate::SubgraphRequest,
+            Response = crate::SubgraphResponse,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send;
+    type Future: Send;
+
+    fn new_service(&self, name: &str) -> Option<Self::SubgraphService>;
+}
+
+#[derive(Clone)]
+pub(crate) struct SubgraphCreator {
+    pub(crate) services: HashMap<String, SubgraphService>,
+    pub(crate) plugins: Arc<Plugins>,
+}
+
+impl SubgraphCreator {
+    pub(crate) fn new(services: Vec<String>, plugins: Arc<Plugins>) -> Self {
+        SubgraphCreator {
+            services: services
+                .into_iter()
+                .map(|name| (name.clone(), SubgraphService::new(name)))
+                .collect(),
+            plugins,
+        }
+    }
+}
+impl SubgraphServiceFactory for SubgraphCreator {
+    type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+    type Future =
+        <BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> as Service<
+            crate::SubgraphRequest,
+        >>::Future;
+
+    fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
+        self.services.get(name).map(|service| {
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service.clone().boxed(), |acc, (_, e)| {
+                    e.subgraph_service(&name, acc)
+                })
+        })
     }
 }
 

@@ -5,7 +5,6 @@ use futures::stream::BoxStream;
 use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;
-use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower_service::Service;
 
@@ -20,7 +19,6 @@ use crate::services::Plugins;
 use crate::services::RouterCreator;
 use crate::PluggableRouterServiceBuilder;
 use crate::Schema;
-use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
@@ -74,9 +72,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxCloneService::new(SubgraphService::new(name.to_string()));
-
-            builder = builder.with_subgraph_service(name, subgraph_service);
+            builder = builder.with_subgraph_service(name);
         }
 
         // Process the plugins.
