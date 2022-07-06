@@ -1,0 +1,26 @@
+{
+  "kind": "Sequence",
+  "nodes": [
+    {
+      "kind": "Fetch",
+      "serviceName": "outer",
+      "variableUsages": [],
+      "operation": "mutation{outerMutation{mutation{__typename}}}",
+      "operationKind": "mutation"
+    },
+    {
+      "kind": "Flatten",
+      "path": [
+        "outerMutation",
+        "mutation"
+      ],
+      "node": {
+        "kind": "Fetch",
+        "serviceName": "inner",
+        "variableUsages": [],
+        "operation": "mutation{...on Mutation{innerMutation}}",
+        "operationKind": "mutation"
+      }
+    }
+  ]
+}
