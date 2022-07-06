@@ -42,7 +42,7 @@
       "Overview": "/customizations/overview",
       "Native Rust plugins": "/customizations/native",
       "Custom binary": "/customizations/custom-binary",
-      "Rhai scripts (experimental)": "/customizations/rhai"
+      "Rhai scripts": "/customizations/rhai"
     },
     "Third-Party Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",

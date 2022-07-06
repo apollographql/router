@@ -19,6 +19,7 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
@@ -452,7 +453,8 @@ pub struct Rhai {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Conf {
-    filename: PathBuf,
+    scripts: Option<PathBuf>,
+    main: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -460,8 +462,22 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        let engine = Arc::new(Rhai::new_rhai_engine());
-        let ast = engine.compile_file(configuration.filename)?;
+        let scripts_path = match configuration.scripts {
+            Some(path) => path,
+            None => "./rhai".into(),
+        };
+
+        let main_file = match configuration.main {
+            Some(main) => main,
+            None => "main.rhai".to_string(),
+        };
+
+        let mut main = scripts_path.clone();
+        main.push(&main_file);
+        eprintln!("main: {:?}", &main);
+        eprintln!("scripts: {:?}", &scripts_path);
+        let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
+        let ast = engine.compile_file(main)?;
         Ok(Self { ast, engine })
     }
 
@@ -1330,8 +1346,15 @@ impl Rhai {
         Ok(())
     }
 
-    fn new_rhai_engine() -> Engine {
+    fn new_rhai_engine(path: Option<PathBuf>) -> Engine {
         let mut engine = Engine::new();
+        // If we pass in a path, use it to configure our engine
+        // with a FileModuleResolver which allows import to work
+        // in scripts.
+        if let Some(scripts) = path {
+            let resolver = FileModuleResolver::new_with_path(scripts);
+            engine.set_module_resolver(resolver);
+        }
 
         // The macro call creates a Rhai module from the plugin module.
         let module = exported_module!(router_plugin_mod);
@@ -1619,7 +1642,7 @@ impl Rhai {
     }
 }
 
-register_plugin!("experimental", "rhai", Rhai);
+register_plugin!("apollo", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
@@ -1655,10 +1678,10 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("experimental.rhai")
+            .get("apollo.rhai")
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
             )
             .await
             .unwrap();
@@ -1708,10 +1731,10 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("experimental.rhai")
+            .get("apollo.rhai")
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
             )
             .await
             .unwrap();
@@ -1773,7 +1796,7 @@ mod tests {
         let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
         let _guard = tracing::dispatcher::set_default(&subscriber);
-        let engine = Rhai::new_rhai_engine();
+        let engine = Rhai::new_rhai_engine(None);
         let input_logs = vec![
             r#"log_trace("trace log")"#,
             r#"log_debug("debug log")"#,
@@ -1814,7 +1837,7 @@ mod tests {
         let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
         let _guard = tracing::dispatcher::set_default(&subscriber);
-        let engine = Rhai::new_rhai_engine();
+        let engine = Rhai::new_rhai_engine(None);
         engine
             .eval::<()>(r#"print("info log")"#)
             .expect("it logged a message");
