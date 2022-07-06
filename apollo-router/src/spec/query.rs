@@ -4909,4 +4909,101 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn nested_fragment_on_union() {
+        let schema = "type Query {
+            basket: GmBasket
+        }
+
+        type GmBasket {
+            id: ID!
+            settings: ServiceSettings!
+        }
+
+        type ServiceSettings {
+            location: ServiceLocation
+        }
+
+        type NewAccountLocation {
+            id: ID!
+            label: String
+            address: Address!
+        }
+
+        union ServiceLocation = AccountLocation | Address | NewAccountLocation
+
+        type AccountLocation {
+            id: ID
+            address: Address
+            instructions: String
+        }
+
+        type Address {
+            city: String
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            "query getSettings {
+                basket {
+                    ...Basket
+                }
+            }
+
+            fragment Basket on GmBasket {
+                id
+                settings {
+                    location {
+                        ...SettingsLocation
+                        ... on AccountLocation {
+                            instructions
+                        }
+                    }
+                }
+            }
+
+            fragment SettingsLocation on ServiceLocation {
+                ... on Address {
+                    city
+                }
+                ... on AccountLocation {
+                    id
+                    address {
+                        city
+                    }
+                }
+                ... on NewAccountLocation {
+                    id
+                    address {
+                        city
+                    }
+                }
+            }",
+            json! {{
+                "basket": {
+                    "id": "1234",
+                    "settings": {
+                        "location": {
+                            "__typename": "AccountLocation",
+                            "id": "1234"
+                        }
+                    }
+                }
+            }},
+            None,
+            json! {{
+                "basket": {
+                    "id": "1234",
+                    "settings": {
+                        "location": {
+                            "id": "1234",
+                            "address": null,
+                            "instructions": null
+                        }
+                    }
+                }
+            }},
+        );
+    }
 }
