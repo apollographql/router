@@ -724,6 +724,16 @@ impl Operation {
     }
 
     fn is_introspection(&self) -> bool {
+        // If the only field is `__typename` it's considered as an introspection query
+        if self.selection_set.len() == 1
+            && self
+                .selection_set
+                .get(0)
+                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .unwrap_or_default()
+        {
+            return true;
+        }
         self.selection_set.iter().all(|sel| match sel {
             Selection::Field { name, .. } => {
                 let name = name.as_str();
@@ -4838,7 +4848,12 @@ mod tests {
               }
             }
           }}";
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
 
         let query = "query {
             __schema {
@@ -4848,7 +4863,23 @@ mod tests {
             }
           }";
 
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
+
+        let query = "query {
+            __typename
+          }";
+
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
     }
 
     #[test]

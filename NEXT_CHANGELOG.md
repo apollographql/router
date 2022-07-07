@@ -45,6 +45,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+
+A query with at the root only one selection field equals to `__typename` must be considered as an introspection query
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
+
 ### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
