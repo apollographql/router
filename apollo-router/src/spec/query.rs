@@ -459,6 +459,7 @@ impl Query {
                             input_type == fragment.type_condition.as_str()
                                 || schema.is_subtype(&fragment.type_condition, input_type)
                         } else {
+                            // If the type condition is an interface and the current known type implements it
                             known_type
                                 .as_ref()
                                 .map(|k| schema.is_subtype(&fragment.type_condition, k))
