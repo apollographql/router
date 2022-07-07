@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
@@ -11,13 +10,11 @@ use serde::Deserialize;
 use tracing::Instrument;
 
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::service_registry::ServiceRegistry;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
 
@@ -99,21 +96,6 @@ impl QueryPlan {
     pub fn with_options(mut self, options: QueryPlanOptions) -> Self {
         self.options = options;
         self
-    }
-
-    /// Validate the entire request for variables and services used.
-    #[tracing::instrument(skip_all, level = "debug", name = "validate")]
-    pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
-        let mut early_errors = Vec::new();
-        for err in self.root.validate_services_against_plan(service_registry) {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
-        if !early_errors.is_empty() {
-            Err(Response::builder().errors(early_errors).build())
-        } else {
-            Ok(())
-        }
     }
 
     /// Execute the plan and return a [`Response`].
@@ -280,6 +262,7 @@ impl PlanNode {
         })
     }
 
+    #[cfg(test)]
     /// Retrieves all the services used across all plan nodes.
     ///
     /// Note that duplicates are not filtered.
@@ -291,29 +274,6 @@ impl PlanNode {
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
         }
-    }
-
-    /// Recursively validate a query plan node making sure that all services are known before we go
-    /// for execution.
-    ///
-    /// This simplifies processing later as we can always guarantee that services are configured for
-    /// the plan.
-    ///
-    /// # Arguments
-    ///
-    ///  *   `plan`: The root query plan node to validate.
-    fn validate_services_against_plan(
-        &self,
-        service_registry: &ServiceRegistry,
-    ) -> Vec<FetchError> {
-        self.service_usage()
-            .filter(|service| !service_registry.contains(service))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .map(|service| FetchError::ValidationUnknownServiceError {
-                service: service.to_string(),
-            })
-            .collect::<Vec<_>>()
     }
 }
 
@@ -642,6 +602,7 @@ pub(crate) mod fetch {
             }
         }
 
+        #[cfg(test)]
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
         }
