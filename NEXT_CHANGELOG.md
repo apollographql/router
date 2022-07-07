@@ -51,6 +51,12 @@ When the subgraph doesn't return the typename and the type condition of a fragme
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
 
+### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+
+A query with at the root only one selection field equals to `__typename` must be considered as an introspection query
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
+
 ### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
@@ -59,4 +65,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 
 ## 🛠 Maintenance
+
+### execute the query plan's first response directly  ([PR #1357](https://github.com/apollographql/router/issues/1357))
+
+The query plan was entirely executed in a spawned task to prepare for the `@defer` implementation, but we can actually
+generate the first response right inside the same future.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
+
 ## 📚 Documentation
