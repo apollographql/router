@@ -53,4 +53,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 
 ## 🛠 Maintenance
+
+### execute the query plan's first response directly  ([PR #1357](https://github.com/apollographql/router/issues/1357))
+
+The query plan was entirely executed in a spawned task to prepare for the `@defer` implementation, but we can actually
+generate the first response right inside the same future.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
+
 ## 📚 Documentation
