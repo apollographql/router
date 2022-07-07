@@ -148,6 +148,7 @@ where
         }
     }
 
+    /*
     /// sends the value without storing it into the cache
     pub(crate) async fn send(self, value: V) {
         if let EntryInner::First {
@@ -157,9 +158,10 @@ where
             let _ = sender.send(value);
             cache.remove_wait(&key).await;
         }
-    }
+    }*/
 }
 
+/*
 async fn example_cache_usage(k: String, cache: &mut DedupCache<String, String>) -> String {
     let entry = cache.get(&k).await;
 
@@ -172,3 +174,4 @@ async fn example_cache_usage(k: String, cache: &mut DedupCache<String, String>) 
         entry.get().await.unwrap()
     }
 }
+*/
