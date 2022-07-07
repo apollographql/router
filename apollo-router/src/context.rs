@@ -8,6 +8,7 @@ use std::sync::Arc;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -15,6 +16,8 @@ use crate::json_ext::Value;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
+
+static SHARD_AMOUNT: OnceCell<usize> = OnceCell::new();
 
 /// Context for a [`crate::http_ext::Request`]
 ///
@@ -35,8 +38,12 @@ pub struct Context {
 impl Context {
     /// Create a new context.
     pub fn new() -> Self {
+        let shard_amount = SHARD_AMOUNT.get_or_init(|| {
+            (std::thread::available_parallelism().map_or(1, usize::from) * 4).next_power_of_two()
+        });
+
         Context {
-            entries: Default::default(),
+            entries: Arc::new(DashMap::with_shard_amount(*shard_amount)),
         }
     }
 }
