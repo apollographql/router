@@ -87,7 +87,7 @@ impl PluginTestHarness {
     ///
     #[builder]
     pub async fn new<P: Plugin>(
-        mut plugin: P,
+        plugin: P,
         schema: IntoSchema,
         mock_router_service: Option<MockRouterService>,
         mock_query_planner_service: Option<MockQueryPlanningService>,

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.9.5"
+version = "0.10.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -92,8 +92,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.7"
 prometheus = "0.13"
-# Pinned to git revision until next rhai release
-rhai = { git="https://github.com/rhaiscript/rhai.git", features = ["sync", "serde", "internals"], rev="6120b7a01a84a8d35d21fcdf2c44432455b68cdb" }
+rhai = { version="1.8.0", features = ["sync", "serde", "internals"] }
 regex = "1.5.6"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",

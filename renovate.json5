@@ -3,7 +3,49 @@
     "config:base",
     ":semanticCommits",
   ],
+  // Renovate Regex Manager Configuration
+  //
+  // A slight variation on the pattern documented within Renovate's docs:
+  //
+  //   => https://docs.renovatebot.com/modules/manager/regex/
+  //
+  // This powers a mechanism that allows Renovate (the package dependency
+  // manager that we use within this repository) to bump packages that live
+  // outside of typical package manifests (e.g., `package.json`) and instead
+  // any number of files.
+  //
+  // This pattern can be conceivably adapted to any pattern to allow the
+  // "Renovation" of nearly anything.  This is largely what Renovate does
+  // behind the scenes for various datasources anyhow (e.g., Dockerfiles).
+  //
+  // You can find a list of data-source specific details on this page:
+  //
+  //   => https://docs.renovatebot.com/modules/datasource/
+  //
+  "regexManagers": [
+    {
+      "fileMatch": [
+        "^\\.tool-versions$",
+        "^dockerfiles/diy/dockerfiles/Dockerfile\\.repo$",
+        "^rust-toolchain\\.toml$",
+        "^docs/.*?\\.mdx$"
+      ],
+      "matchStrings": [
+        "(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b"
+      ],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
+    {
+      // This "rust" name maps to the Docker Hub "rust" image above on account
+      // of the `regexManagers[0]` defined above being `datasourceTemplate` = `docker`.
+      "matchPackageNames": ["rust"],
+      "matchManagers": "regex",
+      "groupName": "rustc",
+      "branchName": "{{{branchPrefix}}}rustc"
+    },
     // Bunch up all non-major npm dependencies into a single PR.  In the common case
     // where the upgrades apply cleanly, this causes less noise and is resolved faster
     // than starting a bunch of upgrades in parallel for what may turn out to be

@@ -138,19 +138,19 @@ where
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let mut service = self.service.clone();
+        let service = self.service.clone();
 
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
 
             Box::pin(async move { Self::dedup(service, wait_map, request).await })
         } else {
-            Box::pin(async move { service.call(request).await })
+            Box::pin(async move { service.oneshot(request).await })
         }
     }
 }

@@ -50,7 +50,7 @@ impl Plugin for IncludeSubgraphErrors {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -207,7 +207,7 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let (router, _) = builder.build().await.expect("should build");
+        let router = builder.build().await.expect("should build").test_service();
 
         router
     }

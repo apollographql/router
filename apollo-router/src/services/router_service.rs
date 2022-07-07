@@ -14,7 +14,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -22,12 +21,14 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::new_service::NewService;
 use super::QueryPlannerContent;
 use crate::cache::DedupCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
+use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -36,6 +37,7 @@ use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
+use crate::router_factory::RouterServiceFactory;
 use crate::services::execution_service::ExecutionService;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQLayer;
@@ -297,10 +299,11 @@ impl PluggableRouterServiceBuilder {
         service: S,
     ) -> PluggableRouterServiceBuilder
     where
+        S: Clone,
         <S as Service<SubgraphRequest>>::Future: Send,
     {
         self.subgraph_services
-            .push((name.to_string(), service.boxed()));
+            .push((name.to_string(), BoxService::new(service)));
         self
     }
 
@@ -309,15 +312,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub async fn build(
-        mut self,
-    ) -> Result<
-        (
-            BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-            Plugins,
-        ),
-        crate::error::ServiceBuildError,
-    > {
+    pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
+        &mut self.plugins
+    }
+
+    pub async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -395,27 +394,91 @@ impl PluggableRouterServiceBuilder {
 
         let apq = APQLayer::with_cache(DedupCache::new(512).await);
 
-        // Router service takes a crate::Request and outputs a crate::Response
-        // NB: Cannot use .buffer() here or the code won't compile...
-        let router_service = Buffer::new(
-            ServiceBuilder::new()
-                .layer(apq)
-                .layer(EnsureQueryPresence::default())
-                .service(
-                    self.plugins.iter_mut().rev().fold(
-                        RouterService::builder()
-                            .query_planner_service(query_planner_service)
-                            .query_execution_service(execution_service)
-                            .schema(self.schema)
-                            .build()
-                            .boxed(),
-                        |acc, (_, e)| e.router_service(acc),
-                    ),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        Ok(RouterCreator {
+            query_planner_service,
+            execution_service,
+            schema: self.schema,
+            plugins: Arc::new(self.plugins),
+            apq,
+        })
+    }
+}
 
-        Ok((router_service.boxed_clone(), self.plugins))
+#[derive(Clone)]
+pub struct RouterCreator {
+    query_planner_service: Buffer<
+        BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+        QueryPlannerRequest,
+    >,
+    execution_service: Buffer<
+        BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
+        ExecutionRequest,
+    >,
+    schema: Arc<Schema>,
+    plugins: Arc<Plugins>,
+    apq: APQLayer,
+}
+
+impl NewService<Request<graphql::Request>> for RouterCreator {
+    type Service = BoxService<
+        Request<graphql::Request>,
+        crate::http_ext::Response<BoxStream<'static, Response>>,
+        BoxError,
+    >;
+    fn new_service(&self) -> Self::Service {
+        BoxService::new(
+            self.make()
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
+                .map_response(|response| response.response),
+        )
+    }
+}
+
+impl RouterServiceFactory for RouterCreator {
+    type RouterService = BoxService<
+        Request<graphql::Request>,
+        crate::http_ext::Response<BoxStream<'static, Response>>,
+        BoxError,
+    >;
+
+    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
+        Request<graphql::Request>,
+    >>::Future;
+}
+
+impl RouterCreator {
+    fn make(
+        &self,
+    ) -> impl Service<
+        RouterRequest,
+        Response = RouterResponse<BoxStream<'static, Response>>,
+        Error = BoxError,
+        Future = BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>,
+    > + Send
+           + 'static {
+        ServiceBuilder::new()
+            .layer(self.apq.clone())
+            .layer(EnsureQueryPresence::default())
+            .service(
+                self.plugins.iter().rev().fold(
+                    RouterService::builder()
+                        .query_planner_service(self.query_planner_service.clone())
+                        .query_execution_service(self.execution_service.clone())
+                        .schema(self.schema.clone())
+                        .build()
+                        .boxed(),
+                    |acc, (_, e)| e.router_service(acc),
+                ),
+            )
+    }
+
+    pub fn test_service(
+        &self,
+    ) -> tower::util::BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, Response>>,
+        BoxError,
+    > {
+        Buffer::new(self.make(), 512).boxed_clone()
     }
 }

@@ -1,4 +1,5 @@
 # Use the rust build image from docker as our base
+# renovate-automation: rustc version
 FROM rust:1.61.0 as build
 
 # Set our working directory for the build
@@ -27,11 +28,17 @@ RUN mkdir -p /dist/config && \
 # Copy configuration for docker image
 COPY dockerfiles/router.yaml /dist/config
 
+# Required so we can copy in libz.so.1
+FROM --platform=linux/amd64 gcr.io/distroless/java17-debian11 as libz-required
+
 # Final image uses distroless. Feel free to change this to an image that suits your needs.
 FROM gcr.io/distroless/cc-debian11
 
 # Set a label for our image
 LABEL org.opencontainers.image.authors="ApolloGraphQL https://github.com/apollographql/router"
+
+# Copy in the extracted/created files
+COPY --from=libz-required /lib/x86_64-linux-gnu/libz.so.1 /lib/x86_64-linux-gnu/libz.so.1
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
