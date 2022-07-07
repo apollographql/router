@@ -75,9 +75,11 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
     value: "indeed"
 ```
 
-## Rules Ordering
+## Rule ordering
 
-Rules are applied in the order in which they are declared. For example:
+Header rules are applied in the same order they're declared, and later rules can _override_ the effects of earlier rules. Consider this example:
+
+<p style="margin-bottom: 0;">❌</p>
 
 ```yaml title="bad_configuration.yaml"
 headers:
@@ -88,7 +90,11 @@ all:
     matching: .*
 ```
 
-In this example, the header named test would be removed from the propagation list, but then immediately the propagate rule would match and ensure it was added back to the list. This is clearly undesirable. To do this correctly, ensure that the propagate rule is specified first in your configuration:
+In this example, first any header named `test` is removed from the list of headers to propagate. However, _the list of headers to propagate is currently empty!_ Next, the `propagate` rule adds _all_ headers to the propagation list, _including_ `test`.
+
+To correctly remove a header from the propagation list, make sure to define your `remove` rule _after_ any `propagate` rules:
+
+<p style="margin-bottom: 0;">✅</p>
 
 ```yaml title="good_configuration.yaml"
 headers:
@@ -99,7 +105,7 @@ all:
     named: "test"
 ```
 
-This would result in adding all headers to the propagation list, then removing the header named "test", which is the desired outcome.
+With this ordering, first all headers are added to the propagation list, then the `test` header is removed.
 
 ## Example
 

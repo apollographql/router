@@ -18,7 +18,7 @@ telemetry:
       enabled: true
 ```
 
-Assuming you are running locally:
+Assuming you're running locally:
 
 1. Run a query against the router.
 2. Navigate to [http://localhost:4000/plugins/apollo.telemetry/prometheus](http://localhost:4000/plugins/apollo.telemetry/prometheus) to see something like:
@@ -31,9 +31,9 @@ http_request_duration_seconds_bucket{le="0.9"} 1
 ---SNIP---
 ```
 
-Note that if you have not run a query against the router you will see a blank page as no metrics will have been generated yet!
+> Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
-Here is the list of available metrics you'll have using Prometheus:
+The following metrics are available using Prometheus:
 
 - HTTP router request duration (`http_request_duration_seconds_bucket`)
 - HTTP request duration by subgraph (`http_request_duration_seconds_bucket` with attribute `subgraph`)
@@ -42,7 +42,7 @@ Here is the list of available metrics you'll have using Prometheus:
 
 ## Using OpenTelemetry Collector
 
-You may send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
+You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -74,17 +74,23 @@ telemetry:
       timeout: 2s
 ```
 
-## Add custom attributes/labels
+## Adding custom attributes/labels
 
-If you need to add attributes/labels on your generated metrics, for example add a custom attributes/labels coming from a specific header in the original HTTP router request, or insert custom attributes/labels on every metrics.
-You also have access to the body of subgraph/router request/response. And be able to add a custom attribute coming from the context filled in the plugins chain.
+You can add custom attributes (OpenTelemetry) and labels (Prometheus) to your generated metrics. You can apply these across _all_ requests, or you can selectively apply them based on the details of a particular request. These details include:
+
+* The presence of a particular HTTP header
+* The value at a particular JSON path within a request or response body (either from a subgraph or from the router itself)
+    * [See examples of querying a JSON path.](#example-json-path-queries)
+* A custom value provided via the router plugin context
+
+Examples of all of these are shown in the file below:
 
 ```yaml title="router.yaml"
 telemetry:
   metrics:
     common:
       attributes:
-        router:
+        router: # Attribute configuration for requests to/responses from the router
           static:
             - name: "version"
               value: "v1.0.0"
@@ -96,16 +102,16 @@ telemetry:
               - named: "x-custom-header-to-add"
           response:
             body:
-              # Take element from the response body of the router located at this path
+              # Apply the value of the provided path of the router's response body as an attribute
               - path: .errors[0].extensions.status
                 name: error_from_body
           context:
-            # Take element from context in plugin chains and add it in attributes
+            # Apply the indicated element from the plugin chain's context as an attribute
             - named: my_key
-        subgraph:
+        subgraph: # Attribute configuration for requests to/responses from subgraphs
           all:
             static:
-              # Always insert on all metrics for all subgraphs
+              # Always apply this attribute to all metrics for all subgraphs
               - name: kind
                 value: subgraph_request
           subgraphs:
@@ -114,15 +120,15 @@ telemetry:
                 header:
                   - named: "x-custom-header"
                 body:
-                  # Take element from the request body of the router located at this path (here it's the query)
+                  # Apply the value of the provided path of the router's request body as an attribute (here it's the query)
                   - path: .query
                     name: query
                     default: UNKNOWN
 ```
 
-### Example of JSON Query to extract data from the body
+### Example JSON path queries
 
-If you have this data:
+Let's say you have a JSON request body with the following structure:
 
 ```json
 {
@@ -133,18 +139,23 @@ If you have this data:
       "array": [3, 2, 1]
     },
     {
-      "whatever": true
+      "isImportant": true
     }
   ]
 }
 ```
 
-And want to fetch the field `whatever` here is the syntax `.items[1].whatever`. You can also try to fetch the field `x` by using this query `.items[0].wanted.x`. A JSON Query is always starting with a dot.
+To fetch the value of the field `isImportant`, the corresponding path is `.items[1].isImportant`.
 
-## Add custom resources
+To fetch the value of the field `x`, the corresponding path is `.items[0].wanted.x`.
 
-Resources are almost like attributes but there are more globals. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics. It could be pretty useful to set
-a service name for example to let you more easily find metrics related to a specific service.
+JSON path queries always begin with a period `.`
+
+## Adding custom resources
+
+Resources are similar to [attributes](#adding-custom-attributeslabels), but there are more globals. They're configured directly on the metrics exporter, which means they're always present on each of your metrics.
+
+As an example, it can be useful to set a `service.name` resource to help you identify metrics related to a particular service:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -155,5 +166,6 @@ telemetry:
         service.name: "apollo-router"
 ```
 
-> Check these [conventions](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md) if you want to provide some standard resources following the opentelemtry specs.
-> For example if you want to use Datadog agent and specify a service name you should use `service.name` as a name for the resource as mentioned in the specs.
+> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+>
+> For example, if you want to use a Datadog agent and specify a service name, you should set the `service.name` resource as shown above and described in the conventions document.
