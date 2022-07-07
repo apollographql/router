@@ -395,6 +395,7 @@ impl Query {
                     skip,
                     include,
                     known_type,
+                    known_type_name,
                 } => {
                     if skip.should_skip(variables).unwrap_or(false) {
                         continue;
@@ -411,6 +412,9 @@ impl Query {
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
                             || schema.is_subtype(type_condition, input_type)
+                    } else if let Some(known_type_name) = known_type_name {
+                        // If the type condition is an interface and the current known type implements it
+                        schema.is_subtype(type_condition, known_type_name)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
@@ -452,6 +456,9 @@ impl Query {
                             // input type is a subtype of the fragment's type condition (interface, union)
                             input_type == fragment.type_condition.as_str()
                                 || schema.is_subtype(&fragment.type_condition, input_type)
+                        } else if let Some(known_type) = known_type {
+                            // If the type condition is an interface and the current known type implements it
+                            schema.is_subtype(&fragment.type_condition, known_type)
                         } else {
                             known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
@@ -543,9 +550,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip: _,
-                    include: _,
-                    known_type: _,
+                    ..
                 } => {
                     // top level objects will not provide a __typename field
                     if type_condition.as_str() != schema.root_operation_name(operation.kind) {
@@ -4914,12 +4919,16 @@ mod tests {
     }
 
     #[test]
-    fn fragment_on_interface_bis() {
+    fn fragment_on_interface_without_typename() {
         let schema = "type Query {
-            inStore(key: String!): InStore
+            inStore(key: String!): InStore!
         }
 
-        type InStore implements CartQueryInterface
+        type InStore implements CartQueryInterface {
+            cart: Cart
+            carts: CartQueryResult!
+        }
+
         interface CartQueryInterface {
             carts: CartQueryResult!
             cart: Cart
@@ -4967,7 +4976,41 @@ mod tests {
                         "results": [{"id": "id"}],
                         "total": 1234
                     },
+                }
+            }},
+        );
+
+        // With inline fragment
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ... on CartQueryInterface {
+                        carts {
+                            results {
+                                id
+                            }
+                            total
+                        }
+                    }
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
                     "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
                 }
             }},
         );
