@@ -21,6 +21,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use super::DynPlugin;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -37,8 +38,6 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::RouterService;
 use crate::Schema;
-
-use super::DynPlugin;
 
 pub struct PluginTestHarness {
     router_service:
@@ -220,14 +219,14 @@ impl PluginTestHarness {
 
 #[derive(Clone)]
 pub struct MockSubgraphFactory {
-    subgraphs: HashMap<
+    pub(crate) subgraphs: HashMap<
         String,
         Buffer<
             BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>,
             SubgraphRequest,
         >,
     >,
-    plugins: Arc<Plugins>,
+    pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphServiceFactory for MockSubgraphFactory {

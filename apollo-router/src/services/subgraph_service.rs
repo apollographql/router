@@ -9,7 +9,9 @@ use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipEncoder;
 use async_compression::tokio::write::ZlibEncoder;
+use dashmap::DashMap;
 use futures::future::BoxFuture;
+use futures::lock::Mutex;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
@@ -20,10 +22,12 @@ use http::HeaderValue;
 use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
+use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
 use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -36,12 +40,11 @@ use tracing::Instrument;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::error::FetchError;
-use crate::graphql;
-
 use super::Plugins;
 use super::SubgraphRequest;
 use super::SubgraphResponse;
+use crate::error::FetchError;
+use crate::graphql;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -270,22 +273,29 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-pub trait SubgraphServiceFactory: Clone + Send + 'static {
+pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
     type SubgraphService: Service<
             crate::SubgraphRequest,
             Response = crate::SubgraphResponse,
             Error = BoxError,
             Future = Self::Future,
-        > + Send;
-    type Future: Send;
+        > + Send
+        + 'static;
+    type Future: Send + 'static;
 
     fn new_service(&self, name: &str) -> Option<Self::SubgraphService>;
 }
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCreator {
-    pub(crate) services:
-        Arc<HashMap<String, BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>>>,
+    pub(crate) services: Arc<
+        HashMap<
+            String,
+            //Arc<
+            Arc<Mutex<BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>>>,
+        >,
+    >,
+    //>>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
@@ -298,11 +308,17 @@ impl SubgraphCreator {
         plugins: Arc<Plugins>,
     ) -> Self {
         SubgraphCreator {
-            services: Arc::new(services.into_iter().collect()),
+            services: Arc::new(
+                services
+                    .into_iter()
+                    .map(|(name, service)| (name, Arc::new(Mutex::new(service))))
+                    .collect(),
+            ),
             plugins,
         }
     }
 }
+
 impl SubgraphServiceFactory for SubgraphCreator {
     type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
     type Future =
@@ -311,14 +327,15 @@ impl SubgraphServiceFactory for SubgraphCreator {
         >>::Future;
 
     fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
-        self.services.get(name).map(|service| {
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service.clone().boxed(), |acc, (_, e)| {
-                    e.subgraph_service(&name, acc)
-                })
-        })
+        self.services
+            .get(name)
+            .and_then(|service| service.try_lock().map(|s| s.clone().boxed()))
+            .map(|service| {
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc))
+            })
     }
 }
 

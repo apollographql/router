@@ -705,9 +705,8 @@ mod tests {
     use tower::ServiceBuilder;
     use tower::ServiceExt;
 
-    use crate::plugin::test::MockSubgraphFactory;
-
     use super::*;
+    use crate::plugin::test::MockSubgraphFactory;
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")

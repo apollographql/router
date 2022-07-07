@@ -26,7 +26,7 @@ use crate::Schema;
 /// Instances of this traits are used by the HTTP server to generate a new
 /// RouterService on each request
 pub(crate) trait RouterServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + 'static
+    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
     type RouterService: Service<
             Request<graphql::Request>,
