@@ -15,7 +15,6 @@ use std::task::Poll;
 use std::time::Duration;
 
 use futures::Future;
-use tokio::time::Instant;
 use tokio::time::Sleep;
 use tower::Service;
 
