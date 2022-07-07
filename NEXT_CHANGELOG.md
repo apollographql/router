@@ -23,6 +23,22 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
+# [0.10.2] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+
+### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+
+This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
+
+By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
+
+
+## 📚 Documentation
+
+
 # [0.10.1] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
