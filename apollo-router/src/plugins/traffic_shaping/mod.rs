@@ -260,6 +260,7 @@ mod test {
 
     use futures::stream::BoxStream;
     use once_cell::sync::Lazy;
+    use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::util::BoxCloneService;
@@ -268,6 +269,7 @@ mod test {
     use super::*;
     use crate::graphql::Response;
     use crate::json_ext::Object;
+    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::PluggableRouterServiceBuilder;
@@ -458,5 +460,80 @@ mod test {
             TrafficShaping::merge_config(None, config.subgraphs.get("products")).as_ref(),
             config.subgraphs.get("products")
         );
+    }
+
+    #[tokio::test]
+    async fn it_rate_limit_subgraph_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        subgraphs:
+            test:
+                rate_limit:
+                    num: 1
+                    per: 10sec
+                timeout: 1sec
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+
+        let test_service = MockSubgraph::new(HashMap::new());
+
+        let _response = plugin
+            .subgraph_service("test", test_service.clone().boxed())
+            .oneshot(SubgraphRequest::fake_builder().build())
+            .await
+            .unwrap();
+        let _response = plugin
+            .subgraph_service("test", test_service.clone().boxed())
+            .oneshot(SubgraphRequest::fake_builder().build())
+            .await
+            .expect_err("should be in error due to a timeout and rate limit");
+        let _response = plugin
+            .subgraph_service("another", test_service.boxed())
+            .oneshot(SubgraphRequest::fake_builder().build())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_rate_limit_router_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        router:
+            rate_limit:
+                num: 1
+                per: 10sec
+            timeout: 1sec
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let mut mock_service = MockRouterService::new();
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(RouterResponse::fake_builder()
+                .data(json!({ "test": 1234_u32 }))
+                .build()
+                .unwrap()
+                .boxed())
+        });
+        let mock_service = mock_service.build();
+
+        let _response = plugin
+            .router_service(mock_service.clone().boxed())
+            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        assert!(plugin
+            .router_service(mock_service.boxed())
+            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .is_err());
     }
 }
