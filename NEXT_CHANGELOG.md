@@ -61,4 +61,11 @@ generate the first response right inside the same future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
 
+### Do not recalculate DashMap's default shard amount on every new map [PR #1372](https://github.com/apollographql/router/pull/1372)
+
+This removes one syscall per new request created
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1372
+
+
 ## 📚 Documentation
