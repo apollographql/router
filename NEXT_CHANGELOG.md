@@ -45,6 +45,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+
+When the subgraph doesn't return the typename and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
+
 ### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
 
 A query with at the root only one selection field equals to `__typename` must be considered as an introspection query
