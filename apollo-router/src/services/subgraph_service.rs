@@ -9,9 +9,7 @@ use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipEncoder;
 use async_compression::tokio::write::ZlibEncoder;
-use dashmap::DashMap;
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
@@ -22,13 +20,10 @@ use http::HeaderValue;
 use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
-use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
@@ -41,8 +36,6 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::Plugins;
-use super::SubgraphRequest;
-use super::SubgraphResponse;
 use crate::error::FetchError;
 use crate::graphql;
 
@@ -288,34 +281,41 @@ pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCreator {
-    pub(crate) services: Arc<
-        HashMap<
-            String,
-            //Arc<
-            Arc<Mutex<BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>>>,
-        >,
-    >,
-    //>>,
+    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
+
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphCreator {
     pub(crate) fn new(
-        services: Vec<(
-            String,
-            BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>,
-        )>,
+        services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
         SubgraphCreator {
-            services: Arc::new(
-                services
-                    .into_iter()
-                    .map(|(name, service)| (name, Arc::new(Mutex::new(service))))
-                    .collect(),
-            ),
+            services: Arc::new(services.into_iter().collect()),
             plugins,
         }
+    }
+}
+
+/// make new instances of the subgraph service
+///
+/// there can be multiple instances of that service executing at any given time
+pub trait MakeSubgraphService: Send + Sync + 'static {
+    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+}
+
+impl<S> MakeSubgraphService for S
+where
+    S: Service<crate::SubgraphRequest, Response = crate::SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S as Service<crate::SubgraphRequest>>::Future: Send,
+{
+    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> {
+        self.clone().boxed()
     }
 }
 
@@ -327,15 +327,13 @@ impl SubgraphServiceFactory for SubgraphCreator {
         >>::Future;
 
     fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
-        self.services
-            .get(name)
-            .and_then(|service| service.try_lock().map(|s| s.clone().boxed()))
-            .map(|service| {
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc))
-            })
+        self.services.get(name).map(|service| {
+            let service = service.make();
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc))
+        })
     }
 }
 

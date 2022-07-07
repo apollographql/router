@@ -13,7 +13,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -22,12 +21,11 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::new_service::NewService;
+use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use super::SubgraphRequest;
-use super::SubgraphResponse;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -230,10 +228,7 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
-    subgraph_services: Vec<(
-        String,
-        BoxCloneService<SubgraphRequest, SubgraphResponse, BoxError>,
-    )>,
+    subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     introspection: bool,
 }
 
@@ -268,20 +263,13 @@ impl PluggableRouterServiceBuilder {
     pub fn with_subgraph_service<S>(
         mut self,
         name: &str,
-        service: S,
+        service_maker: S,
     ) -> PluggableRouterServiceBuilder
     where
-        S: Service<
-                SubgraphRequest,
-                Response = SubgraphResponse,
-                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
-            > + Clone
-            + Send
-            + 'static,
-        <S as tower_service::Service<SubgraphRequest>>::Future: std::marker::Send,
+        S: MakeSubgraphService,
     {
         self.subgraph_services
-            .push((name.to_string(), BoxCloneService::new(service)));
+            .push((name.to_string(), Arc::new(service_maker)));
         self
     }
 
