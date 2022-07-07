@@ -332,7 +332,7 @@ impl SubgraphServiceFactory for SubgraphCreator {
             self.plugins
                 .iter()
                 .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc))
+                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
 }

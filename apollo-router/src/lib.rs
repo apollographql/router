@@ -47,7 +47,6 @@ mod request;
 mod response;
 mod router;
 mod router_factory;
-mod service_registry;
 pub mod services;
 mod spec;
 mod state_machine;

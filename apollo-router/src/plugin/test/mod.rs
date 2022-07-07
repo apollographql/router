@@ -99,12 +99,7 @@ impl PluginTestHarness {
     ) -> Result<PluginTestHarness, BoxError> {
         let mut subgraph_services = mock_subgraph_services
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    Buffer::new(v.build().boxed(), DEFAULT_BUFFER_SIZE),
-                )
-            })
+            .map(|(k, v)| (k, Buffer::new(v.build().boxed(), DEFAULT_BUFFER_SIZE)))
             .collect::<HashMap<_, _>>();
         // If we're using the canned schema then add some canned results
         if let IntoSchema::Canned = schema {
@@ -243,7 +238,7 @@ impl SubgraphServiceFactory for MockSubgraphFactory {
                 .iter()
                 .rev()
                 .fold(service.clone().boxed(), |acc, (_, e)| {
-                    e.subgraph_service(&name, acc)
+                    e.subgraph_service(name, acc)
                 })
         })
     }
