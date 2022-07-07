@@ -14,6 +14,7 @@ mod rate;
 mod timeout;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::stream::BoxStream;
@@ -134,7 +135,7 @@ impl Merge for RateLimitConf {
 struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
-    rate_limit_subgraphs: HashMap<String, RateLimitLayer>,
+    rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
 #[async_trait::async_trait]
@@ -153,7 +154,7 @@ impl Plugin for TrafficShaping {
         Ok(Self {
             config,
             rate_limit_router,
-            rate_limit_subgraphs: HashMap::new(),
+            rate_limit_subgraphs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -187,6 +188,8 @@ impl Plugin for TrafficShaping {
         if let Some(config) = final_config {
             let rate_limit = config.rate_limit.as_ref().map(|rate_limit_conf| {
                 self.rate_limit_subgraphs
+                    .lock()
+                    .unwrap()
                     .entry(name.to_string())
                     .or_insert_with(|| {
                         RateLimitLayer::new(rate_limit_conf.num, rate_limit_conf.per)

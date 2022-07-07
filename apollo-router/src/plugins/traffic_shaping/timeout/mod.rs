@@ -39,9 +39,6 @@ impl<T> Timeout<T> {
         Timeout {
             inner,
             timeout,
-            // The sleep won't actually be used with this duration, but
-            // we create it eagerly so that we can reset it in place rather than
-            // `Box::pinning` a new `Sleep` every time we need one.
             sleep: None,
         }
     }
@@ -58,9 +55,7 @@ where
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.sleep.is_none() {
-            self.sleep = Some(Box::pin(tokio::time::sleep_until(
-                Instant::now() + self.timeout,
-            )));
+            self.sleep = Some(Box::pin(tokio::time::sleep(self.timeout)));
         }
         match self.inner.poll_ready(cx) {
             Poll::Pending => {}
