@@ -395,7 +395,6 @@ impl Query {
                     skip,
                     include,
                     known_type,
-                    known_type_name,
                 } => {
                     if skip.should_skip(variables).unwrap_or(false) {
                         continue;
@@ -418,11 +417,11 @@ impl Query {
                         // __typename field and it does not match, we should not apply
                         // that fragment
                         // If the type condition is an interface and the current known type implements it
-                        known_type_name
+                        known_type
                             .as_ref()
                             .map(|k| schema.is_subtype(type_condition, k))
                             .unwrap_or_default()
-                            || *known_type
+                            || known_type.as_deref() == Some(type_condition.as_str())
                     };
 
                     if is_apply {

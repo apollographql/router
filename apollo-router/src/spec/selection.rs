@@ -22,8 +22,7 @@ pub(crate) enum Selection {
         type_condition: String,
         skip: Skip,
         include: Include,
-        known_type: bool,
-        known_type_name: Option<String>,
+        known_type: Option<String>,
         selection_set: Vec<Selection>,
     },
     FragmentSpread {
@@ -209,15 +208,13 @@ impl Selection {
                     .flatten()
                     .collect();
 
-                let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
-                let known_type_name = current_type.inner_type_name().map(|s| s.to_string());
+                let known_type = current_type.inner_type_name().map(|s| s.to_string());
                 Some(Self::InlineFragment {
                     type_condition,
                     selection_set,
                     skip,
                     include,
                     known_type,
-                    known_type_name,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
