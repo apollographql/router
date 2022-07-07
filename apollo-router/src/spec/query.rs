@@ -4912,4 +4912,64 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn fragment_on_interface_bis() {
+        let schema = "type Query {
+            inStore(key: String!): InStore
+        }
+
+        type InStore implements CartQueryInterface
+        interface CartQueryInterface {
+            carts: CartQueryResult!
+            cart: Cart
+        }
+
+        type Cart {
+            id: ID!
+            total: Int!
+        }
+
+        type CartQueryResult {
+            results: [Cart!]!
+            total: Int!
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ...CartFragmentTest
+                }
+            }
+
+            fragment CartFragmentTest on CartQueryInterface {
+                carts {
+                    results {
+                        id
+                    }
+                    total
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+        );
+    }
 }
