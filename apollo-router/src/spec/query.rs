@@ -4848,7 +4848,12 @@ mod tests {
               }
             }
           }}";
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
 
         let query = "query {
             __schema {
@@ -4858,7 +4863,23 @@ mod tests {
             }
           }";
 
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
+
+        let query = "query {
+            __typename
+          }";
+
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
     }
 
     #[test]
