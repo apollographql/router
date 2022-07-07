@@ -45,6 +45,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+
+When the subgraph doesn't return the typename and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
+
 ### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.

@@ -412,15 +412,17 @@ impl Query {
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
                             || schema.is_subtype(type_condition, input_type)
-                    } else if let Some(known_type_name) = known_type_name {
-                        // If the type condition is an interface and the current known type implements it
-                        schema.is_subtype(type_condition, known_type_name)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
                         // __typename field and it does not match, we should not apply
                         // that fragment
-                        *known_type
+                        // If the type condition is an interface and the current known type implements it
+                        known_type_name
+                            .as_ref()
+                            .map(|k| schema.is_subtype(type_condition, k))
+                            .unwrap_or_default()
+                            || *known_type
                     };
 
                     if is_apply {
@@ -456,11 +458,12 @@ impl Query {
                             // input type is a subtype of the fragment's type condition (interface, union)
                             input_type == fragment.type_condition.as_str()
                                 || schema.is_subtype(&fragment.type_condition, input_type)
-                        } else if let Some(known_type) = known_type {
-                            // If the type condition is an interface and the current known type implements it
-                            schema.is_subtype(&fragment.type_condition, known_type)
                         } else {
-                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                            known_type
+                                .as_ref()
+                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
+                                .unwrap_or_default()
+                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
 
                         if is_apply {
