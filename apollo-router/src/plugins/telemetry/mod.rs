@@ -360,7 +360,26 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
+            .instrument(move |req: &QueryPlannerRequest| {
+                let query = req
+                    .originating_request
+                    .body()
+                    .query
+                    .clone()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .originating_request
+                    .body()
+                    .operation_name
+                    .clone()
+                    .unwrap_or_default();
+
+                info_span!("query_planning",
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                )
+            })
             .service(service)
             .boxed()
     }
@@ -370,7 +389,25 @@ impl Plugin for Telemetry {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
+            .instrument(move |req: &ExecutionRequest| {
+                let query = req
+                    .originating_request
+                    .body()
+                    .query
+                    .clone()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .originating_request
+                    .body()
+                    .operation_name
+                    .clone()
+                    .unwrap_or_default();
+                info_span!("execution",
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                )
+            })
             .service(service)
             .boxed()
     }
@@ -449,9 +486,24 @@ impl Plugin for Telemetry {
         );
         let subgraph_metrics_conf = subgraph_metrics.clone();
         ServiceBuilder::new()
-            .instrument(move |_| {
+            .instrument(move |req: &SubgraphRequest| {
+                let query = req
+                    .subgraph_request
+                    .body()
+                    .query
+                    .clone()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .subgraph_request
+                    .body()
+                    .operation_name
+                    .clone()
+                    .unwrap_or_default();
+
                 info_span!("subgraph",
                     name = name.as_str(),
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
@@ -707,8 +759,9 @@ impl Telemetry {
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
                 ROUTER_SPAN_NAME,
-                query = query.as_str(),
-                operation_name = operation_name.as_str(),
+                graphql.document = query.as_str(),
+                // TODO add graphql.operation.type
+                graphql.operation.name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal
