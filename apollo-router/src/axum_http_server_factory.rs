@@ -494,8 +494,7 @@ where
             http_ext::Request<graphql::Request>,
             Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
-        > + Send
-        + 'static,
+        > + Send,
 {
     match service.ready_oneshot().await {
         Ok(mut service) => {
