@@ -150,7 +150,7 @@ impl Plugin for TrafficShaping {
             .map(|router_rate_limit_conf| {
                 RateLimitLayer::new(router_rate_limit_conf.num, router_rate_limit_conf.per)
             });
-        // TODO display some warnings regarding the configuration with timeout and rate limit
+
         Ok(Self {
             config,
             rate_limit_router,
