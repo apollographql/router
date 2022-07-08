@@ -4,6 +4,8 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
+use opentelemetry::sdk::Resource;
+use opentelemetry::KeyValue;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -28,13 +30,20 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        _metrics_config: &MetricsCommon,
+        metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
             let exporter = opentelemetry_prometheus::exporter()
                 .with_default_histogram_boundaries(vec![
                     0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
                 ])
+                .with_resource(Resource::new(
+                    metrics_config
+                        .resources
+                        .clone()
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v)),
+                ))
                 .try_init()?;
             builder = builder.with_custom_endpoint(
                 "/prometheus",

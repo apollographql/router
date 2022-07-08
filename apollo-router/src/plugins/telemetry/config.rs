@@ -62,6 +62,9 @@ pub struct MetricsCommon {
     pub delay_interval: Option<Duration>,
     /// Configuration to add custom labels/attributes to metrics
     pub attributes: Option<MetricsAttributesConf>,
+    #[serde(default)]
+    /// Resources
+    pub resources: HashMap<String, String>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
