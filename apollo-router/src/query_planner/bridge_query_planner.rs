@@ -6,8 +6,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
+use router_bridge::planner::DeferStreamSupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::Service;
@@ -39,7 +41,17 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
-            planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+            planner: Arc::new(
+                Planner::new(
+                    schema.as_str().to_string(),
+                    QueryPlannerConfig {
+                        defer_stream_support: Some(DeferStreamSupport {
+                            enable_defer: Some(true),
+                        }),
+                    },
+                )
+                .await?,
+            ),
             schema,
             introspection,
         })

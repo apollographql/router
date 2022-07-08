@@ -99,7 +99,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "46fdeb35aa3d3f3289ff0dbbccf63c1234da92a8" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", branch = "geal/defer" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
 serde = { version = "1.0.137", features = ["derive", "rc"] }
