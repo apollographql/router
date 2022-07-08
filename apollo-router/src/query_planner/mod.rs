@@ -131,12 +131,11 @@ impl QueryPlan {
         service_registry: &'a ServiceRegistry,
         originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
-        _sender: futures::channel::mpsc::Sender<Response>,
+        sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
-
         let (value, errors) = self
             .root
             .execute_recursively(
@@ -147,7 +146,7 @@ impl QueryPlan {
                 originating_request,
                 &Value::default(),
                 &HashMap::new(),
-                sender.clone(),
+                sender,
                 &self.options,
             )
             .await;
@@ -293,13 +292,7 @@ impl PlanNode {
                             subselection,
                             node,
                         },
-                    deferred, /*DeferredNode {
-                                  depends,
-                                  label,
-                                  path,
-                                  subselection,
-                                  node,
-                              },*/
+                    deferred,
                 } => {
                     //FIXME: what about nested fetches
                     let mut deferred_fetches = HashMap::new();
@@ -325,15 +318,9 @@ impl PlanNode {
                     let ctx = context.clone();
                     let opt = options.clone();
                     tokio::task::spawn(async move {
-                        //FIXME: do we go from an empty object?
                         let mut value = Value::default();
 
-                        while let Some(v) = stream
-                            .next()
-                            //.instrument(span.clone())
-                            //.in_current_span()
-                            .await
-                        {
+                        while let Some(v) = stream.next().await {
                             let deferred_value = v.0.unwrap();
                             println!("got deferred value: {:?}", deferred_value);
                             value.deep_merge(deferred_value);
@@ -357,11 +344,12 @@ impl PlanNode {
                             .instrument(span.clone())
                             .in_current_span()
                             .await;
-                        value.deep_merge(v);
+                        println!("merging {:?} in {:?}", v, value);
+                        //value.deep_merge(v);
                         errors.extend(err.into_iter());
 
                         let _ = tx
-                            .send(Response::builder().data(value).errors(errors).build())
+                            .send(Response::builder().data(v).errors(errors).build())
                             .await;
                     });
 
@@ -490,24 +478,24 @@ pub(crate) mod fetch {
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
-        service_name: String,
+        pub(crate) service_name: String,
 
         /// The data that is required for the subgraph fetch.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         #[serde(default)]
-        requires: Vec<Selection>,
+        pub(crate) requires: Vec<Selection>,
 
         /// The variables that are used for the subgraph fetch.
-        variable_usages: Vec<String>,
+        pub(crate) variable_usages: Vec<String>,
 
         /// The GraphQL subquery that is used for the fetch.
-        operation: String,
+        pub(crate) operation: String,
 
         /// The GraphQL subquery operation name.
-        operation_name: Option<String>,
+        pub(crate) operation_name: Option<String>,
 
         /// The GraphQL operation kind that is used for the fetch.
-        operation_kind: OperationKind,
+        pub(crate) operation_kind: OperationKind,
 
         /// Optional id used by Deferred nodes
         pub(crate) id: Option<String>,
@@ -714,14 +702,36 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            let data = response.data.unwrap_or_default();
-            if let Some(id) = &self.id {
-                if let Some(sender) = deferred_fetches.get(id.as_str()) {
-                    sender.clone().send(data.clone()).await;
+            println!(
+                "response_at_path({}), paths = {:?}, data = {:?}",
+                current_dir, paths, response.data
+            );
+            match self.response_at_path(current_dir, paths, response.data.unwrap_or_default()) {
+                Ok(value) => {
+                    if let Some(id) = &self.id {
+                        if let Some(sender) = deferred_fetches.get(id.as_str()) {
+                            println!(
+                                "will send data from fetch node '{}': {:?}",
+                                id,
+                                value.as_object().as_ref().unwrap().get("data")
+                            );
+                            sender
+                                .clone()
+                                .send(
+                                    value
+                                        .as_object()
+                                        .and_then(|o| o.get("data"))
+                                        .unwrap()
+                                        .clone(),
+                                )
+                                .await;
+                        }
+                    }
+
+                    Ok((value, errors))
                 }
+                Err(e) => Err(e),
             }
-            self.response_at_path(current_dir, paths, data)
-                .map(|value| (value, errors))
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]
@@ -809,7 +819,7 @@ pub(crate) struct Primary {
 /// The "deferred" parts of the defer (note that it's an array). Each
 /// of those deferred elements will correspond to a different chunk of
 /// the response to the client (after the initial non-deferred one that is).
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeferredNode {
     /// References one or more fetch node(s) (by `id`) within
@@ -830,7 +840,7 @@ pub(crate) struct DeferredNode {
 }
 
 /// A deferred node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     id: String,
@@ -878,6 +888,9 @@ mod tests {
     use http::Method;
     use tower::ServiceBuilder;
     use tower::ServiceExt;
+
+    use crate::json_ext::PathElement;
+    use crate::query_planner::fetch::FetchNode;
 
     use super::*;
     macro_rules! test_query_plan {
@@ -1066,39 +1079,62 @@ mod tests {
     async fn defer() {
         // plan for { t { x ... @defer { y } }}
         let query_plan: QueryPlan = QueryPlan {
-            root: serde_json::from_value(serde_json::json! {{
-                "kind": "Defer",
-                "primary": {
-                    "path":["t", "x"],
-                    "subselection": "{ t { x } }",
-                    "node":  {
-                        "kind": "Fetch",
-                        "serviceName": "X",
-                        "variableUsages": [],
-                        "operation": "{ t { id x } }",
-                        "operationKind": "query",
-                        "operationName": "t",
-                        "id": "fetch1"
-                    }
+            root: PlanNode::Defer {
+                primary: Primary {
+                    path: Some(Path(vec![
+                        /*PathElement::Key("t".to_string()),
+                        PathElement::Key("x".to_string()),*/
+                    ])),
+                    subselection: "{ t { x } }".to_string(),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "X".to_string(),
+                        requires: vec![],
+                        variable_usages: vec![],
+                        operation: "{ t { id __typename x } }".to_string(),
+                        operation_name: Some("t".to_string()),
+                        operation_kind: OperationKind::Query,
+                        id: Some("fetch1".to_string()),
+                    })),
                 },
-                "deferred": {
-                    "depends": [{
-                        "id": "fetch1",
+                deferred: DeferredNode {
+                    depends: vec![Depends {
+                        id: "fetch1".to_string(),
+                        defer_label: None,
                     }],
-                    "path":["t"],
-                    "subselection": "{ ... on T { y } }",
-                    "node": {
-                        "kind": "Fetch",
-                        "serviceName": "Y",
-                        "variableUsages": [],
-                        "operation": "{ t { y } }",
-                        "operationKind": "query",
-                        "operationName": "t",
-                        "id": "fetch2"
-                    }
-                }
-            }})
-            .unwrap(),
+                    label: None,
+                    path: Path(vec![PathElement::Key("t".to_string())]),
+                    subselection: Some("{ ... on T { y } }".to_string()),
+                    node: Some(Arc::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Y".to_string(),
+                        requires: vec![query_planner::selection::Selection::InlineFragment(
+                            query_planner::selection::InlineFragment {
+                                type_condition: Some("T".into()),
+                                selections: vec![
+                                    query_planner::selection::Selection::Field(
+                                        query_planner::selection::Field {
+                                            alias: None,
+                                            name: "id".into(),
+                                            selections: None,
+                                        },
+                                    ),
+                                    query_planner::selection::Selection::Field(
+                                        query_planner::selection::Field {
+                                            alias: None,
+                                            name: "__typename".into(),
+                                            selections: None,
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
+                        variable_usages: vec![],
+                        operation: "{ t { y } }".to_string(),
+                        operation_name: Some("t".to_string()),
+                        operation_kind: OperationKind::Query,
+                        id: Some("fetch2".to_string()),
+                    }))),
+                },
+            },
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1111,51 +1147,68 @@ mod tests {
             .expect_call()
             .times(1)
             .withf(move |_request| true)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            .returning(|_| {
+                Ok(SubgraphResponse::fake_builder()
+                    .data(serde_json::json! {{
+                        "data": { "t": {"id": 1234,
+                        "__typename": "T",
+                         "x": "X"
+                        }}
+                    }})
+                    .build())
+            });
         let mut mock_y_service = plugin::test::MockSubgraphService::new();
         mock_y_service
             .expect_call()
             .times(1)
             .withf(move |_request| true)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            .returning(|_| {
+                Ok(SubgraphResponse::fake_builder()
+                    .data(serde_json::json! {{
+                        "_entities": [{"y": "Y", "__typename": "T"}]
+                    }})
+                    .build())
+            });
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
-        let jh = tokio::task::spawn(async move {
-            let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
+        let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
 
-            query_plan
-                .execute(
-                    &Context::new(),
-                    &ServiceRegistry::new(HashMap::from([
-                        (
-                            "X".into(),
-                            ServiceBuilder::new()
-                                .buffer(1)
-                                .service(mock_x_service.build().boxed()),
-                        ),
-                        (
-                            "Y".into(),
-                            ServiceBuilder::new()
-                                .buffer(1)
-                                .service(mock_y_service.build().boxed()),
-                        ),
-                    ])),
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                    &schema,
-                    sender,
-                )
-                .await
-        });
+        let response = query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([
+                    (
+                        "X".into(),
+                        ServiceBuilder::new()
+                            .buffer(1)
+                            .service(mock_x_service.build().boxed()),
+                    ),
+                    (
+                        "Y".into(),
+                        ServiceBuilder::new()
+                            .buffer(1)
+                            .service(mock_y_service.build().boxed()),
+                    ),
+                ])),
+                http_ext::Request::fake_builder()
+                    .headers(Default::default())
+                    .body(Default::default())
+                    .build()
+                    .expect("fake builds should always work; qed"),
+                &schema,
+                sender,
+            )
+            .await;
+        println!(
+            "got primary response: {}",
+            serde_json::to_string_pretty(&response.data.unwrap()).unwrap()
+        );
         let response = receiver.next().await.unwrap();
-        println!("got primary response: {:?}", response);
-        jh.await.unwrap();
-        let response = receiver.next().await.unwrap();
-        println!("got deferred response: {:?}", response);
+        println!(
+            "got deferred response: {}",
+            serde_json::to_string_pretty(&response.data.unwrap()).unwrap()
+        );
 
         panic!();
     }
