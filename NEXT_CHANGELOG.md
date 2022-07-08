@@ -39,11 +39,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 ## 🐛 Fixes
 ## 🛠 Maintenance
 
-### Replace Buffers of tower services with service factories([PR #1289](https://github.com/apollographql/router/pull/1289)
+### Replace Buffers of tower services with service factories([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
 
 tower services should be used by creating a new service instance for each new session
 instead of going through a Buffer.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
 
 ## 📚 Documentation
