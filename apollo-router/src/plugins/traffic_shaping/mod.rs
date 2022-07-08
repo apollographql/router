@@ -470,8 +470,8 @@ mod test {
             test:
                 rate_limit:
                     num: 1
-                    per: 10sec
-                timeout: 1sec
+                    per: 1sec
+                timeout: 500ms
         "#,
         )
         .unwrap();
@@ -491,7 +491,13 @@ mod test {
             .await
             .expect_err("should be in error due to a timeout and rate limit");
         let _response = plugin
-            .subgraph_service("another", test_service.boxed())
+            .subgraph_service("another", test_service.clone().boxed())
+            .oneshot(SubgraphRequest::fake_builder().build())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let _response = plugin
+            .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
@@ -504,15 +510,15 @@ mod test {
         router:
             rate_limit:
                 num: 1
-                per: 10sec
-            timeout: 1sec
+                per: 1sec
+            timeout: 500ms
         "#,
         )
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
         let mut mock_service = MockRouterService::new();
-        mock_service.expect_call().times(1).returning(move |_| {
+        mock_service.expect_call().times(2).returning(move |_| {
             Ok(RouterResponse::fake_builder()
                 .data(json!({ "test": 1234_u32 }))
                 .build()
@@ -531,9 +537,18 @@ mod test {
             .unwrap();
 
         assert!(plugin
-            .router_service(mock_service.boxed())
+            .router_service(mock_service.clone().boxed())
             .oneshot(RouterRequest::fake_builder().build().unwrap())
             .await
             .is_err());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let _response = plugin
+            .router_service(mock_service.clone().boxed())
+            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
     }
 }
