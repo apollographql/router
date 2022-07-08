@@ -95,12 +95,6 @@ checksum = "bb07d2053ccdbe10e2af2995a2f116c1330396493dc1269f6a91d0ae82e19704"
 
 [[package]]
 name = "apollo-encoder"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2ae23d8a1f5cc1a4e33ec9b1f0d4d626f9e4736619b4c1a4f1482a594ac2e13"
-
-[[package]]
-name = "apollo-encoder"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
@@ -116,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -215,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -231,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -249,7 +243,7 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66fba27e21f40315a0e8abfd2998632b3d1670ae5a16d069c8ff652ea79992d"
 dependencies = [
- "apollo-encoder 0.3.1",
+ "apollo-encoder",
  "apollo-parser",
  "arbitrary",
  "once_cell",
@@ -257,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "bytes",
  "clap 3.1.18",
@@ -278,10 +272,10 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "futures",
- "graphql_client 0.11.0",
+ "graphql_client",
  "launchpad",
  "reqwest",
  "serde",
@@ -1715,28 +1709,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77f3309417938f28bf8228fcff79a4a37103981e3e186d2ccd19c74b38f4eb71"
 
 [[package]]
-name = "failure"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d32e9bd16cc02eae7db7ef620b392808b89f6a5e16bb3497d159c6b92a0f4f86"
-dependencies = [
- "backtrace",
- "failure_derive",
-]
-
-[[package]]
-name = "failure_derive"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4da3c766cd7a0db8242e326e9e4e081edd567072893ed320008189715366a4"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "synstructure",
-]
-
-[[package]]
 name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2135,16 +2107,6 @@ dependencies = [
 
 [[package]]
 name = "graphql-parser"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5613c31f18676f164112732202124f373bb2103ff017b3b85ca954ea6a66ada"
-dependencies = [
- "combine 3.8.1",
- "failure",
-]
-
-[[package]]
-name = "graphql-parser"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2ebc8013b4426d5b81a4364c419a95ed0b404af2b82e2457de52d9348f0e474"
@@ -2155,41 +2117,13 @@ dependencies = [
 
 [[package]]
 name = "graphql_client"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9b58571cfc3cc42c3e8ff44fc6cfbb6c0dea17ed22d20f9d8f1efc4e8209a3f"
-dependencies = [
- "graphql_query_derive 0.10.0",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "graphql_client"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fc16d75d169fddb720d8f1c7aed6413e329e1584079b9734ff07266a193f5bc"
 dependencies = [
- "graphql_query_derive 0.11.0",
+ "graphql_query_derive",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "graphql_client_codegen"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4bf9cd823359d74ad3d3ecf1afd4a975f4ff2f891cdf9a66744606daf52de8c"
-dependencies = [
- "graphql-introspection-query",
- "graphql-parser 0.2.3",
- "heck 0.3.3",
- "lazy_static",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn",
 ]
 
 [[package]]
@@ -2199,7 +2133,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f290ecfa3bea3e8a157899dc8a1d96ee7dd6405c18c8ddd213fc58939d18a0e9"
 dependencies = [
  "graphql-introspection-query",
- "graphql-parser 0.4.0",
+ "graphql-parser",
  "heck 0.4.0",
  "lazy_static",
  "proc-macro2",
@@ -2211,22 +2145,11 @@ dependencies = [
 
 [[package]]
 name = "graphql_query_derive"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e56b093bfda71de1da99758b036f4cc811fd2511c8a76f75680e9ffbd2bb4251"
-dependencies = [
- "graphql_client_codegen 0.10.0",
- "proc-macro2",
- "syn",
-]
-
-[[package]]
-name = "graphql_query_derive"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a755cc59cda2641ea3037b4f9f7ef40471c329f55c1fa2db6fa0bb7ae6c1f7ce"
 dependencies = [
- "graphql_client_codegen 0.11.0",
+ "graphql_client_codegen",
  "proc-macro2",
  "syn",
 ]
@@ -2874,11 +2797,11 @@ dependencies = [
 [[package]]
 name = "launchpad"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/rover.git?rev=c52bd32f1493e63844fd74e1a1d32f18e5c88394#c52bd32f1493e63844fd74e1a1d32f18e5c88394"
+source = "git+https://github.com/apollographql/rover.git?rev=d72ad078d9d845112bd33bd100a723a1fa0e72ff#d72ad078d9d845112bd33bd100a723a1fa0e72ff"
 dependencies = [
- "apollo-encoder 0.2.3",
+ "apollo-encoder",
  "backoff",
- "graphql_client 0.10.0",
+ "graphql_client",
  "humantime",
  "hyper",
  "reqwest",
@@ -4380,8 +4303,9 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.7.0"
-source = "git+https://github.com/rhaiscript/rhai.git?rev=6120b7a01a84a8d35d21fcdf2c44432455b68cdb#6120b7a01a84a8d35d21fcdf2c44432455b68cdb"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f8a1b0ce6aba109eb3628f36db9c1818c1d396bd5a56449d5203e96e4b713a7"
 dependencies = [
  "ahash",
  "bitflags",
@@ -4460,8 +4384,9 @@ dependencies = [
 
 [[package]]
 name = "rhai_codegen"
-version = "1.4.0"
-source = "git+https://github.com/rhaiscript/rhai.git?rev=6120b7a01a84a8d35d21fcdf2c44432455b68cdb#6120b7a01a84a8d35d21fcdf2c44432455b68cdb"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75a39bc2aa9258b282ee5518dac493491a9c4c11a6d7361b9d2644c922fc6488"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6410,7 +6335,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "ansi_term",
  "anyhow",

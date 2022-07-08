@@ -76,7 +76,9 @@ impl FieldType {
                 .iter()
                 .try_for_each(|x| inner_ty.validate_input_value(x, schema)),
             // For coercion from single value to list
-            (FieldType::List(inner_ty), val) => inner_ty.validate_input_value(val, schema),
+            (FieldType::List(inner_ty), val) if val != &Value::Null => {
+                inner_ty.validate_input_value(val, schema)
+            }
             (FieldType::NonNull(inner_ty), value) => {
                 if value.is_null() {
                     Err(InvalidValue)

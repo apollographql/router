@@ -15,8 +15,7 @@ Arguments for this command are described below.
 
 ## Environment variables
 
-To use [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/)
-set these environment variables when running the router:
+If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/), set these environment variables in its startup command:
 
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
@@ -25,7 +24,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 <table class="field-table api-ref">
   <thead>
     <tr>
-      <th>Argument / Environment Variable</th>
+      <th>Environment Variable</th>
       <th>Description</th>
     </tr>
   </thead>
@@ -41,9 +40,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
 The graph ref of the registered Apollo graph and variant that the router fetches its supergraph schema from.
 
-One of this or [`-s` / `--supergraph`](#-s----supergraph) is **required**.
-
-If you provide this argument, you must also provide [`APOLLO_KEY`](#APOLLO_KEY).
+**Required** if using managed federation.
 
 </td>
 </tr>
@@ -57,7 +54,7 @@ If you provide this argument, you must also provide [`APOLLO_KEY`](#APOLLO_KEY).
 
 The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with Apollo Studio when fetching its supergraph schema.
 
-If you provide the [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) env variable, this argument is **required**.
+**Required** if using managed federation.
 
 </td>
 </tr>
@@ -95,7 +92,7 @@ The absolute or relative path to the Apollo Router's [supergraph schema](/federa
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
 
-One of this or env [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) is **required**.
+**Required** if you are _not_ using managed federation.
 
 </td>
 </tr>
@@ -157,7 +154,7 @@ If provided, the router watches for changes to its schema and configuration file
 </td>
 <td>
 
-The Apollo Uplink URL that the Apollo Router should poll to fetch its latest supergraph schema.
+The Apollo Uplink URL(s) that the Apollo Router should poll to fetch its latest supergraph schema.
 
 This argument supports providing a comma-separated list of URLs.
 
@@ -177,7 +174,7 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 
 The amount of time between polls to Apollo Uplink.
 
-The default value is 10s, which is also the minimum allowed value.
+The default value is `10s` (ten seconds), which is also the minimum allowed value.
 
 </td>
 </tr>
@@ -190,7 +187,7 @@ The default value is 10s, which is also the minimum allowed value.
 </td>
 <td>
 
-Prints out a JSON schema of the configuration file, including plugin configuration (see below).
+Prints out a JSON schema of the router's configuration file, including [plugin configuration](#plugins).
 
 </td>
 </tr>
@@ -213,7 +210,7 @@ Prints out the Apollo Router's version.
 
 ## YAML config file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `APOLLO_ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `APOLLO_ROUTER_HOT_RELOAD` environment variable is set to `true`), the router automatically restarts when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 
@@ -321,7 +318,7 @@ Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _h
 
 The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
 
-For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
+For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 
 ### Plugins
 
