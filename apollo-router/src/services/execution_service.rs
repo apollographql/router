@@ -8,7 +8,6 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use http::StatusCode;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -69,42 +68,25 @@ where
             let ctx = context.clone();
             let (sender, receiver) = futures::channel::mpsc::channel(10);
 
-            tokio::task::spawn(
-                async move {
-                    req.query_plan
-                        .execute(
-                            &context,
-                            &this.subgraph_creator,
-                            req.originating_request.clone(),
-                            &this.schema,
-                            sender,
-                        )
-                        .await;
-                }
-                .in_current_span(),
-            );
+            let first = req
+                .query_plan
+                .execute(
+                    &context,
+                    &this.subgraph_creator,
+                    req.originating_request.clone(),
+                    &this.schema,
+                    sender,
+                )
+                .await;
 
-            let (first, rest) = receiver.into_future().await;
-            match first {
-                None => Ok(ExecutionResponse::error_builder()
-                    .errors(vec![crate::error::Error {
-                        message: "empty response".to_string(),
-                        ..Default::default()
-                    }])
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(ctx)
-                    .build()
-                    .expect("can't fail to build our error message")
-                    .boxed()),
-                Some(response) => {
-                    let stream = once(ready(response)).chain(rest).boxed();
+            let rest = receiver;
 
-                    Ok(ExecutionResponse::new_from_response(
-                        http::Response::new(stream as BoxStream<'static, Response>).into(),
-                        ctx,
-                    ))
-                }
-            }
+            let stream = once(ready(first)).chain(rest).boxed();
+
+            Ok(ExecutionResponse::new_from_response(
+                http::Response::new(stream as BoxStream<'static, Response>).into(),
+                ctx,
+            ))
         }
         .in_current_span();
         Box::pin(fut)

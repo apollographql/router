@@ -105,8 +105,10 @@ impl QueryPlan {
         service_factory: &'a Arc<SF>,
         originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
-        mut sender: futures::channel::mpsc::Sender<Response>,
-    ) where
+
+        _sender: futures::channel::mpsc::Sender<Response>,
+    ) -> Response
+    where
         SF: SubgraphServiceFactory,
     {
         let root = Path::empty();
@@ -126,9 +128,7 @@ impl QueryPlan {
             )
             .await;
 
-        let _ = sender
-            .send(Response::builder().data(value).errors(errors).build())
-            .await;
+        Response::builder().data(value).errors(errors).build()
     }
 
     pub fn contains_mutations(&self) -> bool {
@@ -721,7 +721,7 @@ mod tests {
             panic!("this panic should be propagated to the test harness");
         });
 
-        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+        let (sender, _) = futures::channel::mpsc::channel(10);
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
@@ -732,7 +732,7 @@ mod tests {
             plugins: Default::default(),
         });
 
-        query_plan
+        let result = query_plan
             .execute(
                 &Context::new(),
                 &sf,
@@ -745,7 +745,6 @@ mod tests {
                 sender,
             )
             .await;
-        let result = receiver.next().await.unwrap();
         assert_eq!(result.errors.len(), 1);
         let reason: String = serde_json_bytes::from_value(
             result.errors[0].extensions.get("reason").unwrap().clone(),
@@ -780,7 +779,7 @@ mod tests {
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
 
-        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+        let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
@@ -792,7 +791,7 @@ mod tests {
             plugins: Default::default(),
         });
 
-        query_plan
+        let _response = query_plan
             .execute(
                 &Context::new(),
                 &sf,
@@ -806,7 +805,6 @@ mod tests {
             )
             .await;
 
-        receiver.next().await.unwrap();
         assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
     }
 
@@ -834,7 +832,7 @@ mod tests {
                 matches
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+        let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
@@ -846,7 +844,7 @@ mod tests {
             plugins: Default::default(),
         });
 
-        query_plan
+        let _response = query_plan
             .execute(
                 &Context::new(),
                 &sf,
@@ -860,7 +858,6 @@ mod tests {
             )
             .await;
 
-        receiver.next().await.unwrap();
         assert!(
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
