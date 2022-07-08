@@ -37,6 +37,29 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Add support of rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
+
+Additions to the traffic shaping plugin:
+- **Rate limit** - If you want to rate limit requests to a subgraphs or to the router itself.
+- **Timeout**: - Set a timeout to subgraphs and router requests.
+
+```yaml
+traffic_shaping:
+  router: # Rules applied to the router requests
+    rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+      num: 10
+      per: 5sec
+    timeout: 50sec # If request to the router hangs for more than 50secs then cancel the request (by default it's 30 secs)
+  subgraphs:
+    products:
+      rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+        num: 10
+        per: 5sec
+      timeout: 50sec # If request to subgraph product hangs for more than 50secs then cancel the request (by default it's 30 secs)
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
+
 ### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
 
 Resources are almost like attributes but there are more globals. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics. It could be pretty useful to set
