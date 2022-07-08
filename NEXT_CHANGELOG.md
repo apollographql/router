@@ -45,6 +45,18 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+
+When the subgraph doesn't return the typename and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
+
+### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+
+A query with at the root only one selection field equals to `__typename` must be considered as an introspection query
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
+
 ### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
@@ -60,6 +72,12 @@ The query plan was entirely executed in a spawned task to prepare for the `@defe
 generate the first response right inside the same future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
+
+### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+
+This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
+
+By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
 
 ### Do not recalculate DashMap's default shard amount on every new map [PR #1372](https://github.com/apollographql/router/pull/1372)
 
