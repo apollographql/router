@@ -1721,6 +1721,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
             "compression": {
@@ -1737,12 +1738,75 @@ expression: "&schema"
               "description": "Enable query deduplication",
               "type": "boolean",
               "nullable": true
+            },
+            "rate_limit": {
+              "description": "Enable rate limiting",
+              "type": "object",
+              "required": [
+                "num",
+                "per"
+              ],
+              "properties": {
+                "num": {
+                  "description": "Number of requests",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "per": {
+                  "description": "Per time",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "router": {
+          "description": "Applied at the router level",
+          "type": "object",
+          "properties": {
+            "rate_limit": {
+              "description": "Enable rate limiting",
+              "type": "object",
+              "required": [
+                "num",
+                "per"
+              ],
+              "properties": {
+                "num": {
+                  "description": "Number of requests",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "per": {
+                  "description": "Per time",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
             }
           },
           "additionalProperties": false,
           "nullable": true
         },
         "subgraphs": {
+          "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -1761,6 +1825,33 @@ expression: "&schema"
                 "description": "Enable query deduplication",
                 "type": "boolean",
                 "nullable": true
+              },
+              "rate_limit": {
+                "description": "Enable rate limiting",
+                "type": "object",
+                "required": [
+                  "num",
+                  "per"
+                ],
+                "properties": {
+                  "num": {
+                    "description": "Number of requests",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0.0
+                  },
+                  "per": {
+                    "description": "Per time",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "nullable": true
+              },
+              "timeout": {
+                "description": "Enable timeout for incoming requests",
+                "default": null,
+                "type": "string"
               }
             },
             "additionalProperties": false
