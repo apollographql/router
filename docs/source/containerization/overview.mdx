@@ -2,14 +2,15 @@
 title: Containerizing the Apollo Router
 ---
 
-> Find our more about the Apollo Router images [here](https://github.com/apollographql/router/pkgs/container/router).
+import ElasticNotice from '../../shared/elastic-notice.mdx';
+
+> More details about Apollo Router images are available [on GitHub](https://github.com/apollographql/router/pkgs/container/router).
 
 Each release of the Apollo Router includes both default and debug images. Each image for a release contains the same build. Debug images additionally contain a "busybox" to help with container debugging.
 
+<ElasticNotice />
+
 Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v0.1.0-preview.1`):
-
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  This applies to its source code and all distributions, including versions embedded within a Docker image.  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
-
 
 ```bash title="Docker"
 docker run -p 4000:4000 \

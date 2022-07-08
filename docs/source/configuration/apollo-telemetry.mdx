@@ -19,9 +19,9 @@ More information on usage reporting is available in the [Studio documentation](/
 
 Spaceport can run either as an internal component of a single Apollo Router instance, or as an external resource shared by _multiple_ router instances.
 
-For the majority of users an internal Spaceport instance is sufficient.
+For the majority of users, an internal Spaceport instance is sufficient.
 
-To connect the Apollo Router to an external spaceport specify the endpoint in the config.
+To connect the Apollo Router to an external Spaceport instance, specify its endpoint URL in your YAML config file:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -29,7 +29,7 @@ telemetry:
   apollo:
 
     # Optional external Spaceport URL.
-    # If not specified an in-process spaceport is used.
+    # If not specified, an in-process Spaceport is used.
     endpoint: "https://my-spaceport"
 
 ```

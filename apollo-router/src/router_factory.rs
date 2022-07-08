@@ -5,7 +5,6 @@ use futures::stream::BoxStream;
 use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;
-use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower_service::Service;
 
@@ -18,9 +17,9 @@ use crate::plugin::DynPlugin;
 use crate::services::new_service::NewService;
 use crate::services::Plugins;
 use crate::services::RouterCreator;
+use crate::services::SubgraphService;
 use crate::PluggableRouterServiceBuilder;
 use crate::Schema;
-use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
@@ -34,8 +33,7 @@ pub(crate) trait RouterServiceFactory:
             Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
-        > + Send
-        + 'static;
+        > + Send;
     type Future: Send;
 }
 
@@ -75,9 +73,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxCloneService::new(SubgraphService::new(name.to_string()));
-
-            builder = builder.with_subgraph_service(name, subgraph_service);
+            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
 
         // Process the plugins.
