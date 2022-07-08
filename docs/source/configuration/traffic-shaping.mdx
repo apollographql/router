@@ -5,11 +5,13 @@ title: Traffic shaping in the Apollo Router
 The Apollo Router supports the following types of traffic shaping between itself and your subgraphs:
 
 - **Sub-query deduplication** - Whenever the router is sending multiple identical in-flight query operations to a subgraph, it can consolidate them into a single request.
-    - Mutation operations are never deduplicated.
-    - Only in-flight requests are deduplicated.
+  - Mutation operations are never deduplicated.
+  - Only in-flight requests are deduplicated.
 - **Variable deduplication** - If a request to a subgraph includes multiple GraphQL variables with the same value, the router can replace those with a single variable.
 - **Compression** - The router can compress request bodies to subgraphs (along with response bodies to clients) with a supported algorithm
-    - The router currently supports `gzip`, `br`, and `deflate`.
+  - The router currently supports `gzip`, `br`, and `deflate`.
+- **Rate limiting** - If you want to rate limit requests to a subgraphs or to the router itself.
+- **Timeout**: - Set a timeout to subgraphs and router requests.
 
 Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
 
@@ -20,6 +22,11 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 ```yaml title="router.yaml"
 traffic_shaping:
   variables_deduplication: true # Enable the variable deduplication optimization.
+  router: # Rules applied to the router requests
+    rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+      num: 10
+      per: 5sec
+    timeout: 50sec # If request to the router hangs for more than 50secs then cancel the request (by default it's 30 secs)
   all:
     query_deduplication: true # Enable query deduplication for all subgraphs.
     compression: br # Enable brotli compression for all subgraphs.
@@ -27,6 +34,10 @@ traffic_shaping:
     products:
       query_deduplication: false # Disable query for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
+      rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+        num: 10
+        per: 5sec
+      timeout: 50sec # If request to subgraph product hangs for more than 50secs then cancel the request (by default it's 30 secs)
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, query deduplication is enabled for all subgraphs _except_ the `products` subgraph.
