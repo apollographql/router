@@ -416,7 +416,12 @@ impl Query {
                         // we should get the right type here. But in the case we get a
                         // __typename field and it does not match, we should not apply
                         // that fragment
-                        *known_type
+                        // If the type condition is an interface and the current known type implements it
+                        known_type
+                            .as_ref()
+                            .map(|k| schema.is_subtype(type_condition, k))
+                            .unwrap_or_default()
+                            || known_type.as_deref() == Some(type_condition.as_str())
                     };
 
                     if is_apply {
@@ -453,7 +458,12 @@ impl Query {
                             input_type == fragment.type_condition.as_str()
                                 || schema.is_subtype(&fragment.type_condition, input_type)
                         } else {
-                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                            // If the type condition is an interface and the current known type implements it
+                            known_type
+                                .as_ref()
+                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
+                                .unwrap_or_default()
+                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
 
                         if is_apply {
@@ -543,9 +553,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip: _,
-                    include: _,
-                    known_type: _,
+                    ..
                 } => {
                     // top level objects will not provide a __typename field
                     if type_condition.as_str() != schema.root_operation_name(operation.kind) {
@@ -724,6 +732,16 @@ impl Operation {
     }
 
     fn is_introspection(&self) -> bool {
+        // If the only field is `__typename` it's considered as an introspection query
+        if self.selection_set.len() == 1
+            && self
+                .selection_set
+                .get(0)
+                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .unwrap_or_default()
+        {
+            return true;
+        }
         self.selection_set.iter().all(|sel| match sel {
             Selection::Field { name, .. } => {
                 let name = name.as_str();
@@ -4838,7 +4856,12 @@ mod tests {
               }
             }
           }}";
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
 
         let query = "query {
             __schema {
@@ -4848,7 +4871,23 @@ mod tests {
             }
           }";
 
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
+
+        let query = "query {
+            __typename
+          }";
+
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
     }
 
     #[test]
@@ -4908,6 +4947,104 @@ mod tests {
                         "id": "1234",
                         "address": null
                     }
+                }
+            }},
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface_without_typename() {
+        let schema = "type Query {
+            inStore(key: String!): InStore!
+        }
+
+        type InStore implements CartQueryInterface {
+            cart: Cart
+            carts: CartQueryResult!
+        }
+
+        interface CartQueryInterface {
+            carts: CartQueryResult!
+            cart: Cart
+        }
+
+        type Cart {
+            id: ID!
+            total: Int!
+        }
+
+        type CartQueryResult {
+            results: [Cart!]!
+            total: Int!
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ...CartFragmentTest
+                }
+            }
+
+            fragment CartFragmentTest on CartQueryInterface {
+                carts {
+                    results {
+                        id
+                    }
+                    total
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                }
+            }},
+        );
+
+        // With inline fragment
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ... on CartQueryInterface {
+                        carts {
+                            results {
+                                id
+                            }
+                            total
+                        }
+                    }
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
                 }
             }},
         );

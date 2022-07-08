@@ -10,7 +10,12 @@ type Message {
 }
 type Query {
   "Fetch the configuration for a router. If a valid configuration is available, it will be readable as cSDL."
-  routerConfig("The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)." ref: String!, apiKey: String!, "When specified and the result is not newer, `Unchanged` is returned rather `RouterConfigResult`." ifAfterId: ID): RouterConfigResponse!
+  routerConfig(
+    "The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)."
+    ref: String!,apiKey: String!, 
+    "When specified and the result is not newer, `Unchanged` is returned rather `RouterConfigResult`."
+    ifAfterId: ID
+  ): RouterConfigResponse!
 }
 type RouterConfigResult {
   "Variant-unique identifier."
@@ -46,4 +51,7 @@ enum MessageLevel {
   INFO
 }
 "Exposes a URL that specifies the behaviour of this scalar."
-directive @specifiedBy("The URL that specifies the behaviour of this scalar." url: String!) on SCALAR
+directive @specifiedBy(
+    "The URL that specifies the behaviour of this scalar."
+    url: String!
+  ) on SCALAR
