@@ -1141,10 +1141,7 @@ mod tests {
         let query_plan: QueryPlan = QueryPlan {
             root: PlanNode::Defer {
                 primary: Primary {
-                    path: Some(Path(vec![
-                        /*PathElement::Key("t".to_string()),
-                        PathElement::Key("x".to_string()),*/
-                    ])),
+                    path: None,
                     subselection: "{ t { x } }".to_string(),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "X".to_string(),
@@ -1163,35 +1160,38 @@ mod tests {
                     }],
                     label: None,
                     path: Path(vec![PathElement::Key("t".to_string())]),
-                    subselection: Some("{ ... on T { y } }".to_string()),
-                    node: Some(Arc::new(PlanNode::Fetch(FetchNode {
-                        service_name: "Y".to_string(),
-                        requires: vec![query_planner::selection::Selection::InlineFragment(
-                            query_planner::selection::InlineFragment {
-                                type_condition: Some("T".into()),
-                                selections: vec![
-                                    query_planner::selection::Selection::Field(
-                                        query_planner::selection::Field {
-                                            alias: None,
-                                            name: "id".into(),
-                                            selections: None,
-                                        },
-                                    ),
-                                    query_planner::selection::Selection::Field(
-                                        query_planner::selection::Field {
-                                            alias: None,
-                                            name: "__typename".into(),
-                                            selections: None,
-                                        },
-                                    ),
-                                ],
-                            },
-                        )],
-                        variable_usages: vec![],
-                        operation: "{ t { y } }".to_string(),
-                        operation_name: Some("t".to_string()),
-                        operation_kind: OperationKind::Query,
-                        id: Some("fetch2".to_string()),
+                    subselection: Some("{ y }".to_string()),
+                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                        path: Path(vec![PathElement::Key("t".to_string())]),
+                        node: Box::new(PlanNode::Fetch(FetchNode {
+                            service_name: "Y".to_string(),
+                            requires: vec![query_planner::selection::Selection::InlineFragment(
+                                query_planner::selection::InlineFragment {
+                                    type_condition: Some("T".into()),
+                                    selections: vec![
+                                        query_planner::selection::Selection::Field(
+                                            query_planner::selection::Field {
+                                                alias: None,
+                                                name: "id".into(),
+                                                selections: None,
+                                            },
+                                        ),
+                                        query_planner::selection::Selection::Field(
+                                            query_planner::selection::Field {
+                                                alias: None,
+                                                name: "__typename".into(),
+                                                selections: None,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            )],
+                            variable_usages: vec![],
+                            operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}".to_string(),
+                            operation_name: None,
+                            operation_kind: OperationKind::Query,
+                            id: Some("fetch2".to_string()),
+                        })),
                     }))),
                 }],
             },
@@ -1210,10 +1210,10 @@ mod tests {
             .returning(|_| {
                 Ok(SubgraphResponse::fake_builder()
                     .data(serde_json::json! {{
-                        "data": { "t": {"id": 1234,
+                        "t": {"id": 1234,
                         "__typename": "T",
                          "x": "X"
-                        }}
+                        }
                     }})
                     .build())
             });
@@ -1260,16 +1260,19 @@ mod tests {
                 sender,
             )
             .await;
-        println!(
-            "got primary response: {}",
-            serde_json::to_string_pretty(&response.data.unwrap()).unwrap()
-        );
-        let response = receiver.next().await.unwrap();
-        println!(
-            "got deferred response: {}",
-            serde_json::to_string_pretty(&response.data.unwrap()).unwrap()
+
+        // primary response
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            r#"{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}"#
         );
 
-        panic!();
+        let response = receiver.next().await.unwrap();
+
+        // deferred response
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            r#"{"data":{"t":{"y":"Y","__typename":"T"}}}"#
+        );
     }
 }
