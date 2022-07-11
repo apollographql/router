@@ -5,12 +5,13 @@ use std::sync::Arc;
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 pub use fetch::OperationKind;
+use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::broadcast::Sender;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
 use crate::error::Error;
@@ -86,7 +87,7 @@ pub(crate) enum PlanNode {
 
     Defer {
         primary: Primary,
-        deferred: DeferredNode,
+        deferred: Vec<DeferredNode>,
     },
 }
 
@@ -294,68 +295,89 @@ impl PlanNode {
                         },
                     deferred,
                 } => {
-                    //FIXME: what about nested fetches
                     let mut deferred_fetches = HashMap::new();
-                    let mut deferred_receivers = Vec::new();
+                    let mut futures = Vec::new();
 
-                    for d in deferred.depends.iter() {
-                        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-                        deferred_fetches.insert(d.id.clone(), sender.clone());
-                        //FIXME: we should know about the path
-                        // should we know about the fetch id too?
-                        deferred_receivers.push(ReceiverStream::new(receiver).into_future());
-                    }
+                    for deferred_node in deferred {
+                        let mut deferred_receivers = Vec::new();
 
-                    let mut stream: stream::FuturesUnordered<_> =
-                        deferred_receivers.into_iter().collect();
-                    //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
-                    let deferred_node = deferred.node.clone();
-                    let deferred_path = deferred.path.clone();
-                    let mut tx = sender.clone();
-                    let sc = schema.clone();
-                    let orig = originating_request.clone();
-                    let sr = service_registry.clone();
-                    let ctx = context.clone();
-                    let opt = options.clone();
-                    tokio::task::spawn(async move {
-                        let mut value = Value::default();
-
-                        while let Some(v) = stream.next().await {
-                            let deferred_value = v.0.unwrap();
-                            println!("got deferred value: {:?}", deferred_value);
-                            value.deep_merge(deferred_value);
+                        for d in deferred_node.depends.iter() {
+                            match deferred_fetches.get(&d.id) {
+                                None => {
+                                    let (sender, receiver) = tokio::sync::broadcast::channel(1);
+                                    deferred_fetches.insert(d.id.clone(), sender.clone());
+                                    deferred_receivers
+                                        .push(BroadcastStream::new(receiver).into_future());
+                                }
+                                Some(sender) => {
+                                    let receiver = sender.subscribe();
+                                    deferred_receivers
+                                        .push(BroadcastStream::new(receiver).into_future());
+                                }
+                            }
                         }
 
-                        let mut errors = Vec::new();
-                        let span = tracing::info_span!("deferred");
-                        let (v, err) = deferred_node
-                            .unwrap()
-                            .execute_recursively(
-                                &deferred_path,
-                                &ctx,
-                                &sr,
-                                &sc,
-                                orig,
-                                &value,
-                                &HashMap::new(),
-                                tx.clone(),
-                                &opt,
-                            )
-                            .instrument(span.clone())
-                            .in_current_span()
-                            .await;
-                        println!("merging {:?} in {:?}", v, value);
-                        //value.deep_merge(v);
-                        errors.extend(err.into_iter());
+                        let mut stream: stream::FuturesUnordered<_> =
+                            deferred_receivers.into_iter().collect();
+                        //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
+                        let deferred_inner = deferred_node.node.clone();
+                        let deferred_path = deferred_node.path.clone();
+                        let mut tx = sender.clone();
+                        let sc = schema.clone();
+                        let orig = originating_request.clone();
+                        let sr = service_registry.clone();
+                        let ctx = context.clone();
+                        let opt = options.clone();
+                        let fut = async move {
+                            let mut value = Value::default();
 
-                        let _ = tx
-                            .send(Response::builder().data(v).errors(errors).build())
-                            .await;
+                            while let Some(v) = stream.next().await {
+                                let deferred_value = v.0.unwrap().unwrap();
+                                println!("got deferred value: {:?}", deferred_value);
+                                value.deep_merge(deferred_value);
+                            }
+
+                            let span = tracing::info_span!("deferred");
+
+                            if let Some(node) = deferred_inner {
+                                println!(
+                                    "\nwill execute deferred node at path {}: {:?}",
+                                    deferred_path, node
+                                );
+                                let (v, err) = node
+                                    .execute_recursively(
+                                        &Path::default(),
+                                        &ctx,
+                                        &sr,
+                                        &sc,
+                                        orig,
+                                        &value,
+                                        &HashMap::new(),
+                                        tx.clone(),
+                                        &opt,
+                                    )
+                                    .instrument(span.clone())
+                                    .in_current_span()
+                                    .await;
+                                println!("returning deferred {:?}", v);
+
+                                let _ = tx
+                                    .send(Response::builder().data(v).errors(err).build())
+                                    .await;
+                            } else {
+                                todo!()
+                            }
+                        };
+
+                        futures.push(fut);
+                    }
+
+                    tokio::task::spawn(async move {
+                        join_all(futures).await;
                     });
 
                     value = parent_value.clone();
                     errors = Vec::new();
-                    //let (sender, receiver) = tokio::sync::oneshot::channel();
                     let span = tracing::info_span!("primary");
                     let (v, err) = node
                         .execute_recursively(
@@ -392,10 +414,12 @@ impl PlanNode {
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => Box::new(
-                primary
-                    .node
-                    .service_usage()
-                    .chain(deferred.node.iter().flat_map(|node| node.service_usage())),
+                primary.node.service_usage().chain(
+                    deferred
+                        .iter()
+                        .map(|d| d.node.iter().flat_map(|node| node.service_usage()))
+                        .flatten(),
+                ),
             ),
         }
     }
@@ -431,7 +455,7 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
-    use tokio::sync::mpsc::Sender;
+    use tokio::sync::broadcast::Sender;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
@@ -713,18 +737,15 @@ pub(crate) mod fetch {
                             println!(
                                 "will send data from fetch node '{}': {:?}",
                                 id,
-                                value.as_object().as_ref().unwrap().get("data")
+                                value.as_object().as_ref().unwrap() //.get("data")
                             );
-                            sender
-                                .clone()
-                                .send(
-                                    value
-                                        .as_object()
-                                        .and_then(|o| o.get("data"))
-                                        .unwrap()
-                                        .clone(),
-                                )
-                                .await;
+                            sender.clone().send(
+                                value
+                                    //.as_object()
+                                    //.and_then(|o| o.get("data"))
+                                    //.unwrap()
+                                    .clone(),
+                            );
                         }
                     }
 
@@ -1096,7 +1117,7 @@ mod tests {
                         id: Some("fetch1".to_string()),
                     })),
                 },
-                deferred: DeferredNode {
+                deferred: vec![DeferredNode {
                     depends: vec![Depends {
                         id: "fetch1".to_string(),
                         defer_label: None,
@@ -1133,7 +1154,7 @@ mod tests {
                         operation_kind: OperationKind::Query,
                         id: Some("fetch2".to_string()),
                     }))),
-                },
+                }],
             },
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),

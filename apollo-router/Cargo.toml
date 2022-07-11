@@ -112,6 +112,7 @@ static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.31"
 tokio = { version = "1.19.2", features = ["full"] }
+tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["full"] }
@@ -128,7 +129,6 @@ urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
 access-json = "0.1.0"
 async-compression = { version = "0.3.14", features = ["tokio", "brotli", "gzip", "deflate"] }
-tokio-stream = "0.1.9"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
