@@ -23,12 +23,10 @@ use axum::Router;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::ready;
-use futures::StreamExt;
-
-use futures::stream::once;
-
 use futures::prelude::*;
+use futures::stream::once;
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;

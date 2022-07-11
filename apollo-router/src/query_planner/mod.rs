@@ -349,9 +349,9 @@ impl PlanNode {
                                 // sender was dropped, possibly because there was no need to do it,
                                 // or because it is lagging, but here we only send one message so it
                                 // will not happen
-                                if let Some(Ok((deferred_value, mut err))) = v {
+                                if let Some(Ok((deferred_value, err))) = v {
                                     value.deep_merge(deferred_value);
-                                    errors.extend(err.drain(..))
+                                    errors.extend(err.into_iter())
                                 }
                             }
 
@@ -395,23 +395,21 @@ impl PlanNode {
                                         e
                                     );
                                 };
-                            } else {
-                                if let Err(e) = tx
-                                    .send(
-                                        Response::builder()
-                                            .data(value)
-                                            .and_subselection(subselection)
-                                            .build(),
-                                    )
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "error sending deferred response at path {}: {:?}",
-                                        deferred_path,
-                                        e
-                                    );
-                                };
-                            }
+                            } else if let Err(e) = tx
+                                .send(
+                                    Response::builder()
+                                        .data(value)
+                                        .and_subselection(subselection)
+                                        .build(),
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    "error sending deferred response at path {}: {:?}",
+                                    deferred_path,
+                                    e
+                                );
+                            };
                         };
 
                         futures.push(fut);
@@ -465,8 +463,7 @@ impl PlanNode {
                 primary.node.service_usage().chain(
                     deferred
                         .iter()
-                        .map(|d| d.node.iter().flat_map(|node| node.service_usage()))
-                        .flatten(),
+                        .flat_map(|d| d.node.iter().flat_map(|node| node.service_usage())),
                 ),
             ),
         }
@@ -949,10 +946,10 @@ mod tests {
     use tower::ServiceBuilder;
     use tower::ServiceExt;
 
+    use super::*;
     use crate::json_ext::PathElement;
     use crate::query_planner::fetch::FetchNode;
 
-    use super::*;
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
