@@ -22,6 +22,11 @@ use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::channel::oneshot;
+use futures::future::ready;
+use futures::StreamExt;
+
+use futures::stream::once;
+
 use futures::prelude::*;
 use futures::stream::BoxStream;
 use http::header::CONTENT_ENCODING;
@@ -496,22 +501,13 @@ async fn run_graphql_request(
                         .into_response()
                 }
                 Ok(response) => {
-                    let (mut parts, stream) = http::Response::from(response).into_parts();
+                    let (mut parts, mut stream) = http::Response::from(response).into_parts();
                     parts.headers.insert(
                         "content-type",
                         HeaderValue::from_static("multipart/form-data;boundary=\"graphql\""),
                     );
 
-                    let body = stream.map(move |res| {
-                        //FIXME: could be replaced with a https://docs.rs/bytes/latest/bytes/buf/struct.Chain.html
-                        let data = format!("\n--graphql\n{}", serde_json::to_string(&res).unwrap());
-                        Ok::<_, BoxError>(Bytes::from(data))
-                    });
-
-                    // FIXME: we should detect if there is only one response and abvoid multipart in that case
-                    // FIXME we should detect errors too
-                    (parts, StreamBody::new(body)).into_response()
-                    /*match stream.next().await {
+                    match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);
                             (
@@ -521,14 +517,31 @@ async fn run_graphql_request(
                                 .into_response()
                         }
                         Some(response) => {
-                            tracing::trace_span!("serialize_response").in_scope(|| {
-                                http_ext::Response::from(http::Response::from_parts(
-                                    parts, response,
-                                ))
-                                .into_response()
-                            })
+                            if response.has_next.unwrap_or(false) {
+                                let stream = once(ready(response)).chain(stream).chain(once(
+                                    ready(graphql::Response::builder().has_next(false).build()),
+                                ));
+                                let body = stream.map(move |res| {
+                                    println!("got response: {:?}", res);
+                                    //FIXME: could be replaced with a https://docs.rs/bytes/latest/bytes/buf/struct.Chain.html
+                                    let data = format!(
+                                        "\n--graphql\n{}",
+                                        serde_json::to_string(&res).unwrap()
+                                    );
+                                    Ok::<_, BoxError>(Bytes::from(data))
+                                });
+
+                                (parts, StreamBody::new(body)).into_response()
+                            } else {
+                                tracing::trace_span!("serialize_response").in_scope(|| {
+                                    http_ext::Response::from(http::Response::from_parts(
+                                        parts, response,
+                                    ))
+                                    .into_response()
+                                })
+                            }
                         }
-                    }*/
+                    }
                 }
             }
         }

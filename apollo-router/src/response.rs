@@ -351,6 +351,7 @@ mod tests {
                     .cloned()
                     .unwrap()
                 )
+                .has_next(true)
                 .build()
         );
     }

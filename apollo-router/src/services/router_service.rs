@@ -165,6 +165,8 @@ where
                     .boxed());
                 }
                 QueryPlannerContent::Plan { query, plan } => {
+                    let is_deferred = plan.root.contains_defer();
+
                     if let Some(err) = query.validate_variables(body, &schema).err() {
                         Ok(RouterResponse::new_from_graphql_response(err, context).boxed())
                     } else {
@@ -197,6 +199,11 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
+
+                                        if is_deferred {
+                                            response.has_next = Some(true);
+                                        }
+
                                         response
                                     })
                                     .in_current_span(),

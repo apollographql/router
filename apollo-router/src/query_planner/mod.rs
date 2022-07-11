@@ -101,6 +101,16 @@ impl PlanNode {
             Self::Flatten(_) => false,
         }
     }
+
+    pub(crate) fn contains_defer(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_defer()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_defer()),
+            Self::Flatten(node) => node.node.contains_defer(),
+            Self::Fetch(..) => false,
+            Self::Defer { .. } => true,
+        }
+    }
 }
 
 impl QueryPlan {
