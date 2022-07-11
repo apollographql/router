@@ -323,6 +323,7 @@ impl PlanNode {
                         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
                         let deferred_inner = deferred_node.node.clone();
                         let deferred_path = deferred_node.path.clone();
+                        let subselection = deferred_node.subselection.clone();
                         let mut tx = sender.clone();
                         let sc = schema.clone();
                         let orig = originating_request.clone();
@@ -369,7 +370,13 @@ impl PlanNode {
                                 println!("returning deferred {:?}", v);
 
                                 if let Err(e) = tx
-                                    .send(Response::builder().data(v).errors(err).build())
+                                    .send(
+                                        Response::builder()
+                                            .data(v)
+                                            .errors(err)
+                                            .and_subselection(subselection)
+                                            .build(),
+                                    )
                                     .await
                                 {
                                     tracing::error!(
@@ -380,7 +387,12 @@ impl PlanNode {
                                 };
                             } else {
                                 if let Err(e) = tx
-                                    .send(Response::builder().data(value).errors(vec![]).build())
+                                    .send(
+                                        Response::builder()
+                                            .data(value)
+                                            .and_subselection(subselection)
+                                            .build(),
+                                    )
                                     .await
                                 {
                                     tracing::error!(

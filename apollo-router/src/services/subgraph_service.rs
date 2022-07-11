@@ -281,7 +281,6 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::http_ext;
-    use crate::json_ext::Object;
     use crate::query_planner::fetch::OperationKind;
     use crate::Context;
     use crate::SubgraphRequest;
@@ -344,10 +343,7 @@ mod tests {
 
             let original_body = Response {
                 data: Some(Value::String(ByteString::from("test"))),
-                path: None,
-                label: None,
-                errors: vec![],
-                extensions: Object::new(),
+                ..Response::default()
             };
             let mut encoder = GzipEncoder::new(Vec::new());
             encoder
@@ -475,10 +471,7 @@ mod tests {
         // Test the right decompression of the body
         let resp_from_subgraph = Response {
             data: Some(Value::String(ByteString::from("test"))),
-            path: None,
-            label: None,
-            errors: vec![],
-            extensions: Object::new(),
+            ..Response::default()
         };
 
         assert_eq!(resp.response.body(), &resp_from_subgraph);
