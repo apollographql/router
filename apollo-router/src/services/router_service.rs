@@ -191,14 +191,19 @@ where
                                 parts,
                                 response_stream
                                     .map(move |mut response: Response| {
-                                        tracing::debug_span!("format_response").in_scope(|| {
-                                            query.format_response(
-                                                &mut response,
-                                                operation_name.as_deref(),
-                                                variables.clone(),
-                                                schema.api_schema(),
-                                            )
-                                        });
+                                        //FIXME: handle response formatting for deferred responses too
+                                        if response.subselection.is_none() {
+                                            tracing::debug_span!("format_response").in_scope(
+                                                || {
+                                                    query.format_response(
+                                                        &mut response,
+                                                        operation_name.as_deref(),
+                                                        variables.clone(),
+                                                        schema.api_schema(),
+                                                    )
+                                                },
+                                            );
+                                        }
 
                                         if is_deferred {
                                             response.has_next = Some(true);
