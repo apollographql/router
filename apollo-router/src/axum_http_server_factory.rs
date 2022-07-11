@@ -9,6 +9,7 @@ use std::time::Instant;
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::ZlibDecoder;
+use axum::body::StreamBody;
 use axum::extract::Extension;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
@@ -495,8 +496,22 @@ async fn run_graphql_request(
                         .into_response()
                 }
                 Ok(response) => {
-                    let (parts, mut stream) = http::Response::from(response).into_parts();
-                    match stream.next().await {
+                    let (mut parts, stream) = http::Response::from(response).into_parts();
+                    parts.headers.insert(
+                        "content-type",
+                        HeaderValue::from_static("multipart/form-data;boundary=\"graphql\""),
+                    );
+
+                    let body = stream.map(move |res| {
+                        //FIXME: could be replaced with a https://docs.rs/bytes/latest/bytes/buf/struct.Chain.html
+                        let data = format!("\n--graphql\n{}", serde_json::to_string(&res).unwrap());
+                        Ok::<_, BoxError>(Bytes::from(data))
+                    });
+
+                    // FIXME: we should detect if there is only one response and abvoid multipart in that case
+                    // FIXME we should detect errors too
+                    (parts, StreamBody::new(body)).into_response()
+                    /*match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);
                             (
@@ -513,7 +528,7 @@ async fn run_graphql_request(
                                 .into_response()
                             })
                         }
-                    }
+                    }*/
                 }
             }
         }
