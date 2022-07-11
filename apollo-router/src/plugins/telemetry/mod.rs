@@ -7,7 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use ::tracing::__macro_support;
+use ::tracing::callsite;
+use ::tracing::callsite2;
 use ::tracing::info_span;
+use ::tracing::metadata;
+use ::tracing::Level;
 use ::tracing::Span;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
@@ -733,6 +738,18 @@ impl Telemetry {
                 .get(&client_version_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
+            use __macro_support::Callsite as _;
+            static CALLSITE: __macro_support::MacroCallsite = callsite2!(
+                name: ROUTER_SPAN_NAME,
+                kind: metadata::Kind::SPAN,
+                target: module_path!(),
+                level: Level::INFO,
+                fields: graphql.document = query.as_str(),
+                // TODO add graphql.operation.type
+                graphql.operation.name = operation_name.as_str(),
+                client_name = client_name.to_str().unwrap_or_default(),
+                client_version = client_version.to_str().unwrap_or_default(),
+                "otel.kind" = %SpanKind::Internal);
             let span = info_span!(
                 ROUTER_SPAN_NAME,
                 graphql.document = query.as_str(),
