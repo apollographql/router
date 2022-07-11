@@ -170,7 +170,7 @@ impl PlanNode {
         schema: &'a Schema,
         originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
-        deferred_fetches: &'a HashMap<String, Sender<Value>>,
+        deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
         sender: futures::channel::mpsc::Sender<Response>,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -289,13 +289,14 @@ impl PlanNode {
                 PlanNode::Defer {
                     primary:
                         Primary {
-                            path,
-                            subselection,
+                            path: _path,
+                            subselection: _subselection,
                             node,
                         },
                     deferred,
                 } => {
-                    let mut deferred_fetches = HashMap::new();
+                    let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
+                        HashMap::new();
                     let mut futures = Vec::new();
 
                     for deferred_node in deferred {
@@ -330,11 +331,17 @@ impl PlanNode {
                         let opt = options.clone();
                         let fut = async move {
                             let mut value = Value::default();
+                            let mut errors = Vec::new();
 
-                            while let Some(v) = stream.next().await {
-                                let deferred_value = v.0.unwrap().unwrap();
-                                println!("got deferred value: {:?}", deferred_value);
-                                value.deep_merge(deferred_value);
+                            while let Some((v, _remaining)) = stream.next().await {
+                                // a Err(RecvError) means either that the fetch was not performed and the
+                                // sender was dropped, possibly because there was no need to do it,
+                                // or because it is lagging, but here we only send one message so it
+                                // will not happen
+                                if let Some(Ok((deferred_value, mut err))) = v {
+                                    value.deep_merge(deferred_value);
+                                    errors.extend(err.drain(..))
+                                }
                             }
 
                             let span = tracing::info_span!("deferred");
@@ -361,20 +368,39 @@ impl PlanNode {
                                     .await;
                                 println!("returning deferred {:?}", v);
 
-                                let _ = tx
+                                if let Err(e) = tx
                                     .send(Response::builder().data(v).errors(err).build())
-                                    .await;
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                };
                             } else {
-                                todo!()
+                                if let Err(e) = tx
+                                    .send(Response::builder().data(value).errors(vec![]).build())
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                };
                             }
                         };
 
                         futures.push(fut);
                     }
 
-                    tokio::task::spawn(async move {
-                        join_all(futures).await;
-                    });
+                    tokio::task::spawn(
+                        async move {
+                            join_all(futures).await;
+                        }
+                        .in_current_span(),
+                    );
 
                     value = parent_value.clone();
                     errors = Vec::new();
@@ -621,7 +647,7 @@ pub(crate) mod fetch {
             service_registry: &'a ServiceRegistry,
             originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
-            deferred_fetches: &'a HashMap<String, Sender<Value>>,
+            deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
@@ -715,7 +741,7 @@ pub(crate) mod fetch {
 
             // fix error path and erase subgraph error messages (we cannot expose subgraph information
             // to the client)
-            let errors = response
+            let errors: Vec<Error> = response
                 .errors
                 .into_iter()
                 .map(|error| Error {
@@ -734,18 +760,9 @@ pub(crate) mod fetch {
                 Ok(value) => {
                     if let Some(id) = &self.id {
                         if let Some(sender) = deferred_fetches.get(id.as_str()) {
-                            println!(
-                                "will send data from fetch node '{}': {:?}",
-                                id,
-                                value.as_object().as_ref().unwrap() //.get("data")
-                            );
-                            sender.clone().send(
-                                value
-                                    //.as_object()
-                                    //.and_then(|o| o.get("data"))
-                                    //.unwrap()
-                                    .clone(),
-                            );
+                            if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                                tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                            }
                         }
                     }
 
