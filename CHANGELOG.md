@@ -4,8 +4,98 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.11.0] - 2022-07-12
+
+## ❗ BREAKING ❗
+
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+
+the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
+they work like a tower Layer, they can use `&self` instead. This change
+then allows us to move from Buffer to service factories for the query
+planner, execution and subgraph services.
+
+**Services are now created on the fly at session creation, so if any state must be shared
+between executions, it should be stored in an `Arc<Mutex<_>>` in the plugin and cloned
+into the new service in the `Plugin::*_service()` methods**.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1340 https://github.com/apollographql/router/pull/1289
+
+## 🚀 Features
+
+### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
+
+Resources are almost like attributes but more global. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics.  This functionality can be used to, for example,
+apply a `service.name` to metrics to make them easier to find in larger infrastructure, as demonstrated here:
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      resources:
+        # Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+        service.name: "apollo-router"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1354
+
+## 🐛 Fixes
+
+### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+
+When the subgraph doesn't return the `__typename` and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
+
+### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+
+A query that only contains `__typename` at the root will now special-cased as merely an introspection query and will bypass more complex query-planner execution (its value will just be `Query`).
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
+
+### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
+
+Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1363
+
+## 🛠 Maintenance
+
+### Replace Buffers of tower services with service factories ([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
+
+Tower services should be used by creating a new service instance for each new session
+instead of going through a `Buffer`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
+
+### Execute the query plan's first response directly ([PR #1357](https://github.com/apollographql/router/issues/1357))
+
+The query plan was previously executed in a spawned task to prepare for the `@defer` implementation, but we can actually
+generate the first response right inside the same future.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
+
+### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+
+This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
+
+By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
+
+### Render embedded Sandbox instead of landing page ([PR #1369](https://github.com/apollographql/router/pull/1369))
+
+Open the router URL in a browser and start querying the router from the Apollo Sandbox.
+
+By [@mayakoneval](https://github.com/mayakoneval) in https://github.com/apollographql/router/pull/1369
+
+## 📚 Documentation
+
+### Various documentation edits ([PR #1329](https://github.com/apollographql/router/issues/1329))
+
+By [@StephenBarlow](https://github.com/StephenBarlow) in https://github.com/apollographql/router/pull/1329
+
 
 # [0.10.0] - 2022-07-05
+
 ## ❗ BREAKING ❗
 
 ### Change configuration for custom attributes for metrics in telemetry plugin ([PR #1300](https://github.com/apollographql/router/pull/1300)

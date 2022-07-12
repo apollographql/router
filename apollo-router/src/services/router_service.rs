@@ -8,13 +8,11 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
-use futures::Stream;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -22,21 +20,25 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::new_service::NewService;
+use super::subgraph_service::MakeSubgraphService;
+use super::subgraph_service::SubgraphCreator;
+use super::ExecutionCreator;
+use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
+use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
-use crate::services::execution_service::ExecutionService;
-use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::ExecutionRequest;
@@ -46,54 +48,45 @@ use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::Schema;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub struct RouterService<QueryPlannerService, ExecutionService> {
+pub struct RouterService<QueryPlannerService, ExecutionFactory> {
     query_planner_service: QueryPlannerService,
-    query_execution_service: ExecutionService,
+    execution_service_factory: ExecutionFactory,
     ready_query_planner_service: Option<QueryPlannerService>,
-    ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, ExecutionService> {
+impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, ExecutionFactory> {
     #[builder]
     pub fn new(
         query_planner_service: QueryPlannerService,
-        query_execution_service: ExecutionService,
+        execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
-    ) -> RouterService<QueryPlannerService, ExecutionService> {
+    ) -> Self {
         RouterService {
             query_planner_service,
-            query_execution_service,
+            execution_service_factory,
             ready_query_planner_service: None,
-            ready_query_execution_service: None,
             schema,
         }
     }
 }
 
-impl<ResponseStream, QueryPlannerService, ExecutionService> Service<RouterRequest>
-    for RouterService<QueryPlannerService, ExecutionService>
+impl<QueryPlannerService, ExecutionFactory> Service<RouterRequest>
+    for RouterService<QueryPlannerService, ExecutionFactory>
 where
     QueryPlannerService: Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
-    ExecutionService: Service<ExecutionRequest, Response = ExecutionResponse<ResponseStream>, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
     QueryPlannerService::Future: Send + 'static,
-    ExecutionService::Future: Send + 'static,
-    ResponseStream: Stream<Item = Response> + Send + 'static,
+    ExecutionFactory: ExecutionServiceFactory,
 {
     type Response = RouterResponse<BoxStream<'static, Response>>;
     type Error = BoxError;
@@ -104,26 +97,15 @@ where
         // The reason for us to clone here is that the async block needs to own the hot services,
         // and cloning will produce a cold service. Therefore cloning in `RouterService#call` is not
         // a valid course of action.
-        if vec![
-            self.ready_query_planner_service
-                .get_or_insert_with(|| self.query_planner_service.clone())
-                .poll_ready(cx),
-            self.ready_query_execution_service
-                .get_or_insert_with(|| self.query_execution_service.clone())
-                .poll_ready(cx),
-        ]
-        .iter()
-        .all(|r| r.is_ready())
-        {
-            return Poll::Ready(Ok(()));
-        }
-        Poll::Pending
+        self.ready_query_planner_service
+            .get_or_insert_with(|| self.query_planner_service.clone())
+            .poll_ready(cx)
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
-        let mut execution = self.ready_query_execution_service.take().unwrap();
+        let execution = self.execution_service_factory.new_service();
 
         let schema = self.schema.clone();
 
@@ -172,10 +154,8 @@ where
                     } else {
                         let operation_name = body.operation_name.clone();
 
-                        let ExecutionResponse { response, context }: ExecutionResponse<
-                            ResponseStream,
-                        > = execution
-                            .call(
+                        let ExecutionResponse { response, context } = execution
+                            .oneshot(
                                 ExecutionRequest::builder()
                                     .originating_request(req.originating_request.clone())
                                     .query_plan(plan)
@@ -260,10 +240,7 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
-    subgraph_services: Vec<(
-        String,
-        BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    )>,
+    subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     introspection: bool,
     defer_support: bool,
 }
@@ -297,23 +274,16 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_subgraph_service<
-        S: Service<
-                SubgraphRequest,
-                Response = SubgraphResponse,
-                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
-            > + Send
-            + 'static,
-    >(
+    pub fn with_subgraph_service<S>(
         mut self,
         name: &str,
-        service: S,
+        service_maker: S,
     ) -> PluggableRouterServiceBuilder
     where
-        <S as Service<SubgraphRequest>>::Future: Send,
+        S: MakeSubgraphService,
     {
         self.subgraph_services
-            .push((name.to_string(), service.boxed()));
+            .push((name.to_string(), Arc::new(service_maker)));
         self
     }
 
@@ -327,15 +297,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub async fn build(
-        mut self,
-    ) -> Result<
-        (
-            BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-            Plugins,
-        ),
-        crate::error::ServiceBuildError,
-    > {
+    pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
+        &mut self.plugins
+    }
+
+    pub async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -375,63 +341,99 @@ impl PluggableRouterServiceBuilder {
                     |acc, (_, e)| e.query_planning_service(acc),
                 ));
 
-        // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
-        let subgraphs = self
-            .subgraph_services
-            .into_iter()
-            .map(|(name, s)| {
-                let service = self
-                    .plugins
-                    .iter_mut()
-                    .rev()
-                    .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
+        let plugins = Arc::new(self.plugins);
 
-                let service = ServiceBuilder::new().buffered().service(service);
+        let subgraph_creator = Arc::new(SubgraphCreator::new(
+            self.subgraph_services,
+            plugins.clone(),
+        ));
 
-                (name.clone(), service)
-            })
-            .collect();
+        Ok(RouterCreator {
+            query_planner_service,
+            subgraph_creator,
+            schema: self.schema,
+            plugins,
+            apq: APQLayer::default(),
+        })
+    }
+}
 
-        // ExecutionService takes a PlannedRequest and outputs a RouterResponse
-        // NB: Cannot use .buffer() here or the code won't compile...
-        let execution_service = Buffer::new(
-            ServiceBuilder::new()
-                .layer(AllowOnlyHttpPostMutationsLayer::default())
-                .service(
-                    self.plugins.iter_mut().rev().fold(
-                        ExecutionService::builder()
-                            .schema(self.schema.clone())
-                            .subgraph_services(subgraphs)
-                            .build()
-                            .boxed(),
-                        |acc, (_, e)| e.execution_service(acc),
-                    ),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+#[derive(Clone)]
+pub struct RouterCreator {
+    query_planner_service: Buffer<
+        BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+        QueryPlannerRequest,
+    >,
+    subgraph_creator: Arc<SubgraphCreator>,
+    schema: Arc<Schema>,
+    plugins: Arc<Plugins>,
+    apq: APQLayer,
+}
 
-        // Router service takes a crate::Request and outputs a crate::Response
-        // NB: Cannot use .buffer() here or the code won't compile...
-        let router_service = Buffer::new(
-            ServiceBuilder::new()
-                .layer(APQLayer::default())
-                .layer(EnsureQueryPresence::default())
-                .service(
-                    self.plugins.iter_mut().rev().fold(
+impl NewService<Request<graphql::Request>> for RouterCreator {
+    type Service = BoxService<
+        Request<graphql::Request>,
+        crate::http_ext::Response<BoxStream<'static, Response>>,
+        BoxError,
+    >;
+    fn new_service(&self) -> Self::Service {
+        BoxService::new(
+            self.make()
+                .map_request(|http_request: Request<graphql::Request>| http_request.into())
+                .map_response(|response| response.response),
+        )
+    }
+}
+
+impl RouterServiceFactory for RouterCreator {
+    type RouterService = BoxService<
+        Request<graphql::Request>,
+        crate::http_ext::Response<BoxStream<'static, Response>>,
+        BoxError,
+    >;
+
+    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
+        Request<graphql::Request>,
+    >>::Future;
+}
+
+impl RouterCreator {
+    fn make(
+        &self,
+    ) -> impl Service<
+        RouterRequest,
+        Response = RouterResponse<BoxStream<'static, Response>>,
+        Error = BoxError,
+        Future = BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>,
+    > + Send {
+        ServiceBuilder::new()
+            .layer(self.apq.clone())
+            .layer(EnsureQueryPresence::default())
+            .service(
+                self.plugins.iter().rev().fold(
+                    BoxService::new(
                         RouterService::builder()
-                            .query_planner_service(query_planner_service)
-                            .query_execution_service(execution_service)
-                            .schema(self.schema)
-                            .build()
-                            .boxed(),
-                        |acc, (_, e)| e.router_service(acc),
+                            .query_planner_service(self.query_planner_service.clone())
+                            .execution_service_factory(ExecutionCreator {
+                                schema: self.schema.clone(),
+                                plugins: self.plugins.clone(),
+                                subgraph_creator: self.subgraph_creator.clone(),
+                            })
+                            .schema(self.schema.clone())
+                            .build(),
                     ),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+                    |acc, (_, e)| e.router_service(acc),
+                ),
+            )
+    }
 
-        Ok((router_service.boxed_clone(), self.plugins))
+    pub fn test_service(
+        &self,
+    ) -> tower::util::BoxCloneService<
+        RouterRequest,
+        RouterResponse<BoxStream<'static, Response>>,
+        BoxError,
+    > {
+        Buffer::new(self.make(), 512).boxed_clone()
     }
 }

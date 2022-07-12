@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
@@ -15,13 +14,12 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::service_registry::ServiceRegistry;
+use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
 
 mod bridge_query_planner;
@@ -120,30 +118,18 @@ impl QueryPlan {
         self
     }
 
-    /// Validate the entire request for variables and services used.
-    #[tracing::instrument(skip_all, level = "debug", name = "validate")]
-    pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
-        let mut early_errors = Vec::new();
-        for err in self.root.validate_services_against_plan(service_registry) {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
-        if !early_errors.is_empty() {
-            Err(Response::builder().errors(early_errors).build())
-        } else {
-            Ok(())
-        }
-    }
-
     /// Execute the plan and return a [`Response`].
-    pub async fn execute<'a>(
+    pub async fn execute<'a, SF>(
         &self,
         context: &'a Context,
-        service_registry: &'a ServiceRegistry,
+        service_factory: &'a Arc<SF>,
         originating_request: http_ext::Request<Request>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> Response {
+    ) -> Response
+    where
+        SF: SubgraphServiceFactory,
+    {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
@@ -152,7 +138,7 @@ impl QueryPlan {
             .execute_recursively(
                 &root,
                 context,
-                service_registry,
+                service_factory,
                 schema,
                 originating_request,
                 &Value::default(),
@@ -172,18 +158,21 @@ impl QueryPlan {
 
 impl PlanNode {
     #[allow(clippy::too_many_arguments)]
-    fn execute_recursively<'a>(
+    fn execute_recursively<'a, SF>(
         &'a self,
         current_dir: &'a Path,
         context: &'a Context,
-        service_registry: &'a ServiceRegistry,
+        service_factory: &'a Arc<SF>,
         schema: &'a Schema,
         originating_request: http_ext::Request<Request>,
         parent_value: &'a Value,
         deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
         sender: futures::channel::mpsc::Sender<Response>,
         options: &'a QueryPlanOptions,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<(Value, Vec<Error>)>
+    where
+        SF: SubgraphServiceFactory,
+    {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
@@ -199,7 +188,7 @@ impl PlanNode {
                             .execute_recursively(
                                 current_dir,
                                 context,
-                                service_registry,
+                                service_factory,
                                 schema,
                                 originating_request.clone(),
                                 &value,
@@ -225,7 +214,7 @@ impl PlanNode {
                             plan.execute_recursively(
                                 current_dir,
                                 context,
-                                service_registry,
+                                service_factory,
                                 schema,
                                 originating_request.clone(),
                                 parent_value,
@@ -253,7 +242,7 @@ impl PlanNode {
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
                             context,
-                            service_registry,
+                            service_factory,
                             schema,
                             originating_request,
                             parent_value,
@@ -273,7 +262,7 @@ impl PlanNode {
                             parent_value,
                             current_dir,
                             context,
-                            service_registry,
+                            service_factory,
                             originating_request,
                             schema,
                             deferred_fetches,
@@ -337,7 +326,7 @@ impl PlanNode {
                         let mut tx = sender.clone();
                         let sc = schema.clone();
                         let orig = originating_request.clone();
-                        let sr = service_registry.clone();
+                        let sf = service_factory.clone();
                         let ctx = context.clone();
                         let opt = options.clone();
                         let fut = async move {
@@ -362,7 +351,7 @@ impl PlanNode {
                                     .execute_recursively(
                                         &Path::default(),
                                         &ctx,
-                                        &sr,
+                                        &sf,
                                         &sc,
                                         orig,
                                         &value,
@@ -424,7 +413,7 @@ impl PlanNode {
                         .execute_recursively(
                             current_dir,
                             context,
-                            service_registry,
+                            service_factory,
                             schema,
                             originating_request.clone(),
                             &value,
@@ -444,6 +433,7 @@ impl PlanNode {
         })
     }
 
+    #[cfg(test)]
     /// Retrieves all the services used across all plan nodes.
     ///
     /// Note that duplicates are not filtered.
@@ -462,29 +452,6 @@ impl PlanNode {
                 ),
             ),
         }
-    }
-
-    /// Recursively validate a query plan node making sure that all services are known before we go
-    /// for execution.
-    ///
-    /// This simplifies processing later as we can always guarantee that services are configured for
-    /// the plan.
-    ///
-    /// # Arguments
-    ///
-    ///  *   `plan`: The root query plan node to validate.
-    fn validate_services_against_plan(
-        &self,
-        service_registry: &ServiceRegistry,
-    ) -> Vec<FetchError> {
-        self.service_usage()
-            .filter(|service| !service_registry.contains(service))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .map(|service| FetchError::ValidationUnknownServiceError {
-                service: service.to_string(),
-            })
-            .collect::<Vec<_>>()
     }
 }
 
@@ -510,7 +477,7 @@ pub(crate) mod fetch {
     use crate::json_ext::Path;
     use crate::json_ext::Value;
     use crate::json_ext::ValueExt;
-    use crate::service_registry::ServiceRegistry;
+    use crate::services::subgraph_service::SubgraphServiceFactory;
     use crate::*;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
@@ -653,17 +620,20 @@ pub(crate) mod fetch {
 
     impl FetchNode {
         #[allow(clippy::too_many_arguments)]
-        pub(crate) async fn fetch_node<'a>(
+        pub(crate) async fn fetch_node<'a, SF>(
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
             context: &'a Context,
-            service_registry: &'a ServiceRegistry,
+            service_factory: &'a Arc<SF>,
             originating_request: http_ext::Request<Request>,
             schema: &'a Schema,
             deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
             options: &QueryPlanOptions,
-        ) -> Result<(Value, Vec<Error>), FetchError> {
+        ) -> Result<(Value, Vec<Error>), FetchError>
+        where
+            SF: SubgraphServiceFactory,
+        {
             let FetchNode {
                 operation,
                 operation_kind,
@@ -723,8 +693,8 @@ pub(crate) mod fetch {
                 .context(context.clone())
                 .build();
 
-            let service = service_registry
-                .get(service_name)
+            let service = service_factory
+                .new_service(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -827,6 +797,7 @@ pub(crate) mod fetch {
             }
         }
 
+        #[cfg(test)]
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
         }
@@ -939,6 +910,7 @@ mod tests {
 
     use super::*;
     use crate::json_ext::PathElement;
+    use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
 
     macro_rules! test_query_plan {
@@ -995,16 +967,20 @@ mod tests {
         });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([(
+                "product".into(),
+                ServiceBuilder::new()
+                    .buffer(1)
+                    .service(mock_products_service.build().boxed()),
+            )]),
+            plugins: Default::default(),
+        });
 
         let result = query_plan
             .execute(
                 &Context::new(),
-                &ServiceRegistry::new(HashMap::from([(
-                    "product".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_products_service.build().boxed()),
-                )])),
+                &sf,
                 http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
@@ -1050,15 +1026,20 @@ mod tests {
 
         let (sender, _) = futures::channel::mpsc::channel(10);
 
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([(
+                "product".into(),
+                ServiceBuilder::new()
+                    .buffer(1)
+                    .service(mock_products_service.build().boxed()),
+            )]),
+            plugins: Default::default(),
+        });
+
         let _response = query_plan
             .execute(
                 &Context::new(),
-                &ServiceRegistry::new(HashMap::from([(
-                    "product".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_products_service.build().boxed()),
-                )])),
+                &sf,
                 http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
@@ -1098,15 +1079,20 @@ mod tests {
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         let (sender, _) = futures::channel::mpsc::channel(10);
 
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([(
+                "product".into(),
+                ServiceBuilder::new()
+                    .buffer(1)
+                    .service(mock_products_service.build().boxed()),
+            )]),
+            plugins: Default::default(),
+        });
+
         let _response = query_plan
             .execute(
                 &Context::new(),
-                &ServiceRegistry::new(HashMap::from([(
-                    "product".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_products_service.build().boxed()),
-                )])),
+                &sf,
                 http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())
@@ -1221,24 +1207,28 @@ mod tests {
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
         let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([
+                (
+                    "X".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_x_service.build().boxed()),
+                ),
+                (
+                    "Y".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_y_service.build().boxed()),
+                ),
+            ]),
+            plugins: Default::default(),
+        });
 
         let response = query_plan
             .execute(
                 &Context::new(),
-                &ServiceRegistry::new(HashMap::from([
-                    (
-                        "X".into(),
-                        ServiceBuilder::new()
-                            .buffer(1)
-                            .service(mock_x_service.build().boxed()),
-                    ),
-                    (
-                        "Y".into(),
-                        ServiceBuilder::new()
-                            .buffer(1)
-                            .service(mock_y_service.build().boxed()),
-                    ),
-                ])),
+                &sf,
                 http_ext::Request::fake_builder()
                     .headers(Default::default())
                     .body(Default::default())

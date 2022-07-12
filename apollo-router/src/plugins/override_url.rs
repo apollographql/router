@@ -32,7 +32,7 @@ impl Plugin for OverrideSubgraphUrl {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -82,7 +82,7 @@ mod tests {
                     .build())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(

@@ -51,7 +51,7 @@ mod tests {
         .expect("json must be valid");
 
         // Build a rhai plugin instance from our conf
-        let mut rhai = Rhai::new(conf)
+        let rhai = Rhai::new(conf)
             .await
             .expect("valid configuration should succeed");
 
