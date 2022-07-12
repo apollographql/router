@@ -83,4 +83,10 @@ instead of going through a Buffer.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
 
+### Render embedded Sandbox instead of landing page([PR #1369](https://github.com/apollographql/router/pull/1369)
+
+Open the router URL in a browser and start querying the router from the Apollo Sandbox.
+
+By [@mayakoneval](https://github.com/mayakoneval) in https://github.com/apollographql/router/pull/1369
+
 ## 📚 Documentation
