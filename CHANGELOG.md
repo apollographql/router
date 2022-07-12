@@ -43,13 +43,13 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
 
-When the subgraph doesn't return the typename and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+When the subgraph doesn't return the `__typename` and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
 
 ### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
 
-A query that only contains __typename at the root must be considered as an introspection query
+A query that only contains `__typename` at the root will now special-cased as merely an introspection query and will bypass more complex query-planner execution (its value will just be `Query`).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
 
@@ -61,16 +61,16 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
-### Replace Buffers of tower services with service factories([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
+### Replace Buffers of tower services with service factories ([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
 
-tower services should be used by creating a new service instance for each new session
-instead of going through a Buffer.
+Tower services should be used by creating a new service instance for each new session
+instead of going through a `Buffer`.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
 
-### execute the query plan's first response directly ([PR #1357](https://github.com/apollographql/router/issues/1357))
+### Execute the query plan's first response directly ([PR #1357](https://github.com/apollographql/router/issues/1357))
 
-The query plan was entirely executed in a spawned task to prepare for the `@defer` implementation, but we can actually
+The query plan was previously executed in a spawned task to prepare for the `@defer` implementation, but we can actually
 generate the first response right inside the same future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
