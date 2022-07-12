@@ -164,9 +164,8 @@ mod tests {
     use router_bridge::planner::UsageReporting;
     use test_log::test;
 
-    use crate::query_planner::QueryPlanOptions;
-
     use super::*;
+    use crate::query_planner::QueryPlanOptions;
 
     mock! {
         #[derive(Debug)]
