@@ -7,9 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use ::tracing::Value;
 use ::tracing::__macro_support;
 use ::tracing::callsite;
 use ::tracing::callsite2;
+use ::tracing::field::FieldSet;
 use ::tracing::info_span;
 use ::tracing::metadata;
 use ::tracing::Level;
@@ -43,6 +45,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use url::Url;
 
+use self::apollo::client_name_header_default;
+use self::apollo::client_version_header_default;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
@@ -230,8 +234,6 @@ impl Plugin for Telemetry {
         // The trace provider will not be shut down if drop is not called and it will result in a hang.
         // Don't add anything fallible after the tracer provider has been created.
         let tracer_provider = Self::create_tracer_provider(&config)?;
-        //
-        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
 
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
@@ -241,7 +243,6 @@ impl Plugin for Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
-            // metrics_response_queries,
         });
 
         // We're safe now for shutdown.
@@ -273,9 +274,7 @@ impl Plugin for Telemetry {
         let config = Arc::new(self.config.clone());
         let config_map_res = config.clone();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(
-                config.apollo.clone().unwrap_or_default(),
-            ))
+            .instrument(Self::router_service_span(config.clone()))
             .map_future_with_context(
                 move |req: &RouterRequest| {
                     Self::populate_context(config.clone(), req);
@@ -717,9 +716,17 @@ impl Telemetry {
         futures::executor::block_on(jh).expect("failed to replace tracer provider");
     }
 
-    fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
-        let client_name_header = config.client_name_header;
-        let client_version_header = config.client_version_header;
+    fn router_service_span(config: Arc<config::Conf>) -> impl Fn(&RouterRequest) -> Span + Clone {
+        let client_name_header = config
+            .apollo
+            .as_ref()
+            .map(|a| a.client_name_header.clone())
+            .unwrap_or_else(client_name_header_default);
+        let client_version_header = config
+            .apollo
+            .as_ref()
+            .map(|a| a.client_version_header.clone())
+            .unwrap_or_else(client_version_header_default);
 
         move |request: &RouterRequest| {
             let http_request = &request.originating_request;
@@ -749,16 +756,41 @@ impl Telemetry {
                 graphql.operation.name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
-                "otel.kind" = %SpanKind::Internal);
-            let span = info_span!(
-                ROUTER_SPAN_NAME,
-                graphql.document = query.as_str(),
-                // TODO add graphql.operation.type
-                graphql.operation.name = operation_name.as_str(),
-                client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal
             );
+            let identifier = CALLSITE.metadata().callsite();
+            // let test_str = String::from("coucou");
+            // let test = Box::new(test_str.as_str());
+            let t = Box::leak(Box::new([string_to_static_str(String::from("coucou"))]));
+            let static_fields = config
+                .tracing
+                .as_ref()
+                .and_then(|t| t.trace_config.as_ref())
+                .and_then(|tc| tc.new_attributes.as_ref())
+                .and_then(|na| na.router.as_ref())
+                .map(|r| r.get_static_names())
+                .unwrap_or_default();
+            let fields_set = FieldSet::new(static_fields, identifier);
+
+            for field in &fields_set {
+                let val = String::from("coucou");
+                let mut test = vec![Some((&field, Some(&val.as_str() as &dyn Value)))];
+                // TODO use dynamic vec
+                let vs = fields_set.value_set(&[(&field, Some(&val.as_str() as &dyn Value))]);
+                let span = Span::new(CALLSITE.metadata(), &vs);
+            }
+
+            let span = Span::new(CALLSITE.metadata(), &[("test", "coucou")]);
+
+            // let span = info_span!(
+            //     ROUTER_SPAN_NAME,
+            //     graphql.document = query.as_str(),
+            //     // TODO add graphql.operation.type
+            //     graphql.operation.name = operation_name.as_str(),
+            //     client_name = client_name.to_str().unwrap_or_default(),
+            //     client_version = client_version.to_str().unwrap_or_default(),
+            //     "otel.kind" = %SpanKind::Internal
+            // );
             span
         }
     }
@@ -974,6 +1006,11 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
             ::tracing::error!("OpenTelemetry error occurred: {:?}", other)
         }
     }
+}
+
+fn string_to_static_str(s: String) -> &'static str {
+    // Box::leak(s.into_boxed_str())
+    "coucou"
 }
 
 register_plugin!("apollo", "telemetry", Telemetry);

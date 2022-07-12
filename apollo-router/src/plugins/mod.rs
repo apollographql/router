@@ -34,6 +34,12 @@ pub mod rhai;
 pub mod telemetry;
 pub(crate) mod traffic_shaping;
 
+// TODO
+// Maybe a best implementation would be to provide method like get_static_names to fetch a static array of names.
+// Use it in our code to declare fieldSet
+// And then use the normal logics to compute different attributes
+/// -------------------
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Configuration to add custom attributes/labels on metrics
@@ -376,6 +382,101 @@ impl LocationForwardConf {
         }
 
         attributes
+    }
+
+    pub(crate) fn get_static_names(&self) -> &'static [&'static str] {
+        let mut static_names: Vec<&'static str> = Vec::new();
+        if let Some(context) = &self.context {
+            static_names.extend(context.iter().map(|ctx| {
+                let current_str: &'static str = Box::leak::<'static>(
+                    ctx.rename
+                        .as_ref()
+                        .unwrap_or(&ctx.named)
+                        .clone()
+                        .into_boxed_str(),
+                );
+                current_str
+            }));
+        }
+        if let Some(insert) = &self.insert {
+            static_names.extend(insert.iter().map(|i| {
+                let current_str: &'static str =
+                    Box::leak::<'static>(i.name.clone().into_boxed_str());
+                current_str
+            }));
+        }
+        if let Some(request) = &self.request {
+            if let Some(req_body) = &request.body {
+                static_names.extend(req_body.iter().map(|rb| {
+                    let current_str: &'static str =
+                        Box::leak::<'static>(rb.name.clone().into_boxed_str());
+                    current_str
+                }));
+            }
+            if let Some(req_header) = &request.header {
+                static_names.extend(req_header.iter().map(|rh| match rh {
+                    HeaderForward::Named { named, rename, .. } => {
+                        let current_str: &'static str = Box::leak(
+                            rename
+                                .as_ref()
+                                .unwrap_or(&named.to_string())
+                                .clone()
+                                .into_boxed_str(),
+                        );
+                        current_str
+                    }
+                    HeaderForward::Matching { .. } => {
+                        unimplemented!(
+                            "currently not supported, cannot add dynamic attribute name on tracing"
+                        )
+                    }
+                }));
+            }
+        }
+        if let Some(response) = &self.response {
+            if let Some(res_body) = &response.body {
+                static_names.extend(res_body.iter().map(|rb| {
+                    let current_str: &'static str =
+                        Box::leak::<'static>(rb.name.clone().into_boxed_str());
+                    current_str
+                }));
+            }
+            if let Some(res_header) = &response.header {
+                static_names.extend(res_header.iter().map(|rh| match rh {
+                    HeaderForward::Named { named, rename, .. } => {
+                        let current_str: &'static str = Box::leak(
+                            rename
+                                .as_ref()
+                                .unwrap_or(&named.to_string())
+                                .clone()
+                                .into_boxed_str(),
+                        );
+                        current_str
+                    }
+                    HeaderForward::Matching { .. } => {
+                        unimplemented!(
+                            "currently not supported, cannot add dynamic attribute name on tracing"
+                        )
+                    }
+                }));
+            }
+        }
+
+        static_names.leak()
+    }
+}
+
+impl SubgraphConf {
+    pub(crate) fn get_static_names(&self) -> &'static [&'static str] {
+        let mut static_names: Vec<&'static str> = Vec::new();
+        if let Some(all) = &self.all {
+            static_names.extend(all.get_static_names());
+        }
+        if let Some(subgraphs) = &self.subgraphs {
+            static_names.extend(subgraphs.iter().flat_map(|(_, s)| s.get_static_names()));
+        }
+
+        static_names.leak()
     }
 }
 

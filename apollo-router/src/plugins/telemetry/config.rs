@@ -13,6 +13,7 @@ use serde::Deserialize;
 use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
+use crate::plugins::CommonLocationConf;
 
 pub trait GenericWith<T>
 where
@@ -101,6 +102,8 @@ pub struct Trace {
     pub max_attributes_per_event: Option<u32>,
     pub max_attributes_per_link: Option<u32>,
     pub attributes: Option<BTreeMap<String, AttributeValue>>,
+    // TODO rename with attributes
+    pub new_attributes: Option<CommonLocationConf>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
