@@ -540,7 +540,7 @@ where
                                             once(ready(serde_json::to_vec(&res).unwrap().into())),
                                         )
                                     })
-                                    .map(|d| Ok::<_, BoxError>(d));
+                                    .map(Ok::<_, BoxError>);
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
