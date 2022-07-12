@@ -120,7 +120,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         service
@@ -129,7 +129,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         service
@@ -138,7 +138,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -153,7 +153,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
     /// The `_subgraph_name` parameter is useful if you need to apply a customization only specific subgraphs.
     fn subgraph_service(
-        &mut self,
+        &self,
         _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -192,21 +192,21 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -218,7 +218,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
     /// The `_subgraph_name` parameter is useful if you need to apply a customization only on specific subgraphs.
     fn subgraph_service(
-        &mut self,
+        &self,
         _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
@@ -243,21 +243,21 @@ where
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         self.router_service(service)
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         self.query_planning_service(service)
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -269,7 +269,7 @@ where
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {

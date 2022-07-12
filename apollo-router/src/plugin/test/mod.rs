@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
+use indexmap::IndexMap;
 pub use mock::subgraph::MockSubgraph;
 pub use service::MockExecutionService;
 pub use service::MockQueryPlanningService;
@@ -20,6 +21,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use super::DynPlugin;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -28,9 +30,12 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::services::subgraph_service::SubgraphServiceFactory;
+use crate::services::ExecutionCreator;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
-use crate::ExecutionService;
+use crate::services::SubgraphRequest;
 use crate::RouterService;
 use crate::Schema;
 
@@ -86,22 +91,15 @@ impl PluginTestHarness {
     ///
     #[builder]
     pub async fn new<P: Plugin>(
-        mut plugin: P,
+        plugin: P,
         schema: IntoSchema,
         mock_router_service: Option<MockRouterService>,
         mock_query_planner_service: Option<MockQueryPlanningService>,
-        mock_execution_service: Option<MockExecutionService>,
         mock_subgraph_services: HashMap<String, MockSubgraphService>,
     ) -> Result<PluginTestHarness, BoxError> {
         let mut subgraph_services = mock_subgraph_services
             .into_iter()
-            .map(|(k, v)| {
-                let subgraph_service = plugin.subgraph_service(&k, v.build().boxed());
-                (
-                    k.clone(),
-                    Buffer::new(subgraph_service, DEFAULT_BUFFER_SIZE),
-                )
-            })
+            .map(|(k, v)| (k, Buffer::new(v.build().boxed(), DEFAULT_BUFFER_SIZE)))
             .collect::<HashMap<_, _>>();
         // If we're using the canned schema then add some canned results
         if let IntoSchema::Canned = schema {
@@ -148,41 +146,42 @@ impl PluginTestHarness {
                 .unwrap_or(query_planner),
         );
 
-        let execution_service = plugin.execution_service(
-            mock_execution_service
-                .map(|s| s.build().boxed())
-                .unwrap_or_else(|| {
-                    ExecutionService::builder()
-                        .schema(schema.clone())
-                        .subgraph_services(subgraph_services)
-                        .build()
-                        .boxed()
-                }),
+        let mut plugins = IndexMap::new();
+        plugins.insert(
+            "tested_plugin".to_string(),
+            Box::new(plugin) as Box<dyn DynPlugin + 'static>,
         );
+        let plugins = Arc::new(plugins);
 
+        let router_service = mock_router_service
+            .map(|s| s.build().boxed())
+            .unwrap_or_else(|| {
+                BoxService::new(
+                    RouterService::builder()
+                        .query_planner_service(Buffer::new(
+                            query_planner_service,
+                            DEFAULT_BUFFER_SIZE,
+                        ))
+                        .execution_service_factory(ExecutionCreator {
+                            schema: schema.clone(),
+                            plugins: plugins.clone(),
+                            subgraph_creator: Arc::new(MockSubgraphFactory {
+                                plugins: plugins.clone(),
+                                subgraphs: subgraph_services,
+                            }),
+                        })
+                        .schema(schema.clone())
+                        .build(),
+                )
+            });
         let router_service = ServiceBuilder::new()
             .layer(APQLayer::default())
             .layer(EnsureQueryPresence::default())
             .service(
-                plugin.router_service(
-                    mock_router_service
-                        .map(|s| s.build().boxed())
-                        .unwrap_or_else(|| {
-                            BoxService::new(
-                                RouterService::builder()
-                                    .query_planner_service(Buffer::new(
-                                        query_planner_service,
-                                        DEFAULT_BUFFER_SIZE,
-                                    ))
-                                    .query_execution_service(Buffer::new(
-                                        execution_service,
-                                        DEFAULT_BUFFER_SIZE,
-                                    ))
-                                    .schema(schema.clone())
-                                    .build(),
-                            )
-                        }),
-                ),
+                plugins
+                    .get("tested_plugin")
+                    .unwrap()
+                    .router_service(router_service),
             )
             .boxed();
         Ok(Self { router_service })
@@ -210,6 +209,38 @@ impl PluginTestHarness {
                     .build()?,
             )
             .await
+    }
+}
+
+#[derive(Clone)]
+pub struct MockSubgraphFactory {
+    pub(crate) subgraphs: HashMap<
+        String,
+        Buffer<
+            BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>,
+            SubgraphRequest,
+        >,
+    >,
+    pub(crate) plugins: Arc<Plugins>,
+}
+
+impl SubgraphServiceFactory for MockSubgraphFactory {
+    type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+
+    type Future =
+        <BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> as Service<
+            SubgraphRequest,
+        >>::Future;
+
+    fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
+        self.subgraphs.get(name).map(|service| {
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service.clone().boxed(), |acc, (_, e)| {
+                    e.subgraph_service(name, acc)
+                })
+        })
     }
 }
 

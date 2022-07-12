@@ -38,7 +38,6 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
-use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::MakeService;
@@ -58,9 +57,9 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Handler;
 use crate::router::ApolloRouterError;
+use crate::router_factory::RouterServiceFactory;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -74,38 +73,19 @@ impl AxumHttpServerFactory {
     }
 }
 
-type BufferedService = Buffer<
-    BoxService<
-        http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, graphql::Response>>,
-        BoxError,
-    >,
-    http_ext::Request<graphql::Request>,
->;
-
 impl HttpServerFactory for AxumHttpServerFactory {
     type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
-    fn create<RS>(
+    fn create<RF>(
         &self,
-        service: RS,
+        service_factory: RF,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RS: Service<
-                http_ext::Request<graphql::Request>,
-                Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
-                Error = BoxError,
-            > + Send
-            + Sync
-            + Clone
-            + 'static,
-
-        <RS as Service<http_ext::Request<graphql::Request>>>::Future: std::marker::Send,
+        RF: RouterServiceFactory,
     {
-        let boxed_service = Buffer::new(service.boxed(), DEFAULT_BUFFER_SIZE);
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -136,12 +116,31 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     get({
                         let display_landing_page = configuration.server.landing_page;
                         move |host: Host,
-                              service: Extension<BufferedService>,
+                              Extension(service): Extension<RF>,
                               http_request: Request<Body>| {
-                            handle_get(host, service, http_request, display_landing_page)
+                            handle_get(
+                                host,
+                                service.new_service().boxed(),
+                                http_request,
+                                display_landing_page,
+                            )
                         }
                     })
-                    .post(handle_post),
+                    .post({
+                        move |host: Host,
+                              uri: OriginalUri,
+                              request: Json<graphql::Request>,
+                              Extension(service): Extension<RF>,
+                              header_map: HeaderMap| {
+                            handle_post(
+                                host,
+                                uri,
+                                request,
+                                service.new_service().boxed(),
+                                header_map,
+                            )
+                        }
+                    }),
                 )
                 .layer(middleware::from_fn(decompress_request_body))
                 .layer(
@@ -162,7 +161,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         }),
                 )
                 .route(&configuration.server.health_check_path, get(health_check))
-                .layer(Extension(boxed_service))
+                .layer(Extension(service_factory))
                 .layer(cors)
                 .layer(CompressionLayer::new()); // To compress response body
 
@@ -418,7 +417,11 @@ async fn custom_plugin_handler(
 
 async fn handle_get(
     Host(host): Host,
-    Extension(service): Extension<BufferedService>,
+    service: BoxService<
+        http_ext::Request<graphql::Request>,
+        http_ext::Response<BoxStream<'static, graphql::Response>>,
+        BoxError,
+    >,
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
@@ -452,7 +455,11 @@ async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
-    Extension(service): Extension<BufferedService>,
+    service: BoxService<
+        http_ext::Request<graphql::Request>,
+        http_ext::Response<BoxStream<'static, graphql::Response>>,
+        BoxError,
+    >,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     let mut http_request = Request::post(
@@ -477,10 +484,17 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
-async fn run_graphql_request(
-    service: BufferedService,
+async fn run_graphql_request<RS>(
+    service: RS,
     http_request: Request<graphql::Request>,
-) -> impl IntoResponse {
+) -> impl IntoResponse
+where
+    RS: Service<
+            http_ext::Request<graphql::Request>,
+            Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
+            Error = BoxError,
+        > + Send,
+{
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
@@ -679,6 +693,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::http_ext::Request;
+    use crate::services::new_service::NewService;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -726,6 +741,32 @@ mod tests {
         }
     }
 
+    type MockRouterServiceType = tower_test::mock::Mock<
+        http_ext::Request<graphql::Request>,
+        http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
+    >;
+
+    #[derive(Clone)]
+    struct TestRouterServiceFactory {
+        inner: MockRouterServiceType,
+    }
+
+    impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
+        type Service = MockRouterServiceType;
+
+        fn new_service(&self) -> Self::Service {
+            self.inner.clone()
+        }
+    }
+
+    impl RouterServiceFactory for TestRouterServiceFactory {
+        type RouterService = MockRouterServiceType;
+
+        type Future = <<TestRouterServiceFactory as NewService<
+            http_ext::Request<graphql::Request>,
+        >>::Service as Service<http_ext::Request<graphql::Request>>>::Future;
+    }
+
     async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
@@ -742,7 +783,9 @@ mod tests {
         });
         let server = server_factory
             .create(
-                service.into_inner(),
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
                 Arc::new(
                     Configuration::builder()
                         .server(
@@ -792,7 +835,14 @@ mod tests {
             }
         });
         let server = server_factory
-            .create(service.into_inner(), Arc::new(conf), None, plugin_handlers)
+            .create(
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
+                Arc::new(conf),
+                None,
+                plugin_handlers,
+            )
             .await
             .expect("Failed to create server factory");
         let mut default_headers = HeaderMap::new();
@@ -826,7 +876,9 @@ mod tests {
         });
         let server = server_factory
             .create(
-                service.into_inner(),
+                TestRouterServiceFactory {
+                    inner: service.into_inner(),
+                },
                 Arc::new(
                     Configuration::builder()
                         .server(

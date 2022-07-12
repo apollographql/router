@@ -25,6 +25,16 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.10.1] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+
+the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
+they work like a tower Layer, they can use `&self` instead. This change
+then allows us to move from Buffer to service factories for the query
+planner, execution and subgraph services
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1340 https://github.com/apollographql/router/pull/1289
+
 ## 🚀 Features
 
 ### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
@@ -66,17 +76,11 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
-### execute the query plan's first response directly  ([PR #1357](https://github.com/apollographql/router/issues/1357))
+### Replace Buffers of tower services with service factories([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
 
-The query plan was entirely executed in a spawned task to prepare for the `@defer` implementation, but we can actually
-generate the first response right inside the same future.
+tower services should be used by creating a new service instance for each new session
+instead of going through a Buffer.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
-
-### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
-
-This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
-
-By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
 
 ## 📚 Documentation

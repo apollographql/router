@@ -655,7 +655,7 @@ async fn setup_router_and_registry() -> (
         builder = builder.with_subgraph_service(name, service);
     }
 
-    let (router, _) = builder.build().await.unwrap();
+    let router = builder.build().await.unwrap().test_service();
 
     (router, counting_registry)
 }
