@@ -519,15 +519,14 @@ async fn run_graphql_request(
                                 let stream = once(ready(response)).chain(stream).chain(once(
                                     ready(graphql::Response::builder().has_next(false).build()),
                                 ));
-                                let body = stream.map(move |res| {
-                                    println!("got response: {:?}", res);
-                                    //FIXME: could be replaced with a https://docs.rs/bytes/latest/bytes/buf/struct.Chain.html
-                                    let data = format!(
-                                        "\n--graphql\n{}",
-                                        serde_json::to_string(&res).unwrap()
-                                    );
-                                    Ok::<_, BoxError>(Bytes::from(data))
-                                });
+
+                                let body = stream
+                                    .flat_map(|res| {
+                                        once(ready(Bytes::from_static(b"\n--graphql\n"))).chain(
+                                            once(ready(serde_json::to_vec(&res).unwrap().into())),
+                                        )
+                                    })
+                                    .map(|d| Ok::<_, BoxError>(d));
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
