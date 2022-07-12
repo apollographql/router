@@ -28,10 +28,5 @@ pub(crate) trait QueryPlanner: Send + Sync {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> Result<QueryPlannerContent, QueryPlannerError>;
+    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError>;
 }

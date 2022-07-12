@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
 
-use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
@@ -50,25 +49,16 @@ impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
     for CachingQueryPlannerResolver<T>
 {
     async fn retrieve(&self, key: QueryKey) -> Result<QueryPlannerContent, CacheResolverError> {
-        self.delegate
-            .get(key.0, key.1, key.2)
-            .await
-            .map_err(|err| err.into())
+        self.delegate.get(key).await.map_err(|err| err.into())
     }
 }
 
 #[async_trait]
 impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> PlanResult {
-        let key = (query, operation, options);
+    async fn get(&self, key: QueryKey) -> PlanResult {
         let entry = self.cm.get(&key).await;
         if entry.is_first() {
-            let res = self.delegate.get(key.0, key.1, key.2).await;
+            let res = self.delegate.get(key).await;
             entry.insert(res.clone()).await;
             res
         } else {
@@ -110,7 +100,7 @@ where
         );
         let qp = self.clone();
         Box::pin(async move {
-            qp.get(key.0, key.1, key.2)
+            qp.get(key)
                 .await
                 .map(|query_planner_content| {
                     if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
@@ -174,6 +164,8 @@ mod tests {
     use router_bridge::planner::UsageReporting;
     use test_log::test;
 
+    use crate::query_planner::QueryPlanOptions;
+
     use super::*;
 
     mock! {
@@ -181,9 +173,7 @@ mod tests {
         MyQueryPlanner {
             fn sync_get(
                 &self,
-                query: String,
-                operation: Option<String>,
-                options: QueryPlanOptions,
+                key: QueryKey,
             ) -> PlanResult;
         }
 
@@ -194,13 +184,8 @@ mod tests {
 
     #[async_trait]
     impl QueryPlanner for MockMyQueryPlanner {
-        async fn get(
-            &self,
-            query: String,
-            operation: Option<String>,
-            options: QueryPlanOptions,
-        ) -> PlanResult {
-            self.sync_get(query, operation, options)
+        async fn get(&self, key: QueryKey) -> PlanResult {
+            self.sync_get(key)
         }
     }
 
@@ -222,20 +207,20 @@ mod tests {
 
         for _ in 0..5 {
             assert!(planner
-                .get(
+                .get((
                     "query1".into(),
                     Some("".into()),
                     QueryPlanOptions::default()
-                )
+                ))
                 .await
                 .is_err());
         }
         assert!(planner
-            .get(
+            .get((
                 "query2".into(),
                 Some("".into()),
                 QueryPlanOptions::default()
-            )
+            ))
             .await
             .is_err());
     }
