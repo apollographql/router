@@ -13,7 +13,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
 they work like a tower Layer, they can use `&self` instead. This change
 then allows us to move from Buffer to service factories for the query
-planner, execution and subgraph services
+planner, execution and subgraph services.
+
+**Services are now created on the fly at session creation, so if any state must be shared
+between executions, it should be stored in an `Arc<Mutex<_>>` in the plugin and cloned
+into the new service in the `Plugin::*_service()` methods**.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1340 https://github.com/apollographql/router/pull/1289
 
@@ -45,7 +49,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
 
-A query with at the root only one selection field equals to `__typename` must be considered as an introspection query
+A query that only contains __typename at the root must be considered as an introspection query
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
 
