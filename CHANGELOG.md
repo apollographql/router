@@ -25,8 +25,8 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
 
-Resources are almost like attributes but there are more globals. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics. It could be pretty useful to set
-a service name for example to let you more easily find metrics related to a specific service.
+Resources are almost like attributes but more global. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics.  This functionality can be used to, for example,
+apply a `service.name` to metrics to make them easier to find in larger infrastructure, as demonstrated here:
 
 ```yaml
 telemetry:
