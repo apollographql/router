@@ -14,6 +14,7 @@ use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
+use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
@@ -29,6 +30,8 @@ pub struct Query {
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    subselections: HashMap<String, (Path, Vec<Selection>)>,
 }
 
 impl Query {
@@ -76,8 +79,9 @@ impl Query {
                 };
 
                 response.data = Some(
-                    match self.apply_root_selection_set(
-                        operation,
+                    match SelectionSet(&operation.selection_set).apply_root(
+                        self,
+                        operation.kind,
                         &all_variables,
                         &mut input,
                         &mut output,
@@ -89,6 +93,29 @@ impl Query {
                 );
 
                 return;
+            } else if let Some(subselection) = &response.subselection {
+                // Get subselection from hashmap
+                match self.subselections.get(subselection) {
+                    Some((_subselection_path, subselection_set)) => {
+                        let mut output = Object::default();
+
+                        response.data = Some(
+                            match SelectionSet(subselection_set).apply(
+                                self,
+                                &variables,
+                                &mut input,
+                                &mut output,
+                                schema,
+                            ) {
+                                Ok(()) => output.into(),
+                                Err(InvalidValue) => Value::Null,
+                            },
+                        );
+
+                        return;
+                    }
+                    None => failfast_debug!("can't find subselection for {:?}", subselection),
+                }
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -98,6 +125,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
+
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
@@ -138,6 +166,7 @@ impl Query {
             string,
             fragments,
             operations,
+            subselections: HashMap::new(),
         })
     }
 
@@ -247,8 +276,8 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-                        match self.apply_selection_set(
-                            selection_set,
+                        match SelectionSet(selection_set).apply(
+                            self,
                             variables,
                             input_object,
                             output_object,
@@ -322,282 +351,282 @@ impl Query {
         }
     }
 
-    fn apply_selection_set(
-        &self,
-        selection_set: &[Selection],
-        variables: &Object,
-        input: &mut Object,
-        output: &mut Object,
-        schema: &Schema,
-    ) -> Result<(), InvalidValue> {
-        // For skip and include, using .unwrap_or is legit here because
-        // validate_variables should have already checked that
-        // the variable is present and it is of the correct type
-        for selection in selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    alias,
-                    selection_set,
-                    field_type,
-                    skip,
-                    include,
-                } => {
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    if skip.should_skip(variables).unwrap_or(false) {
-                        continue;
-                    }
+    // fn apply_selection_set(
+    //     &self,
+    //     selection_set: &[Selection],
+    //     variables: &Object,
+    //     input: &mut Object,
+    //     output: &mut Object,
+    //     schema: &Schema,
+    // ) -> Result<(), InvalidValue> {
+    //     // For skip and include, using .unwrap_or is legit here because
+    //     // validate_variables should have already checked that
+    //     // the variable is present and it is of the correct type
+    //     for selection in selection_set {
+    //         match selection {
+    //             Selection::Field {
+    //                 name,
+    //                 alias,
+    //                 selection_set,
+    //                 field_type,
+    //                 skip,
+    //                 include,
+    //             } => {
+    //                 let field_name = alias.as_ref().unwrap_or(name);
+    //                 if skip.should_skip(variables).unwrap_or(false) {
+    //                     continue;
+    //                 }
 
-                    if !include.should_include(variables).unwrap_or(true) {
-                        continue;
-                    }
+    //                 if !include.should_include(variables).unwrap_or(true) {
+    //                     continue;
+    //                 }
 
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
+    //                 if let Some(input_value) = input.get_mut(field_name.as_str()) {
+    //                     // if there's already a value for that key in the output it means either:
+    //                     // - the value is a scalar and was moved into output using take(), replacing
+    //                     // the input value with Null
+    //                     // - the value was already null and is already present in output
+    //                     // if we expect an object or list at that key, output will already contain
+    //                     // an object or list and then input_value cannot be null
+    //                     if input_value.is_null() && output.contains_key(field_name.as_str()) {
+    //                         continue;
+    //                     }
 
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == TYPENAME {
-                            if input_value.is_string() {
-                                *output_value = input_value.clone();
-                            }
-                        } else {
-                            self.format_value(
-                                field_type,
-                                variables,
-                                input_value,
-                                output_value,
-                                selection_set,
-                                schema,
-                            )?;
-                        }
-                    } else {
-                        if !output.contains_key(field_name.as_str()) {
-                            output.insert((*field_name).clone(), Value::Null);
-                        }
-                        if field_type.is_non_null() {
-                            return Err(InvalidValue);
-                        }
-                    }
-                }
-                Selection::InlineFragment {
-                    type_condition,
-                    selection_set,
-                    skip,
-                    include,
-                    known_type,
-                } => {
-                    if skip.should_skip(variables).unwrap_or(false) {
-                        continue;
-                    }
+    //                     let selection_set = selection_set.as_deref().unwrap_or_default();
+    //                     let output_value =
+    //                         output.entry((*field_name).clone()).or_insert(Value::Null);
+    //                     if field_name.as_str() == TYPENAME {
+    //                         if input_value.is_string() {
+    //                             *output_value = input_value.clone();
+    //                         }
+    //                     } else {
+    //                         self.format_value(
+    //                             field_type,
+    //                             variables,
+    //                             input_value,
+    //                             output_value,
+    //                             selection_set,
+    //                             schema,
+    //                         )?;
+    //                     }
+    //                 } else {
+    //                     if !output.contains_key(field_name.as_str()) {
+    //                         output.insert((*field_name).clone(), Value::Null);
+    //                     }
+    //                     if field_type.is_non_null() {
+    //                         return Err(InvalidValue);
+    //                     }
+    //                 }
+    //             }
+    //             Selection::InlineFragment {
+    //                 type_condition,
+    //                 selection_set,
+    //                 skip,
+    //                 include,
+    //                 known_type,
+    //             } => {
+    //                 if skip.should_skip(variables).unwrap_or(false) {
+    //                     continue;
+    //                 }
 
-                    if !include.should_include(variables).unwrap_or(true) {
-                        continue;
-                    }
+    //                 if !include.should_include(variables).unwrap_or(true) {
+    //                     continue;
+    //                 }
 
-                    let is_apply = if let Some(input_type) =
-                        input.get(TYPENAME).and_then(|val| val.as_str())
-                    {
-                        // check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        input_type == type_condition.as_str()
-                            || schema.is_subtype(type_condition, input_type)
-                    } else {
-                        // known_type = true means that from the query's shape, we know
-                        // we should get the right type here. But in the case we get a
-                        // __typename field and it does not match, we should not apply
-                        // that fragment
-                        // If the type condition is an interface and the current known type implements it
-                        known_type
-                            .as_ref()
-                            .map(|k| schema.is_subtype(type_condition, k))
-                            .unwrap_or_default()
-                            || known_type.as_deref() == Some(type_condition.as_str())
-                    };
+    //                 let is_apply = if let Some(input_type) =
+    //                     input.get(TYPENAME).and_then(|val| val.as_str())
+    //                 {
+    //                     // check if the fragment matches the input type directly, and if not, check if the
+    //                     // input type is a subtype of the fragment's type condition (interface, union)
+    //                     input_type == type_condition.as_str()
+    //                         || schema.is_subtype(type_condition, input_type)
+    //                 } else {
+    //                     // known_type = true means that from the query's shape, we know
+    //                     // we should get the right type here. But in the case we get a
+    //                     // __typename field and it does not match, we should not apply
+    //                     // that fragment
+    //                     // If the type condition is an interface and the current known type implements it
+    //                     known_type
+    //                         .as_ref()
+    //                         .map(|k| schema.is_subtype(type_condition, k))
+    //                         .unwrap_or_default()
+    //                         || known_type.as_deref() == Some(type_condition.as_str())
+    //                 };
 
-                    if is_apply {
-                        self.apply_selection_set(selection_set, variables, input, output, schema)?;
-                    }
-                }
-                Selection::FragmentSpread {
-                    name,
-                    known_type,
-                    skip,
-                    include,
-                } => {
-                    if skip.should_skip(variables).unwrap_or(false) {
-                        continue;
-                    }
+    //                 if is_apply {
+    //                     self.apply_selection_set(selection_set, variables, input, output, schema)?;
+    //                 }
+    //             }
+    //             Selection::FragmentSpread {
+    //                 name,
+    //                 known_type,
+    //                 skip,
+    //                 include,
+    //             } => {
+    //                 if skip.should_skip(variables).unwrap_or(false) {
+    //                     continue;
+    //                 }
 
-                    if !include.should_include(variables).unwrap_or(true) {
-                        continue;
-                    }
+    //                 if !include.should_include(variables).unwrap_or(true) {
+    //                     continue;
+    //                 }
 
-                    if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.skip.should_skip(variables).unwrap_or(false) {
-                            continue;
-                        }
-                        if !fragment.include.should_include(variables).unwrap_or(true) {
-                            continue;
-                        }
+    //                 if let Some(fragment) = self.fragments.get(name) {
+    //                     if fragment.skip.should_skip(variables).unwrap_or(false) {
+    //                         continue;
+    //                     }
+    //                     if !fragment.include.should_include(variables).unwrap_or(true) {
+    //                         continue;
+    //                     }
 
-                        let is_apply = if let Some(input_type) =
-                            input.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            input_type == fragment.type_condition.as_str()
-                                || schema.is_subtype(&fragment.type_condition, input_type)
-                        } else {
-                            // If the type condition is an interface and the current known type implements it
-                            known_type
-                                .as_ref()
-                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
-                                .unwrap_or_default()
-                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
-                        };
+    //                     let is_apply = if let Some(input_type) =
+    //                         input.get(TYPENAME).and_then(|val| val.as_str())
+    //                     {
+    //                         // check if the fragment matches the input type directly, and if not, check if the
+    //                         // input type is a subtype of the fragment's type condition (interface, union)
+    //                         input_type == fragment.type_condition.as_str()
+    //                             || schema.is_subtype(&fragment.type_condition, input_type)
+    //                     } else {
+    //                         // If the type condition is an interface and the current known type implements it
+    //                         known_type
+    //                             .as_ref()
+    //                             .map(|k| schema.is_subtype(&fragment.type_condition, k))
+    //                             .unwrap_or_default()
+    //                             || known_type.as_deref() == Some(fragment.type_condition.as_str())
+    //                     };
 
-                        if is_apply {
-                            self.apply_selection_set(
-                                &fragment.selection_set,
-                                variables,
-                                input,
-                                output,
-                                schema,
-                            )?;
-                        }
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
-                    }
-                }
-            }
-        }
+    //                     if is_apply {
+    //                         self.apply_selection_set(
+    //                             &fragment.selection_set,
+    //                             variables,
+    //                             input,
+    //                             output,
+    //                             schema,
+    //                         )?;
+    //                     }
+    //                 } else {
+    //                     // the fragment should have been already checked with the schema
+    //                     failfast_debug!("missing fragment named: {}", name);
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    fn apply_root_selection_set(
-        &self,
-        operation: &Operation,
-        variables: &Object,
-        input: &mut Object,
-        output: &mut Object,
-        schema: &Schema,
-    ) -> Result<(), InvalidValue> {
-        for selection in &operation.selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    alias,
-                    selection_set,
-                    field_type,
-                    skip,
-                    include,
-                } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
-                    if skip.should_skip(variables).unwrap_or(false) {
-                        continue;
-                    }
+    // fn apply_root_selection_set(
+    //     &self,
+    //     operation: &Operation,
+    //     variables: &Object,
+    //     input: &mut Object,
+    //     output: &mut Object,
+    //     schema: &Schema,
+    // ) -> Result<(), InvalidValue> {
+    //     for selection in &operation.selection_set {
+    //         match selection {
+    //             Selection::Field {
+    //                 name,
+    //                 alias,
+    //                 selection_set,
+    //                 field_type,
+    //                 skip,
+    //                 include,
+    //             } => {
+    //                 // Using .unwrap_or is legit here because
+    //                 // validate_variables should have already checked that
+    //                 // the variable is present and it is of the correct type
+    //                 if skip.should_skip(variables).unwrap_or(false) {
+    //                     continue;
+    //                 }
 
-                    if !include.should_include(variables).unwrap_or(true) {
-                        continue;
-                    }
+    //                 if !include.should_include(variables).unwrap_or(true) {
+    //                     continue;
+    //                 }
 
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    let field_name_str = field_name.as_str();
-                    if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
+    //                 let field_name = alias.as_ref().unwrap_or(name);
+    //                 let field_name_str = field_name.as_str();
+    //                 if let Some(input_value) = input.get_mut(field_name_str) {
+    //                     // if there's already a value for that key in the output it means either:
+    //                     // - the value is a scalar and was moved into output using take(), replacing
+    //                     // the input value with Null
+    //                     // - the value was already null and is already present in output
+    //                     // if we expect an object or list at that key, output will already contain
+    //                     // an object or list and then input_value cannot be null
+    //                     if input_value.is_null() && output.contains_key(field_name_str) {
+    //                         continue;
+    //                     }
 
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-                        self.format_value(
-                            field_type,
-                            variables,
-                            input_value,
-                            output_value,
-                            selection_set,
-                            schema,
-                        )?;
-                    } else if field_name_str == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(
-                                field_name.clone(),
-                                Value::String(operation.kind.to_string().into()),
-                            );
-                        }
-                    } else if field_type.is_non_null() {
-                        return Err(InvalidValue);
-                    }
-                }
-                Selection::InlineFragment {
-                    type_condition,
-                    selection_set,
-                    ..
-                } => {
-                    // top level objects will not provide a __typename field
-                    if type_condition.as_str() != schema.root_operation_name(operation.kind) {
-                        return Err(InvalidValue);
-                    }
+    //                     let selection_set = selection_set.as_deref().unwrap_or_default();
+    //                     let output_value =
+    //                         output.entry((*field_name).clone()).or_insert(Value::Null);
+    //                     self.format_value(
+    //                         field_type,
+    //                         variables,
+    //                         input_value,
+    //                         output_value,
+    //                         selection_set,
+    //                         schema,
+    //                     )?;
+    //                 } else if field_name_str == TYPENAME {
+    //                     if !output.contains_key(field_name_str) {
+    //                         output.insert(
+    //                             field_name.clone(),
+    //                             Value::String(operation.kind.to_string().into()),
+    //                         );
+    //                     }
+    //                 } else if field_type.is_non_null() {
+    //                     return Err(InvalidValue);
+    //                 }
+    //             }
+    //             Selection::InlineFragment {
+    //                 type_condition,
+    //                 selection_set,
+    //                 ..
+    //             } => {
+    //                 // top level objects will not provide a __typename field
+    //                 if type_condition.as_str() != schema.root_operation_name(operation.kind) {
+    //                     return Err(InvalidValue);
+    //                 }
 
-                    self.apply_selection_set(selection_set, variables, input, output, schema)?;
-                }
-                Selection::FragmentSpread {
-                    name,
-                    known_type: _,
-                    skip: _,
-                    include: _,
-                } => {
-                    if let Some(fragment) = self.fragments.get(name) {
-                        let operation_type_name = schema.root_operation_name(operation.kind);
-                        let is_apply = {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            operation_type_name == fragment.type_condition.as_str()
-                                || schema.is_subtype(&fragment.type_condition, operation_type_name)
-                        };
+    //                 self.apply_selection_set(selection_set, variables, input, output, schema)?;
+    //             }
+    //             Selection::FragmentSpread {
+    //                 name,
+    //                 known_type: _,
+    //                 skip: _,
+    //                 include: _,
+    //             } => {
+    //                 if let Some(fragment) = self.fragments.get(name) {
+    //                     let operation_type_name = schema.root_operation_name(operation.kind);
+    //                     let is_apply = {
+    //                         // check if the fragment matches the input type directly, and if not, check if the
+    //                         // input type is a subtype of the fragment's type condition (interface, union)
+    //                         operation_type_name == fragment.type_condition.as_str()
+    //                             || schema.is_subtype(&fragment.type_condition, operation_type_name)
+    //                     };
 
-                        if !is_apply {
-                            return Err(InvalidValue);
-                        }
+    //                     if !is_apply {
+    //                         return Err(InvalidValue);
+    //                     }
 
-                        self.apply_selection_set(
-                            &fragment.selection_set,
-                            variables,
-                            input,
-                            output,
-                            schema,
-                        )?;
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
-                    }
-                }
-            }
-        }
+    //                     self.apply_selection_set(
+    //                         &fragment.selection_set,
+    //                         variables,
+    //                         input,
+    //                         output,
+    //                         schema,
+    //                     )?;
+    //                 } else {
+    //                     // the fragment should have been already checked with the schema
+    //                     failfast_debug!("missing fragment named: {}", name);
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
@@ -656,8 +685,280 @@ impl Query {
     }
 }
 
+pub(crate) struct SelectionSet<'a>(&'a [Selection]);
+impl<'a> SelectionSet<'a> {
+    pub(crate) fn apply_root(
+        &self,
+        query: &Query,
+        operation_kind: OperationKind,
+        variables: &Object,
+        input: &mut Object,
+        output: &mut Object,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
+        for selection in self.0 {
+            match selection {
+                Selection::Field {
+                    name,
+                    alias,
+                    selection_set,
+                    field_type,
+                    skip,
+                    include,
+                } => {
+                    // Using .unwrap_or is legit here because
+                    // validate_variables should have already checked that
+                    // the variable is present and it is of the correct type
+                    if skip.should_skip(variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    let field_name = alias.as_ref().unwrap_or(name);
+                    let field_name_str = field_name.as_str();
+                    if let Some(input_value) = input.get_mut(field_name_str) {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was moved into output using take(), replacing
+                        // the input value with Null
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
+                        if input_value.is_null() && output.contains_key(field_name_str) {
+                            continue;
+                        }
+
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let output_value =
+                            output.entry((*field_name).clone()).or_insert(Value::Null);
+                        query.format_value(
+                            field_type,
+                            variables,
+                            input_value,
+                            output_value,
+                            selection_set,
+                            schema,
+                        )?;
+                    } else if field_name_str == TYPENAME {
+                        if !output.contains_key(field_name_str) {
+                            output.insert(
+                                field_name.clone(),
+                                Value::String(operation_kind.to_string().into()),
+                            );
+                        }
+                    } else if field_type.is_non_null() {
+                        return Err(InvalidValue);
+                    }
+                }
+                Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    ..
+                } => {
+                    // top level objects will not provide a __typename field
+                    if type_condition.as_str() != schema.root_operation_name(operation_kind) {
+                        return Err(InvalidValue);
+                    }
+
+                    SelectionSet(selection_set).apply(query, variables, input, output, schema)?;
+                }
+                Selection::FragmentSpread {
+                    name,
+                    known_type: _,
+                    skip: _,
+                    include: _,
+                } => {
+                    if let Some(fragment) = query.fragments.get(name) {
+                        let operation_type_name = schema.root_operation_name(operation_kind);
+                        let is_apply = {
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            operation_type_name == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, operation_type_name)
+                        };
+
+                        if !is_apply {
+                            return Err(InvalidValue);
+                        }
+
+                        SelectionSet(&fragment.selection_set)
+                            .apply(query, variables, input, output, schema)?;
+                    } else {
+                        // the fragment should have been already checked with the schema
+                        failfast_debug!("missing fragment named: {}", name);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply(
+        &self,
+        query: &Query,
+        variables: &Object,
+        input: &mut Object,
+        output: &mut Object,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
+        // For skip and include, using .unwrap_or is legit here because
+        // validate_variables should have already checked that
+        // the variable is present and it is of the correct type
+        for selection in self.0 {
+            match selection {
+                Selection::Field {
+                    name,
+                    alias,
+                    selection_set,
+                    field_type,
+                    skip,
+                    include,
+                } => {
+                    let field_name = alias.as_ref().unwrap_or(name);
+                    if skip.should_skip(variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was moved into output using take(), replacing
+                        // the input value with Null
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
+                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
+                            continue;
+                        }
+
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let output_value =
+                            output.entry((*field_name).clone()).or_insert(Value::Null);
+                        if field_name.as_str() == TYPENAME {
+                            if input_value.is_string() {
+                                *output_value = input_value.clone();
+                            }
+                        } else {
+                            query.format_value(
+                                field_type,
+                                variables,
+                                input_value,
+                                output_value,
+                                selection_set,
+                                schema,
+                            )?;
+                        }
+                    } else {
+                        if !output.contains_key(field_name.as_str()) {
+                            output.insert((*field_name).clone(), Value::Null);
+                        }
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
+                    }
+                }
+                Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    skip,
+                    include,
+                    known_type,
+                } => {
+                    if skip.should_skip(variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    let is_apply = if let Some(input_type) =
+                        input.get(TYPENAME).and_then(|val| val.as_str())
+                    {
+                        // check if the fragment matches the input type directly, and if not, check if the
+                        // input type is a subtype of the fragment's type condition (interface, union)
+                        input_type == type_condition.as_str()
+                            || schema.is_subtype(type_condition, input_type)
+                    } else {
+                        // known_type = true means that from the query's shape, we know
+                        // we should get the right type here. But in the case we get a
+                        // __typename field and it does not match, we should not apply
+                        // that fragment
+                        // If the type condition is an interface and the current known type implements it
+                        known_type
+                            .as_ref()
+                            .map(|k| schema.is_subtype(type_condition, k))
+                            .unwrap_or_default()
+                            || known_type.as_deref() == Some(type_condition.as_str())
+                    };
+
+                    if is_apply {
+                        SelectionSet(selection_set)
+                            .apply(query, variables, input, output, schema)?;
+                    }
+                }
+                Selection::FragmentSpread {
+                    name,
+                    known_type,
+                    skip,
+                    include,
+                } => {
+                    if skip.should_skip(variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(variables).unwrap_or(true) {
+                        continue;
+                    }
+
+                    if let Some(fragment) = query.fragments.get(name) {
+                        if fragment.skip.should_skip(variables).unwrap_or(false) {
+                            continue;
+                        }
+                        if !fragment.include.should_include(variables).unwrap_or(true) {
+                            continue;
+                        }
+
+                        let is_apply = if let Some(input_type) =
+                            input.get(TYPENAME).and_then(|val| val.as_str())
+                        {
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            input_type == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, input_type)
+                        } else {
+                            // If the type condition is an interface and the current known type implements it
+                            known_type
+                                .as_ref()
+                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
+                                .unwrap_or_default()
+                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
+                        };
+
+                        if is_apply {
+                            SelectionSet(&fragment.selection_set)
+                                .apply(query, variables, input, output, schema)?;
+                        }
+                    } else {
+                        // the fragment should have been already checked with the schema
+                        failfast_debug!("missing fragment named: {}", name);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
-struct Operation {
+pub(crate) struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,

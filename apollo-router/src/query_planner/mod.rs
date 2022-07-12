@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_parser::ast;
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 pub use fetch::OperationKind;
@@ -110,6 +111,123 @@ impl PlanNode {
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
         }
+    }
+
+    pub(crate) fn parse_subselections(
+        &self,
+        schema: &Schema,
+    ) -> HashMap<String, (Option<Path>, Query)> {
+        if !self.contains_defer() {
+            return HashMap::new();
+        }
+        // re-create full query with the right path
+        // parse the subselection
+        let mut subselections = HashMap::new();
+        self.collect_subselections(schema, &mut subselections);
+
+        subselections
+    }
+
+    fn collect_subselections(
+        &self,
+        schema: &Schema,
+        subselections: &mut HashMap<String, (Option<Path>, Query)>,
+    ) {
+        // re-create full query with the right path
+        // parse the subselection
+        match self {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                nodes.iter().fold(subselections, |subs, current| {
+                    current.collect_subselections(schema, subs);
+
+                    subs
+                });
+            }
+            Self::Flatten(node) => {
+                node.node.collect_subselections(schema, subselections);
+            }
+            Self::Defer { primary, deferred } => {
+                // TODO rebuilt subselection from the root thanks to the path
+                let primary_path = primary.path.clone().unwrap_or_default();
+                let path_len = primary_path.len();
+                let query = primary_path
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, path_elt)| match path_elt {
+                        json_ext::PathElement::Flatten => todo!(),
+                        json_ext::PathElement::Index(_) => todo!(),
+                        json_ext::PathElement::Key(key) => {
+                            let mut key = key.clone();
+                            if idx == 0 {
+                                key = format!("{{ {key}");
+                            }
+                            // if idx != path_len - 1 {
+                            //     key = format!("{{ {key} {{");
+                            // }
+
+                            key
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join("{");
+                dbg!(query);
+                // ----------------------- Parse ---------------------------------
+                let sub_selection = Query::parse(&primary.subselection, schema)
+                    .expect("it must respect the schema");
+                // ----------------------- END Parse ---------------------------------
+
+                subselections.insert(
+                    primary.subselection.clone(),
+                    (primary.path.clone(), sub_selection),
+                );
+                deferred.iter().fold(subselections, |subs, current| {
+                    if let Some(subselection) = &current.subselection {
+                        // TODO rebuilt subselection from the root thanks to the path
+                        let current_path = current.path.clone();
+                        let path_len = current_path.len();
+                        let query = current_path
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, path_elt)| match path_elt {
+                                json_ext::PathElement::Flatten => todo!(),
+                                json_ext::PathElement::Index(_) => todo!(),
+                                json_ext::PathElement::Key(key) => {
+                                    let mut key = key.clone();
+                                    if idx == 0 {
+                                        key = format!("{{ {key}");
+                                    }
+                                    // if idx != path_len - 1 {
+                                    //     key = format!("{{ {key} {{");
+                                    // }
+
+                                    key
+                                }
+                            })
+                            .collect::<Vec<String>>()
+                            .join("{");
+                        // push_str
+                        // Add trailing }
+                        dbg!(query);
+                        // ----------------------- Parse ---------------------------------
+                        let sub_selection =
+                            Query::parse(subselection, schema).expect("it must respect the schema");
+                        // ----------------------- END Parse ---------------------------------
+
+                        subs.insert(
+                            subselection.clone(),
+                            (current.path.clone().into(), sub_selection),
+                        );
+                    }
+                    if let Some(current_node) = &current.node {
+                        current_node.collect_subselections(schema, subs);
+                    }
+
+                    subs
+                });
+            }
+            Self::Fetch(..) => {}
+        }
+        todo!()
     }
 }
 
