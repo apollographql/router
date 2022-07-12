@@ -16,7 +16,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceExt;
 
-use crate::cache::DedupCache;
+use crate::cache::DeduplicatingCache;
 use crate::graphql::Response;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::RouterRequest;
@@ -34,11 +34,11 @@ struct PersistedQuery {
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
-    cache: DedupCache<Vec<u8>, String>,
+    cache: DeduplicatingCache<Vec<u8>, String>,
 }
 
 impl APQLayer {
-    pub(crate) fn with_cache(cache: DedupCache<Vec<u8>, String>) -> Self {
+    pub(crate) fn with_cache(cache: DeduplicatingCache<Vec<u8>, String>) -> Self {
         Self { cache }
     }
 }
@@ -73,7 +73,7 @@ pub(crate) struct APQService<S>
 where
     S: Service<RouterRequest>,
 {
-    cache: DedupCache<Vec<u8>, String>,
+    cache: DeduplicatingCache<Vec<u8>, String>,
     inner: Buffer<S, RouterRequest>,
 }
 
@@ -259,7 +259,7 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let apq = APQLayer::with_cache(DedupCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
         let mut service_stack = apq.layer(mock);
 
         let extensions = HashMap::from([(
@@ -355,7 +355,7 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let apq = APQLayer::with_cache(DedupCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
         let mut service_stack = apq.layer(mock_service);
 
         let extensions = HashMap::from([(

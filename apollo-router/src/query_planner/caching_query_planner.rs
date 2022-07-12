@@ -9,7 +9,7 @@ use router_bridge::planner::UsageReporting;
 
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
-use crate::cache::DedupCache;
+use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
@@ -25,7 +25,7 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: QueryPlanner + Clone> {
-    cm: Arc<DedupCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
+    cm: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
     delegate: Arc<T>,
 }
 
@@ -37,7 +37,7 @@ struct CachingQueryPlannerResolver<T: QueryPlanner> {
 impl<T: QueryPlanner + Clone + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cm = Arc::new(DedupCache::new(plan_cache_limit).await);
+        let cm = Arc::new(DeduplicatingCache::new(plan_cache_limit).await);
         Self {
             cm,
             delegate: Arc::new(delegate),

@@ -26,7 +26,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::cache::DedupCache;
+use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -330,7 +330,7 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq = APQLayer::with_cache(DedupCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
 
         Ok(RouterCreator {
             query_planner_service,

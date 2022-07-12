@@ -12,13 +12,14 @@ pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
 
+/// Cache implementation with query deduplication
 #[derive(Clone)]
-pub(crate) struct DedupCache<K: Clone + Send + Eq + Hash, V: Clone> {
+pub(crate) struct DeduplicatingCache<K: Clone + Send + Eq + Hash, V: Clone> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
 }
 
-impl<K, V> DedupCache<K, V>
+impl<K, V> DeduplicatingCache<K, V>
 where
     K: Clone + Send + Eq + Hash + 'static,
     V: Clone + Send + 'static,
@@ -99,7 +100,7 @@ enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
     First {
         key: K,
         sender: broadcast::Sender<V>,
-        cache: DedupCache<K, V>,
+        cache: DeduplicatingCache<K, V>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {

@@ -22,7 +22,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::DynPlugin;
-use crate::cache::DedupCache;
+use crate::cache::DeduplicatingCache;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -155,7 +155,7 @@ impl PluginTestHarness {
         );
         let plugins = Arc::new(plugins);
 
-        let apq = APQLayer::with_cache(DedupCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
         let router_service = mock_router_service
             .map(|s| s.build().boxed())
             .unwrap_or_else(|| {
