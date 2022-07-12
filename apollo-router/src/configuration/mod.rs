@@ -264,6 +264,11 @@ pub(crate) struct Server {
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
     pub(crate) health_check_path: String,
+
+    /// Experimental @defer directive support
+    /// default: false
+    #[serde(default = "default_defer_support")]
+    pub(crate) defer_support: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -276,6 +281,7 @@ impl Server {
         landing_page: Option<bool>,
         endpoint: Option<String>,
         health_check_path: Option<String>,
+        defer_support: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
@@ -284,6 +290,7 @@ impl Server {
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
         }
     }
 }
@@ -412,6 +419,10 @@ fn default_endpoint() -> String {
 
 fn default_health_check_path() -> String {
     String::from("/.well-known/apollo/server-health")
+}
+
+fn default_defer_support() -> bool {
+    false
 }
 
 impl Default for Server {

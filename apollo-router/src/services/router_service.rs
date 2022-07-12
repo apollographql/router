@@ -265,6 +265,7 @@ pub struct PluggableRouterServiceBuilder {
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
     introspection: bool,
+    defer_support: bool,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -274,6 +275,7 @@ impl PluggableRouterServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             introspection: false,
+            defer_support: false,
         }
     }
 
@@ -320,6 +322,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    pub fn with_defer_support(mut self) -> PluggableRouterServiceBuilder {
+        self.defer_support = true;
+        self
+    }
+
     pub async fn build(
         mut self,
     ) -> Result<
@@ -356,9 +363,10 @@ impl PluggableRouterServiceBuilder {
         };
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
-            .await
-            .map_err(ServiceBuildError::QueryPlannerError)?;
+        let bridge_query_planner =
+            BridgeQueryPlanner::new(self.schema.clone(), introspection, self.defer_support)
+                .await
+                .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service =
             ServiceBuilder::new()
                 .buffered()

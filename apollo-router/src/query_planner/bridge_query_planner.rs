@@ -39,6 +39,7 @@ impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
+        defer_support: bool,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(
@@ -46,7 +47,7 @@ impl BridgeQueryPlanner {
                     schema.as_str().to_string(),
                     QueryPlannerConfig {
                         defer_stream_support: Some(DeferStreamSupport {
-                            enable_defer: Some(true),
+                            enable_defer: Some(defer_support),
                         }),
                     },
                 )
@@ -204,6 +205,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
@@ -230,6 +232,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
@@ -272,6 +275,7 @@ mod tests {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap()
@@ -305,6 +309,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
