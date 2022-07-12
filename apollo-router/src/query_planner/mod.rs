@@ -358,10 +358,6 @@ impl PlanNode {
                             let span = tracing::info_span!("deferred");
 
                             if let Some(node) = deferred_inner {
-                                println!(
-                                    "\nwill execute deferred node at path {}: {:?}",
-                                    deferred_path, node
-                                );
                                 let (v, err) = node
                                     .execute_recursively(
                                         &Path::default(),
@@ -377,7 +373,6 @@ impl PlanNode {
                                     .instrument(span.clone())
                                     .in_current_span()
                                     .await;
-                                println!("returning deferred {:?}", v);
 
                                 if let Err(e) = tx
                                     .send(
@@ -771,10 +766,6 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            println!(
-                "response_at_path({}), paths = {:?}, data = {:?}",
-                current_dir, paths, response.data
-            );
             match self.response_at_path(current_dir, paths, response.data.unwrap_or_default()) {
                 Ok(value) => {
                     if let Some(id) = &self.id {
