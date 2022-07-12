@@ -77,6 +77,12 @@ This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com
 
 By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
 
+### Render embedded Sandbox instead of landing page ([PR #1369](https://github.com/apollographql/router/pull/1369))
+
+Open the router URL in a browser and start querying the router from the Apollo Sandbox.
+
+By [@mayakoneval](https://github.com/mayakoneval) in https://github.com/apollographql/router/pull/1369
+
 ## 📚 Documentation
 
 ### Various documentation edits ([PR #1329](https://github.com/apollographql/router/issues/1329))
