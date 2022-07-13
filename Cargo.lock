@@ -3588,6 +3588,7 @@ dependencies = [
  "opentelemetry-http",
  "prost",
  "prost-build",
+ "reqwest",
  "thiserror",
  "tokio",
  "tonic",
