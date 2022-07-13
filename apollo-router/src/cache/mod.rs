@@ -32,7 +32,6 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
-        //loop {
         let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get(key) {
             Some(waiter) => {
