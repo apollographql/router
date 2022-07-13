@@ -13,15 +13,15 @@ use structopt::StructOpt;
 use xtask::*;
 
 const INCLUDE: &[&str] = &["README.md", "LICENSE", "licenses.html"];
-pub(crate) const TARGET_MUSL_LINUX: &str = "x86_64-unknown-linux-musl";
-pub(crate) const TARGET_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
-pub(crate) const TARGET_WINDOWS: &str = "x86_64-pc-windows-msvc";
-pub(crate) const TARGET_MACOS: &str = "x86_64-apple-darwin";
+pub(crate) const TARGET_X86_64_MUSL_LINUX: &str = "x86_64-unknown-linux-musl";
+pub(crate) const TARGET_X86_64_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
+pub(crate) const TARGET_X86_64_WINDOWS: &str = "x86_64-pc-windows-msvc";
+pub(crate) const TARGET_X86_64_MACOS: &str = "x86_64-apple-darwin";
 pub(crate) const POSSIBLE_TARGETS: [&str; 4] = [
-    TARGET_MUSL_LINUX,
-    TARGET_GNU_LINUX,
-    TARGET_WINDOWS,
-    TARGET_MACOS,
+    TARGET_X86_64_MUSL_LINUX,
+    TARGET_X86_64_GNU_LINUX,
+    TARGET_X86_64_WINDOWS,
+    TARGET_X86_64_MACOS,
 ];
 
 #[derive(Debug, StructOpt)]
@@ -131,10 +131,10 @@ impl FromStr for Target {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
-            TARGET_MUSL_LINUX => Ok(Self::MuslLinux),
-            TARGET_GNU_LINUX => Ok(Self::GnuLinux),
-            TARGET_WINDOWS => Ok(Self::Windows),
-            TARGET_MACOS => Ok(Self::MacOS),
+            TARGET_X86_64_MUSL_LINUX => Ok(Self::MuslLinux),
+            TARGET_X86_64_GNU_LINUX => Ok(Self::GnuLinux),
+            TARGET_X86_64_WINDOWS => Ok(Self::Windows),
+            TARGET_X86_64_MACOS => Ok(Self::MacOS),
             _ => Ok(Self::Other),
         }
     }
@@ -143,10 +143,10 @@ impl FromStr for Target {
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match &self {
-            Target::MuslLinux => TARGET_MUSL_LINUX,
-            Target::GnuLinux => TARGET_GNU_LINUX,
-            Target::Windows => TARGET_WINDOWS,
-            Target::MacOS => TARGET_MACOS,
+            Target::MuslLinux => TARGET_X86_64_MUSL_LINUX,
+            Target::GnuLinux => TARGET_X86_64_GNU_LINUX,
+            Target::Windows => TARGET_X86_64_WINDOWS,
+            Target::MacOS => TARGET_X86_64_MACOS,
             Target::Other => "unknown-target",
         };
         write!(f, "{}", msg)
