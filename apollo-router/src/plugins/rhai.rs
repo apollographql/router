@@ -472,8 +472,7 @@ impl Plugin for Rhai {
             None => "main.rhai".to_string(),
         };
 
-        let mut main = scripts_path.clone();
-        main.push(&main_file);
+        let main = scripts_path.join(&main_file);
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
         Ok(Self { ast, engine })
