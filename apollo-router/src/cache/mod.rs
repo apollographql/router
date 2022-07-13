@@ -148,8 +148,8 @@ where
         }
     }
 
-    /*
     /// sends the value without storing it into the cache
+    #[allow(unused)]
     pub(crate) async fn send(self, value: V) {
         if let EntryInner::First {
             sender, cache, key, ..
@@ -158,20 +158,27 @@ where
             let _ = sender.send(value);
             cache.remove_wait(&key).await;
         }
-    }*/
-}
-
-/*
-async fn example_cache_usage(k: String, cache: &mut DedupCache<String, String>) -> String {
-    let entry = cache.get(&k).await;
-
-    if entry.is_first() {
-        // potentially long and complex async task that can fail
-        let value = "hello".to_string();
-        entry.insert(value.clone()).await;
-        value
-    } else {
-        entry.get().await.unwrap()
     }
 }
-*/
+
+#[cfg(test)]
+mod tests {
+    use super::DeduplicatingCache;
+
+    #[tokio::test]
+    async fn example_cache_usage() {
+        let k = "key".to_string();
+        let cache = DeduplicatingCache::new(1).await;
+
+        let entry = cache.get(&k).await;
+
+        if entry.is_first() {
+            // potentially long and complex async task that can fail
+            let value = "hello".to_string();
+            entry.insert(value.clone()).await;
+            value
+        } else {
+            entry.get().await.unwrap()
+        };
+    }
+}
