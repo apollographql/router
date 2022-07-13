@@ -52,7 +52,6 @@ impl Query {
         variables: Object,
         schema: &Schema,
     ) {
-        dbg!(&response);
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
             let operation = match operation_name {

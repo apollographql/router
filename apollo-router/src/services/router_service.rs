@@ -191,12 +191,6 @@ where
                                 parts,
                                 response_stream
                                     .map(move |mut response: Response| {
-                                        dbg!(&response);
-                                        //FIXME: handle response formatting for deferred responses too
-
-                                        // On prend response.subselection comme un lookup pour la hashmap subselection dans query.
-                                        // Si on la trouve on fait notre query.get(subselection).format_response(...)
-                                        // if response.subselection.is_none() {
                                         tracing::debug_span!("format_response").in_scope(|| {
                                             query.format_response(
                                                 &mut response,
@@ -205,7 +199,6 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
-                                        // }
 
                                         if is_deferred {
                                             response.has_next = Some(true);

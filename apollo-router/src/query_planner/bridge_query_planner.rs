@@ -108,7 +108,6 @@ impl BridgeQueryPlanner {
                 data: QueryPlan { node: Some(node) },
                 usage_reporting,
             } => {
-                dbg!(&node);
                 let subselections = node.parse_subselections(&*self.schema);
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
