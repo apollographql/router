@@ -46,7 +46,7 @@ async fn all_rhai_callbacks_are_invoked() {
         let service = SubgraphService::new(name.to_owned());
         builder = builder.with_subgraph_service(name, service);
     }
-    let (router, _) = builder.build().await.unwrap();
+    let router = builder.build().await.unwrap().test_service();
 
     let request = http_ext::Request::fake_builder()
         .body(

@@ -2,14 +2,10 @@
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
+use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;
-use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
-use tower::util::BoxService;
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
@@ -17,36 +13,44 @@ use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::http_ext::Request;
 use crate::http_ext::Response;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::services::new_service::NewService;
 use crate::services::Plugins;
+use crate::services::RouterCreator;
+use crate::services::SubgraphService;
 use crate::PluggableRouterServiceBuilder;
 use crate::Schema;
-use crate::SubgraphService;
 
 /// Factory for creating a RouterService
 ///
-/// Instances of this traits are used by the StateMachine to generate a new
-/// RouterService from configuration when it changes
-#[async_trait::async_trait]
-pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
+/// Instances of this traits are used by the HTTP server to generate a new
+/// RouterService on each request
+pub(crate) trait RouterServiceFactory:
+    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+{
     type RouterService: Service<
             Request<graphql::Request>,
             Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
-        > + Send
-        + Sync
-        + Clone
-        + 'static;
+        > + Send;
     type Future: Send;
+}
+
+/// Factory for creating a RouterServiceFactory
+///
+/// Instances of this traits are used by the StateMachine to generate a new
+/// RouterServiceFactory from configuration when it changes
+#[async_trait::async_trait]
+pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
+    type RouterServiceFactory: RouterServiceFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Plugins), BoxError>;
+        previous_router: Option<&'a Self::RouterServiceFactory>,
+    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -54,33 +58,24 @@ pub(crate) trait RouterServiceFactory: Send + Sync + 'static {
 pub(crate) struct YamlRouterServiceFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceFactory for YamlRouterServiceFactory {
-    type RouterService = Buffer<
-        BoxCloneService<
-            Request<graphql::Request>,
-            Response<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-        Request<graphql::Request>,
-    >;
-    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+impl RouterServiceConfigurator for YamlRouterServiceFactory {
+    type RouterServiceFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Plugins), BoxError> {
+        _previous_router: Option<&'a Self::RouterServiceFactory>,
+    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxService::new(SubgraphService::new(name.to_string()));
-
-            builder = builder.with_subgraph_service(name, subgraph_service);
+            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
+
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema).await?;
 
@@ -88,26 +83,43 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        let (pluggable_router_service, mut plugins) = builder.build().await?;
-        let service = ServiceBuilder::new().buffered().service(
-            pluggable_router_service
-                .map_request(|http_request: Request<graphql::Request>| http_request.into())
-                .map_response(|response| response.response)
-                .boxed_clone(),
-        );
-
         // We're good to go with the new service. Let the plugins know that this is about to happen.
         // This is needed so that the Telemetry plugin can swap in the new propagator.
         // The alternative is that we introduce another service on Plugin that wraps the request
         // at a much earlier stage.
-        for (_, plugin) in &mut plugins {
+        for (_, plugin) in builder.plugins_mut() {
             tracing::debug!("activating plugin {}", plugin.name());
             plugin.activate();
             tracing::debug!("activated plugin {}", plugin.name());
         }
 
-        Ok((service, plugins))
+        let pluggable_router_service = builder.build().await?;
+
+        Ok((pluggable_router_service, IndexMap::new()))
     }
+}
+
+/// test only helper method to create a router factory in integration tests
+///
+/// not meant to be used directly
+pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
+    let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+
+    let schema: Schema = schema.parse().unwrap();
+
+    let service = YamlRouterServiceFactory::default()
+        .create(Arc::new(config), Arc::new(schema), None)
+        .await;
+    assert_eq!(
+        service.map(|_| ()).unwrap_err().to_string().as_str(),
+        r#"couldn't build Router Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
+Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+
+Details:
+Error: Cannot find type "Review" in subgraph "products"
+caused by
+"#
+    );
 }
 
 async fn create_plugins(
@@ -259,7 +271,7 @@ mod test {
     use crate::plugin::Plugin;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::RouterServiceConfigurator;
     use crate::router_factory::YamlRouterServiceFactory;
     use crate::Schema;
 
@@ -370,45 +382,6 @@ mod test {
         .unwrap();
         let service = create_service(config).await;
         assert!(service.is_err())
-    }
-
-    // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
-    // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_telemetry_doesnt_hang_with_invalid_schema() {
-        use tracing_subscriber::EnvFilter;
-
-        use crate::subscriber::set_global_subscriber;
-        use crate::subscriber::RouterSubscriber;
-
-        // A global subscriber must be set before we start up the telemetry plugin
-        let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(
-            tracing_subscriber::fmt::fmt()
-                .with_env_filter(EnvFilter::from_default_env())
-                .json()
-                .finish(),
-        ));
-
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            telemetry:
-              tracing:
-                trace_config:
-                  service_name: router
-                otlp:
-                  endpoint: default
-        "#,
-        )
-        .unwrap();
-
-        let schema: Schema = include_str!("testdata/invalid_supergraph.graphql")
-            .parse()
-            .unwrap();
-
-        let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
-            .await;
-        service.map(|_| ()).unwrap_err();
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {

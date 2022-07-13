@@ -39,6 +39,7 @@ use crate::*;
 mod execution_service;
 pub mod http_ext;
 pub(crate) mod layers;
+pub mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
 

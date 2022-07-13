@@ -2,19 +2,19 @@
 title: Moving to the Apollo Router from @apollo/gateway
 ---
 
-The Apollo Router is a graph router for federated graphs that's written in the Rust programming language. It's a new, higher-performance alternative to the Node.js-based `@apollo/gateway` library.
+The Apollo Router is a graph router for federated supergraphs that's written in the Rust programming language. It's a new, higher-performance alternative to the Node.js-based `@apollo/gateway` library.
 
 If you're currently using the `@apollo/gateway` library in your federated graph, this article walks you through the steps to move over to the Apollo Router.
 
 ## What's different?
 
-Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. You can pass this binary a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup to customize its behavior.  Additionally, if you start your router with the `--hot-reload` flag, or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true` you can even _modify_ that configuration and have changes picked up without restarting the router.
+Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. To customize its behavior, you can pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even _modify_ that configuration without a restart.
 
 You _can_ use the Apollo Router as a library in a larger project, but our goal is to remove the need to write custom code in your graph router (which is necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
 
 ## Take inventory of your gateway configuration
 
-The `@apollo/gateway` library is an extension to the Apollo Server library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
+The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
 
 Because the Apollo Router is an entirely new tool with a different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
 
@@ -42,7 +42,7 @@ The Apollo Router supports the following environment variables used by `@apollo/
 
 The Apollo Router **renames** the following environment variables used by `@apollo/gateway`:
 
-* [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) → `APOLLO_UPLINK_ENDPOINTS`
+* [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](/federation/managed-federation/uplink/#environment-variable) → `APOLLO_UPLINK_ENDPOINTS`
     * This argument supports providing a comma-separated list of URLs.
 
 ## `ApolloGateway` constructor options
@@ -51,7 +51,7 @@ The number of options you currently provide to your `ApolloGateway` constructor 
 
 ### `supergraphSdl`
 
-This constructor option is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/supergraphs/).
+The [`supergraphSdl` option](/federation/api/apollo-gateway#supergraphsdl) is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/supergraphs/).
 
 You can achieve this option's effect with the Apollo Router in one of the following ways:
 
@@ -72,7 +72,7 @@ Instead, you need to perform composition using [managed federation](./managed-fe
 
 ### `buildService`
 
-The buildService function enables you to customize the requests that the gateway sends to your subgraphs.
+The [`buildService` function](/federation/api/apollo-gateway#buildservice) enables you to customize the HTTP requests that the gateway sends to your subgraphs.
 
 Common use cases include:
 
@@ -83,7 +83,7 @@ Common use cases include:
 
 ### `logger`
 
-This constructor option enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
+The [`logger` constructor option](/federation/api/apollo-gateway#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
 
 In the Apollo Router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 

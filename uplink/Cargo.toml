@@ -1,6 +1,6 @@
 [package]
 name = "apollo-uplink"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 build = "build.rs"
 
@@ -20,7 +20,7 @@ tracing = "0.1.34"
 url = "2.2.2"
 
 [build-dependencies]
-launchpad = { git = "https://github.com/apollographql/rover.git", rev = "c52bd32f1493e63844fd74e1a1d32f18e5c88394" }
+launchpad = { git = "https://github.com/apollographql/rover.git", rev = "d72ad078d9d845112bd33bd100a723a1fa0e72ff" }
 reqwest = { version = "0.11.11", default_features = false, features = [
     "rustls-tls",
 ] }
