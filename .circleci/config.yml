@@ -617,15 +617,17 @@ jobs:
       - checkout
       - attach_workspace:
           at: artifacts
-          # - run:
-          # command: >
-            # curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       - run:
-          command: >
-            helm package -d artifacts helm/chart/router
-      - run:
-          command: >
-            helm repo index artifacts --merge index.yaml --url https://router.apollo.dev/helm
+          command: |
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            # Package up the helm chart
+            helm package helm/chart/router
+            # Make sure we have the newest chart
+            CHART=$(ls -t router*.tgz| head -1)
+            # NB: GH token expires 30/3/2023
+            echo ${GITHUB_DOCKER_TOKEN} | helm registry login -u garypen --password-stdin ghcr.io
+            # Push chart to repository
+            helm push ${CHART} oci://ghcr.io/helm-charts
 workflows:
   ci_checks:
     jobs:
