@@ -617,15 +617,15 @@ jobs:
       - checkout
       - attach_workspace:
           at: artifacts
-      - run:
-          command: >
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # - run:
+          # command: >
+            # curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       - run:
           command: >
             helm package -d artifacts helm/chart/router
       - run:
           command: >
-            helm repo index artifacts --merge index.yaml
+            helm repo index artifacts --merge index.yaml --url https://router.apollo.dev/helm
 workflows:
   ci_checks:
     jobs:
