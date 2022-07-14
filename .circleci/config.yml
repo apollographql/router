@@ -627,7 +627,7 @@ jobs:
             # NB: GH token expires 30/3/2023
             echo ${GITHUB_DOCKER_TOKEN} | helm registry login -u garypen --password-stdin ghcr.io
             # Push chart to repository
-            helm push ${CHART} oci://ghcr.io/helm-charts
+            helm push ${CHART} oci://ghcr.io/apollographql/router
 workflows:
   ci_checks:
     jobs:
