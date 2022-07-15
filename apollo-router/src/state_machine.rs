@@ -572,6 +572,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_custom_endpoints().returning(HashMap::new);
                 Ok(router)
             });
         router_factory
