@@ -1,3 +1,2 @@
-plugins:
-  experimental.rhai:
-    filename: src/rhai_data_response_mutate.rhai
+rhai:
+  main: src/rhai_data_response_mutate.rhai
