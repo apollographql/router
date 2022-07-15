@@ -765,6 +765,10 @@ mod tests {
         type Future = <<TestRouterServiceFactory as NewService<
             http_ext::Request<graphql::Request>,
         >>::Service as Service<http_ext::Request<graphql::Request>>>::Future;
+
+        fn custom_endpoints(&self) -> HashMap<String, Handler> {
+            HashMap::new()
+        }
     }
 
     async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {

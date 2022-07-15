@@ -26,7 +26,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
 use crate::router_factory::RouterServiceConfigurator;
-use crate::services::Plugins;
+use crate::router_factory::RouterServiceFactory;
 use crate::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -44,8 +44,6 @@ enum State<RS> {
         #[derivative(Debug = "ignore")]
         router_service_factory: RS,
         server_handle: HttpServerHandle,
-        #[derivative(Debug = "ignore")]
-        plugins: Plugins,
     },
     Stopped,
     Errored(ApolloRouterError),
@@ -85,6 +83,7 @@ impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
     FA: RouterServiceConfigurator + Send,
+    <FA as RouterServiceConfigurator>::RouterServiceFactory: RouterServiceFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         let ready = Arc::new(RwLock::new(None));
@@ -157,7 +156,6 @@ where
                         schema,
                         router_service_factory: router_service,
                         server_handle,
-                        plugins,
                     },
                     UpdateSchema(new_schema),
                 ) => {
@@ -167,7 +165,6 @@ where
                         schema,
                         router_service,
                         server_handle,
-                        plugins,
                         None,
                         Some(Arc::new(*new_schema)),
                     )
@@ -182,7 +179,6 @@ where
                         schema,
                         router_service_factory: router_service,
                         server_handle,
-                        plugins,
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
@@ -192,7 +188,6 @@ where
                         schema,
                         router_service,
                         server_handle,
-                        plugins,
                         Some(Arc::new(*new_configuration)),
                         None,
                     )
@@ -272,7 +267,7 @@ where
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
 
-            let (router_factory, plugins) = self
+            let router_factory = self
                 .router_configurator
                 .create(configuration.clone(), schema.clone(), None)
                 .await
@@ -280,15 +275,7 @@ where
                     tracing::error!("cannot create the router: {}", err);
                     Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
-            let plugin_handlers: HashMap<String, Handler> = plugins
-                .iter()
-                .filter_map(|(plugin_name, plugin)| {
-                    (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                        .then(|| plugin.custom_endpoint())
-                        .flatten()
-                        .map(|h| (plugin_name.clone(), h))
-                })
-                .collect();
+            let plugin_handlers: HashMap<String, Handler> = router_factory.custom_endpoints();
 
             let server_handle = self
                 .http_server_factory
@@ -309,7 +296,6 @@ where
                 schema,
                 router_service_factory: router_factory,
                 server_handle,
-                plugins,
             })
         } else {
             Ok(state)
@@ -323,7 +309,6 @@ where
         schema: Arc<Schema>,
         router_service: <FA as RouterServiceConfigurator>::RouterServiceFactory,
         server_handle: HttpServerHandle,
-        plugins: Plugins,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
@@ -342,17 +327,9 @@ where
             )
             .await
         {
-            Ok((new_router_service, plugins)) => {
-                let plugin_handlers: HashMap<String, Handler> = plugins
-                    .iter()
-                    .filter_map(|(plugin_name, plugin)| {
-                        (plugin_name.starts_with("apollo.")
-                            || plugin_name.starts_with("experimental."))
-                        .then(|| plugin.custom_endpoint())
-                        .flatten()
-                        .map(|handler| (plugin_name.clone(), handler))
-                    })
-                    .collect();
+            Ok(new_router_service) => {
+                let plugin_handlers: HashMap<String, Handler> =
+                    new_router_service.custom_endpoints();
 
                 let server_handle = server_handle
                     .restart(
@@ -371,7 +348,6 @@ where
                     schema: new_schema,
                     router_service_factory: new_router_service,
                     server_handle,
-                    plugins,
                 })
             }
             Err(err) => {
@@ -384,7 +360,6 @@ where
                     schema,
                     router_service_factory: router_service,
                     server_handle,
-                    plugins,
                 })
             }
         }
@@ -597,7 +572,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                Ok((router, Default::default()))
+                Ok(router)
             });
         router_factory
             .expect_create()
@@ -637,7 +612,7 @@ mod tests {
                 configuration: Arc<Configuration>,
                 schema: Arc<crate::Schema>,
                 previous_router: Option<&'a MockMyRouterFactory>,
-            ) -> Result<(MockMyRouterFactory, Plugins), BoxError>;
+            ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
 
@@ -648,6 +623,7 @@ mod tests {
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
             type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+            fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler>;
         }
         impl  NewService<Request<graphql::Request>> for MyRouterFactory {
             type Service = MockMyRouter;
@@ -774,7 +750,8 @@ mod tests {
             .returning(move |_, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                Ok((router, Default::default()))
+                router.expect_custom_endpoints().returning(HashMap::new);
+                Ok(router)
             });
         router_factory
     }
