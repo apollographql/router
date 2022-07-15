@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -24,7 +23,6 @@ use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::Handler;
 use crate::router_factory::RouterServiceConfigurator;
 use crate::router_factory::RouterServiceFactory;
 use crate::Schema;
@@ -381,6 +379,7 @@ impl<T> ResultExt<T> for Result<T, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
@@ -402,6 +401,7 @@ mod tests {
     use crate::http_ext::Request;
     use crate::http_ext::Response;
     use crate::http_server_factory::Listener;
+    use crate::plugin::Handler;
     use crate::router_factory::RouterServiceConfigurator;
     use crate::router_factory::RouterServiceFactory;
     use crate::services::new_service::NewService;
