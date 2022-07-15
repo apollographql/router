@@ -55,12 +55,13 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1395](https://github.com/apollographql/router/issues/1395)
+### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
 
 Dependency updates were blocked for some time due to incompatibilities:
 - #1389: the router-bridge crate needed a new version of `deno_core` in its workspace that would not fix the version of `once_cell`. Now that it is done we can update `once_cell` in the router
 - #1395: `clap` at version 3.2 changed the way values are extracted from matched arguments, which resulted in panics. This is now fixed and we can update `clap` in the router and related crates
+- #1394: broader dependency updates now that everything is locked
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1395
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1394 https://github.com/apollographql/router/pull/1395
 
 ## 📚 Documentation
