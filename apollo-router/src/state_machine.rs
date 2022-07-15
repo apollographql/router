@@ -328,8 +328,7 @@ where
             .await
         {
             Ok(new_router_service) => {
-                let plugin_handlers =
-                    new_router_service.custom_endpoints();
+                let plugin_handlers = new_router_service.custom_endpoints();
 
                 let server_handle = server_handle
                     .restart(
