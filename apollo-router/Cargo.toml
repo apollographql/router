@@ -17,17 +17,19 @@ path = "src/main.rs"
 failfast = []
 
 [dependencies]
+access-json = "0.1.0"
 anyhow = "1.0.58"
 apollo-parser = "0.2.8"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
+async-compression = { version = "0.3.14", features = ["tokio", "brotli", "gzip", "deflate"] }
 async-trait = "0.1.56"
 atty = "0.2.14"
 axum = { version = "0.5.9", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.65"
 buildstructor = "0.3.2"
 bytes = "1.1.0"
-clap = { version = "=3.1.18", default-features = false, features = [
+clap = { version = "3.2.10", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -83,6 +85,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
     "tls",
     "http-proto",
     "metrics",
+    "reqwest-client",
 ] }
 opentelemetry-semantic-conventions = "0.9.0"
 opentelemetry-zipkin = { version = "0.15.0", default-features = false, features = [
@@ -127,8 +130,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
-access-json = "0.1.0"
-async-compression = { version = "0.3.14", features = ["tokio", "brotli", "gzip", "deflate"] }
+
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

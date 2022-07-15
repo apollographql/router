@@ -2,6 +2,7 @@
 
 use std::env;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -348,10 +349,12 @@ fn copy_args_to_env() {
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
             if a.is_allow_invalid_utf8_set() {
-                if let Some(value) = matches.value_of_os(a.get_id()) {
+                if let Some(value) = matches.get_one::<OsString>(a.get_id()) {
                     env::set_var(env, value);
                 }
-            } else if let Some(value) = matches.value_of(a.get_id()) {
+            } else if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id()) {
+                env::set_var(env, value);
+            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
                 env::set_var(env, value);
             }
         }
