@@ -83,7 +83,7 @@ impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
     FA: RouterServiceConfigurator + Send,
-    <FA as RouterServiceConfigurator>::RouterServiceFactory: RouterServiceFactory,
+    FA::RouterServiceFactory: RouterServiceFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         let ready = Arc::new(RwLock::new(None));
@@ -275,7 +275,7 @@ where
                     tracing::error!("cannot create the router: {}", err);
                     Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
-            let plugin_handlers: HashMap<String, Handler> = router_factory.custom_endpoints();
+            let plugin_handlers = router_factory.custom_endpoints();
 
             let server_handle = self
                 .http_server_factory
@@ -328,7 +328,7 @@ where
             .await
         {
             Ok(new_router_service) => {
-                let plugin_handlers: HashMap<String, Handler> =
+                let plugin_handlers =
                     new_router_service.custom_endpoints();
 
                 let server_handle = server_handle
