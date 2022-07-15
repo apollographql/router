@@ -93,7 +93,7 @@ impl BridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-        selections: Query,
+        mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -107,14 +107,18 @@ impl BridgeQueryPlanner {
             PlanSuccess {
                 data: QueryPlan { node: Some(node) },
                 usage_reporting,
-            } => Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(query_planner::QueryPlan {
-                    usage_reporting,
-                    root: node,
-                    options,
-                }),
-                query: Arc::new(selections),
-            }),
+            } => {
+                let subselections = node.parse_subselections(&*self.schema);
+                selections.subselections = subselections;
+                Ok(QueryPlannerContent::Plan {
+                    plan: Arc::new(query_planner::QueryPlan {
+                        usage_reporting,
+                        root: node,
+                        options,
+                    }),
+                    query: Arc::new(selections),
+                })
+            }
             PlanSuccess {
                 data: QueryPlan { node: None },
                 usage_reporting,

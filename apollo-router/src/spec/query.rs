@@ -14,6 +14,7 @@ use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
+use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
@@ -29,6 +30,8 @@ pub struct Query {
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) subselections: HashMap<String, (Option<Path>, Query)>,
 }
 
 impl Query {
@@ -59,8 +62,32 @@ impl Query {
                     .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
                 None => self.operations.get(0),
             };
+            if let Some(subselection) = &response.subselection {
+                // Get subselection from hashmap
+                match self.subselections.get(subselection) {
+                    Some((_subselection_path, subselection_query)) => {
+                        dbg!(subselection);
+                        dbg!(subselection_query);
+                        let mut output = Object::default();
+                        let operation = &subselection_query.operations[0];
+                        response.data = Some(
+                            match self.apply_root_selection_set(
+                                operation,
+                                &variables,
+                                &mut input,
+                                &mut output,
+                                schema,
+                            ) {
+                                Ok(()) => output.into(),
+                                Err(InvalidValue) => Value::Null,
+                            },
+                        );
 
-            if let Some(operation) = operation {
+                        return;
+                    }
+                    None => failfast_debug!("can't find subselection for {:?}", subselection),
+                }
+            } else if let Some(operation) = operation {
                 let mut output = Object::default();
 
                 let all_variables = if operation.variables.is_empty() {
@@ -98,6 +125,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
+
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
@@ -138,6 +166,7 @@ impl Query {
             string,
             fragments,
             operations,
+            subselections: HashMap::new(),
         })
     }
 
@@ -657,7 +686,7 @@ impl Query {
 }
 
 #[derive(Debug)]
-struct Operation {
+pub(crate) struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,

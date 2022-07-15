@@ -109,6 +109,77 @@ impl PlanNode {
             Self::Defer { .. } => true,
         }
     }
+
+    pub(crate) fn parse_subselections(
+        &self,
+        schema: &Schema,
+    ) -> HashMap<String, (Option<Path>, Query)> {
+        if !self.contains_defer() {
+            return HashMap::new();
+        }
+        // re-create full query with the right path
+        // parse the subselection
+        let mut subselections = HashMap::new();
+        self.collect_subselections(schema, &mut subselections);
+
+        subselections
+    }
+
+    fn collect_subselections(
+        &self,
+        schema: &Schema,
+        subselections: &mut HashMap<String, (Option<Path>, Query)>,
+    ) {
+        // re-create full query with the right path
+        // parse the subselection
+        match self {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                nodes.iter().fold(subselections, |subs, current| {
+                    current.collect_subselections(schema, subs);
+
+                    subs
+                });
+            }
+            Self::Flatten(node) => {
+                node.node.collect_subselections(schema, subselections);
+            }
+            Self::Defer { primary, deferred } => {
+                // TODO rebuilt subselection from the root thanks to the path
+                let primary_path = primary.path.clone().unwrap_or_default();
+                let query = reconstruct_full_query(&primary_path, &primary.subselection);
+                // ----------------------- Parse ---------------------------------
+                let sub_selection =
+                    Query::parse(&query, schema).expect("it must respect the schema");
+                // ----------------------- END Parse ---------------------------------
+
+                subselections.insert(
+                    primary.subselection.clone(),
+                    (primary.path.clone(), sub_selection),
+                );
+                deferred.iter().fold(subselections, |subs, current| {
+                    if let Some(subselection) = &current.subselection {
+                        // TODO rebuilt subselection from the root thanks to the path
+                        let query = reconstruct_full_query(&current.path, subselection);
+                        // ----------------------- Parse ---------------------------------
+                        let sub_selection =
+                            Query::parse(&query, schema).expect("it must respect the schema");
+                        // ----------------------- END Parse ---------------------------------
+
+                        subs.insert(
+                            subselection.clone(),
+                            (current.path.clone().into(), sub_selection),
+                        );
+                    }
+                    if let Some(current_node) = &current.node {
+                        current_node.collect_subselections(schema, subs);
+                    }
+
+                    subs
+                });
+            }
+            Self::Fetch(..) => {}
+        }
+    }
 }
 
 impl QueryPlan {
@@ -133,7 +204,7 @@ impl QueryPlan {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
-        let (value, errors) = self
+        let (value, subselection, errors) = self
             .root
             .execute_recursively(
                 &root,
@@ -148,7 +219,11 @@ impl QueryPlan {
             )
             .await;
 
-        Response::builder().data(value).errors(errors).build()
+        Response::builder()
+            .data(value)
+            .and_subselection(subselection)
+            .errors(errors)
+            .build()
     }
 
     pub fn contains_mutations(&self) -> bool {
@@ -169,7 +244,7 @@ impl PlanNode {
         deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
         sender: futures::channel::mpsc::Sender<Response>,
         options: &'a QueryPlanOptions,
-    ) -> future::BoxFuture<(Value, Vec<Error>)>
+    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)>
     where
         SF: SubgraphServiceFactory,
     {
@@ -177,6 +252,7 @@ impl PlanNode {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
             let mut errors;
+            let mut subselection = None;
 
             match self {
                 PlanNode::Sequence { nodes } => {
@@ -184,7 +260,7 @@ impl PlanNode {
                     errors = Vec::new();
                     let span = tracing::info_span!("sequence");
                     for node in nodes {
-                        let (v, err) = node
+                        let (v, subselect, err) = node
                             .execute_recursively(
                                 current_dir,
                                 context,
@@ -201,6 +277,7 @@ impl PlanNode {
                             .await;
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
+                        subselection = subselect;
                     }
                 }
                 PlanNode::Parallel { nodes } => {
@@ -226,7 +303,7 @@ impl PlanNode {
                         })
                         .collect();
 
-                    while let Some((v, err)) = stream
+                    while let Some((v, _subselect, err)) = stream
                         .next()
                         .instrument(span.clone())
                         .in_current_span()
@@ -237,7 +314,7 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
-                    let (v, err) = node
+                    let (v, subselect, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
@@ -255,6 +332,7 @@ impl PlanNode {
 
                     value = v;
                     errors = err;
+                    subselection = subselect;
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
@@ -289,7 +367,7 @@ impl PlanNode {
                     primary:
                         Primary {
                             path: _path,
-                            subselection: _subselection,
+                            subselection: primary_subselection,
                             node,
                         },
                     deferred,
@@ -347,7 +425,7 @@ impl PlanNode {
                             let span = tracing::info_span!("deferred");
 
                             if let Some(node) = deferred_inner {
-                                let (v, err) = node
+                                let (v, _, err) = node
                                     .execute_recursively(
                                         &Path::default(),
                                         &ctx,
@@ -409,7 +487,7 @@ impl PlanNode {
                     value = parent_value.clone();
                     errors = Vec::new();
                     let span = tracing::info_span!("primary");
-                    let (v, err) = node
+                    let (v, _subselect, err) = node
                         .execute_recursively(
                             current_dir,
                             context,
@@ -426,10 +504,12 @@ impl PlanNode {
                         .await;
                     value.deep_merge(v);
                     errors.extend(err.into_iter());
+                    subselection = primary_subselection.clone().into();
+                    // TODO we need to check if when we have a defer it's always starting with a deferred node ????
                 }
             }
 
-            (value, errors)
+            (value, subselection, errors)
         })
     }
 
@@ -453,6 +533,31 @@ impl PlanNode {
             ),
         }
     }
+}
+
+fn reconstruct_full_query(path: &Path, subselection: &str) -> String {
+    // let current_path = current.path.clone();
+    let path_len = path.len();
+    let mut query = path
+        .iter()
+        .enumerate()
+        .map(|(idx, path_elt)| match path_elt {
+            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => unreachable!(),
+            json_ext::PathElement::Key(key) => {
+                let mut key = key.clone();
+                if idx == 0 {
+                    key = format!("{{ {key} ");
+                }
+
+                key
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("{");
+    query.push_str(subselection);
+    query.push_str(&" }".repeat(path_len));
+
+    query
 }
 
 pub(crate) mod fetch {
