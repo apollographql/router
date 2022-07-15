@@ -85,6 +85,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
     "tls",
     "http-proto",
     "metrics",
+    "reqwest-client",
 ] }
 opentelemetry-semantic-conventions = "0.9.0"
 opentelemetry-zipkin = { version = "0.15.0", default-features = false, features = [

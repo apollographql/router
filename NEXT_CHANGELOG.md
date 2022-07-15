@@ -45,5 +45,13 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### The opentelemetry-otlp crate needs a http-client feature [PR #1392](https://github.com/apollographql/router/pull/1392)
+
+The opentelemetry-otlp crate only checks at runtime if a HTTP client was added through
+cargo features. We now use reqwest for that.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1392
+
 ## 🛠 Maintenance
 ## 📚 Documentation
