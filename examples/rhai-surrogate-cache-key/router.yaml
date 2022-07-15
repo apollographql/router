@@ -1,3 +1,2 @@
-plugins:
-  experimental.rhai:
-    filename: src/rhai_surrogate_cache_key.rhai
+rhai:
+  main: src/rhai_surrogate_cache_key.rhai
