@@ -125,7 +125,7 @@ tracing = "0.1.35"
 tracing-core = "0.1.28"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
-tracing-subscriber = { version = "0.3.14", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"

@@ -24,7 +24,7 @@ tonic = "0.6.2"
 tokio = { version = "1.19.2", features = ["macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.9", features = ["net"] }
 tracing = "0.1.35"
-tracing-subscriber = { version = "0.3.14", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
