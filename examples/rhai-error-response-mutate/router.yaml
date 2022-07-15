@@ -1,2 +1,3 @@
 rhai:
-  main: src/rhai_error_response_mutate.rhai
+  scripts: src
+  main: rhai_error_response_mutate.rhai

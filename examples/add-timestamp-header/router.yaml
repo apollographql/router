@@ -1,2 +1,3 @@
 rhai:
-  main: src/add_timestamp_header.rhai
+  scripts: src
+  main: add_timestamp_header.rhai
