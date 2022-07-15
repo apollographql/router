@@ -53,6 +53,13 @@ cargo features. We now use reqwest for that.
 
 By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1392
 
+### Expose the custom endpoints from RouterServiceFactory ([PR #1402](https://github.com/apollographql/router/pull/1402))
+
+Plugin HTTP endpoints registration was broken during the Tower refactoring. We now make sure that the list
+of endpoints is generated from the `RouterServiceFactory` instance.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1402
+
 ## 🛠 Maintenance
 
 ### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
