@@ -30,7 +30,7 @@ impl Plugin for ForbidMutations {
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,

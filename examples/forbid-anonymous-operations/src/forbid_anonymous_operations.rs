@@ -34,7 +34,7 @@ impl Plugin for ForbidAnonymousOperations {
     // Forbidding anonymous operations can happen at the very beginning of our GraphQL request lifecycle.
     // We will thus put the logic it in the `router_service` section of our plugin.
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<
             RouterRequest,
             RouterResponse<BoxStream<'static, graphql::Response>>,

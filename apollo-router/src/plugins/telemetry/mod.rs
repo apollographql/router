@@ -261,7 +261,7 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(
-        &mut self,
+        &self,
         service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
@@ -341,7 +341,7 @@ impl Plugin for Telemetry {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
@@ -351,7 +351,7 @@ impl Plugin for Telemetry {
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: BoxService<
             ExecutionRequest,
             ExecutionResponse<BoxStream<'static, Response>>,
@@ -366,7 +366,7 @@ impl Plugin for Telemetry {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -1135,7 +1135,7 @@ mod tests {
                     .build())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(

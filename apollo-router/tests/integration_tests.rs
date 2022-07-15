@@ -625,10 +625,6 @@ async fn setup_router_and_registry() -> (
     BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>,
     CountingServiceRegistry,
 ) {
-    std::panic::set_hook(Box::new(|e| {
-        let backtrace = backtrace::Backtrace::new();
-        tracing::error!("{}\n{:?}", e, backtrace)
-    }));
     let schema: Arc<Schema> =
         Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let counting_registry = CountingServiceRegistry::new();
@@ -659,7 +655,7 @@ async fn setup_router_and_registry() -> (
         builder = builder.with_subgraph_service(name, service);
     }
 
-    let (router, _) = builder.build().await.unwrap();
+    let router = builder.build().await.unwrap().test_service();
 
     (router, counting_registry)
 }
