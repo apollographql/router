@@ -17,4 +17,4 @@ apollo-router-scaffold = { git="https://github.com/apollographql/router.git", ta
 {{/if}}
 {{/if}}
 anyhow = "=1.0.58"
-clap = "=3.1.18"
+clap = "3.2.10"
