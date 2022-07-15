@@ -46,7 +46,8 @@ mod tests {
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/add_timestamp_header.rhai",
+            "scripts": "src",
+            "main": "add_timestamp_header.rhai",
         }))
         .expect("json must be valid");
 
