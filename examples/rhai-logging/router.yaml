@@ -1,3 +1,2 @@
-plugins:
-  experimental.rhai:
-    filename: src/rhai_logging.rhai
+rhai:
+  main: src/rhai_logging.rhai

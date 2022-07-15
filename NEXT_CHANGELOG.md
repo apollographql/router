@@ -25,6 +25,24 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [0.11.1] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+### Move `experimental.rhai` out of `experimental` [PR #1365](https://github.com/apollographql/router/pull/1365)
+You will need to update your YAML configuration file to use the correct name for `rhai` plugin.
+
+```diff
+- plugins:
+-   experimental.rhai:
+-     filename: /path/to/myfile.rhai
++ rhai:
++   scripts: /path/to/directory/containing/all/my/rhai/scripts (./scripts by default)
++   main: <name of main script to execute> (main.rhai by default)
+```
+You can now modularise your rhai code. Rather than specifying a path to a filename containing your rhai code, the rhai plugin will now attempt to execute the script specified via `main`. If modules are imported, the rhai plugin will search for those modules in the `scripts` directory. for more details about how rhai makes use of modules, look at [the rhai documentation](https://rhai.rs/book/ref/modules/import.html).
+
+The simplest migration will be to set `scripts` to the directory containing your `myfile.rhai` and to rename your `myfile.rhai` to `main.rhai`.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1365
+
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
