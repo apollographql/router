@@ -1,3 +1,2 @@
-plugins:
-  experimental.rhai:
-    filename: src/add_timestamp_header.rhai
+rhai:
+  main: src/add_timestamp_header.rhai
