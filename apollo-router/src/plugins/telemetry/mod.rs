@@ -138,8 +138,8 @@ impl Drop for Telemetry {
             // Tracer providers must be flushed. This may happen as part of otel if the provider was set
             // as the global, but may also happen in the case of an failed config reload.
             // If the tracer prover is present then it was not handed over so we must flush it.
-            // We must make the call to force_flush() from spawn_blocking() (or spawn a thread) to
-            // ensure that the call to force_flush() is made from a separate thread.
+            // We must make the call to force_flush() from a separate thread to prevent hangs:
+            // see https://github.com/open-telemetry/opentelemetry-rust/issues/536.
             ::tracing::debug!("flushing telemetry");
             let jh = tokio::task::spawn_blocking(move || {
                 opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
