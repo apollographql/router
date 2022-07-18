@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -22,7 +22,12 @@ anyhow = "1.0.58"
 apollo-parser = "0.2.8"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
-async-compression = { version = "0.3.14", features = ["tokio", "brotli", "gzip", "deflate"] }
+async-compression = { version = "0.3.14", features = [
+    "tokio",
+    "brotli",
+    "gzip",
+    "deflate",
+] }
 async-trait = "0.1.56"
 atty = "0.2.14"
 axum = { version = "0.5.12", features = ["headers", "json", "original-uri"] }
@@ -95,7 +100,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.7"
 prometheus = "0.13"
-rhai = { version="1.8.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.8.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
@@ -118,7 +123,16 @@ tokio = { version = "1.19.2", features = ["full"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["full"] }
-tower-http = { version = "0.3.4", features = ["trace", "cors", "compression-br", "compression-deflate", "compression-gzip", "decompression-br", "decompression-deflate", "decompression-gzip"] }
+tower-http = { version = "0.3.4", features = [
+    "trace",
+    "cors",
+    "compression-br",
+    "compression-deflate",
+    "compression-gzip",
+    "decompression-br",
+    "decompression-deflate",
+    "decompression-gzip",
+] }
 tower-service = "0.3.2"
 tower-test = "0.4.0"
 tracing = "=0.1.34"
