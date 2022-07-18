@@ -5,7 +5,7 @@ FROM --platform=linux/amd64 alpine:latest AS build
 ARG ROUTER_RELEASE
 
 # Pull release from GH
-ADD https://github.com/apollographql/router/releases/download/v${ROUTER_RELEASE}/router-${ROUTER_RELEASE}-x86_64-unknown-linux-gnu.tar.gz /tmp/router.tar.gz
+ADD https://github.com/apollographql/router/releases/download/v${ROUTER_RELEASE}/router-${ROUTER_RELEASE}-x86_64-linux.tar.gz /tmp/router.tar.gz
 
 WORKDIR /tmp
 
