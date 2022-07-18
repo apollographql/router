@@ -3,11 +3,19 @@ services:
 
   apollo-router:
     container_name: apollo-router
-    image: ghcr.io/apollographql/router:v0.11.0
+    image: ghcr.io/apollographql/router:v0.12.0
     volumes:
       - ./supergraph.graphql:/etc/config/supergraph.graphql
       - ./router/datadog.router.yaml:/etc/config/configuration.yaml
-    command: [ "-c", "/etc/config/configuration.yaml", "-s", "/etc/config/supergraph.graphql", "--log", "info" ]
+    command:
+      [
+        "-c",
+        "/etc/config/configuration.yaml",
+        "-s",
+        "/etc/config/supergraph.graphql",
+        "--log",
+        "info"
+      ]
     ports:
       - 4000:4000
     depends_on:

@@ -2,7 +2,7 @@
 name = "xtask"
 edition = "2021"
 publish = false
-version = "0.1.0"
+version = "0.12.0"
 
 [dependencies]
 # This dependency should stay in line with your router version
@@ -13,7 +13,7 @@ apollo-router-scaffold = { path ="{{integration_test}}apollo-router-scaffold" }
 {{#if branch}}
 apollo-router-scaffold = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
 {{else}}
-apollo-router-scaffold = { git="https://github.com/apollographql/router.git", tag="v0.11.0"}
+apollo-router-scaffold = { git="https://github.com/apollographql/router.git", tag="v0.12.0"}
 {{/if}}
 {{/if}}
 anyhow = "=1.0.58"

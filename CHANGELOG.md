@@ -4,6 +4,58 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.12.0] - 2022-08-18
+
+## ❗ BREAKING ❗
+
+### Move `experimental.rhai` out of `experimental` [PR #1365](https://github.com/apollographql/router/pull/1365)
+
+You will need to update your YAML configuration file to use the correct name for `rhai` plugin.
+
+```diff
+- plugins:
+-   experimental.rhai:
+-     filename: /path/to/myfile.rhai
++ rhai:
++   scripts: /path/to/directory/containing/all/my/rhai/scripts (./scripts by default)
++   main: <name of main script to execute> (main.rhai by default)
+```
+
+You can now modularise your rhai code. Rather than specifying a path to a filename containing your rhai code, the rhai plugin will now attempt to execute the script specified via `main`. If modules are imported, the rhai plugin will search for those modules in the `scripts` directory. for more details about how rhai makes use of modules, look at [the rhai documentation](https://rhai.rs/book/ref/modules/import.html).
+
+The simplest migration will be to set `scripts` to the directory containing your `myfile.rhai` and to rename your `myfile.rhai` to `main.rhai`.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1365
+
+## 🐛 Fixes
+
+### The opentelemetry-otlp crate needs a http-client feature [PR #1392](https://github.com/apollographql/router/pull/1392)
+
+The opentelemetry-otlp crate only checks at runtime if a HTTP client was added through
+cargo features. We now use reqwest for that.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1392
+
+### Expose the custom endpoints from RouterServiceFactory ([PR #1402](https://github.com/apollographql/router/pull/1402))
+
+Plugin HTTP endpoints registration was broken during the Tower refactoring. We now make sure that the list
+of endpoints is generated from the `RouterServiceFactory` instance.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1402
+
+## 🛠 Maintenance
+
+### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
+
+Dependency updates were blocked for some time due to incompatibilities:
+
+- #1389: the router-bridge crate needed a new version of `deno_core` in its workspace that would not fix the version of `once_cell`. Now that it is done we can update `once_cell` in the router
+- #1395: `clap` at version 3.2 changed the way values are extracted from matched arguments, which resulted in panics. This is now fixed and we can update `clap` in the router and related crates
+- #1394: broader dependency updates now that everything is locked
+- #1410: revert tracing update that caused two telemetry tests to fail (the router binary is not affected)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1394 https://github.com/apollographql/router/pull/1395 and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1410
+
 # [0.11.0] - 2022-07-12
 
 ## ❗ BREAKING ❗
