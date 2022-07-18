@@ -77,7 +77,7 @@ download_binary() {
 
     # Download asset file.
     say "Downloading router from $_url"
-    
+
     curl -sSfL -H 'Accept: application/octet-stream' "$_url" -o "$_file"
     if [ $? != 0 ]; then
       say "Failed to download $_url"
@@ -137,15 +137,15 @@ get_architecture() {
 
     case "$_ostype" in
         Linux)
-            _ostype=linux
+            _ostype=unknown-linux-gnu
             ;;
 
         Darwin)
-            _ostype=macos
+            _ostype=apple-darwin
             ;;
 
         MINGW* | MSYS* | CYGWIN*)
-            _ostype=windows
+            _ostype=pc-windows-msvc
             ;;
 
         *)
