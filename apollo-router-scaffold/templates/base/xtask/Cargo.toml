@@ -2,7 +2,7 @@
 name = "xtask"
 edition = "2021"
 publish = false
-version = "0.1.0"
+version = "0.12.0"
 
 [dependencies]
 # This dependency should stay in line with your router version
