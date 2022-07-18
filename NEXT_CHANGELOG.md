@@ -68,9 +68,9 @@ Dependency updates were blocked for some time due to incompatibilities:
 - #1389: the router-bridge crate needed a new version of `deno_core` in its workspace that would not fix the version of `once_cell`. Now that it is done we can update `once_cell` in the router
 - #1395: `clap` at version 3.2 changed the way values are extracted from matched arguments, which resulted in panics. This is now fixed and we can update `clap` in the router and related crates
 - #1394: broader dependency updates now that everything is locked
+- #1410: revert tracing update that caused two telemetry tests to fail (the router binary is not affected)
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1394 https://github.com/apollographql/router/pull/1395
-
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1394 https://github.com/apollographql/router/pull/1395 and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1410 
 ### Insert the full target triplet in the package name [PR #1393](https://github.com/apollographql/router/pull/1393)
 
 The released package names will now contain the full target triplet in their name:
