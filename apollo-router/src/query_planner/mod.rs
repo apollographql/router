@@ -595,7 +595,7 @@ impl PlanNode {
                                     service_factory,
                                     schema,
                                     originating_request.clone(),
-                                    &parent_value,
+                                    parent_value,
                                     deferred_fetches,
                                     sender.clone(),
                                     options,
@@ -607,28 +607,26 @@ impl PlanNode {
                             errors.extend(err.into_iter());
                             subselection = subselect;
                         }
-                    } else {
-                        if let Some(node) = else_clause {
-                            let span = tracing::info_span!("condition_else");
-                            let (v, subselect, err) = node
-                                .execute_recursively(
-                                    current_dir,
-                                    context,
-                                    service_factory,
-                                    schema,
-                                    originating_request.clone(),
-                                    &parent_value,
-                                    deferred_fetches,
-                                    sender.clone(),
-                                    options,
-                                )
-                                .instrument(span.clone())
-                                .in_current_span()
-                                .await;
-                            value.deep_merge(v);
-                            errors.extend(err.into_iter());
-                            subselection = subselect;
-                        }
+                    } else if let Some(node) = else_clause {
+                        let span = tracing::info_span!("condition_else");
+                        let (v, subselect, err) = node
+                            .execute_recursively(
+                                current_dir,
+                                context,
+                                service_factory,
+                                schema,
+                                originating_request.clone(),
+                                parent_value,
+                                deferred_fetches,
+                                sender.clone(),
+                                options,
+                            )
+                            .instrument(span.clone())
+                            .in_current_span()
+                            .await;
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                        subselection = subselect;
                     }
                 }
             }
