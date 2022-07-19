@@ -408,6 +408,7 @@ impl PlanNode {
                         let deferred_inner = deferred_node.node.clone();
                         let deferred_path = deferred_node.path.clone();
                         let subselection = deferred_node.subselection();
+                        let label = deferred_node.label.clone();
                         let mut tx = sender.clone();
                         let sc = schema.clone();
                         let orig = originating_request.clone();
@@ -455,6 +456,7 @@ impl PlanNode {
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)
+                                            .and_label(label)
                                             .build(),
                                     )
                                     .await
@@ -471,6 +473,7 @@ impl PlanNode {
                                         .data(value)
                                         .and_path(Some(deferred_path.clone()))
                                         .and_subselection(subselection)
+                                        .and_label(label)
                                         .build(),
                                 )
                                 .await
