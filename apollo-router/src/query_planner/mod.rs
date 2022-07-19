@@ -156,7 +156,7 @@ impl PlanNode {
                 // ----------------------- END Parse ---------------------------------
 
                 subselections.insert(
-                    (Some(primary_path.clone()), primary.subselection.clone()),
+                    (Some(primary_path), primary.subselection.clone()),
                     sub_selection,
                 );
                 deferred.iter().fold(subselections, |subs, current| {
