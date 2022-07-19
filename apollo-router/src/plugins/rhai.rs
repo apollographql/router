@@ -57,12 +57,6 @@ use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
-pub(crate) trait Accessor<Access>: Send {
-    fn accessor(&self) -> &Access;
-
-    fn accessor_mut(&mut self) -> &mut Access;
-}
-
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
 
@@ -142,7 +136,7 @@ mod router_plugin_mod {
     pub(crate) fn get_subgraph(
         obj: &mut SharedMut<subgraph::Request>,
     ) -> Result<http_ext::Request<Request>, Box<EvalAltResult>> {
-        obj.with_mut(|request| Ok(request.subgraph_request.clone()))
+        Ok(obj.with_mut(|request| request.subgraph_request.clone()))
     }
 
     #[rhai_fn(set = "subgraph", return_raw)]
@@ -209,42 +203,42 @@ mod router_plugin_mod {
     pub(crate) fn get_originating_headers_router_response(
         obj: &mut SharedMut<router::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_headers_response_response)
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_response(
         obj: &mut SharedMut<execution::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_headers_response_response)
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_subgraph_response(
         obj: &mut SharedMut<subgraph::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_headers_response_response)
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_response(
         obj: &mut SharedMut<router::Response>,
     ) -> Result<Response, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_body_response_response)
+        Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_execution_response(
         obj: &mut SharedMut<execution::Response>,
     ) -> Result<Response, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_body_response_response)
+        Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_subgraph_response(
         obj: &mut SharedMut<subgraph::Response>,
     ) -> Result<Response, Box<EvalAltResult>> {
-        obj.with_mut(get_originating_body_response_response)
+        Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -252,7 +246,8 @@ mod router_plugin_mod {
         obj: &mut SharedMut<router::Response>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -260,7 +255,8 @@ mod router_plugin_mod {
         obj: &mut SharedMut<execution::Response>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -268,7 +264,8 @@ mod router_plugin_mod {
         obj: &mut SharedMut<subgraph::Response>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
     }
 
     #[rhai_fn(set = "body", return_raw)]
@@ -276,7 +273,8 @@ mod router_plugin_mod {
         obj: &mut SharedMut<router::Response>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_body_response_response(response, body))
+        obj.with_mut(|response| *response.response.body_mut() = body);
+        Ok(())
     }
 
     #[rhai_fn(set = "body", return_raw)]
@@ -284,7 +282,8 @@ mod router_plugin_mod {
         obj: &mut SharedMut<execution::Response>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_body_response_response(response, body))
+        obj.with_mut(|response| *response.response.body_mut() = body);
+        Ok(())
     }
 
     #[rhai_fn(set = "body", return_raw)]
@@ -292,36 +291,7 @@ mod router_plugin_mod {
         obj: &mut SharedMut<subgraph::Response>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| set_originating_body_response_response(response, body))
-    }
-
-    // Generic Trait Object accessors used by various shared type objects above
-
-    fn get_originating_headers_response_response<T: Accessor<http_ext::Response<Response>>>(
-        obj: &mut T,
-    ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Ok(obj.accessor().headers().clone())
-    }
-
-    fn get_originating_body_response_response<T: Accessor<http_ext::Response<Response>>>(
-        obj: &mut T,
-    ) -> Result<Response, Box<EvalAltResult>> {
-        Ok(obj.accessor().body().clone())
-    }
-
-    fn set_originating_headers_response_response<T: Accessor<http_ext::Response<Response>>>(
-        obj: &mut T,
-        headers: HeaderMap,
-    ) -> Result<(), Box<EvalAltResult>> {
-        *obj.accessor_mut().headers_mut() = headers;
-        Ok(())
-    }
-
-    fn set_originating_body_response_response<T: Accessor<http_ext::Response<Response>>>(
-        obj: &mut T,
-        body: Response,
-    ) -> Result<(), Box<EvalAltResult>> {
-        *obj.accessor_mut().body_mut() = body;
+        obj.with_mut(|response| *response.response.body_mut() = body);
         Ok(())
     }
 
@@ -464,57 +434,6 @@ pub(crate) enum ServiceStep {
     Subgraph(SharedMut<subgraph::Service>),
 }
 
-macro_rules! accessor_mut_for_shared_types {
-    (subgraph) => {
-        // XXX CAN'T DO THIS FOR SUBGRAPH
-        fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
-            panic!("cannot mutate originating request on a subgraph");
-        }
-    };
-    ($_base: ident) => {
-        fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
-            &mut self.originating_request
-        }
-    };
-}
-
-macro_rules! gen_shared_types {
-    ($($base: ident), +) => {
-        $(
-            impl Accessor<Context> for $base::Request {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<Context> for $base::Response {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<http_ext::Request<Request>> for $base::Request {
-
-                fn accessor(&self) -> &http_ext::Request<Request> {
-                    &self.originating_request
-                }
-
-                accessor_mut_for_shared_types!($base);
-            }
-        )*
-    };
-}
-
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_request {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
@@ -646,87 +565,9 @@ macro_rules! gen_map_response {
     };
 }
 
-// Special case for subgraph, so invoke separately
-gen_shared_types!(query_planner);
-gen_shared_types!(subgraph);
-
 pub(crate) struct RhaiExecutionResponse {
     context: Context,
     response: http_ext::Response<Response>,
-}
-impl Accessor<Context> for ExecutionRequest {
-    fn accessor(&self) -> &Context {
-        &self.context
-    }
-    fn accessor_mut(&mut self) -> &mut Context {
-        &mut self.context
-    }
-}
-impl Accessor<Context> for ExecutionResponse {
-    fn accessor(&self) -> &Context {
-        &self.context
-    }
-    fn accessor_mut(&mut self) -> &mut Context {
-        &mut self.context
-    }
-}
-impl Accessor<http_ext::Request<Request>> for ExecutionRequest {
-    fn accessor(&self) -> &http_ext::Request<Request> {
-        &self.originating_request
-    }
-    fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
-        &mut self.originating_request
-    }
-}
-
-impl Accessor<Context> for RhaiExecutionResponse {
-    fn accessor(&self) -> &Context {
-        &self.context
-    }
-
-    fn accessor_mut(&mut self) -> &mut Context {
-        &mut self.context
-    }
-}
-
-impl Accessor<http_ext::Response<Response>> for RhaiExecutionResponse {
-    fn accessor(&self) -> &http_ext::Response<Response> {
-        &self.response
-    }
-
-    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
-        &mut self.response
-    }
-}
-
-impl Accessor<http_ext::Response<Response>> for RhaiRouterResponse {
-    fn accessor(&self) -> &http_ext::Response<Response> {
-        &self.response
-    }
-
-    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
-        &mut self.response
-    }
-}
-
-impl Accessor<http_ext::Response<BoxStream<'static, Response>>> for ExecutionResponse {
-    fn accessor(&self) -> &http_ext::Response<BoxStream<'static, Response>> {
-        &self.response
-    }
-
-    fn accessor_mut(&mut self) -> &mut http_ext::Response<BoxStream<'static, Response>> {
-        &mut self.response
-    }
-}
-
-impl Accessor<http_ext::Response<Response>> for SubgraphResponse {
-    fn accessor(&self) -> &http_ext::Response<Response> {
-        &self.response
-    }
-
-    fn accessor_mut(&mut self) -> &mut http_ext::Response<Response> {
-        &mut self.response
-    }
 }
 
 pub(crate) struct RhaiRouterResponse {
@@ -734,85 +575,13 @@ pub(crate) struct RhaiRouterResponse {
     response: http_ext::Response<Response>,
 }
 
-impl Accessor<Context> for RouterRequest {
-    fn accessor(&self) -> &Context {
-        &self.context
-    }
-    fn accessor_mut(&mut self) -> &mut Context {
-        &mut self.context
-    }
-}
-impl Accessor<Context> for RhaiRouterResponse {
-    fn accessor(&self) -> &Context {
-        &self.context
-    }
-    fn accessor_mut(&mut self) -> &mut Context {
-        &mut self.context
-    }
-}
-impl Accessor<http_ext::Request<Request>> for RouterRequest {
-    fn accessor(&self) -> &http_ext::Request<Request> {
-        &self.originating_request
-    }
-    fn accessor_mut(&mut self) -> &mut http_ext::Request<Request> {
-        &mut self.originating_request
-    }
-}
-
-// Generic Trait Object accessors used by various shared type objects above
-
-fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
-    Ok(obj.accessor().clone())
-}
-
-fn insert_context<T: Accessor<Context>>(
-    obj: &mut T,
-    context: Context,
-) -> Result<(), Box<EvalAltResult>> {
-    *obj.accessor_mut() = context;
-    Ok(())
-}
-
-fn get_originating_headers<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-) -> Result<HeaderMap, Box<EvalAltResult>> {
-    Ok(obj.accessor().headers().clone())
-}
-
-fn set_originating_headers<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-    headers: HeaderMap,
-) -> Result<(), Box<EvalAltResult>> {
-    *obj.accessor_mut().headers_mut() = headers;
-    Ok(())
-}
-
-fn get_originating_body<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-) -> Result<Request, Box<EvalAltResult>> {
-    Ok(obj.accessor().body().clone())
-}
-
-fn set_originating_body<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-    body: Request,
-) -> Result<(), Box<EvalAltResult>> {
-    *obj.accessor_mut().body_mut() = body;
-    Ok(())
-}
-
-fn set_originating_uri<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-    uri: Uri,
-) -> Result<(), Box<EvalAltResult>> {
-    *obj.accessor_mut().uri_mut() = uri;
-    Ok(())
-}
-
-fn get_originating_uri<T: Accessor<http_ext::Request<Request>>>(
-    obj: &mut T,
-) -> Result<Uri, Box<EvalAltResult>> {
-    Ok(obj.accessor().uri().clone())
+macro_rules! if_subgraph {
+    ( subgraph => $subgraph: block else $not_subgraph: block ) => {
+        $subgraph
+    };
+    ( $base: ident => $subgraph: block else $not_subgraph: block ) => {
+        $not_subgraph
+    };
 }
 
 macro_rules! register_rhai_interface {
@@ -821,61 +590,96 @@ macro_rules! register_rhai_interface {
             // Context stuff
             $engine.register_get_result(
                 "context",
-                |obj: &mut SharedMut<$base::Request>| obj.with_mut(get_context),
+                |obj: &mut SharedMut<$base::Request>| {
+                    Ok(obj.with_mut(|request| request.context.clone()))
+                }
             )
             .register_get_result(
                 "context",
-                |obj: &mut SharedMut<$base::Response>| obj.with_mut(get_context),
+                |obj: &mut SharedMut<$base::Response>| {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                }
             );
 
             $engine.register_set_result(
                 "context",
                 |obj: &mut SharedMut<$base::Request>, context: Context| {
-                    obj.with_mut(|request| insert_context(request, context))
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
                 }
-
             )
             .register_set_result(
                 "context",
                 |obj: &mut SharedMut<$base::Response>, context: Context| {
-                    obj.with_mut(|response| insert_context(response, context))
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
                 }
             );
 
             // Originating Request
             $engine.register_get_result(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>| obj.with_mut(get_originating_headers)
+                |obj: &mut SharedMut<$base::Request>| {
+                    Ok(obj.with_mut(|request| request.originating_request.headers().clone()))
+                }
             );
 
             $engine.register_set_result(
                 "headers",
                 |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
-                    obj.with_mut(|request| set_originating_headers(request, headers))
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            panic!("cannot mutate originating request on a subgraph");
+                        } else {
+                            obj.with_mut(|request| *request.originating_request.headers_mut() = headers);
+                            Ok(())
+                        }
+                    }
                 }
             );
 
             $engine.register_get_result(
                 "body",
-                |obj: &mut SharedMut<$base::Request>| obj.with_mut(get_originating_body),
+                |obj: &mut SharedMut<$base::Request>| {
+                    Ok(obj.with_mut(|request| request.originating_request.body().clone()))
+                }
             );
 
             $engine.register_set_result(
                 "body",
                 |obj: &mut SharedMut<$base::Request>, body: Request| {
-                    obj.with_mut(|request| set_originating_body(request, body))
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, body);
+                            panic!("cannot mutate originating request on a subgraph");
+                        } else {
+                            obj.with_mut(|request| *request.originating_request.body_mut() = body);
+                            Ok(())
+                        }
+                    }
                 }
             );
 
             $engine.register_get_result(
                 "uri",
-                |obj: &mut SharedMut<$base::Request>| obj.with_mut(get_originating_uri)
+                |obj: &mut SharedMut<$base::Request>| {
+                    Ok(obj.with_mut(|request| request.originating_request.uri().clone()))
+                }
             );
 
             $engine.register_set_result(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
-                    obj.with_mut(|request| set_originating_uri(request, uri))
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, uri);
+                            panic!("cannot mutate originating request on a subgraph");
+                        } else {
+                            obj.with_mut(|request| *request.originating_request.uri_mut() = uri);
+                            Ok(())
+                        }
+                    }
                 }
             );
         )*
