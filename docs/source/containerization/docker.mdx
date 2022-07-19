@@ -11,7 +11,7 @@ The default behaviour of the router images is suitable for a quickstart or devel
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
-Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v0.11.0`
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v0.12.0`
 
 ## Override the configuration
 
@@ -92,10 +92,10 @@ Usage: build_docker_image.sh [-b] [<release>]
 	Example 1: Building HEAD from the repo
 		build_docker_image.sh -b
 	Example 2: Building tag from the repo
-		build_docker_image.sh -b v0.11.0
+		build_docker_image.sh -b v0.12.0
 	Example 3: Building commit hash from the repo
 		build_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5
-	Example 4: Building tag v0.11.0 from the released tarball
-		build_docker_image.sh v0.11.0
+	Example 4: Building tag v0.12.0 from the released tarball
+		build_docker_image.sh v0.12.0
 ```
 Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [distroless images](https://github.com/GoogleContainerTools/distroless) for the final image build. Feel free to modify the script to use images which better suit your own needs.

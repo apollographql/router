@@ -50,7 +50,7 @@ metadata:
   labels:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.12.0"
 ---
 # Source: router/templates/secret.yaml
 apiVersion: v1
@@ -60,7 +60,7 @@ metadata:
   labels:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.12.0"
 data:
   managedFederationApiKey: "REDACTED"
 ---
@@ -72,7 +72,7 @@ metadata:
   labels:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.12.0"
 data:
   configuration.yaml: |
     server:
@@ -90,7 +90,7 @@ metadata:
   labels:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.12.0"
 spec:
   type: ClusterIP
   ports:
@@ -110,7 +110,7 @@ metadata:
   labels:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.12.0"
   annotations:
     prometheus.io/path: /plugins/apollo.telemetry/prometheus
     prometheus.io/port: "80"
@@ -134,7 +134,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v0.11.0"
+          image: "ghcr.io/apollographql/router:v0.12.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload

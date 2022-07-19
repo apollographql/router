@@ -1,2 +1,3 @@
 rhai:
-  main: src/cookies_to_headers.rhai
+  scripts: src
+  main: cookies_to_headers.rhai

@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 // This entire file is license key functionality
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
-use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -14,8 +14,8 @@ use crate::graphql;
 use crate::http_ext::Request;
 use crate::http_ext::Response;
 use crate::plugin::DynPlugin;
+use crate::plugin::Handler;
 use crate::services::new_service::NewService;
-use crate::services::Plugins;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
 use crate::PluggableRouterServiceBuilder;
@@ -35,6 +35,8 @@ pub(crate) trait RouterServiceFactory:
             Future = Self::Future,
         > + Send;
     type Future: Send;
+
+    fn custom_endpoints(&self) -> HashMap<String, Handler>;
 }
 
 /// Factory for creating a RouterServiceFactory
@@ -50,7 +52,7 @@ pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError>;
+    ) -> Result<Self::RouterServiceFactory, BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -66,7 +68,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<(Self::RouterServiceFactory, Plugins), BoxError> {
+    ) -> Result<Self::RouterServiceFactory, BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();
@@ -98,7 +100,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 
         let pluggable_router_service = builder.build().await?;
 
-        Ok((pluggable_router_service, IndexMap::new()))
+        Ok(pluggable_router_service)
     }
 }
 

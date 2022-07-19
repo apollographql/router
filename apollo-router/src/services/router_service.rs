@@ -394,6 +394,18 @@ impl RouterServiceFactory for RouterCreator {
     type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
         Request<graphql::Request>,
     >>::Future;
+
+    fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
+        self.plugins
+            .iter()
+            .filter_map(|(plugin_name, plugin)| {
+                (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
+                    .then(|| plugin.custom_endpoint())
+                    .flatten()
+                    .map(|h| (plugin_name.clone(), h))
+            })
+            .collect()
+    }
 }
 
 impl RouterCreator {
