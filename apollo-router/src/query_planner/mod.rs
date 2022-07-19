@@ -121,7 +121,7 @@ impl PlanNode {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
-        self.collect_subselections(schema, &mut subselections);
+        self.collect_subselections(schema, &Path::default(), &mut subselections);
 
         subselections
     }
@@ -129,6 +129,7 @@ impl PlanNode {
     fn collect_subselections(
         &self,
         schema: &Schema,
+        initial_path: &Path,
         subselections: &mut HashMap<String, (Option<Path>, Query)>,
     ) {
         // re-create full query with the right path
@@ -136,17 +137,18 @@ impl PlanNode {
         match self {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 nodes.iter().fold(subselections, |subs, current| {
-                    current.collect_subselections(schema, subs);
+                    current.collect_subselections(schema, initial_path, subs);
 
                     subs
                 });
             }
             Self::Flatten(node) => {
-                node.node.collect_subselections(schema, subselections);
+                node.node
+                    .collect_subselections(schema, initial_path, subselections);
             }
             Self::Defer { primary, deferred } => {
                 // TODO rebuilt subselection from the root thanks to the path
-                let primary_path = primary.path.clone().unwrap_or_default();
+                let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 let query = reconstruct_full_query(&primary_path, &primary.subselection);
                 // ----------------------- Parse ---------------------------------
                 let sub_selection =
@@ -172,7 +174,11 @@ impl PlanNode {
                         );
                     }
                     if let Some(current_node) = &current.node {
-                        current_node.collect_subselections(schema, subs);
+                        current_node.collect_subselections(
+                            schema,
+                            &initial_path.join(&current.path),
+                            subs,
+                        );
                     }
 
                     subs
