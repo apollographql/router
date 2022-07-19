@@ -66,8 +66,6 @@ impl Query {
                 // Get subselection from hashmap
                 match self.subselections.get(subselection) {
                     Some((_subselection_path, subselection_query)) => {
-                        dbg!(subselection);
-                        dbg!(subselection_query);
                         let mut output = Object::default();
                         let operation = &subselection_query.operations[0];
                         response.data = Some(

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
@@ -536,26 +537,21 @@ impl PlanNode {
 }
 
 fn reconstruct_full_query(path: &Path, subselection: &str) -> String {
-    // let current_path = current.path.clone();
-    let path_len = path.len();
-    let mut query = path
-        .iter()
-        .enumerate()
-        .map(|(idx, path_elt)| match path_elt {
-            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => unreachable!(),
+    let mut query = String::new();
+    let mut len = 0;
+    for path_elt in path.iter() {
+        match path_elt {
+            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
             json_ext::PathElement::Key(key) => {
-                let mut key = key.clone();
-                if idx == 0 {
-                    key = format!("{{ {key} ");
-                }
-
-                key
+                write!(&mut query, "{{ {key}")
+                    .expect("writing to a String should not fail because it can reallocate");
+                len += 1;
             }
-        })
-        .collect::<Vec<String>>()
-        .join("{");
+        }
+    }
+
     query.push_str(subselection);
-    query.push_str(&" }".repeat(path_len));
+    query.push_str(&" }".repeat(len));
 
     query
 }
