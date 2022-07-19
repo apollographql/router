@@ -31,7 +31,7 @@ pub struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<String, (Option<Path>, Query)>,
+    pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
 }
 
 impl Query {
@@ -64,8 +64,11 @@ impl Query {
             };
             if let Some(subselection) = &response.subselection {
                 // Get subselection from hashmap
-                match self.subselections.get(subselection) {
-                    Some((_subselection_path, subselection_query)) => {
+                match self
+                    .subselections
+                    .get(&(response.path.clone(), subselection.clone()))
+                {
+                    Some(subselection_query) => {
                         let mut output = Object::default();
                         let operation = &subselection_query.operations[0];
                         response.data = Some(

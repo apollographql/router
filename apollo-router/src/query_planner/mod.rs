@@ -114,7 +114,7 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> HashMap<String, (Option<Path>, Query)> {
+    ) -> HashMap<(Option<Path>, String), Query> {
         if !self.contains_defer() {
             return HashMap::new();
         }
@@ -130,7 +130,7 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
-        subselections: &mut HashMap<String, (Option<Path>, Query)>,
+        subselections: &mut HashMap<(Option<Path>, String), Query>,
     ) {
         // re-create full query with the right path
         // parse the subselection
@@ -156,8 +156,8 @@ impl PlanNode {
                 // ----------------------- END Parse ---------------------------------
 
                 subselections.insert(
-                    primary.subselection.clone(),
-                    (primary.path.clone(), sub_selection),
+                    (Some(primary_path.clone()), primary.subselection.clone()),
+                    sub_selection,
                 );
                 deferred.iter().fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
@@ -169,8 +169,8 @@ impl PlanNode {
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
-                            subselection.clone(),
-                            (current.path.clone().into(), sub_selection),
+                            (current.path.clone().into(), subselection.clone()),
+                            sub_selection,
                         );
                     }
                     if let Some(current_node) = &current.node {
@@ -407,7 +407,7 @@ impl PlanNode {
                         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
                         let deferred_inner = deferred_node.node.clone();
                         let deferred_path = deferred_node.path.clone();
-                        let subselection = deferred_node.subselection.clone();
+                        let subselection = deferred_node.subselection();
                         let mut tx = sender.clone();
                         let sc = schema.clone();
                         let orig = originating_request.clone();
@@ -453,6 +453,7 @@ impl PlanNode {
                                         Response::builder()
                                             .data(v)
                                             .errors(err)
+                                            .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)
                                             .build(),
                                     )
@@ -468,6 +469,7 @@ impl PlanNode {
                                 .send(
                                     Response::builder()
                                         .data(value)
+                                        .and_path(Some(deferred_path.clone()))
                                         .and_subselection(subselection)
                                         .build(),
                                 )
@@ -965,6 +967,16 @@ pub(crate) struct DeferredNode {
     node: Option<Arc<PlanNode>>,
 }
 
+impl DeferredNode {
+    fn subselection(&self) -> Option<String> {
+        self.subselection.clone().or_else(|| {
+            self.node.as_ref().and_then(|node| match node.as_ref() {
+                PlanNode::Defer { primary, .. } => Some(primary.subselection.clone()),
+                _ => None,
+            })
+        })
+    }
+}
 /// A deferred node.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]

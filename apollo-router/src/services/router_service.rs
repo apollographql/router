@@ -180,6 +180,10 @@ where
                                             )
                                         });
 
+                                        // we use the path to look up the subselections, but the generated response
+                                        // is an object starting at the root so the path should be empty
+                                        response.path = None;
+
                                         if is_deferred {
                                             response.has_next = Some(true);
                                         }
