@@ -88,6 +88,13 @@ pub(crate) enum PlanNode {
         primary: Primary,
         deferred: Vec<DeferredNode>,
     },
+
+    #[serde(rename_all = "camelCase")]
+    Condition {
+        condition: String,
+        if_clause: Option<Box<PlanNode>>,
+        else_clause: Option<Box<PlanNode>>,
+    },
 }
 
 impl PlanNode {
@@ -98,6 +105,23 @@ impl PlanNode {
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
             Self::Defer { primary, .. } => primary.node.contains_mutations(),
             Self::Flatten(_) => false,
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(node) = if_clause {
+                    if node.contains_mutations() {
+                        return true;
+                    }
+                }
+                if let Some(node) = else_clause {
+                    if node.contains_mutations() {
+                        return true;
+                    }
+                }
+                false
+            }
         }
     }
 
@@ -108,6 +132,25 @@ impl PlanNode {
             Self::Flatten(node) => node.node.contains_defer(),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                // right now ConditionNode is only used with defer, but it might be used
+                // in the future to implement @skip and @include execution
+                if let Some(node) = if_clause {
+                    if node.contains_defer() {
+                        return true;
+                    }
+                }
+                if let Some(node) = else_clause {
+                    if node.contains_defer() {
+                        return true;
+                    }
+                }
+                false
+            }
         }
     }
 
@@ -185,6 +228,18 @@ impl PlanNode {
                 });
             }
             Self::Fetch(..) => {}
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(node) = if_clause {
+                    node.collect_subselections(schema, initial_path, subselections);
+                }
+                if let Some(node) = else_clause {
+                    node.collect_subselections(schema, initial_path, subselections);
+                }
+            }
         }
     }
 }
@@ -519,6 +574,63 @@ impl PlanNode {
                     subselection = primary_subselection.clone().into();
                     // TODO we need to check if when we have a defer it's always starting with a deferred node ????
                 }
+                PlanNode::Condition {
+                    condition,
+                    if_clause,
+                    else_clause,
+                } => {
+                    value = Value::default();
+                    errors = Vec::new();
+
+                    if let Some(&Value::Bool(true)) =
+                        originating_request.body().variables.get(condition.as_str())
+                    {
+                        //FIXME: should we show an error if the if_node was not present?
+                        if let Some(node) = if_clause {
+                            let span = tracing::info_span!("condition_if");
+                            let (v, subselect, err) = node
+                                .execute_recursively(
+                                    current_dir,
+                                    context,
+                                    service_factory,
+                                    schema,
+                                    originating_request.clone(),
+                                    &parent_value,
+                                    deferred_fetches,
+                                    sender.clone(),
+                                    options,
+                                )
+                                .instrument(span.clone())
+                                .in_current_span()
+                                .await;
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                            subselection = subselect;
+                        }
+                    } else {
+                        if let Some(node) = else_clause {
+                            let span = tracing::info_span!("condition_else");
+                            let (v, subselect, err) = node
+                                .execute_recursively(
+                                    current_dir,
+                                    context,
+                                    service_factory,
+                                    schema,
+                                    originating_request.clone(),
+                                    &parent_value,
+                                    deferred_fetches,
+                                    sender.clone(),
+                                    options,
+                                )
+                                .instrument(span.clone())
+                                .in_current_span()
+                                .await;
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                            subselection = subselect;
+                        }
+                    }
+                }
             }
 
             (value, subselection, errors)
@@ -543,6 +655,18 @@ impl PlanNode {
                         .flat_map(|d| d.node.iter().flat_map(|node| node.service_usage())),
                 ),
             ),
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => match (if_clause, else_clause) {
+                (None, None) => Box::new(None.into_iter()),
+                (None, Some(node)) => node.service_usage(),
+                (Some(node), None) => node.service_usage(),
+                (Some(if_node), Some(else_node)) => {
+                    Box::new(if_node.service_usage().chain(else_node.service_usage()))
+                }
+            },
         }
     }
 }

@@ -64,10 +64,11 @@ impl Query {
             };
             if let Some(subselection) = &response.subselection {
                 // Get subselection from hashmap
-                match self
-                    .subselections
-                    .get(&(response.path.clone(), subselection.clone()))
-                {
+                match self.subselections.get(&(
+                    //FIXME: we should not have optional paths at all in the subselections map
+                    response.path.clone().or_else(|| Some(Path::default())),
+                    subselection.clone(),
+                )) {
                     Some(subselection_query) => {
                         let mut output = Object::default();
                         let operation = &subselection_query.operations[0];
