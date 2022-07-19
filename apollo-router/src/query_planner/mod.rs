@@ -1369,7 +1369,7 @@ mod tests {
         // deferred response
         assert_eq!(
             serde_json::to_string(&response).unwrap(),
-            r#"{"data":{"t":{"y":"Y","__typename":"T"}}}"#
+            r#"{"data":{"t":{"y":"Y","__typename":"T"}},"path":["t"]}"#
         );
     }
 }
