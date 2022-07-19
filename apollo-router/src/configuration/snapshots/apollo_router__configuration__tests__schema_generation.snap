@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 848
 expression: "&schema"
 ---
 {
@@ -325,7 +326,7 @@ expression: "&schema"
         "landing_page": true,
         "endpoint": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "defer_support": false
+        "experimental_defer_support": false
       },
       "type": "object",
       "properties": {
@@ -390,15 +391,15 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
-        "defer_support": {
-          "description": "Experimental @defer directive support default: false",
-          "default": false,
-          "type": "boolean"
-        },
         "endpoint": {
           "description": "GraphQL endpoint default: \"/\"",
           "default": "/",
           "type": "string"
+        },
+        "experimental_defer_support": {
+          "description": "Experimental @defer directive support default: false",
+          "default": false,
+          "type": "boolean"
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
