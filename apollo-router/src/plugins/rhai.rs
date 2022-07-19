@@ -630,7 +630,7 @@ macro_rules! register_rhai_interface {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, headers);
-                            panic!("cannot mutate originating request on a subgraph");
+                            Err("cannot mutate originating request on a subgraph".into())
                         } else {
                             obj.with_mut(|request| *request.originating_request.headers_mut() = headers);
                             Ok(())
@@ -652,7 +652,7 @@ macro_rules! register_rhai_interface {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, body);
-                            panic!("cannot mutate originating request on a subgraph");
+                            Err("cannot mutate originating request on a subgraph".into())
                         } else {
                             obj.with_mut(|request| *request.originating_request.body_mut() = body);
                             Ok(())
@@ -674,7 +674,7 @@ macro_rules! register_rhai_interface {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, uri);
-                            panic!("cannot mutate originating request on a subgraph");
+                            Err("cannot mutate originating request on a subgraph".into())
                         } else {
                             obj.with_mut(|request| *request.originating_request.uri_mut() = uri);
                             Ok(())
