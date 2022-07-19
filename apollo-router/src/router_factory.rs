@@ -73,7 +73,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();
         }
-        if configuration.server.defer_support {
+        if configuration.server.experimental_defer_support {
             builder = builder.with_defer_support();
         }
 

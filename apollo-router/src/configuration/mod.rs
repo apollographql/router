@@ -268,7 +268,7 @@ pub(crate) struct Server {
     /// Experimental @defer directive support
     /// default: false
     #[serde(default = "default_defer_support")]
-    pub(crate) defer_support: bool,
+    pub(crate) experimental_defer_support: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -290,7 +290,7 @@ impl Server {
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
-            defer_support: defer_support.unwrap_or_else(default_defer_support),
+            experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
         }
     }
 }
