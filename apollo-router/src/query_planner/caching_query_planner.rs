@@ -7,6 +7,8 @@ use std::task;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
+use serde_json_bytes::value::Serializer;
 
 use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
@@ -105,14 +107,16 @@ where
                 .await
                 .map(|query_planner_content| {
                     if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
-                        if let Err(e) = request
-                            .context
-                            .insert(USAGE_REPORTING, plan.usage_reporting.clone())
-                        {
-                            tracing::error!(
-                                "usage reporting was not serializable to context, {}",
-                                e
-                            );
+                        match (&plan.usage_reporting).serialize(Serializer) {
+                            Ok(v) => {
+                                request.context.insert_json_value(USAGE_REPORTING, v);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    e
+                                );
+                            }
                         }
                     }
                     query_planner_content
