@@ -291,7 +291,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test -p "apollo-router" -p "apollo-router-scaffold" --locked
+      - run: cargo test --all --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -318,12 +318,12 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 3 -p "apollo-router" -p "apollo-router-scaffold" --locked
+            - run: cargo test --jobs 3 --all --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
           steps:
-            - run: cargo test -p "apollo-router" -p "apollo-router-scaffold" --locked
+            - run: cargo test --all --locked
 
       - save_cache:
           name: Save .cargo
