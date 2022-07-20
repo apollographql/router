@@ -16,7 +16,7 @@ Built in functionality in the Apollo Router.
 Extending the functionality of the Apollo Router.
 
 ### Rhai
-Experimental scripting support.
+Scripting support.
 * [Time request and add to header](./add-timestamp-header)
 * [Cookies to headers](./cookies-to-headers)
 * [Operation Name to headers](./op-name-to-header)
