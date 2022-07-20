@@ -73,7 +73,7 @@ where
                 .execute(
                     &context,
                     &this.subgraph_creator,
-                    req.originating_request.clone(),
+                    &Arc::new(req.originating_request),
                     &this.schema,
                     sender,
                 )
