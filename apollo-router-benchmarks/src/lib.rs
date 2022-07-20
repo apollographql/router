@@ -8,6 +8,6 @@ pub mod tests {
 
         let builder = setup();
         let router = runtime.block_on(builder.build()).unwrap();
-        runtime.block_on(basic_composition_benchmark(router.test_service()));
+        runtime.block_on(async move { basic_composition_benchmark(router.test_service()).await });
     }
 }

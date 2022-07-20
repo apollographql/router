@@ -1,11 +1,9 @@
-use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphResponse;
-use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -71,13 +69,8 @@ impl Plugin for PropagateStatusCode {
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
-    {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -226,8 +219,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .context(context)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         let mock_service = mock_service.build();
@@ -267,8 +259,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .context(context)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         let mock_service = mock_service.build();
