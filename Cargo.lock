@@ -4425,7 +4425,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?branch=geal/defer#822c6ec31303fe7cc9b7d6c5de697f724a984b8b"
+source = "git+https://github.com/apollographql/federation-rs.git?branch=geal/defer#ee8ba79c7ac9ff8817d685e1507be85e75a2f5bc"
 dependencies = [
  "anyhow",
  "async-channel",
