@@ -6,7 +6,6 @@ use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
-use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -35,13 +34,8 @@ impl Plugin for ForbidAnonymousOperations {
     // We will thus put the logic it in the `router_service` section of our plugin.
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
-    {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
@@ -72,7 +66,7 @@ impl Plugin for ForbidAnonymousOperations {
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
                         .build()?;
-                    Ok(ControlFlow::Break(res.boxed()))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
                     tracing::info!("operation is allowed!");
@@ -225,8 +219,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it

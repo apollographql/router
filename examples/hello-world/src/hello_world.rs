@@ -40,8 +40,8 @@ impl Plugin for HelloWorld {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]

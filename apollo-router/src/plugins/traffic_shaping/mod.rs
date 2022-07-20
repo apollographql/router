@@ -144,7 +144,6 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
-    use futures::stream::BoxStream;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
@@ -170,11 +169,7 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, Response>>,
-            BoxError,
-        >,
+        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     ) {
         let request = RouterRequest::fake_builder()
             .query(query.to_string())
@@ -197,8 +192,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>
-    {
+    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 

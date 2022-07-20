@@ -480,8 +480,8 @@ impl Plugin for Rhai {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -839,11 +839,7 @@ impl Accessor<http_ext::Response<Response>> for SubgraphResponse {
 }
 
 #[allow(dead_code)]
-type SharedRouterService = Arc<
-    Mutex<
-        Option<BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>>,
-    >,
->;
+type SharedRouterService = Arc<Mutex<Option<BoxService<RouterRequest, RouterResponse, BoxError>>>>;
 #[allow(dead_code)]
 type SharedRouterRequest = Arc<Mutex<Option<RouterRequest>>>;
 
@@ -952,13 +948,8 @@ impl ServiceStep {
                                 context: Context,
                                 msg: String,
                                 status: StatusCode,
-                            ) -> Result<
-                                ControlFlow<
-                                    RouterResponse<BoxStream<'static, Response>>,
-                                    RouterRequest,
-                                >,
-                                BoxError,
-                            > {
+                            ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError>
+                            {
                                 let res = RouterResponse::error_builder()
                                     .errors(vec![Error {
                                         message: msg,
@@ -967,7 +958,7 @@ impl ServiceStep {
                                     .status_code(status)
                                     .context(context)
                                     .build()?;
-                                Ok(ControlFlow::Break(res.boxed()))
+                                Ok(ControlFlow::Break(res))
                             }
                             let shared_request = Shared::new(Mutex::new(Some(request)));
                             let result: Result<Dynamic, String> = if callback.is_curried() {
@@ -1089,7 +1080,7 @@ impl ServiceStep {
                 // gen_map_response!(router, service, rhai_service, callback);
                 service.replace(|service| {
                     BoxService::new(service.and_then(
-                        |router_response: RouterResponse<BoxStream<'static, Response>>| async move {
+                        |router_response: RouterResponse| async move {
                             // Let's define a local function to build an error response
                             // XXX: This isn't ideal. We already have a response, so ideally we'd
                             // like to append this error into the existing response. However,
@@ -1100,8 +1091,7 @@ impl ServiceStep {
                                 context: Context,
                                 msg: String,
                                 status: StatusCode,
-                            ) -> RouterResponse<BoxStream<'static, Response>>
-                            {
+                            ) -> RouterResponse {
                                 let res = RouterResponse::error_builder()
                                     .errors(vec![Error {
                                         message: msg,
@@ -1111,7 +1101,7 @@ impl ServiceStep {
                                     .context(context)
                                     .build()
                                     .expect("can't fail to build our error message");
-                                res.boxed()
+                                res
                             }
 
                             // we split the response stream into headers+first response, then a stream of deferred responses
@@ -1670,8 +1660,7 @@ mod tests {
                     .header("x-custom-header", "CUSTOM_VALUE")
                     .context(req.context)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()

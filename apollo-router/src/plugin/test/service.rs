@@ -44,11 +44,7 @@ macro_rules! mock_service {
     };
 }
 
-mock_service!(
-    Router,
-    RouterRequest,
-    RouterResponse<BoxStream<'static, Response>>
-);
+mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(
     Execution,

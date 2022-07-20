@@ -140,18 +140,17 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
+assert_impl_all!(RouterResponse: Send);
 /// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
-#[derive(Clone, Debug)]
-pub struct RouterResponse<T: Stream<Item = Response>> {
-    pub response: http_ext::Response<T>,
+pub struct RouterResponse {
+    pub response: http_ext::Response<BoxStream<'static, Response>>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse<Once<Ready<Response>>> {
+impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -190,7 +189,7 @@ impl RouterResponse<Once<Ready<Response>>> {
             }
         }
 
-        let http_response = builder.body(once(ready(res)))?;
+        let http_response = builder.body(once(ready(res)).boxed())?;
 
         // Create a compatible Response
         let compat_response = http_ext::Response {
@@ -255,35 +254,34 @@ impl RouterResponse<Once<Ready<Response>>> {
 
     pub fn new_from_graphql_response(response: Response, context: Context) -> Self {
         Self {
-            response: http::Response::new(once(ready(response))).into(),
+            response: http::Response::new(once(ready(response)).boxed()).into(),
             context,
         }
     }
 }
 
-impl<T: Stream<Item = Response> + Send + Unpin + 'static> RouterResponse<T> {
+impl RouterResponse {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
 }
 
-impl<T: Stream<Item = Response> + Send + 'static> RouterResponse<T> {
-    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
+impl RouterResponse {
+    pub fn new_from_response(
+        response: http_ext::Response<BoxStream<'static, Response>>,
+        context: Context,
+    ) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> RouterResponse<U>
+    pub fn map<F>(self, f: F) -> RouterResponse
     where
-        F: FnMut(T) -> U,
+        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         RouterResponse {
             context: self.context,
             response: self.response.map(f),
         }
-    }
-
-    pub fn boxed(self) -> RouterResponse<BoxStream<'static, Response>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
     }
 }
 

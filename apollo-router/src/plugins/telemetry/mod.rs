@@ -262,8 +262,8 @@ impl Plugin for Telemetry {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
@@ -283,10 +283,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let mut result: Result<
-                            RouterResponse<BoxStream<'static, Response>>,
-                            BoxError,
-                        > = fut.await;
+                        let mut result: Result<RouterResponse, BoxError> = fut.await;
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -311,12 +308,12 @@ impl Plugin for Telemetry {
                             Ok(router_response) => {
                                 let is_not_success =
                                     !router_response.response.status().is_success();
-                                Ok(router_response
-                                    .map(move |response_stream| {
-                                        let sender = sender.clone();
-                                        let ctx = ctx.clone();
+                                Ok(router_response.map(move |response_stream| {
+                                    let sender = sender.clone();
+                                    let ctx = ctx.clone();
 
-                                        response_stream.map(move |response| {
+                                    response_stream
+                                        .map(move |response| {
                                             let response_has_errors = !response.errors.is_empty();
 
                                             if !matches!(sender, Sender::Noop) {
@@ -329,8 +326,8 @@ impl Plugin for Telemetry {
                                             }
                                             response
                                         })
-                                    })
-                                    .boxed())
+                                        .boxed()
+                                }))
                             }
                         }
                     }
@@ -766,9 +763,9 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<RouterResponse<BoxStream<'static, Response>>, BoxError>,
+        result: Result<RouterResponse, BoxError>,
         request_duration: Duration,
-    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
+    ) -> Result<RouterResponse, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -1106,8 +1103,7 @@ mod tests {
                     .header("x-custom", "coming_from_header")
                     .data(json!({"data": {"my_value": 2}}))
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         let mut mock_subgraph_service = MockSubgraphService::new();

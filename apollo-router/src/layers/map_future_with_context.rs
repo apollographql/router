@@ -78,14 +78,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use futures::stream::BoxStream;
     use http::HeaderValue;
     use tower::BoxError;
     use tower::Service;
     use tower::ServiceBuilder;
     use tower::ServiceExt;
 
-    use crate::graphql::Response;
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockRouterService;
     use crate::RouterRequest;
@@ -97,7 +95,7 @@ mod test {
         mock_service
             .expect_call()
             .once()
-            .returning(|_| Ok(RouterResponse::fake_builder().build().unwrap().boxed()));
+            .returning(|_| Ok(RouterResponse::fake_builder().build().unwrap()));
 
         let mut service = ServiceBuilder::new()
             .map_future_with_context(
@@ -109,8 +107,7 @@ mod test {
                         .unwrap()
                 },
                 |ctx: HeaderValue, resp| async move {
-                    let resp: Result<RouterResponse<BoxStream<'static, Response>>, BoxError> =
-                        resp.await;
+                    let resp: Result<RouterResponse, BoxError> = resp.await;
                     resp.map(|mut response| {
                         response.response.headers_mut().insert("hello", ctx.clone());
                         response
