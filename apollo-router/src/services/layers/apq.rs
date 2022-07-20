@@ -5,7 +5,6 @@
 
 use std::ops::ControlFlow;
 
-use futures::stream::BoxStream;
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -17,7 +16,6 @@ use tower::Layer;
 use tower::Service;
 
 use crate::error::Error;
-use crate::graphql::Response;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::RouterRequest;
 use crate::RouterResponse;
@@ -51,9 +49,7 @@ impl Default for APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
-        + Send
-        + 'static,
+    S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -119,7 +115,7 @@ where
                                 .build()
                                 .expect("response is valid");
 
-                            Ok(ControlFlow::Break(res.boxed()))
+                            Ok(ControlFlow::Break(res))
                         }
                     }
                     _ => Ok(ControlFlow::Continue(req)),
@@ -145,6 +141,7 @@ mod apq_tests {
 
     use super::*;
     use crate::error::Error;
+    use crate::graphql::Response;
     use crate::plugin::test::MockRouterService;
     use crate::Context;
 
@@ -189,8 +186,7 @@ mod apq_tests {
 
             Ok(RouterResponse::fake_builder()
                 .build()
-                .expect("expecting valid request")
-                .boxed())
+                .expect("expecting valid request"))
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -217,8 +213,7 @@ mod apq_tests {
 
                 Ok(RouterResponse::fake_builder()
                     .build()
-                    .expect("expecting valid request")
-                    .boxed())
+                    .expect("expecting valid request"))
             });
 
         let mock = mock_service.build();
@@ -309,8 +304,7 @@ mod apq_tests {
 
                 Ok(RouterResponse::fake_builder()
                     .build()
-                    .expect("expecting valid request")
-                    .boxed())
+                    .expect("expecting valid request"))
             });
 
         // the last call should be an APQ error.
