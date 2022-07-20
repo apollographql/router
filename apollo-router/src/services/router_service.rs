@@ -223,8 +223,8 @@ where
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
 /// collection of plugins, collection of subgraph services are assembled to generate a
-/// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
-/// response.
+/// [`tower::util::BoxCloneService`] capable of processing a router request
+/// through the entire stack to return a response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
