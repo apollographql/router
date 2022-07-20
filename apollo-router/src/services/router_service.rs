@@ -118,7 +118,12 @@ where
             let QueryPlannerResponse { content, context } = planning
                 .call(
                     QueryPlannerRequest::builder()
-                        .originating_request(req.originating_request.clone())
+                        .query(
+                            body.query
+                                .clone()
+                                .expect("the query presence was already checked by a plugin"),
+                        )
+                        .and_operation_name(body.operation_name.clone())
                         .query_plan_options(QueryPlanOptions::default())
                         .context(context)
                         .build(),
