@@ -190,7 +190,7 @@ where
         }
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
-                message: dbg!(error.to_string()),
+                message: error.to_string(),
                 ..Default::default()
             }];
             let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
