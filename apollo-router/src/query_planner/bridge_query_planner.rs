@@ -148,13 +148,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = req.originating_request.body();
             match this
                 .get((
-                    body.query.clone().expect(
-                        "presence of a query has been checked by the RouterService before; qed",
-                    ),
-                    body.operation_name.to_owned(),
+                    req.query.clone(),
+                    req.operation_name.to_owned(),
                     req.query_plan_options,
                 ))
                 .await
