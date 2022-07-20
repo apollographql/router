@@ -1,4 +1,3 @@
-use apollo_router::graphql::Response;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::ExecutionRequest;
@@ -9,7 +8,6 @@ use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphResponse;
-use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -71,13 +69,8 @@ impl Plugin for HelloWorld {
 
     fn execution_service(
         &self,
-        service: BoxService<
-            ExecutionRequest,
-            ExecutionResponse<BoxStream<'static, Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
-    {
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service

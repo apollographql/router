@@ -1,12 +1,10 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 {{#if type_basic}}
-use apollo_router::graphql::Response;
 use apollo_router::services::{ExecutionRequest, ExecutionResponse};
 use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
 use apollo_router::services::{RouterRequest, RouterResponse};
 use apollo_router::services::{SubgraphRequest, SubgraphResponse};
-use futures::stream::BoxStream;
 {{/if}}
 {{#if type_auth}}
 use apollo_router::services::{RouterRequest, RouterResponse};
@@ -77,8 +75,8 @@ impl Plugin for {{pascal_name}} {
     // Delete this function if you are not customizing it.
     fn execution_service(
         &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         service
     }
 

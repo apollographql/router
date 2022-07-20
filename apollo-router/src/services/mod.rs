@@ -4,12 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::ready;
-use futures::future::Ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
-use futures::stream::Once;
 use futures::stream::StreamExt;
-use futures::Stream;
 use http::header::HeaderName;
 use http::method::Method;
 use http::HeaderValue;
@@ -264,9 +261,7 @@ impl RouterResponse {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
-}
 
-impl RouterResponse {
     pub fn new_from_response(
         response: http_ext::Response<BoxStream<'static, Response>>,
         context: Context,
@@ -601,18 +596,18 @@ impl ExecutionRequest {
     }
 }
 
-assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
+assert_impl_all!(ExecutionResponse: Send);
 /// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
-pub struct ExecutionResponse<T: Stream<Item = Response>> {
-    pub response: http_ext::Response<T>,
+pub struct ExecutionResponse {
+    pub response: http_ext::Response<BoxStream<'static, Response>>,
 
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl ExecutionResponse<Once<Ready<Response>>> {
+impl ExecutionResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
@@ -639,7 +634,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         // Build an http Response
         let http_response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
-            .body(once(ready(res)))
+            .body(once(ready(res)).boxed())
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
@@ -702,18 +697,21 @@ impl ExecutionResponse<Once<Ready<Response>>> {
     }
 }
 
-impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
+impl ExecutionResponse {
     /// This is the constructor to use when constructing a real ExecutionResponse.
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(
+        response: http_ext::Response<BoxStream<'static, Response>>,
+        context: Context,
+    ) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> ExecutionResponse<U>
+    pub fn map<F>(self, f: F) -> ExecutionResponse
     where
-        F: FnMut(T) -> U,
+        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         ExecutionResponse {
             context: self.context,
@@ -721,12 +719,6 @@ impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
         }
     }
 
-    pub fn boxed(self) -> ExecutionResponse<BoxStream<'static, Response>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
-    }
-}
-
-impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }

@@ -13,7 +13,6 @@ use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::stream::BoxStream;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
@@ -41,7 +40,6 @@ use url::Url;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
-use crate::graphql::Response;
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
@@ -349,13 +347,8 @@ impl Plugin for Telemetry {
 
     fn execution_service(
         &self,
-        service: BoxService<
-            ExecutionRequest,
-            ExecutionResponse<BoxStream<'static, Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
-    {
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
