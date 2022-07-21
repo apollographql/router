@@ -278,7 +278,6 @@ impl PlanNode {
 }
 
 pub(crate) mod fetch {
-    use std::collections::HashMap;
     use std::fmt::Display;
     use std::sync::Arc;
 
@@ -583,7 +582,7 @@ pub(crate) mod fetch {
                                     // when we do not deduplicate, there will be only one user of the
                                     // entity, so we should not clone the entity
                                     if let Some(path) = path_list.last() {
-                                        value.insert(&path, entity)?;
+                                        value.insert(path, entity)?;
                                     }
                                 }
                             }
