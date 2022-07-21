@@ -278,6 +278,7 @@ impl PlanNode {
 }
 
 pub(crate) mod fetch {
+    use std::collections::HashMap;
     use std::fmt::Display;
     use std::sync::Arc;
 
@@ -351,7 +352,7 @@ pub(crate) mod fetch {
 
     struct Variables {
         variables: Object,
-        paths: HashMap<usize, Vec<Path>>,
+        paths: HashMap<Path, usize>,
     }
 
     impl Variables {
@@ -375,7 +376,7 @@ pub(crate) mod fetch {
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
-                let mut paths: HashMap<usize, Vec<Path>> = HashMap::new();
+                let mut paths: HashMap<Path, usize> = HashMap::new();
                 let (paths, representations) = if enable_variable_deduplication {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
@@ -383,10 +384,10 @@ pub(crate) mod fetch {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
                                 match values.get_index_of(&value) {
                                     Some(index) => {
-                                        paths.entry(index).or_default().push(path.clone());
+                                        paths.insert(path.clone(), index);
                                     }
                                     None => {
-                                        paths.entry(values.len()).or_default().push(path.clone());
+                                        paths.insert(path.clone(), values.len());
                                         values.insert(value);
                                     }
                                 }
@@ -404,7 +405,7 @@ pub(crate) mod fetch {
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
-                                paths.entry(values.len()).or_default().push(path.clone());
+                                paths.insert(path.clone(), values.len());
                                 values.push(value);
                             }
                         }
@@ -560,7 +561,7 @@ pub(crate) mod fetch {
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
-            paths: HashMap<usize, Vec<Path>>,
+            paths: HashMap<Path, usize>,
             data: Value,
         ) -> Result<Value, FetchError> {
             if !self.requires.is_empty() {
@@ -572,20 +573,19 @@ pub(crate) mod fetch {
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
-                            for (index, entity) in array.into_iter().enumerate() {
-                                if let Some(path_list) = paths.get(&index) {
-                                    for path in &path_list[..path_list.len() - 1] {
-                                        value.insert(path, entity.clone())?;
-                                    }
 
-                                    // when we do not deduplicate, there will be only one user of the
-                                    // entity, so we should not clone the entity
-                                    if let Some(path) = path_list.last() {
-                                        value.insert(path, entity)?;
-                                    }
-                                }
+                            for (path, entity_idx) in paths {
+                                value.insert(
+                                    &path,
+                                    array
+                                        .get(entity_idx)
+                                        .ok_or_else(|| FetchError::ExecutionInvalidContent {
+                                            reason: "Received invalid content for key `_entities`!"
+                                                .to_string(),
+                                        })?
+                                        .clone(),
+                                )?;
                             }
-
                             return Ok(value);
                         } else {
                             return Err(FetchError::ExecutionInvalidContent {
