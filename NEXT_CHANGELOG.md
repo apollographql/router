@@ -37,6 +37,33 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
+
+The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
+multiple parts that are sent one by one.
+
+:warning: *this is still experimental and not fit for production use yet*
+
+To activate it:
+
+Add this to the supergraph:
+
+```graphql
+directive @defer(
+  label: String
+  if: Boolean
+) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+```
+
+And add this option to the configuration file:
+
+```yaml
+server:
+  experimental_defer_support: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
+
 ## 🐛 Fixes
 
 ### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
