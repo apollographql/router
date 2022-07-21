@@ -24,7 +24,7 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: QueryPlanner + Clone> {
-    cm: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
+    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
     delegate: Arc<T>,
 }
 
@@ -36,9 +36,9 @@ struct CachingQueryPlannerResolver<T: QueryPlanner> {
 impl<T: QueryPlanner + Clone + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cm = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
+        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
         Self {
-            cm,
+            cache,
             delegate: Arc::new(delegate),
         }
     }
@@ -56,7 +56,7 @@ impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
 #[async_trait]
 impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
     async fn get(&self, key: QueryKey) -> PlanResult {
-        let entry = self.cm.get(&key).await;
+        let entry = self.cache.get(&key).await;
         if entry.is_first() {
             let res = self.delegate.get(key).await;
             entry.insert(res.clone()).await;
