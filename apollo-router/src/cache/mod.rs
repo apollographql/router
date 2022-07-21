@@ -32,6 +32,12 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
+        // waiting on a value from the cache is a potentially long(millisecond scale) task that
+        // can involve a network call to an external database. To reduce the waiting time, we
+        // go through a wait map to register interest in data associated with a key.
+        // If the data is present, it is sent directly to all the tasks that were waiting for it.
+        // If it is not present, the first task that requested it can perform the work to create
+        // the data, store it in the cache and send the value to all the other tasks.
         let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get(key) {
             Some(waiter) => {
@@ -46,6 +52,9 @@ where
 
                 locked_wait_map.insert(key.clone(), sender.clone());
 
+                // we must not hold a lock over the wait map while we are waiting for a value from the
+                // cache. This way, other tasks can come and register interest in the same key, or
+                // request other keys independently
                 drop(locked_wait_map);
 
                 if let Some(value) = self.storage.get(key).await {
