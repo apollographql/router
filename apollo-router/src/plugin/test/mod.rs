@@ -155,7 +155,7 @@ impl PluginTestHarness {
         );
         let plugins = Arc::new(plugins);
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let router_service = mock_router_service
             .map(|s| s.build().boxed())
             .unwrap_or_else(|| {

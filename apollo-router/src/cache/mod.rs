@@ -11,6 +11,7 @@ use self::storage::CacheStorage;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
+pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
@@ -24,7 +25,11 @@ where
     K: Clone + Send + Eq + Hash + 'static,
     V: Clone + Send + 'static,
 {
-    pub(crate) async fn new(capacity: usize) -> Self {
+    pub(crate) async fn new() -> Self {
+        Self::with_capacity(DEFAULT_CACHE_CAPACITY).await
+    }
+
+    pub(crate) async fn with_capacity(capacity: usize) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
             storage: CacheStorage::new(capacity).await,
@@ -177,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::new(1).await;
+        let cache = DeduplicatingCache::with_capacity(1).await;
 
         let entry = cache.get(&k).await;
 

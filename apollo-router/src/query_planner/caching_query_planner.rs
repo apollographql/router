@@ -36,7 +36,7 @@ struct CachingQueryPlannerResolver<T: QueryPlanner> {
 impl<T: QueryPlanner + Clone + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cm = Arc::new(DeduplicatingCache::new(plan_cache_limit).await);
+        let cm = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
         Self {
             cm,
             delegate: Arc::new(delegate),

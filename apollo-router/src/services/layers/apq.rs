@@ -259,7 +259,7 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock);
 
         let extensions = HashMap::from([(
@@ -355,7 +355,7 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new(512).await);
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);
 
         let extensions = HashMap::from([(
