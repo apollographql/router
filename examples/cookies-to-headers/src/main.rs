@@ -80,7 +80,8 @@ mod tests {
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/cookies_to_headers.rhai",
+            "scripts": "src",
+            "main": "cookies_to_headers.rhai",
         }))
         .expect("json must be valid");
 

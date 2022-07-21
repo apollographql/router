@@ -38,15 +38,15 @@ mod tests {
                     .context(req.context)
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/add_timestamp_header.rhai",
+            "scripts": "src",
+            "main": "add_timestamp_header.rhai",
         }))
         .expect("json must be valid");
 

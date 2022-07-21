@@ -6,14 +6,12 @@
 
 use std::ops::ControlFlow;
 
-use futures::stream::BoxStream;
 use http::StatusCode;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-use crate::graphql::Response;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::RouterRequest;
 use crate::RouterResponse;
@@ -23,9 +21,7 @@ pub(crate) struct EnsureQueryPresence {}
 
 impl<S> Layer<S> for EnsureQueryPresence
 where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
-        + Send
-        + 'static,
+    S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
     <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -52,7 +48,7 @@ where
                         .context(req.context)
                         .build()
                         .expect("response is valid");
-                    Ok(ControlFlow::Break(res.boxed()))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -75,8 +71,7 @@ mod ensure_query_presence_tests {
         mock_service.expect_call().times(1).returning(move |_req| {
             Ok(RouterResponse::fake_builder()
                 .build()
-                .expect("expecting valid request")
-                .boxed())
+                .expect("expecting valid request"))
         });
 
         let mock = mock_service.build();

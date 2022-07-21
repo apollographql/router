@@ -3,13 +3,11 @@ title: Rhai scripts for the Apollo Router
 description: Extend router functionality without compiling a custom plugin
 ---
 
-> ⚠️ Apollo Router support for Rhai scripting is currently experimental. For details, see [experimental limitations](#experimental-limitations).
-
-The Apollo Router provides experimental support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
+The Apollo Router provides support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
 
 Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
 
-## Experimental limitations
+## Limitations
 
 Like the rest of the Apollo Router, Rhai support is in active development. At this time, functionality is limited.
 
@@ -24,16 +22,17 @@ Like the rest of the Apollo Router, Rhai support is in active development. At th
 **What you can't do (yet):**
 * Execute calls to external services
 
-> ⚠️ As Rhai script is experimental, we may introduce breaking changes to Rhai script functionality after the general availability (GA) release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
-
 ## Configuration
 
 ```yaml
-plugins:
-  experimental.rhai:
-    # Currently there can only be a single rhai file.  If there are multiple
-    # customizations, keep them all in a single file.
-    filename: "location_of_your_rhai_script.rhai"
+rhai:
+  # You must have a "main" rhai file. By default this is "main.rhai"
+  # You can change this name by specifying main:
+  main: "test.rhai"
+  # Your rhai scripts are loaded from relative directory "./rhai"
+  # (relative to the directory in which your router is executing)
+  # You can change this location by specifying scripts:
+  scripts: "/where/I/keep/my/rhai/scripts"
 ```
 
 ## Rhai Router Execution Environment
