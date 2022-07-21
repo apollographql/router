@@ -516,7 +516,7 @@ where
                     let (mut parts, mut stream) = http::Response::from(response).into_parts();
                     parts.headers.insert(
                         "content-type",
-                        HeaderValue::from_static("multipart/form-data;boundary=\"graphql\""),
+                        HeaderValue::from_static("multipart/mixed;boundary=\"graphql\""),
                     );
 
                     match stream.next().await {
@@ -530,16 +530,18 @@ where
                         }
                         Some(response) => {
                             if response.has_next.unwrap_or(false) {
-                                let stream = once(ready(response)).chain(stream).chain(once(
-                                    ready(graphql::Response::builder().has_next(false).build()),
-                                ));
+                                let stream = once(ready(response)).chain(stream);
 
                                 let body = stream
                                     .flat_map(|res| {
-                                        once(ready(Bytes::from_static(b"\n--graphql\n"))).chain(
-                                            once(ready(serde_json::to_vec(&res).unwrap().into())),
-                                        )
-                                    })
+                                        once(ready(Bytes::from_static(
+                                            b"--graphql\r\ncontent-type: application/json\r\n\r\n",
+                                        )))
+                                        .chain(once(ready(
+                                            serde_json::to_vec(&res).unwrap().into(),
+                                        )))
+                                        .chain(once(ready(Bytes::from_static(b"\r\n"))))
+                                    }).chain(once(ready(Bytes::from_static(b"--graphql--\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}"))))
                                     .map(Ok::<_, BoxError>);
 
                                 (parts, StreamBody::new(body)).into_response()
