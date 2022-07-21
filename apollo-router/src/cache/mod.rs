@@ -178,6 +178,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::DeduplicatingCache;
+    use futures::stream::FuturesUnordered;
+    use futures::stream::StreamExt;
+    use mockall::mock;
+    use test_log::test;
 
     #[tokio::test]
     async fn example_cache_usage() {
@@ -194,5 +198,52 @@ mod tests {
         } else {
             entry.get().await.unwrap()
         };
+    }
+
+    #[test(tokio::test)]
+    async fn it_should_enforce_cache_limits() {
+        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(13).await;
+
+        for i in 0..14 {
+            let entry = cache.get(&i).await;
+            entry.insert(i).await;
+        }
+
+        assert_eq!(cache.storage.len().await, 13);
+    }
+
+    mock! {
+        ResolveValue {
+            async fn retrieve(&self, key: usize) -> usize;
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn it_should_only_delegate_once_per_key() {
+        let mut mock = MockResolveValue::new();
+
+        mock.expect_retrieve().times(1).return_const(1usize);
+
+        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(10).await;
+
+        // Let's trigger 100 concurrent gets of the same value and ensure only
+        // one delegated retrieve is made
+        let mut computations: FuturesUnordered<_> = (0..100)
+            .map(|_| async {
+                let entry = cache.get(&1).await;
+                if entry.is_first() {
+                    let value = mock.retrieve(1).await;
+                    entry.insert(value).await;
+                    value
+                } else {
+                    entry.get().await.unwrap()
+                }
+            })
+            .collect();
+
+        while let Some(_result) = computations.next().await {}
+
+        // To be really sure, check there is only one value in the cache
+        assert_eq!(cache.storage.len().await, 1);
     }
 }

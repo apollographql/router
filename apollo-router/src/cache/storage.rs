@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use lru::LruCache;
 use tokio::sync::Mutex;
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -29,5 +30,10 @@ where
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key, value);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn len(&self) -> usize {
+        self.inner.lock().await.len()
     }
 }
