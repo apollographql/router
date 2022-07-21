@@ -352,7 +352,7 @@ pub(crate) mod fetch {
 
     struct Variables {
         variables: Object,
-        paths: HashMap<usize, Vec<Path>>,
+        paths: Vec<Vec<Path>>,
     }
 
     impl Variables {
@@ -376,7 +376,7 @@ pub(crate) mod fetch {
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
-                let mut paths: HashMap<usize, Vec<Path>> = HashMap::new();
+                let mut paths: Vec<Vec<Path>> = vec![];
                 let (paths, representations) = if enable_variable_deduplication {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
@@ -384,10 +384,11 @@ pub(crate) mod fetch {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
                                 match values.get_index_of(&value) {
                                     Some(index) => {
-                                        paths.entry(index).or_default().push(path);
+                                        // paths and values should have the same number of elements
+                                        paths[index].push(path);
                                     }
                                     None => {
-                                        paths.entry(values.len()).or_default().push(path);
+                                        paths.push(vec![path]);
                                         values.insert(value);
                                     }
                                 }
@@ -405,7 +406,7 @@ pub(crate) mod fetch {
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
-                                paths.entry(values.len()).or_default().push(path);
+                                paths.push(vec![path]);
                                 values.push(value);
                             }
                         }
@@ -430,7 +431,7 @@ pub(crate) mod fetch {
                                 .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                         })
                         .collect::<Object>(),
-                    paths: HashMap::new(),
+                    paths: vec![],
                 })
             }
         }
@@ -561,7 +562,7 @@ pub(crate) mod fetch {
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
-            paths: HashMap<usize, Vec<Path>>,
+            paths: Vec<Vec<Path>>,
             data: Value,
         ) -> Result<Value, FetchError> {
             if !self.requires.is_empty() {
@@ -574,7 +575,7 @@ pub(crate) mod fetch {
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
                             for (index, entity) in array.into_iter().enumerate() {
-                                if let Some(path_list) = paths.get(&index) {
+                                if let Some(path_list) = paths.get(index) {
                                     for path in &path_list[..path_list.len() - 1] {
                                         value.insert(path, entity.clone())?;
                                     }
