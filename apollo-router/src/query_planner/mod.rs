@@ -384,10 +384,10 @@ pub(crate) mod fetch {
                                 match values.get_index_of(&value) {
                                     Some(index) => {
                                         // paths and values should have the same number of elements
-                                        paths[index].push(path);
+                                        paths[index].push(path.clone());
                                     }
                                     None => {
-                                        paths.push(vec![path]);
+                                        paths.push(vec![path.clone()]);
                                         values.insert(value);
                                     }
                                 }
@@ -405,7 +405,7 @@ pub(crate) mod fetch {
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
-                                paths.push(vec![path]);
+                                paths.push(vec![path.clone()]);
                                 values.push(value);
                             }
                         }

@@ -75,7 +75,7 @@ pub trait ValueExt {
     #[track_caller]
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F)
     where
-        F: FnMut(Path, &'a Value);
+        F: FnMut(&Path, &'a Value);
 
     #[track_caller]
     fn is_valid_float_input(&self) -> bool;
@@ -321,9 +321,9 @@ impl ValueExt for Value {
     #[track_caller]
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F)
     where
-        F: FnMut(Path, &'a Value),
+        F: FnMut(&Path, &'a Value),
     {
-        iterate_path(&Path::default(), &path.0, self, &mut f)
+        iterate_path(&mut Path::default(), &path.0, self, &mut f)
     }
 
     #[track_caller]
@@ -353,40 +353,37 @@ impl ValueExt for Value {
     }
 }
 
-fn iterate_path<'a, F>(parent: &Path, path: &'a [PathElement], data: &'a Value, f: &mut F)
+fn iterate_path<'a, F>(parent: &mut Path, path: &'a [PathElement], data: &'a Value, f: &mut F)
 where
-    F: FnMut(Path, &'a Value),
+    F: FnMut(&Path, &'a Value),
 {
     match path.get(0) {
-        None => f(parent.clone(), data),
+        None => f(parent, data),
         Some(PathElement::Flatten) => {
             if let Some(array) = data.as_array() {
                 for (i, value) in array.iter().enumerate() {
-                    iterate_path(
-                        &parent.join(Path::from(i.to_string())),
-                        &path[1..],
-                        value,
-                        f,
-                    );
+                    parent.push(PathElement::Index(i));
+                    iterate_path(parent, &path[1..], value, f);
+                    parent.pop();
                 }
             }
         }
         Some(PathElement::Index(i)) => {
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
-                    iterate_path(
-                        &parent.join(Path::from(i.to_string())),
-                        &path[1..],
-                        value,
-                        f,
-                    )
+                    parent.push(PathElement::Index(*i));
+
+                    iterate_path(parent, &path[1..], value, f);
+                    parent.pop();
                 }
             }
         }
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k.as_str()) {
-                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
+                    parent.push(PathElement::Key(k.to_string()));
+                    iterate_path(parent, &path[1..], value, f);
+                    parent.pop();
                 }
             }
         }
@@ -505,6 +502,14 @@ impl Path {
         new.extend(self.iter().cloned());
         new.extend(other.iter().cloned());
         Path(new)
+    }
+
+    pub fn push(&mut self, element: PathElement) {
+        self.0.push(element)
+    }
+
+    pub fn pop(&mut self) -> Option<PathElement> {
+        self.0.pop()
     }
 }
 
