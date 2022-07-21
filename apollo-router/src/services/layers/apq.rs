@@ -3,6 +3,8 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
+use std::ops::ControlFlow;
+
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use serde::Deserialize;
@@ -18,6 +20,7 @@ use tower::ServiceExt;
 
 use crate::cache::DeduplicatingCache;
 use crate::graphql::Response;
+use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::RouterRequest;
 use crate::RouterResponse;
@@ -43,41 +46,7 @@ impl APQLayer {
     }
 }
 
-/*
-impl Default for APQLayer {
-    fn default() -> Self {
-        Self::with_cache(Cache::new(512))
-    }
-}
-*/
-
 impl<S> Layer<S> for APQLayer
-where
-    S: Service<RouterRequest, Response = RouterResponse<BoxStream<'static, Response>>>
-        + Send
-        + 'static,
-    <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + Sync + 'static,
-{
-    type Service = APQService<S>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        APQService {
-            cache: self.cache.clone(),
-            inner: Buffer::new(service, DEFAULT_BUFFER_SIZE),
-        }
-    }
-}
-
-pub(crate) struct APQService<S>
-where
-    S: Service<RouterRequest>,
-{
-    cache: DeduplicatingCache<Vec<u8>, String>,
-    inner: Buffer<S, RouterRequest>,
-}
-
-impl<S> Service<RouterRequest> for APQService<S>
 where
     S: Service<
             RouterRequest,
@@ -87,81 +56,93 @@ where
         + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
 {
-    type Response = RouterResponse<BoxStream<'static, Response>>;
+    type Service = AsyncCheckpointService<
+        Buffer<S, RouterRequest>,
+        BoxFuture<
+            'static,
+            Result<ControlFlow<<S as Service<RouterRequest>>::Response, RouterRequest>, BoxError>,
+        >,
+        RouterRequest,
+    >;
 
-    type Error = BoxError;
-
-    type Future =
-        BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
-        let maybe_query_hash: Option<Vec<u8>> = req
-            .originating_request
-            .body()
-            .extensions
-            .get("persistedQuery")
-            .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
-            .and_then(|persisted_query| hex::decode(persisted_query.sha256hash.as_bytes()).ok());
-
-        let body_query = req.originating_request.body().query.clone();
-
+    fn layer(&self, service: S) -> Self::Service {
         let cache = self.cache.clone();
-        let service = self.inner.clone();
-        Box::pin(async move {
-            match (maybe_query_hash, body_query) {
-                (Some(query_hash), Some(query)) => {
-                    if query_matches_hash(query.as_str(), query_hash.as_slice()) {
-                        tracing::trace!("apq: cache insert");
-                        let _ = req.context.insert("persisted_query_hit", false);
-                        cache.insert(query_hash, query).await;
-                    } else {
-                        tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
-                    }
+        AsyncCheckpointService::new(
+            move |mut req| {
+                let cache = cache.clone();
+                Box::pin(async move {
+                    let maybe_query_hash: Option<Vec<u8>> = req
+                        .originating_request
+                        .body()
+                        .extensions
+                        .get("persistedQuery")
+                        .and_then(|value| {
+                            serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
+                        })
+                        .and_then(|persisted_query| {
+                            hex::decode(persisted_query.sha256hash.as_bytes()).ok()
+                        });
 
-                    Ok(service.oneshot(req).await?)
-                }
-                (Some(apq_hash), _) => {
-                    if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
-                        let _ = req.context.insert("persisted_query_hit", true);
-                        tracing::trace!("apq: cache hit");
-                        req.originating_request.body_mut().query = Some(cached_query);
-                        Ok(service.oneshot(req).await?)
-                    } else {
-                        tracing::trace!("apq: cache miss");
-                        let errors = vec![crate::error::Error {
-                            message: "PersistedQueryNotFound".to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: serde_json_bytes::from_value(json!({
-                                  "code": "PERSISTED_QUERY_NOT_FOUND",
-                                  "exception": {
-                                  "stacktrace": [
-                                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                                  ],
-                              },
-                            }))
-                            .unwrap(),
-                        }];
-                        let res = RouterResponse::builder()
-                            .data(Value::default())
-                            .errors(errors)
-                            .context(req.context)
-                            .build()
-                            .expect("response is valid");
+                    let body_query = req.originating_request.body().query.clone();
 
-                        Ok(res.boxed())
+                    match (maybe_query_hash, body_query) {
+                        (Some(query_hash), Some(query)) => {
+                            if query_matches_hash(query.as_str(), query_hash.as_slice()) {
+                                tracing::trace!("apq: cache insert");
+                                let _ = req.context.insert("persisted_query_hit", false);
+                                cache.insert(query_hash, query).await;
+                            } else {
+                                tracing::warn!(
+                                    "apq: graphql request doesn't match provided sha256Hash"
+                                );
+                            }
+                            Ok(ControlFlow::Continue(req))
+                        }
+                        (Some(apq_hash), _) => {
+                            if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
+                                let _ = req.context.insert("persisted_query_hit", true);
+                                tracing::trace!("apq: cache hit");
+                                req.originating_request.body_mut().query = Some(cached_query);
+                                Ok(ControlFlow::Continue(req))
+                            } else {
+                                tracing::trace!("apq: cache miss");
+                                let errors = vec![crate::error::Error {
+                                    message: "PersistedQueryNotFound".to_string(),
+                                    locations: Default::default(),
+                                    path: Default::default(),
+                                    extensions: serde_json_bytes::from_value(json!({
+                                          "code": "PERSISTED_QUERY_NOT_FOUND",
+                                          "exception": {
+                                          "stacktrace": [
+                                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                                          ],
+                                      },
+                                    }))
+                                    .unwrap(),
+                                }];
+                                let res = RouterResponse::builder()
+                                    .data(Value::default())
+                                    .errors(errors)
+                                    .context(req.context)
+                                    .build()
+                                    .expect("response is valid");
+
+                                Ok(ControlFlow::Break(res.boxed()))
+                            }
+                        }
+                        _ => Ok(ControlFlow::Continue(req)),
                     }
-                }
-                _ => Ok(service.oneshot(req).await?),
-            }
-        })
+                })
+                    as BoxFuture<
+                        'static,
+                        Result<
+                            ControlFlow<<S as Service<RouterRequest>>::Response, RouterRequest>,
+                            BoxError,
+                        >,
+                    >
+            },
+            Buffer::new(service, DEFAULT_BUFFER_SIZE),
+        )
     }
 }
 

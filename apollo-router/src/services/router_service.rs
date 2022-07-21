@@ -27,7 +27,6 @@ use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::cache::DeduplicatingCache;
-use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
