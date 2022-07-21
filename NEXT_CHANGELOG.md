@@ -27,9 +27,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Remove the generic stream type from RouterResponse and ExecutionResponse ([PR #1420](https://github.com/apollographql/router/pull/1420)
+
+This generic type complicates the API with limited benefit because we use BoxStream everywhere in plugins:
+* `RouterResponse<BoxStream<'static, Response>>` -> `RouterResponse`
+* `ExecutionResponse<BoxStream<'static, Response>>` -> `ExecutionResponse`
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
+
 ## 🚀 Features
 
 ## 🐛 Fixes
+
+### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
+
+In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
+
+By @SimonSapin
 
 ## 🛠 Maintenance
 
