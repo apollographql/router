@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
 use indexmap::IndexMap;
 pub use mock::subgraph::MockSubgraph;
 pub use service::MockExecutionService;
@@ -22,7 +21,6 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::DynPlugin;
-use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
@@ -40,8 +38,7 @@ use crate::RouterService;
 use crate::Schema;
 
 pub struct PluginTestHarness {
-    router_service:
-        BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
+    router_service: BoxService<RouterRequest, RouterResponse, BoxError>,
 }
 pub enum IntoSchema {
     String(String),
@@ -189,17 +186,12 @@ impl PluginTestHarness {
     }
 
     /// Call the test harness with a request. Not that you will need to have set up appropriate responses via mocks.
-    pub async fn call(
-        &mut self,
-        request: RouterRequest,
-    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
+    pub async fn call(&mut self, request: RouterRequest) -> Result<RouterResponse, BoxError> {
         self.router_service.ready().await?.call(request).await
     }
 
     /// If using the canned schema this canned request will give a response.
-    pub async fn call_canned(
-        &mut self,
-    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
+    pub async fn call_canned(&mut self) -> Result<RouterResponse, BoxError> {
         self.router_service
             .ready()
             .await?

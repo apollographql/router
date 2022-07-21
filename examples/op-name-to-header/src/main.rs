@@ -44,8 +44,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it

@@ -88,7 +88,7 @@ where
     QueryPlannerService::Future: Send + 'static,
     ExecutionFactory: ExecutionServiceFactory,
 {
-    type Response = RouterResponse<BoxStream<'static, Response>>;
+    type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -125,32 +125,32 @@ where
                 .await?;
 
             match content {
-                QueryPlannerContent::Introspection { response } => {
-                    return Ok(
-                        RouterResponse::new_from_graphql_response(*response, context).boxed(),
-                    );
-                }
+                QueryPlannerContent::Introspection { response } => Ok(
+                    RouterResponse::new_from_graphql_response(*response, context),
+                ),
                 QueryPlannerContent::IntrospectionDisabled => {
-                    let mut resp = http::Response::new(once(ready(
-                        graphql::Response::builder()
-                            .errors(vec![crate::error::Error::builder()
-                                .message(String::from("introspection has been disabled"))
-                                .build()])
-                            .build(),
-                    )));
+                    let mut resp = http::Response::new(
+                        once(ready(
+                            graphql::Response::builder()
+                                .errors(vec![crate::error::Error::builder()
+                                    .message(String::from("introspection has been disabled"))
+                                    .build()])
+                                .build(),
+                        ))
+                        .boxed(),
+                    );
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
-                    return Ok(RouterResponse {
+                    Ok(RouterResponse {
                         response: resp.into(),
                         context,
-                    }
-                    .boxed());
+                    })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_graphql_response(err, context).boxed())
+                        Ok(RouterResponse::new_from_graphql_response(err, context))
                     } else {
                         let operation_name = body.operation_name.clone();
 
@@ -190,11 +190,11 @@ where
 
                                         response
                                     })
-                                    .in_current_span(),
+                                    .in_current_span()
+                                    .boxed(),
                             )
                             .into(),
-                        }
-                        .boxed())
+                        })
                     }
                 }
             }
@@ -222,8 +222,7 @@ where
                 .status_code(status_code)
                 .context(context_cloned)
                 .build()
-                .expect("building a response like this should not fail")
-                .boxed())
+                .expect("building a response like this should not fail"))
         });
 
         Box::pin(fut)
@@ -413,9 +412,9 @@ impl RouterCreator {
         &self,
     ) -> impl Service<
         RouterRequest,
-        Response = RouterResponse<BoxStream<'static, Response>>,
+        Response = RouterResponse,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>,
+        Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
             .layer(self.apq.clone())
@@ -440,11 +439,7 @@ impl RouterCreator {
 
     pub fn test_service(
         &self,
-    ) -> tower::util::BoxCloneService<
-        RouterRequest,
-        RouterResponse<BoxStream<'static, Response>>,
-        BoxError,
-    > {
+    ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
         Buffer::new(self.make(), 512).boxed_clone()
     }
 }
