@@ -438,6 +438,8 @@ impl PlanNode {
                         HashMap::new();
                     let mut futures = Vec::new();
 
+                    let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
+
                     for deferred_node in deferred {
                         let mut deferred_receivers = Vec::new();
 
@@ -470,6 +472,7 @@ impl PlanNode {
                         let sf = service_factory.clone();
                         let ctx = context.clone();
                         let opt = options.clone();
+                        let mut primary_receiver = primary_sender.subscribe();
                         let fut = async move {
                             let mut value = Value::default();
                             let mut errors = Vec::new();
@@ -504,6 +507,8 @@ impl PlanNode {
                                     .in_current_span()
                                     .await;
 
+                                let _ = primary_receiver.recv().await;
+
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
@@ -522,22 +527,28 @@ impl PlanNode {
                                         e
                                     );
                                 };
-                            } else if let Err(e) = tx
-                                .send(
-                                    Response::builder()
-                                        .data(value)
-                                        .and_path(Some(deferred_path.clone()))
-                                        .and_subselection(subselection)
-                                        .and_label(label)
-                                        .build(),
-                                )
-                                .await
-                            {
-                                tracing::error!(
-                                    "error sending deferred response at path {}: {:?}",
-                                    deferred_path,
-                                    e
-                                );
+                            } else {
+                                let primary_value =
+                                    primary_receiver.recv().await.unwrap_or_default();
+
+                                if let Err(e) = tx
+                                    .send(
+                                        Response::builder()
+                                            .data(primary_value)
+                                            .errors(errors)
+                                            .and_path(Some(deferred_path.clone()))
+                                            .and_subselection(subselection)
+                                            .and_label(label)
+                                            .build(),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                }
                             };
                         };
 
@@ -572,7 +583,7 @@ impl PlanNode {
                     value.deep_merge(v);
                     errors.extend(err.into_iter());
                     subselection = primary_subselection.clone().into();
-                    // TODO we need to check if when we have a defer it's always starting with a deferred node ????
+                    let _ = primary_sender.send(value.clone());
                 }
                 PlanNode::Condition {
                     condition,
