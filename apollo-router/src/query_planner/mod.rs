@@ -463,6 +463,13 @@ impl PlanNode {
                             }
                         }
 
+                        // if a deferred node has no depends (ie not waiting for data from fetches) then it has to
+                        // wait until the primary response is entirely created.
+                        //
+                        // If the depends list is not empty, the inner node can start working on the fetched data, then
+                        // it is merged into the primary response before applying the subselection
+                        let is_depends_empty = deferred_node.depends.is_empty();
+
                         let mut stream: stream::FuturesUnordered<_> =
                             deferred_receivers.into_iter().collect();
                         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
@@ -477,28 +484,31 @@ impl PlanNode {
                         let ctx = context.clone();
                         let opt = options.clone();
                         let mut primary_receiver = primary_sender.subscribe();
+                        let mut value = parent_value.clone();
                         let fut = async move {
-                            let mut value = Value::default();
                             let mut errors = Vec::new();
 
-                            while let Some((v, _remaining)) = stream.next().await {
-                                // a Err(RecvError) means either that the fetch was not performed and the
-                                // sender was dropped, possibly because there was no need to do it,
-                                // or because it is lagging, but here we only send one message so it
-                                // will not happen
-                                if let Some(Ok((deferred_value, err))) = v {
-                                    value.deep_merge(deferred_value);
-                                    errors.extend(err.into_iter())
+                            if is_depends_empty {
+                                let primary_value =
+                                    primary_receiver.recv().await.unwrap_or_default();
+                                value.deep_merge(primary_value);
+                            } else {
+                                while let Some((v, _remaining)) = stream.next().await {
+                                    // a Err(RecvError) means either that the fetch was not performed and the
+                                    // sender was dropped, possibly because there was no need to do it,
+                                    // or because it is lagging, but here we only send one message so it
+                                    // will not happen
+                                    if let Some(Ok((deferred_value, err))) = v {
+                                        value.deep_merge(deferred_value);
+                                        errors.extend(err.into_iter())
+                                    }
                                 }
                             }
-
-                            let primary_value = primary_receiver.recv().await.unwrap_or_default();
-                            value.deep_merge(primary_value.clone());
 
                             let span = tracing::info_span!("deferred");
 
                             if let Some(node) = deferred_inner {
-                                let (v, node_subselection, err) = node
+                                let (mut v, node_subselection, err) = node
                                     .execute_recursively(
                                         &Path::default(),
                                         &ctx,
@@ -513,6 +523,12 @@ impl PlanNode {
                                     .instrument(span.clone())
                                     .in_current_span()
                                     .await;
+
+                                if !is_depends_empty {
+                                    let primary_value =
+                                        primary_receiver.recv().await.unwrap_or_default();
+                                    v.deep_merge(primary_value);
+                                }
 
                                 if let Err(e) = tx
                                     .send(
@@ -532,28 +548,41 @@ impl PlanNode {
                                         e
                                     );
                                 };
-                            } else if let Err(e) = tx
-                                .send(
-                                    Response::builder()
-                                        .data(primary_value)
-                                        .errors(errors)
-                                        .and_path(Some(deferred_path.clone()))
-                                        .and_subselection(subselection)
-                                        .and_label(label)
-                                        .build(),
-                                )
-                                .await
-                            {
-                                tracing::error!(
-                                    "error sending deferred response at path {}: {:?}",
-                                    deferred_path,
-                                    e
-                                );
+                            } else {
+                                let primary_value =
+                                    primary_receiver.recv().await.unwrap_or_default();
+                                value.deep_merge(primary_value);
+
+                                if let Err(e) = tx
+                                    .send(
+                                        Response::builder()
+                                            .data(value)
+                                            .errors(errors)
+                                            .and_path(Some(deferred_path.clone()))
+                                            .and_subselection(subselection)
+                                            .and_label(label)
+                                            .build(),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                }
                             };
                         };
 
                         futures.push(fut);
                     }
+
+                    tokio::task::spawn(
+                        async move {
+                            join_all(futures).await;
+                        }
+                        .in_current_span(),
+                    );
 
                     value = parent_value.clone();
                     errors = Vec::new();
@@ -587,13 +616,6 @@ impl PlanNode {
 
                         let _ = primary_sender.send(value.clone());
                     }
-
-                    tokio::task::spawn(
-                        async move {
-                            join_all(futures).await;
-                        }
-                        .in_current_span(),
-                    );
                 }
                 PlanNode::Condition {
                     condition,
