@@ -532,25 +532,23 @@ impl PlanNode {
                                         e
                                     );
                                 };
-                            } else {
-                                if let Err(e) = tx
-                                    .send(
-                                        Response::builder()
-                                            .data(primary_value)
-                                            .errors(errors)
-                                            .and_path(Some(deferred_path.clone()))
-                                            .and_subselection(subselection)
-                                            .and_label(label)
-                                            .build(),
-                                    )
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "error sending deferred response at path {}: {:?}",
-                                        deferred_path,
-                                        e
-                                    );
-                                }
+                            } else if let Err(e) = tx
+                                .send(
+                                    Response::builder()
+                                        .data(primary_value)
+                                        .errors(errors)
+                                        .and_path(Some(deferred_path.clone()))
+                                        .and_subselection(subselection)
+                                        .and_label(label)
+                                        .build(),
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    "error sending deferred response at path {}: {:?}",
+                                    deferred_path,
+                                    e
+                                );
                             };
                         };
 
