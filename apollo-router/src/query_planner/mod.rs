@@ -103,7 +103,11 @@ impl PlanNode {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
-            Self::Defer { primary, .. } => primary.node.contains_mutations(),
+            Self::Defer { primary, .. } => primary
+                .node
+                .as_ref()
+                .map(|n| n.contains_mutations())
+                .unwrap_or(false),
             Self::Flatten(_) => false,
             Self::Condition {
                 if_clause,
@@ -428,7 +432,7 @@ impl PlanNode {
                 PlanNode::Defer {
                     primary:
                         Primary {
-                            path: _path,
+                            path: _primary_path,
                             subselection: primary_subselection,
                             node,
                         },
@@ -488,10 +492,13 @@ impl PlanNode {
                                 }
                             }
 
+                            let primary_value = primary_receiver.recv().await.unwrap_or_default();
+                            value.deep_merge(primary_value.clone());
+
                             let span = tracing::info_span!("deferred");
 
                             if let Some(node) = deferred_inner {
-                                let (v, _, err) = node
+                                let (v, node_subselection, err) = node
                                     .execute_recursively(
                                         &Path::default(),
                                         &ctx,
@@ -507,15 +514,13 @@ impl PlanNode {
                                     .in_current_span()
                                     .await;
 
-                                let _ = primary_receiver.recv().await;
-
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
                                             .data(v)
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
-                                            .and_subselection(subselection)
+                                            .and_subselection(subselection.or(node_subselection))
                                             .and_label(label)
                                             .build(),
                                     )
@@ -528,9 +533,6 @@ impl PlanNode {
                                     );
                                 };
                             } else {
-                                let primary_value =
-                                    primary_receiver.recv().await.unwrap_or_default();
-
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
@@ -555,35 +557,45 @@ impl PlanNode {
                         futures.push(fut);
                     }
 
+                    value = parent_value.clone();
+                    errors = Vec::new();
+                    let span = tracing::info_span!("primary");
+                    if let Some(node) = node {
+                        let (v, _subselect, err) = node
+                            .execute_recursively(
+                                current_dir,
+                                context,
+                                service_factory,
+                                schema,
+                                originating_request.clone(),
+                                &value,
+                                &deferred_fetches,
+                                sender,
+                                options,
+                            )
+                            .instrument(span.clone())
+                            .in_current_span()
+                            .await;
+                        let _guard = span.enter();
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                        subselection = primary_subselection.clone().into();
+
+                        let _ = primary_sender.send(value.clone());
+                    } else {
+                        let _guard = span.enter();
+
+                        subselection = primary_subselection.clone().into();
+
+                        let _ = primary_sender.send(value.clone());
+                    }
+
                     tokio::task::spawn(
                         async move {
                             join_all(futures).await;
                         }
                         .in_current_span(),
                     );
-
-                    value = parent_value.clone();
-                    errors = Vec::new();
-                    let span = tracing::info_span!("primary");
-                    let (v, _subselect, err) = node
-                        .execute_recursively(
-                            current_dir,
-                            context,
-                            service_factory,
-                            schema,
-                            originating_request.clone(),
-                            &value,
-                            &deferred_fetches,
-                            sender,
-                            options,
-                        )
-                        .instrument(span.clone())
-                        .in_current_span()
-                        .await;
-                    value.deep_merge(v);
-                    errors.extend(err.into_iter());
-                    subselection = primary_subselection.clone().into();
-                    let _ = primary_sender.send(value.clone());
                 }
                 PlanNode::Condition {
                     condition,
@@ -657,13 +669,22 @@ impl PlanNode {
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
-            Self::Defer { primary, deferred } => Box::new(
-                primary.node.service_usage().chain(
-                    deferred
-                        .iter()
-                        .flat_map(|d| d.node.iter().flat_map(|node| node.service_usage())),
-                ),
-            ),
+            Self::Defer { primary, deferred } => primary
+                .node
+                .as_ref()
+                .map(|n| {
+                    Box::new(
+                        n.service_usage().chain(
+                            deferred
+                                .iter()
+                                .flat_map(|d| d.node.iter().flat_map(|node| node.service_usage())),
+                        ),
+                    ) as Box<dyn Iterator<Item = &'a str> + 'a>
+                })
+                .unwrap_or_else(|| {
+                    Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &'a str> + 'a>
+                }),
+
             Self::Condition {
                 if_clause,
                 else_clause,
@@ -1077,7 +1098,7 @@ pub(crate) struct Primary {
     subselection: String,
 
     // The plan to get all the data for that primary part
-    node: Box<PlanNode>,
+    node: Option<Box<PlanNode>>,
 }
 
 /// The "deferred" parts of the defer (note that it's an array). Each
@@ -1372,7 +1393,7 @@ mod tests {
                 primary: Primary {
                     path: None,
                     subselection: "{ t { x } }".to_string(),
-                    node: Box::new(PlanNode::Fetch(FetchNode {
+                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "X".to_string(),
                         requires: vec![],
                         variable_usages: vec![],
@@ -1380,7 +1401,7 @@ mod tests {
                         operation_name: Some("t".to_string()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".to_string()),
-                    })),
+                    }))),
                 },
                 deferred: vec![DeferredNode {
                     depends: vec![Depends {
