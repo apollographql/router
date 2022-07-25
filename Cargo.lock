@@ -166,7 +166,6 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "paste",
- "pin-project-lite",
  "prometheus",
  "regex",
  "reqwest",
