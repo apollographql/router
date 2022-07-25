@@ -48,6 +48,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Update the scaffold template so it targets router v0.12.0 ([#PR1431](https://github.com/apollographql/router/pull/1431))
+
+The cargo scaffold template will target the latest version of the router.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
 ### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
 
 In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
