@@ -82,9 +82,7 @@ impl Context {
 
     /// Insert a value int the context using the provided key and value.
     ///
-    /// Semantics:
-    ///  - If the operation fails, then the pair has not been inserted.
-    ///  - If the operation succeeds, the result is the old value as an [`Option`].
+    /// Semantics: the result is the old value as an [`Option`].
     pub fn insert_json_value<K>(&self, key: K, value: Value) -> Option<Value>
     where
         K: Into<String>,
