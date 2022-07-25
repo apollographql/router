@@ -70,9 +70,9 @@ The cargo scaffold template will target the latest version of the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
-### Support aliasing on non object types ([1406](https://github.com/apollographql/router/issues/1406))
+### Fix: Selection merge on non object field alias ([1406](https://github.com/apollographql/router/issues/1406))
 
-Fixed a bug where aliasing without renaming fields would sometimes put `null`s instead of expected values. 
+Fixed a bug where merging aliased fields would sometimes put `null`s instead of expected values. 
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1432
 
