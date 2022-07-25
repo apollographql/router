@@ -5,7 +5,7 @@
 //!     and is purely intended of an illustration of an approach to JWT verification
 //!     via a router plugin.
 //!
-//! The plugin uses [`jwt_simple`]: https://crates.io/crates/jwt-simple
+//! The plugin uses [`jwt_simple`](https://crates.io/crates/jwt-simple)
 //!
 //! The plugin provides support for HMAC algorithms. Additional algorithms (RSA, etc..)
 //! are supported by the crate, but not implemented in this plugin (yet...)

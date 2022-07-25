@@ -60,12 +60,24 @@ pub static TARGET_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
 
 #[macro_export]
 macro_rules! cargo {
-    ($( $args:expr ),* $(,)?) => {{
+    (
+        $args:expr
+        $(
+            , env = {
+                $( $k: expr => $v: expr ),*
+                $(,)?
+            }
+        )?
+        $(,)?
+    ) => {{
         let mut command = ::std::process::Command::new(which::which("cargo")?);
 
-        $(
         command.args($args);
-        )*
+        $(
+            $(
+                command.env($k, $v);
+            )*
+        )?
 
         let status = command
             .current_dir(&*PKG_PROJECT_ROOT)
