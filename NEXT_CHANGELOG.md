@@ -37,6 +37,15 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
+
+This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
+database). The API revolves around an `Entry` structure that allows query deduplication and lets the
+client decide how to generate the value to cache, instead of a complicated delegate system inside the
+cache.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
+
 ## 🐛 Fixes
 
 ### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
