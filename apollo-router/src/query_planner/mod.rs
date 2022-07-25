@@ -514,7 +514,7 @@ impl PlanNode {
                                         &ctx,
                                         &sf,
                                         &sc,
-                                        orig,
+                                        &orig,
                                         &value,
                                         &HashMap::new(),
                                         tx.clone(),
@@ -594,7 +594,7 @@ impl PlanNode {
                                 context,
                                 service_factory,
                                 schema,
-                                originating_request.clone(),
+                                originating_request,
                                 &value,
                                 &deferred_fetches,
                                 sender,
@@ -637,7 +637,7 @@ impl PlanNode {
                                     context,
                                     service_factory,
                                     schema,
-                                    originating_request.clone(),
+                                    originating_request,
                                     parent_value,
                                     deferred_fetches,
                                     sender.clone(),
@@ -658,7 +658,7 @@ impl PlanNode {
                                 context,
                                 service_factory,
                                 schema,
-                                originating_request.clone(),
+                                &originating_request.clone(),
                                 parent_value,
                                 deferred_fetches,
                                 sender.clone(),
@@ -1532,11 +1532,13 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed"),
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
                 &schema,
                 sender,
             )
