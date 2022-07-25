@@ -426,14 +426,13 @@ pub(crate) mod fetch {
                 // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
                 // the previous operation field) and the data is null. In that case, we recognize that we
                 // should not perform the next fetch
-                if !current_dir.is_empty() {
-                    if data
-                        .get_path(&current_dir)
+                if !current_dir.is_empty()
+                    && data
+                        .get_path(current_dir)
                         .map(|value| value.is_null())
                         .unwrap_or(true)
-                    {
-                        return None;
-                    }
+                {
+                    return None;
                 }
 
                 Some(Variables {
