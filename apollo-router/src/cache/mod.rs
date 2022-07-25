@@ -177,11 +177,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::DeduplicatingCache;
     use futures::stream::FuturesUnordered;
     use futures::stream::StreamExt;
     use mockall::mock;
     use test_log::test;
+
+    use super::DeduplicatingCache;
 
     #[tokio::test]
     async fn example_cache_usage() {

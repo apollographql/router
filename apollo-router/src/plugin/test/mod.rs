@@ -22,7 +22,6 @@ use tower::ServiceExt;
 
 use super::DynPlugin;
 use crate::cache::DeduplicatingCache;
-use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
