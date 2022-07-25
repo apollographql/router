@@ -26,6 +26,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -233,8 +234,8 @@ where
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
 /// collection of plugins, collection of subgraph services are assembled to generate a
-/// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
-/// response.
+/// [`tower::util::BoxCloneService`] capable of processing a router request
+/// through the entire stack to return a response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
@@ -331,13 +332,14 @@ impl PluggableRouterServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, self.defer_support)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            ServiceBuilder::new()
-                .buffered()
-                .service(self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
-                    |acc, (_, e)| e.query_planning_service(acc),
-                ));
+        let query_planner_service = ServiceBuilder::new().buffered().service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                    .await
+                    .boxed(),
+                |acc, (_, e)| e.query_planning_service(acc),
+            ),
+        );
 
         let plugins = Arc::new(self.plugins);
 
@@ -346,12 +348,14 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+
         Ok(RouterCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
             plugins,
-            apq: APQLayer::default(),
+            apq,
         })
     }
 }
