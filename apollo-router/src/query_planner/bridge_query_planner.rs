@@ -18,6 +18,7 @@ use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
+use crate::traits::QueryKey;
 use crate::traits::QueryPlanner;
 use crate::*;
 
@@ -132,13 +133,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let body = req.originating_request.body();
             match this
-                .get(
+                .get((
                     body.query.clone().expect(
                         "presence of a query has been checked by the RouterService before; qed",
                     ),
                     body.operation_name.to_owned(),
                     req.query_plan_options,
-                )
+                ))
                 .await
             {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
@@ -156,19 +157,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(query.clone()).await?;
+    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(query.as_str()).await;
+            return self.introspection(key.0.as_str()).await;
         }
 
-        self.plan(query, operation, options, selections).await
+        self.plan(key.0, key.1, key.2, selections).await
     }
 }
 
@@ -196,11 +192,11 @@ mod tests {
         .await
         .unwrap();
         let result = planner
-            .get(
+            .get((
                 include_str!("testdata/query.graphql").into(),
                 None,
                 Default::default(),
-            )
+            ))
             .await
             .unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -222,11 +218,11 @@ mod tests {
         .await
         .unwrap();
         let err = planner
-            .get(
+            .get((
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 None,
                 Default::default(),
-            )
+            ))
             .await
             .unwrap_err();
 
@@ -296,7 +292,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let result = planner.get("".into(), None, Default::default()).await;
+        let result = planner.get(("".into(), None, Default::default())).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",

@@ -25,7 +25,6 @@ use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphService;
 use apollo_router::Context;
 use apollo_router::Schema;
-use futures::stream::BoxStream;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -622,13 +621,9 @@ async fn query_rust(
 }
 
 async fn setup_router_and_registry() -> (
-    BoxCloneService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>,
+    BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
-    std::panic::set_hook(Box::new(|e| {
-        let backtrace = backtrace::Backtrace::new();
-        tracing::error!("{}\n{:?}", e, backtrace)
-    }));
     let schema: Arc<Schema> =
         Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let counting_registry = CountingServiceRegistry::new();
@@ -665,11 +660,7 @@ async fn setup_router_and_registry() -> (
 }
 
 async fn query_with_router(
-    router: BoxCloneService<
-        RouterRequest,
-        RouterResponse<BoxStream<'static, graphql::Response>>,
-        BoxError,
-    >,
+    router: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     request: RouterRequest,
 ) -> graphql::Response {
     router

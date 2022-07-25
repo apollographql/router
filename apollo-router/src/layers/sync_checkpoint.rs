@@ -188,8 +188,7 @@ mod checkpoint_tests {
             .returning(move |_req: crate::ExecutionRequest| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build()
-                    .boxed())
+                    .build())
             });
 
         let service = execution_service.build();
@@ -224,8 +223,7 @@ mod checkpoint_tests {
             .returning(move |_req| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build()
-                    .boxed())
+                    .build())
             });
 
         let service = router_service.build();
@@ -259,8 +257,7 @@ mod checkpoint_tests {
             Ok(ControlFlow::Break(
                 ExecutionResponse::fake_builder()
                     .label("returned_before_mock_service".to_string())
-                    .build()
-                    .boxed(),
+                    .build(),
             ))
         })
         .layer(service);

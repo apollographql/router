@@ -7,7 +7,6 @@ use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
-use futures::stream::BoxStream;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -50,13 +49,8 @@ impl Plugin for AllowClientIdFromFile {
     // switching the async file read with an async http request
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
-    {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -140,7 +134,7 @@ impl Plugin for AllowClientIdFromFile {
             async {
                 // Check to see if we built a response. If we did, we need to Break.
                 match res {
-                    Some(res) => Ok(ControlFlow::Break(res.boxed())),
+                    Some(res) => Ok(ControlFlow::Break(res)),
                     None => Ok(ControlFlow::Continue(req)),
                 }
             }
@@ -317,8 +311,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it

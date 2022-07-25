@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 837
 expression: "&schema"
 ---
 {
@@ -298,19 +297,21 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "rhai": {
+      "description": "Configuration for the Rhai Plugin",
+      "type": "object",
+      "properties": {
+        "main": {
+          "type": "string",
+          "nullable": true
         },
-        "experimental.rhai": {
-          "description": "Configuration for the Rhai Plugin",
-          "type": "object",
-          "required": [
-            "filename"
-          ],
-          "properties": {
-            "filename": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
+        "scripts": {
+          "type": "string",
+          "nullable": true
         }
       },
       "additionalProperties": false

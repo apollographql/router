@@ -4,8 +4,150 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.12.0] - 2022-08-18
+
+## ❗ BREAKING ❗
+
+### Move `experimental.rhai` out of `experimental` [PR #1365](https://github.com/apollographql/router/pull/1365)
+
+You will need to update your YAML configuration file to use the correct name for `rhai` plugin.
+
+```diff
+- plugins:
+-   experimental.rhai:
+-     filename: /path/to/myfile.rhai
++ rhai:
++   scripts: /path/to/directory/containing/all/my/rhai/scripts (./scripts by default)
++   main: <name of main script to execute> (main.rhai by default)
+```
+
+You can now modularise your rhai code. Rather than specifying a path to a filename containing your rhai code, the rhai plugin will now attempt to execute the script specified via `main`. If modules are imported, the rhai plugin will search for those modules in the `scripts` directory. for more details about how rhai makes use of modules, look at [the rhai documentation](https://rhai.rs/book/ref/modules/import.html).
+
+The simplest migration will be to set `scripts` to the directory containing your `myfile.rhai` and to rename your `myfile.rhai` to `main.rhai`.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1365
+
+## 🐛 Fixes
+
+### The opentelemetry-otlp crate needs a http-client feature [PR #1392](https://github.com/apollographql/router/pull/1392)
+
+The opentelemetry-otlp crate only checks at runtime if a HTTP client was added through
+cargo features. We now use reqwest for that.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1392
+
+### Expose the custom endpoints from RouterServiceFactory ([PR #1402](https://github.com/apollographql/router/pull/1402))
+
+Plugin HTTP endpoints registration was broken during the Tower refactoring. We now make sure that the list
+of endpoints is generated from the `RouterServiceFactory` instance.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1402
+
+## 🛠 Maintenance
+
+### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
+
+Dependency updates were blocked for some time due to incompatibilities:
+
+- #1389: the router-bridge crate needed a new version of `deno_core` in its workspace that would not fix the version of `once_cell`. Now that it is done we can update `once_cell` in the router
+- #1395: `clap` at version 3.2 changed the way values are extracted from matched arguments, which resulted in panics. This is now fixed and we can update `clap` in the router and related crates
+- #1394: broader dependency updates now that everything is locked
+- #1410: revert tracing update that caused two telemetry tests to fail (the router binary is not affected)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1389 https://github.com/apollographql/router/pull/1394 https://github.com/apollographql/router/pull/1395 and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1410
+
+# [0.11.0] - 2022-07-12
+
+## ❗ BREAKING ❗
+
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+
+the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
+they work like a tower Layer, they can use `&self` instead. This change
+then allows us to move from Buffer to service factories for the query
+planner, execution and subgraph services.
+
+**Services are now created on the fly at session creation, so if any state must be shared
+between executions, it should be stored in an `Arc<Mutex<_>>` in the plugin and cloned
+into the new service in the `Plugin::*_service()` methods**.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1340 https://github.com/apollographql/router/pull/1289
+
+## 🚀 Features
+
+### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
+
+Resources are almost like attributes but more global. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics.  This functionality can be used to, for example,
+apply a `service.name` to metrics to make them easier to find in larger infrastructure, as demonstrated here:
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      resources:
+        # Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+        service.name: "apollo-router"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1354
+
+## 🐛 Fixes
+
+### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+
+When the subgraph doesn't return the `__typename` and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
+
+### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+
+A query that only contains `__typename` at the root will now special-cased as merely an introspection query and will bypass more complex query-planner execution (its value will just be `Query`).
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
+
+### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
+
+Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1363
+
+## 🛠 Maintenance
+
+### Replace Buffers of tower services with service factories ([PR #1289](https://github.com/apollographql/router/pull/1289) [PR #1355](https://github.com/apollographql/router/pull/1355))
+
+Tower services should be used by creating a new service instance for each new session
+instead of going through a `Buffer`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1289  https://github.com/apollographql/router/pull/1355
+
+### Execute the query plan's first response directly ([PR #1357](https://github.com/apollographql/router/issues/1357))
+
+The query plan was previously executed in a spawned task to prepare for the `@defer` implementation, but we can actually
+generate the first response right inside the same future.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
+
+### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+
+This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
+
+By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/1373
+
+### Render embedded Sandbox instead of landing page ([PR #1369](https://github.com/apollographql/router/pull/1369))
+
+Open the router URL in a browser and start querying the router from the Apollo Sandbox.
+
+By [@mayakoneval](https://github.com/mayakoneval) in https://github.com/apollographql/router/pull/1369
+
+## 📚 Documentation
+
+### Various documentation edits ([PR #1329](https://github.com/apollographql/router/issues/1329))
+
+By [@StephenBarlow](https://github.com/StephenBarlow) in https://github.com/apollographql/router/pull/1329
+
 
 # [0.10.0] - 2022-07-05
+
 ## ❗ BREAKING ❗
 
 ### Change configuration for custom attributes for metrics in telemetry plugin ([PR #1300](https://github.com/apollographql/router/pull/1300)

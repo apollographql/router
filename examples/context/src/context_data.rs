@@ -1,11 +1,9 @@
-use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphResponse;
-use futures::stream::BoxStream;
 use http::StatusCode;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -47,13 +45,8 @@ impl Plugin for ContextData {
 
     fn router_service(
         &self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
-    {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.

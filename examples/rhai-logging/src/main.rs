@@ -37,15 +37,15 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_logging.rhai",
+            "scripts": "src",
+            "main": "rhai_logging.rhai",
         }))
         .expect("json must be valid");
 

@@ -1,3 +1,3 @@
-plugins:
-  experimental.rhai:
-    filename: src/cookies_to_headers.rhai
+rhai:
+  scripts: src
+  main: cookies_to_headers.rhai
