@@ -80,7 +80,7 @@ impl Context {
         }
     }
 
-    /// Insert a value int the context using the provided key and value.
+    /// Insert a value in the context using the provided key and value.
     ///
     /// Semantics: the result is the old value as an [`Option`].
     pub fn insert_json_value<K>(&self, key: K, value: Value) -> Option<Value>
@@ -90,7 +90,7 @@ impl Context {
         self.entries.insert(key.into(), value)
     }
 
-    /// Upsert a value int the context using the provided key and resolving
+    /// Upsert a value in the context using the provided key and resolving
     /// function.
     ///
     /// The resolving function must yield a value to be used in the context. It
