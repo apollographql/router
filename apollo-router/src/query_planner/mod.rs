@@ -421,14 +421,18 @@ pub(crate) mod fetch {
 
                 Some(Variables { variables, paths })
             } else {
+                // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
+                // when the first fetch fails, the query plan wwill still execute up until the second fetch,
+                // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
+                // the previous operation field) and the data is null. In that case, we recognize that we
+                // should not perform the next fetch
                 if !current_dir.is_empty() {
-                    match data.pointer(current_dir.to_string().as_str()) {
-                        Some(matched_value) => {
-                            if matched_value.is_null() {
-                                return None;
-                            }
-                        }
-                        None => return None,
+                    if data
+                        .get_path(&current_dir)
+                        .map(|value| value.is_null())
+                        .unwrap_or(true)
+                    {
+                        return None;
                     }
                 }
 
@@ -914,6 +918,12 @@ mod tests {
       }"#;
 
         let query_plan: QueryPlan = QueryPlan {
+            // generated from:
+            // mutation {
+            //   mutationA {
+            //     mutationB
+            //   }
+            // }
             root: serde_json::from_str(
                 r#"{
                 "kind": "Sequence",
@@ -949,19 +959,15 @@ mod tests {
             options: QueryPlanOptions::default(),
         };
 
-        let succeeded: Arc<AtomicBool> = Default::default();
-
         let mut mock_a_service = plugin::test::MockSubgraphService::new();
         mock_a_service
             .expect_call()
             .times(1)
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
 
+        // the first fetch returned null, so there should never be a call to B
         let mut mock_b_service = plugin::test::MockSubgraphService::new();
-        mock_b_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build())); //.never();
+        mock_b_service.expect_call().never();
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([
