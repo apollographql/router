@@ -44,20 +44,20 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         // The mock has been set up, we can now build a service from it
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/op_name_to_header.rhai",
+            "scripts": "src",
+            "main": "op_name_to_header.rhai",
         }))
         .expect("json must be valid");
 
         // Build a rhai plugin instance from our conf
-        let mut rhai = Rhai::new(conf)
+        let rhai = Rhai::new(conf)
             .await
             .expect("valid configuration should succeed");
 

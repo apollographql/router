@@ -15,7 +15,7 @@
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Traffic shaping": "/configuration/traffic-shaping",
-      "Subgraph Error Inclusion": "/configuration/subgraph-error-inclusion"
+      "Subgraph error inclusion (experimental)": "/configuration/subgraph-error-inclusion"
     },
     "Monitoring & Metrics": {
       "Health check": "/configuration/health-checks",
@@ -42,9 +42,9 @@
       "Overview": "/customizations/overview",
       "Native Rust plugins": "/customizations/native",
       "Custom binary": "/customizations/custom-binary",
-      "Rhai scripts (experimental)": "/customizations/rhai"
+      "Rhai scripts": "/customizations/rhai"
     },
-    "Third-Party Support": {
+    "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
     }

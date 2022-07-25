@@ -1,6 +1,5 @@
 use std::ops::ControlFlow;
 
-use futures::stream::BoxStream;
 use http::header;
 use http::HeaderMap;
 use http::StatusCode;
@@ -11,7 +10,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::register_plugin;
@@ -99,9 +97,9 @@ impl Plugin for Csrf {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -124,7 +122,7 @@ impl Plugin for Csrf {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()?;
-                        Ok(ControlFlow::Break(res.boxed()))
+                        Ok(ControlFlow::Break(res))
                     }
                 })
                 .service(service)
@@ -303,8 +301,7 @@ mod csrf_tests {
             Ok(RouterResponse::fake_builder()
                 .data(json!({ "test": 1234_u32 }))
                 .build()
-                .unwrap()
-                .boxed())
+                .unwrap())
         });
 
         let mock = mock_service.build();

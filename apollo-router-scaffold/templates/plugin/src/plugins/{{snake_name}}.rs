@@ -1,6 +1,5 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
-use apollo_router::graphql::Response;
 {{#if type_basic}}
 use apollo_router::services::{ExecutionRequest, ExecutionResponse};
 use apollo_router::services::{QueryPlannerRequest, QueryPlannerResponse};
@@ -20,7 +19,6 @@ use apollo_router::layers::ServiceBuilderExt;
 use tower::ServiceExt;
 use tower::ServiceBuilder;
 {{/if}}
-use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -52,9 +50,9 @@ impl Plugin for {{pascal_name}} {
 
     // Delete this function if you are not customizing it.
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -68,7 +66,7 @@ impl Plugin for {{pascal_name}} {
 
     // Delete this function if you are not customizing it.
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         service
@@ -76,15 +74,15 @@ impl Plugin for {{pascal_name}} {
 
     // Delete this function if you are not customizing it.
     fn execution_service(
-        &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         service
     }
 
     // Delete this function if you are not customizing it.
     fn subgraph_service(
-        &mut self,
+        &self,
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -104,9 +102,9 @@ impl Plugin for {{pascal_name}} {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
 
         ServiceBuilder::new()
                     .checkpoint_async(|request : RouterRequest| async {
@@ -131,9 +129,9 @@ impl Plugin for {{pascal_name}} {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
 
         ServiceBuilder::new()
                     .instrument(|_request| {

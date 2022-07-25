@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-version = "0.9.5"
+version = "0.12.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 ansi_term = "0.12"
-anyhow = "1.0.58"
+anyhow = "1"
 base64 = "0.13"
 camino = "1"
 cargo_metadata = "0.15"

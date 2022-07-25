@@ -407,20 +407,21 @@ impl Query {
                     let is_apply = if let Some(input_type) =
                         input.get(TYPENAME).and_then(|val| val.as_str())
                     {
-                        //First determine if fragment is for interface
-                        //Otherwise we assume concrete type is expected
-                        if let Some(interface) = schema.interfaces.get(type_condition) {
-                            //Check if input implements interface
-                            schema.is_subtype(interface.name.as_str(), input_type)
-                        } else {
-                            input_type == type_condition.as_str()
-                        }
+                        // check if the fragment matches the input type directly, and if not, check if the
+                        // input type is a subtype of the fragment's type condition (interface, union)
+                        input_type == type_condition.as_str()
+                            || schema.is_subtype(type_condition, input_type)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
                         // __typename field and it does not match, we should not apply
                         // that fragment
-                        *known_type
+                        // If the type condition is an interface and the current known type implements it
+                        known_type
+                            .as_ref()
+                            .map(|k| schema.is_subtype(type_condition, k))
+                            .unwrap_or_default()
+                            || known_type.as_deref() == Some(type_condition.as_str())
                     };
 
                     if is_apply {
@@ -452,17 +453,17 @@ impl Query {
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            // First determine if the fragment matches an interface
-                            // Otherwise we assume a concrete type is expected
-                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
-                            {
-                                //Check if input implements interface
-                                schema.is_subtype(interface.name.as_str(), input_type)
-                            } else {
-                                input_type == fragment.type_condition.as_str()
-                            }
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            input_type == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, input_type)
                         } else {
-                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                            // If the type condition is an interface and the current known type implements it
+                            known_type
+                                .as_ref()
+                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
+                                .unwrap_or_default()
+                                || known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
 
                         if is_apply {
@@ -552,9 +553,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip: _,
-                    include: _,
-                    known_type: _,
+                    ..
                 } => {
                     // top level objects will not provide a __typename field
                     if type_condition.as_str() != schema.root_operation_name(operation.kind) {
@@ -572,15 +571,10 @@ impl Query {
                     if let Some(fragment) = self.fragments.get(name) {
                         let operation_type_name = schema.root_operation_name(operation.kind);
                         let is_apply = {
-                            // First determine if the fragment is for an interface
-                            // Otherwise we assume a concrete type is expected
-                            if let Some(interface) = schema.interfaces.get(&fragment.type_condition)
-                            {
-                                // Check if input implements interface
-                                schema.is_subtype(interface.name.as_str(), operation_type_name)
-                            } else {
-                                operation_type_name == fragment.type_condition.as_str()
-                            }
+                            // check if the fragment matches the input type directly, and if not, check if the
+                            // input type is a subtype of the fragment's type condition (interface, union)
+                            operation_type_name == fragment.type_condition.as_str()
+                                || schema.is_subtype(&fragment.type_condition, operation_type_name)
                         };
 
                         if !is_apply {
@@ -738,6 +732,16 @@ impl Operation {
     }
 
     fn is_introspection(&self) -> bool {
+        // If the only field is `__typename` it's considered as an introspection query
+        if self.selection_set.len() == 1
+            && self
+                .selection_set
+                .get(0)
+                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .unwrap_or_default()
+        {
+            return true;
+        }
         self.selection_set.iter().all(|sel| match sel {
             Selection::Field { name, .. } => {
                 let name = name.as_str();
@@ -1360,6 +1364,8 @@ mod tests {
 
         // https://spec.graphql.org/June2018/#sec-Type-System.List
         assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
+        assert_validation!(schema, "query($foo:[Int!]){x}", json!({}));
+        assert_validation!(schema, "query($foo:[Int!]){x}", json!({ "foo": null }));
         assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
         assert_validation!(schema, "query($foo:[String]){x}", json!({"foo":"bar"}));
         assert_validation!(schema, "query($foo:[[Int]]){x}", json!({"foo":1}));
@@ -1371,6 +1377,7 @@ mod tests {
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
         assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
+        assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1, null]}));
         assert_validation!(schema, "query($foo:[Int]!){x}", json!({"foo":[]}));
         assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
         assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
@@ -4849,7 +4856,12 @@ mod tests {
               }
             }
           }}";
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
 
         let query = "query {
             __schema {
@@ -4859,6 +4871,182 @@ mod tests {
             }
           }";
 
-        let _ = Query::parse(query, api_schema).unwrap();
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
+
+        let query = "query {
+            __typename
+          }";
+
+        assert!(Query::parse(query, api_schema)
+            .unwrap()
+            .operations
+            .get(0)
+            .unwrap()
+            .is_introspection());
+    }
+
+    #[test]
+    fn fragment_on_union() {
+        let schema = "type Query {
+            settings: ServiceSettings
+        }
+
+        type ServiceSettings {
+            location: ServiceLocation
+        }
+
+        union ServiceLocation = AccountLocation | Address
+
+        type AccountLocation {
+            id: ID
+            address: Address
+        }
+
+        type Address {
+            city: String
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            "{
+                settings {
+                  location {
+                    ...SettingsLocation
+                  }
+                }
+              }
+
+              fragment SettingsLocation on ServiceLocation {
+                ... on Address {
+                  city
+                }
+                 ... on AccountLocation {
+                   id
+                   address {
+                     city
+                   }
+                 }
+              }",
+            json! {{
+                "settings": {
+                    "location": {
+                        "__typename": "AccountLocation",
+                        "id": "1234"
+                    }
+                }
+            }},
+            None,
+            json! {{
+                "settings": {
+                    "location": {
+                        "id": "1234",
+                        "address": null
+                    }
+                }
+            }},
+        );
+    }
+
+    #[test]
+    fn fragment_on_interface_without_typename() {
+        let schema = "type Query {
+            inStore(key: String!): InStore!
+        }
+
+        type InStore implements CartQueryInterface {
+            cart: Cart
+            carts: CartQueryResult!
+        }
+
+        interface CartQueryInterface {
+            carts: CartQueryResult!
+            cart: Cart
+        }
+
+        type Cart {
+            id: ID!
+            total: Int!
+        }
+
+        type CartQueryResult {
+            results: [Cart!]!
+            total: Int!
+        }";
+
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ...CartFragmentTest
+                }
+            }
+
+            fragment CartFragmentTest on CartQueryInterface {
+                carts {
+                    results {
+                        id
+                    }
+                    total
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                }
+            }},
+        );
+
+        // With inline fragment
+        assert_format_response_fed2!(
+            schema,
+            r#"query {
+                mtb: inStore(key: "mountainbikes") {
+                    ... on CartQueryInterface {
+                        carts {
+                            results {
+                                id
+                            }
+                            total
+                        }
+                    }
+                }
+            }"#,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                    "cart": null
+                }
+            }},
+            None,
+            json! {{
+                "mtb": {
+                    "carts": {
+                        "results": [{"id": "id"}],
+                        "total": 1234
+                    },
+                }
+            }},
+        );
     }
 }

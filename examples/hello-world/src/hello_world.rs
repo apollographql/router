@@ -1,4 +1,3 @@
-use apollo_router::graphql::Response;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::ExecutionRequest;
@@ -9,7 +8,6 @@ use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphResponse;
-use futures::stream::BoxStream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::BoxService;
@@ -39,9 +37,9 @@ impl Plugin for HelloWorld {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -61,7 +59,7 @@ impl Plugin for HelloWorld {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         // This is the default implementation and does not modify the default service.
@@ -70,14 +68,9 @@ impl Plugin for HelloWorld {
     }
 
     fn execution_service(
-        &mut self,
-        service: BoxService<
-            ExecutionRequest,
-            ExecutionResponse<BoxStream<'static, Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
-    {
+        &self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
@@ -85,7 +78,7 @@ impl Plugin for HelloWorld {
 
     // Called for each subgraph
     fn subgraph_service(
-        &mut self,
+        &self,
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {

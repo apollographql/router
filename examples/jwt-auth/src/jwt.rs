@@ -5,7 +5,7 @@
 //!     and is purely intended of an illustration of an approach to JWT verification
 //!     via a router plugin.
 //!
-//! The plugin uses [`jwt_simple`]: https://crates.io/crates/jwt-simple
+//! The plugin uses [`jwt_simple`](https://crates.io/crates/jwt-simple)
 //!
 //! The plugin provides support for HMAC algorithms. Additional algorithms (RSA, etc..)
 //! are supported by the crate, but not implemented in this plugin (yet...)
@@ -70,7 +70,6 @@ use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::Context;
-use futures::stream::BoxStream;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
 use jwt_simple::prelude::*;
@@ -211,14 +210,9 @@ impl Plugin for JwtAuth {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<
-            RouterRequest,
-            RouterResponse<BoxStream<'static, graphql::Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, graphql::Response>>, BoxError>
-    {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // We are going to use the `jwt-simple` crate for our JWT verification.
         // The crate provides straightforward support for the popular JWT algorithms.
 
@@ -243,7 +237,7 @@ impl Plugin for JwtAuth {
                     context: Context,
                     msg: String,
                     status: StatusCode,
-                ) -> Result<ControlFlow<RouterResponse<BoxStream<'static, graphql::Response>>, RouterRequest>, BoxError> {
+                ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
                     let res = RouterResponse::error_builder()
                         .errors(vec![graphql::Error {
                             message: msg,
@@ -252,7 +246,7 @@ impl Plugin for JwtAuth {
                         .status_code(status)
                         .context(context)
                         .build()?;
-                    Ok(ControlFlow::Break(res.boxed()))
+                    Ok(ControlFlow::Break(res))
                 }
 
                 // The http_request is stored in a `RouterRequest` context.
@@ -584,8 +578,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .expect("expecting valid request")
-                    .boxed())
+                    .expect("expecting valid request"))
             });
 
         // The mock has been set up, we can now build a service from it
@@ -600,7 +593,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(conf)
             .await
             .expect("valid configuration should succeed");
 
@@ -657,7 +650,7 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(conf)
             .await
             .expect("valid configuration should succeed");
 
@@ -711,7 +704,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(conf)
             .await
             .expect("valid configuration should succeed");
 

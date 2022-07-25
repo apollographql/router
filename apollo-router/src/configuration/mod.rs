@@ -2,6 +2,7 @@
 // This entire file is license key functionality
 mod yaml;
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
 use std::net::SocketAddr;
@@ -66,7 +67,7 @@ pub enum ConfigurationError {
         error: String,
     },
     /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_yaml::Error),
+    DeserializeConfigError(serde_json::Error),
 }
 
 /// The configuration for the router.
@@ -565,6 +566,7 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
             message: "failed to parse yaml",
             error: e.to_string(),
         })?;
+    let expanded_yaml = expand_env_variables(yaml);
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",
@@ -578,116 +580,109 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
             message: "failed to compile schema",
             error: e.to_string(),
         })?;
-    if let Err(errors) = schema.validate(yaml) {
+    if let Err(errors) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.
         match yaml::parse(raw_yaml) {
             Ok(yaml) => {
                 let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-                let errors =
-                    errors
-                        .enumerate()
-                        .filter_map(|(idx, e)| {
-                            if let Some(element) = yaml.get_element(&e.instance_path) {
-                                const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
-                                match element {
-                                    yaml::Value::String(value, marker) => {
-                                        // Dirty hack.
-                                        // If the element is a string and it has env variable expansion then we can't validate
-                                        // Leave it up to serde to catch these.
-                                        if &envmnt::expand(
-                                            value,
-                                            Some(ExpandOptions::new().clone_with_expansion_type(
-                                                ExpansionType::UnixBracketsWithDefaults,
-                                            )),
-                                        ) != value
-                                        {
-                                            return None;
-                                        }
+                let errors = errors
+                    .enumerate()
+                    .filter_map(|(idx, mut e)| {
+                        if let Some(element) = yaml.get_element(&e.instance_path) {
+                            const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
+                            match element {
+                                yaml::Value::String(value, marker) => {
+                                    let lines = yaml_split_by_lines[0.max(
+                                        marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    )
+                                        ..marker.line()]
+                                        .iter()
+                                        .join("\n");
 
-                                        let lines =
-                                            yaml_split_by_lines[0.max(marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ))
-                                                ..marker.line()]
-                                                .iter()
-                                                .join("\n");
+                                    // Replace the value in the error message with the one from the raw config.
+                                    // This guarantees that if the env variable contained a secret it won't be leaked.
+                                    e.instance = Cow::Owned(coerce(value));
 
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n{}^----- {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            " ".repeat(0.max(marker.col())),
-                                            e
-                                        ))
-                                    }
-                                    seq_element @ yaml::Value::Sequence(_, m) => {
-                                        let (start_marker, end_marker) =
-                                            (m, seq_element.end_marker());
-
-                                        let offset =
-                                            0.max(start_marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ));
-                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(idx, line)| {
-                                                let real_line = idx + offset;
-                                                match real_line.cmp(&start_marker.line()) {
-                                                    Ordering::Equal => format!("┌ {line}"),
-                                                    Ordering::Greater => format!("| {line}"),
-                                                    Ordering::Less => line.to_string(),
-                                                }
-                                            })
-                                            .join("\n");
-
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n└-----> {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            e
-                                        ))
-                                    }
-                                    map_value @ yaml::Value::Mapping(current_label, _, _marker) => {
-                                        let (start_marker, end_marker) = (
-                                            current_label.as_ref()?.marker.as_ref()?,
-                                            map_value.end_marker(),
-                                        );
-                                        let offset =
-                                            0.max(start_marker.line().saturating_sub(
-                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
-                                            ));
-                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(idx, line)| {
-                                                let real_line = idx + offset;
-                                                match real_line.cmp(&start_marker.line()) {
-                                                    Ordering::Equal => format!("┌ {line}"),
-                                                    Ordering::Greater => format!("| {line}"),
-                                                    Ordering::Less => line.to_string(),
-                                                }
-                                            })
-                                            .join("\n");
-
-                                        Some(format!(
-                                            "{}. {}\n\n{}\n└-----> {}",
-                                            idx + 1,
-                                            e.instance_path,
-                                            lines,
-                                            e
-                                        ))
-                                    }
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n{}^----- {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        " ".repeat(0.max(marker.col())),
+                                        e
+                                    ))
                                 }
-                            } else {
-                                None
+                                seq_element @ yaml::Value::Sequence(_, m) => {
+                                    let (start_marker, end_marker) = (m, seq_element.end_marker());
+
+                                    let offset = 0.max(
+                                        start_marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    );
+                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, line)| {
+                                            let real_line = idx + offset;
+                                            match real_line.cmp(&start_marker.line()) {
+                                                Ordering::Equal => format!("┌ {line}"),
+                                                Ordering::Greater => format!("| {line}"),
+                                                Ordering::Less => line.to_string(),
+                                            }
+                                        })
+                                        .join("\n");
+
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n└-----> {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        e
+                                    ))
+                                }
+                                map_value
+                                @ yaml::Value::Mapping(current_label, _value, _marker) => {
+                                    let (start_marker, end_marker) = (
+                                        current_label.as_ref()?.marker.as_ref()?,
+                                        map_value.end_marker(),
+                                    );
+                                    let offset = 0.max(
+                                        start_marker
+                                            .line()
+                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                                    );
+                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, line)| {
+                                            let real_line = idx + offset;
+                                            match real_line.cmp(&start_marker.line()) {
+                                                Ordering::Equal => format!("┌ {line}"),
+                                                Ordering::Greater => format!("| {line}"),
+                                                Ordering::Less => line.to_string(),
+                                            }
+                                        })
+                                        .join("\n");
+
+                                    Some(format!(
+                                        "{}. {}\n\n{}\n└-----> {}",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        e
+                                    ))
+                                }
                             }
-                        })
-                        .join("\n\n");
+                        } else {
+                            None
+                        }
+                    })
+                    .join("\n\n");
 
                 if !errors.is_empty() {
                     return Err(ConfigurationError::InvalidConfiguration {
@@ -706,8 +701,8 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
         }
     }
 
-    let config: Configuration =
-        serde_yaml::from_str(raw_yaml).map_err(ConfigurationError::DeserializeConfigError)?;
+    let config: Configuration = serde_json::from_value(expanded_yaml)
+        .map_err(ConfigurationError::DeserializeConfigError)?;
 
     // ------------- Check for unknown fields at runtime ----------------
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
@@ -769,6 +764,47 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     Ok(config)
+}
+
+fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+    let mut configuration = configuration.clone();
+    visit(&mut configuration);
+    configuration
+}
+
+fn visit(value: &mut Value) {
+    let mut expanded: Option<String> = None;
+    match value {
+        Value::String(value) => {
+            let new_value = envmnt::expand(
+                value,
+                Some(
+                    ExpandOptions::new()
+                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
+                ),
+            );
+
+            if &new_value != value {
+                expanded = Some(new_value);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(visit),
+        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        _ => {}
+    }
+    // The expansion may have resulted in a primitive, reparse and replace
+    if let Some(expanded) = expanded {
+        *value = coerce(&expanded)
+    }
+}
+
+fn coerce(expanded: &str) -> Value {
+    match serde_yaml::from_str(expanded) {
+        Ok(Value::Bool(b)) => Value::Bool(b),
+        Ok(Value::Number(n)) => Value::Number(n),
+        Ok(Value::Null) => Value::Null,
+        _ => Value::String(expanded.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -1154,5 +1190,71 @@ server:
                 }
             }
         }
+    }
+
+    #[test]
+    fn it_does_not_leak_env_variable_values() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        let error = validate_configuration(
+            r#"
+server:
+  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+        "#,
+        )
+        .expect_err("Must have an error because we expect a boolean");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_inline_sequence_env_expansion() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_sequence_env_expansion() {
+        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers:
+      - Content-Type
+      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
+  another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
     }
 }
