@@ -103,7 +103,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
-        originating_request: http_ext::Request<Request>,
+        originating_request: &'a Arc<http_ext::Request<Request>>,
         schema: &'a Schema,
 
         _sender: futures::channel::mpsc::Sender<Response>,
@@ -144,7 +144,7 @@ impl PlanNode {
         context: &'a Context,
         service_factory: &'a Arc<SF>,
         schema: &'a Schema,
-        originating_request: http_ext::Request<Request>,
+        originating_request: &'a Arc<http_ext::Request<Request>>,
         parent_value: &'a Value,
         options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)>
@@ -168,7 +168,7 @@ impl PlanNode {
                                 context,
                                 service_factory,
                                 schema,
-                                originating_request.clone(),
+                                originating_request,
                                 &value,
                                 options,
                             )
@@ -192,7 +192,7 @@ impl PlanNode {
                                 context,
                                 service_factory,
                                 schema,
-                                originating_request.clone(),
+                                originating_request,
                                 parent_value,
                                 options,
                             )
@@ -362,7 +362,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: http_ext::Request<Request>,
+            request: &Arc<http_ext::Request<Request>>,
             schema: &Schema,
             enable_variable_deduplication: bool,
         ) -> Option<Variables> {
@@ -384,10 +384,10 @@ pub(crate) mod fetch {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
                                 match values.get_index_of(&value) {
                                     Some(index) => {
-                                        paths.insert(path, index);
+                                        paths.insert(path.clone(), index);
                                     }
                                     None => {
-                                        paths.insert(path, values.len());
+                                        paths.insert(path.clone(), values.len());
                                         values.insert(value);
                                     }
                                 }
@@ -405,7 +405,7 @@ pub(crate) mod fetch {
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
                             if let Ok(Some(value)) = select_object(content, requires, schema) {
-                                paths.insert(path, values.len());
+                                paths.insert(path.clone(), values.len());
                                 values.push(value);
                             }
                         }
@@ -444,7 +444,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_factory: &'a Arc<SF>,
-            originating_request: http_ext::Request<Request>,
+            originating_request: &'a Arc<http_ext::Request<Request>>,
             schema: &'a Schema,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError>
@@ -465,7 +465,7 @@ pub(crate) mod fetch {
                 data,
                 current_dir,
                 // Needs the original request here
-                originating_request.clone(),
+                originating_request,
                 schema,
                 options.enable_variable_deduplication,
             )
@@ -478,7 +478,7 @@ pub(crate) mod fetch {
             };
 
             let subgraph_request = SubgraphRequest::builder()
-                .originating_request(Arc::new(originating_request))
+                .originating_request(originating_request.clone())
                 .subgraph_request(
                     http_ext::Request::builder()
                         .method(http::Method::POST)
@@ -573,6 +573,7 @@ pub(crate) mod fetch {
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
+
                             for (path, entity_idx) in paths {
                                 value.insert(
                                     &path,
@@ -736,11 +737,13 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed"),
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -795,11 +798,13 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed"),
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )
@@ -848,11 +853,13 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed"),
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
                 &Schema::from_str(test_schema!()).unwrap(),
                 sender,
             )

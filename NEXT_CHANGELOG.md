@@ -54,6 +54,16 @@ In Rhai plugins, accessors that mutate the originating request are not available
 
 By @SimonSapin
 
+### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423)
+
+* do not clone the client request during query plan execution
+* do not clone the usage reporting
+* avoid path allocations when iterating over JSON values
+
+The benchmarks show that this PR gives a 23% gain in requests per second compared to main
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
