@@ -37,6 +37,22 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
+
+The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
+multiple parts that are sent one by one.
+
+:warning: *this is still experimental and not fit for production use yet*
+
+To activate it, add this option to the configuration file:
+
+```yaml
+server:
+  experimental_defer_support: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
+
 ### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
 
 This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
