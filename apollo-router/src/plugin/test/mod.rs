@@ -21,6 +21,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::DynPlugin;
+use crate::cache::DeduplicatingCache;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::Plugin;
@@ -136,6 +137,7 @@ impl PluginTestHarness {
             .await?,
             DEFAULT_BUFFER_SIZE,
         )
+        .await
         .boxed();
         let query_planner_service = plugin.query_planning_service(
             mock_query_planner_service
@@ -150,6 +152,7 @@ impl PluginTestHarness {
         );
         let plugins = Arc::new(plugins);
 
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let router_service = mock_router_service
             .map(|s| s.build().boxed())
             .unwrap_or_else(|| {
@@ -172,7 +175,7 @@ impl PluginTestHarness {
                 )
             });
         let router_service = ServiceBuilder::new()
-            .layer(APQLayer::default())
+            .layer(apq)
             .layer(EnsureQueryPresence::default())
             .service(
                 plugins

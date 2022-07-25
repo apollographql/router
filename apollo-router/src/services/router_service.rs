@@ -26,6 +26,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -312,13 +313,14 @@ impl PluggableRouterServiceBuilder {
         let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
             .await
             .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            ServiceBuilder::new()
-                .buffered()
-                .service(self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
-                    |acc, (_, e)| e.query_planning_service(acc),
-                ));
+        let query_planner_service = ServiceBuilder::new().buffered().service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                    .await
+                    .boxed(),
+                |acc, (_, e)| e.query_planning_service(acc),
+            ),
+        );
 
         let plugins = Arc::new(self.plugins);
 
@@ -327,12 +329,14 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+
         Ok(RouterCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
             plugins,
-            apq: APQLayer::default(),
+            apq,
         })
     }
 }
