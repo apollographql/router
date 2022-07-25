@@ -425,12 +425,10 @@ pub(crate) mod fetch {
                     match data.pointer(current_dir.to_string().as_str()) {
                         Some(matched_value) => {
                             if matched_value.is_null() {
-                                return None
+                                return None;
                             }
                         }
-                        None => {
-                            return None
-                        }
+                        None => return None,
                     }
                 }
 
@@ -882,5 +880,122 @@ mod tests {
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
         );
+    }
+
+    #[tokio::test]
+    async fn dependent_mutations() {
+        let schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1"),
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+      {
+        query: Query
+        mutation: Mutation
+      }
+
+      directive @core(feature: String!) repeatable on SCHEMA
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      scalar join__FieldSet
+
+      enum join__Graph {
+        A @join__graph(name: "A" url: "http://localhost:4001")
+        B @join__graph(name: "B" url: "http://localhost:4004")
+      }
+
+      type Mutation {
+          mutationA: Mutation @join__field(graph: A)
+          mutationB: Boolean @join__field(graph: B)
+      }
+
+      type Query {
+          query: Boolean @join__field(graph: A)
+      }"#;
+
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(
+                r#"{
+                "kind": "Sequence",
+                "nodes": [
+                    {
+                        "kind": "Fetch",
+                        "serviceName": "A",
+                        "variableUsages": [],
+                        "operation": "mutation{mutationA{__typename}}",
+                        "operationKind": "mutation"
+                    },
+                    {
+                        "kind": "Flatten",
+                        "path": [
+                            "mutationA"
+                        ],
+                        "node": {
+                            "kind": "Fetch",
+                            "serviceName": "B",
+                            "variableUsages": [],
+                            "operation": "mutation{...on Mutation{mutationB}}",
+                            "operationKind": "mutation"
+                        }
+                    }
+                ]
+            }"#,
+            )
+            .unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+            options: QueryPlanOptions::default(),
+        };
+
+        let succeeded: Arc<AtomicBool> = Default::default();
+
+        let mut mock_a_service = plugin::test::MockSubgraphService::new();
+        mock_a_service
+            .expect_call()
+            .times(1)
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        let mut mock_b_service = plugin::test::MockSubgraphService::new();
+        mock_b_service
+            .expect_call()
+            .times(1)
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build())); //.never();
+
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([
+                (
+                    "A".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_a_service.build().boxed()),
+                ),
+                (
+                    "B".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_b_service.build().boxed()),
+                ),
+            ]),
+            plugins: Default::default(),
+        });
+
+        let (sender, _) = futures::channel::mpsc::channel(10);
+        let _response = query_plan
+            .execute(
+                &Context::new(),
+                &sf,
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
+                &Schema::from_str(schema).unwrap(),
+                sender,
+            )
+            .await;
     }
 }
