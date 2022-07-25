@@ -44,18 +44,7 @@ multiple parts that are sent one by one.
 
 :warning: *this is still experimental and not fit for production use yet*
 
-To activate it:
-
-Add this to the supergraph:
-
-```graphql
-directive @defer(
-  label: String
-  if: Boolean
-) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-```
-
-And add this option to the configuration file:
+To activate it, add this option to the configuration file:
 
 ```yaml
 server:
