@@ -1,19 +1,12 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::task::Context;
 use std::task::Poll;
-use std::time::Duration;
 
-use futures::future::FutureExt;
 use futures::ready;
-use tokio::time::sleep;
-use tokio::time::sleep_until;
 use tokio::time::Instant;
-use tokio::time::Sleep;
 use tower::Service;
 
 use super::future::ResponseFuture;
