@@ -571,7 +571,19 @@ impl PlanNode {
                     let span = tracing::info_span!("primary");
                     if let Some(node) = node {
                         let (v, _subselect, err) = node
-                            .execute_recursively(parameters, current_dir, &value, sender)
+                            .execute_recursively(
+                                &ExecutionParameters {
+                                    context: &parameters.context,
+                                    service_factory: &parameters.service_factory,
+                                    schema: &parameters.schema,
+                                    originating_request: &parameters.originating_request,
+                                    deferred_fetches: &deferred_fetches,
+                                    options: &parameters.options,
+                                },
+                                current_dir,
+                                &value,
+                                sender,
+                            )
                             .instrument(span.clone())
                             .in_current_span()
                             .await;
