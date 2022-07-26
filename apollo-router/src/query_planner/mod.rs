@@ -1519,18 +1519,18 @@ mod tests {
 
         // primary response
         assert_eq!(
-            serde_json::to_string(&response).unwrap(),
-            r#"{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}"#
+            serde_json::to_value(&response).unwrap(),
+            serde_json::json! {{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}}
         );
 
         let response = receiver.next().await.unwrap();
 
         // deferred response
         assert_eq!(
-            serde_json::to_string(&response).unwrap(),
+            serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            r#"{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}"#
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
         );
     }
 }
