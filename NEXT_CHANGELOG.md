@@ -37,6 +37,22 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
+
+The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
+multiple parts that are sent one by one.
+
+:warning: *this is still experimental and not fit for production use yet*
+
+To activate it, add this option to the configuration file:
+
+```yaml
+server:
+  experimental_defer_support: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
+
 ### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
 
 This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
@@ -48,11 +64,27 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Update the scaffold template so it targets router v0.12.0 ([#PR1431](https://github.com/apollographql/router/pull/1431))
+
+The cargo scaffold template will target the latest version of the router.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
 ### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
 
 In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
 
 By @SimonSapin
+
+### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423)
+
+* do not clone the client request during query plan execution
+* do not clone the usage reporting
+* avoid path allocations when iterating over JSON values
+
+The benchmarks show that this PR gives a 23% gain in requests per second compared to main
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
 
 ## 🛠 Maintenance
 

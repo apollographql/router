@@ -153,6 +153,8 @@ where
                     })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
+                    let is_deferred = plan.root.contains_defer();
+
                     if let Some(err) = query.validate_variables(body, &schema).err() {
                         Ok(RouterResponse::new_from_graphql_response(err, context))
                     } else {
@@ -183,6 +185,15 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
+
+                                        // we use the path to look up the subselections, but the generated response
+                                        // is an object starting at the root so the path should be empty
+                                        response.path = None;
+
+                                        if is_deferred {
+                                            response.has_next = Some(true);
+                                        }
+
                                         response
                                     })
                                     .in_current_span()
@@ -235,6 +246,7 @@ pub struct PluggableRouterServiceBuilder {
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     introspection: bool,
+    defer_support: bool,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -244,6 +256,7 @@ impl PluggableRouterServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             introspection: false,
+            defer_support: false,
         }
     }
 
@@ -283,6 +296,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    pub fn with_defer_support(mut self) -> PluggableRouterServiceBuilder {
+        self.defer_support = true;
+        self
+    }
+
     pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
         &mut self.plugins
     }
@@ -315,9 +333,10 @@ impl PluggableRouterServiceBuilder {
         };
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
-            .await
-            .map_err(ServiceBuildError::QueryPlannerError)?;
+        let bridge_query_planner =
+            BridgeQueryPlanner::new(self.schema.clone(), introspection, self.defer_support)
+                .await
+                .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service = ServiceBuilder::new().buffered().service(
             self.plugins.iter_mut().rev().fold(
                 CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)

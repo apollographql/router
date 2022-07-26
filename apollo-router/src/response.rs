@@ -34,6 +34,12 @@ pub struct Response {
     /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Object,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub has_next: Option<bool>,
+
+    #[serde(skip_serializing)]
+    pub subselection: Option<String>,
 }
 
 #[buildstructor::buildstructor]
@@ -46,6 +52,8 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
+        subselection: Option<String>,
+        has_next: Option<bool>,
     ) -> Self {
         Self {
             label,
@@ -53,6 +61,8 @@ impl Response {
             path,
             errors,
             extensions,
+            subselection,
+            has_next,
         }
     }
 
@@ -111,6 +121,11 @@ impl Response {
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
+        let has_next = extract_key_value_from_object!(object, "hasNext", Value::Bool(b) => b)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
 
         Ok(Response {
             label,
@@ -118,6 +133,8 @@ impl Response {
             path,
             errors,
             extensions,
+            subselection: None,
+            has_next,
         })
     }
 }
@@ -334,6 +351,7 @@ mod tests {
                     .cloned()
                     .unwrap()
                 )
+                .has_next(true)
                 .build()
         );
     }

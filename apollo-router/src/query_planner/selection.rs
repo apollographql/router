@@ -25,14 +25,14 @@ pub(crate) enum Selection {
 pub(crate) struct Field {
     /// An optional alias for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    alias: Option<String>,
+    pub(crate) alias: Option<String>,
 
     /// The name of the field.
-    name: String,
+    pub(crate) name: String,
 
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    selections: Option<Vec<Selection>>,
+    pub(crate) selections: Option<Vec<Selection>>,
 }
 
 /// An inline fragment.
@@ -41,10 +41,10 @@ pub(crate) struct Field {
 pub(crate) struct InlineFragment {
     /// The required fragment type.
     #[serde(skip_serializing_if = "Option::is_none")]
-    type_condition: Option<String>,
+    pub(crate) type_condition: Option<String>,
 
     /// The selections from the fragment.
-    selections: Vec<Selection>,
+    pub(crate) selections: Vec<Selection>,
 }
 
 pub(crate) fn select_object(

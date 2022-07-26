@@ -6,8 +6,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
+use router_bridge::planner::DeferStreamSupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::Service;
@@ -38,9 +40,20 @@ impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
+        defer_support: bool,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
-            planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+            planner: Arc::new(
+                Planner::new(
+                    schema.as_str().to_string(),
+                    QueryPlannerConfig {
+                        defer_stream_support: Some(DeferStreamSupport {
+                            enable_defer: Some(defer_support),
+                        }),
+                    },
+                )
+                .await?,
+            ),
             schema,
             introspection,
         })
@@ -81,7 +94,7 @@ impl BridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-        selections: Query,
+        mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -95,14 +108,18 @@ impl BridgeQueryPlanner {
             PlanSuccess {
                 data: QueryPlan { node: Some(node) },
                 usage_reporting,
-            } => Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(query_planner::QueryPlan {
-                    usage_reporting,
-                    root: node,
-                    options,
-                }),
-                query: Arc::new(selections),
-            }),
+            } => {
+                let subselections = node.parse_subselections(&*self.schema);
+                selections.subselections = subselections;
+                Ok(QueryPlannerContent::Plan {
+                    plan: Arc::new(query_planner::QueryPlan {
+                        usage_reporting,
+                        root: node,
+                        options,
+                    }),
+                    query: Arc::new(selections),
+                })
+            }
             PlanSuccess {
                 data: QueryPlan { node: None },
                 usage_reporting,
@@ -185,6 +202,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
@@ -211,6 +229,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
@@ -253,6 +272,7 @@ mod tests {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap()
@@ -286,6 +306,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
