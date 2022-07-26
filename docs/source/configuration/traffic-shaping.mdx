@@ -23,7 +23,7 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 traffic_shaping:
   variables_deduplication: true # Enable the variable deduplication optimization.
   router: # Rules applied to the router requests
-    rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+    rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are rejected
       num: 10
       per: 5sec
     timeout: 50sec # If request to the router hangs for more than 50secs then cancel the request (by default it's 30 secs)
@@ -34,7 +34,7 @@ traffic_shaping:
     products:
       query_deduplication: false # Disable query for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
-      rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+      rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are rejected
         num: 10
         per: 5sec
       timeout: 50sec # If request to subgraph product hangs for more than 50secs then cancel the request (by default it's 30 secs)

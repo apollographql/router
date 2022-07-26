@@ -144,6 +144,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
+pin-project-lite = "0.2.9"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

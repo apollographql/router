@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use futures::stream::BoxStream;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
@@ -29,9 +28,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::rate::RateLimitLayer;
+pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
-use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
@@ -160,8 +159,8 @@ impl Plugin for TrafficShaping {
 
     fn router_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         ServiceBuilder::new()
             .layer(TimeoutLayer::new(
                 self.config
@@ -489,7 +488,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
@@ -516,8 +515,7 @@ mod test {
             Ok(RouterResponse::fake_builder()
                 .data(json!({ "test": 1234_u32 }))
                 .build()
-                .unwrap()
-                .boxed())
+                .unwrap())
         });
         let mock_service = mock_service.build();
 
@@ -535,7 +533,7 @@ mod test {
             .oneshot(RouterRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
         let _response = plugin
             .router_service(mock_service.clone().boxed())
             .oneshot(RouterRequest::fake_builder().build().unwrap())

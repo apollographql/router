@@ -1,39 +1,32 @@
-use std::pin::Pin;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
 
 use tokio::time::Instant;
-use tokio::time::Sleep;
 use tower::Layer;
 
-use super::service::State;
 use super::Rate;
 use super::RateLimit;
-
 /// Enforces a rate limit on the number of requests the underlying
 /// service can handle over a period of time.
 #[derive(Debug, Clone)]
 pub(crate) struct RateLimitLayer {
     rate: Rate,
-    state: Arc<RwLock<State>>,
-    sleep: Arc<RwLock<Pin<Box<Sleep>>>>,
+    curr_time: Arc<RwLock<Instant>>,
+    previous_counter: Arc<AtomicUsize>,
+    current_counter: Arc<AtomicUsize>,
 }
 
 impl RateLimitLayer {
     /// Create new rate limit layer.
     pub(crate) fn new(num: u64, per: Duration) -> Self {
         let rate = Rate::new(num, per);
-        let until = Instant::now();
-        let state = State::Ready {
-            until,
-            rem: rate.num(),
-        };
-
         RateLimitLayer {
             rate,
-            sleep: Arc::new(RwLock::new(Box::pin(tokio::time::sleep_until(until)))),
-            state: Arc::new(RwLock::new(state)),
+            curr_time: Arc::new(RwLock::new(Instant::now())),
+            previous_counter: Arc::default(),
+            current_counter: Arc::new(AtomicUsize::new(1)),
         }
     }
 }
@@ -45,8 +38,9 @@ impl<S> Layer<S> for RateLimitLayer {
         RateLimit {
             inner: service,
             rate: self.rate,
-            state: self.state.clone(),
-            sleep: self.sleep.clone(),
+            curr_time: self.curr_time.clone(),
+            previous_counter: self.previous_counter.clone(),
+            current_counter: self.current_counter.clone(),
         }
     }
 }

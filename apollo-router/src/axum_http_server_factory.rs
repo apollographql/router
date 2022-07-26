@@ -59,6 +59,7 @@ use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::Elapsed;
+use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterServiceFactory;
 
@@ -502,6 +503,14 @@ where
 
             match service.call(Request::from_parts(head, body).into()).await {
                 Err(e) => {
+                    if let Some(source_err) = e.source() {
+                        if source_err.is::<RateLimited>() {
+                            return RateLimited::new().into_response();
+                        }
+                        if source_err.is::<Elapsed>() {
+                            return Elapsed::new().into_response();
+                        }
+                    }
                     tracing::error!("router service call failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -534,15 +543,20 @@ where
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
-            if e.is::<Elapsed>() {
-                Elapsed::new().into_response()
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "router service is not available to process request",
-                )
-                    .into_response()
+            if let Some(source_err) = e.source() {
+                if source_err.is::<RateLimited>() {
+                    return RateLimited::new().into_response();
+                }
+                if source_err.is::<Elapsed>() {
+                    return Elapsed::new().into_response();
+                }
             }
+
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "router service is not available to process request",
+            )
+                .into_response()
         }
     }
 }
