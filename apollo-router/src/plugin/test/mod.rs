@@ -29,6 +29,7 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::ExecutionCreator;
 use crate::services::Plugins;
@@ -93,38 +94,19 @@ impl PluginTestHarness {
         schema: IntoSchema,
         mock_router_service: Option<MockRouterService>,
         mock_query_planner_service: Option<MockQueryPlanningService>,
-        mock_subgraph_services: HashMap<String, MockSubgraphService>,
+        mut subgraph_services: HashMap<String, Arc<dyn MakeSubgraphService>>,
     ) -> Result<PluginTestHarness, BoxError> {
-        let mut subgraph_services = mock_subgraph_services
-            .into_iter()
-            .map(|(k, v)| (k, Buffer::new(v.build().boxed(), DEFAULT_BUFFER_SIZE)))
-            .collect::<HashMap<_, _>>();
         // If we're using the canned schema then add some canned results
         if let IntoSchema::Canned = schema {
             subgraph_services
                 .entry("products".to_string())
-                .or_insert_with(|| {
-                    Buffer::new(
-                        mock::canned::products_subgraph().boxed(),
-                        DEFAULT_BUFFER_SIZE,
-                    )
-                });
+                .or_insert_with(|| Arc::new(mock::canned::products_subgraph()));
             subgraph_services
                 .entry("accounts".to_string())
-                .or_insert_with(|| {
-                    Buffer::new(
-                        mock::canned::accounts_subgraph().boxed(),
-                        DEFAULT_BUFFER_SIZE,
-                    )
-                });
+                .or_insert_with(|| Arc::new(mock::canned::accounts_subgraph()));
             subgraph_services
                 .entry("reviews".to_string())
-                .or_insert_with(|| {
-                    Buffer::new(
-                        mock::canned::reviews_subgraph().boxed(),
-                        DEFAULT_BUFFER_SIZE,
-                    )
-                });
+                .or_insert_with(|| Arc::new(mock::canned::reviews_subgraph()));
         }
 
         let schema = Arc::new(Schema::from(schema));
@@ -210,13 +192,7 @@ impl PluginTestHarness {
 
 #[derive(Clone)]
 pub struct MockSubgraphFactory {
-    pub(crate) subgraphs: HashMap<
-        String,
-        Buffer<
-            BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>,
-            SubgraphRequest,
-        >,
-    >,
+    pub(crate) subgraphs: HashMap<String, Arc<dyn MakeSubgraphService>>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
@@ -233,9 +209,7 @@ impl SubgraphServiceFactory for MockSubgraphFactory {
             self.plugins
                 .iter()
                 .rev()
-                .fold(service.clone().boxed(), |acc, (_, e)| {
-                    e.subgraph_service(name, acc)
-                })
+                .fold(service.make(), |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
 }

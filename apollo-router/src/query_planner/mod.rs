@@ -1202,13 +1202,12 @@ mod tests {
     use std::sync::Arc;
 
     use http::Method;
-    use tower::ServiceBuilder;
-    use tower::ServiceExt;
 
     use super::*;
     use crate::json_ext::PathElement;
     use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
+    use crate::services::subgraph_service::MakeSubgraphService;
 
     macro_rules! test_query_plan {
         () => {
@@ -1267,9 +1266,7 @@ mod tests {
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service.build()) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1328,9 +1325,7 @@ mod tests {
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service.build()) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1383,9 +1378,7 @@ mod tests {
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service.build()) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1514,15 +1507,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "X".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_x_service.build().boxed()),
+                    Arc::new(mock_x_service.build()) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "Y".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_y_service.build().boxed()),
+                    Arc::new(mock_y_service.build()) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),
