@@ -9,6 +9,7 @@ use std::time::Instant;
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::ZlibDecoder;
+use axum::body::StreamBody;
 use axum::extract::Extension;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
@@ -21,8 +22,11 @@ use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::channel::oneshot;
+use futures::future::ready;
 use futures::prelude::*;
+use futures::stream::once;
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
@@ -509,7 +513,12 @@ where
                         .into_response()
                 }
                 Ok(response) => {
-                    let (parts, mut stream) = http::Response::from(response).into_parts();
+                    let (mut parts, mut stream) = http::Response::from(response).into_parts();
+                    parts.headers.insert(
+                        "content-type",
+                        HeaderValue::from_static("multipart/mixed;boundary=\"graphql\""),
+                    );
+
                     match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);
@@ -520,12 +529,30 @@ where
                                 .into_response()
                         }
                         Some(response) => {
-                            tracing::trace_span!("serialize_response").in_scope(|| {
-                                http_ext::Response::from(http::Response::from_parts(
-                                    parts, response,
-                                ))
-                                .into_response()
-                            })
+                            if response.has_next.unwrap_or(false) {
+                                let stream = once(ready(response)).chain(stream);
+
+                                let body = stream
+                                    .flat_map(|res| {
+                                        once(ready(Bytes::from_static(
+                                            b"--graphql\r\ncontent-type: application/json\r\n\r\n",
+                                        )))
+                                        .chain(once(ready(
+                                            serde_json::to_vec(&res).unwrap().into(),
+                                        )))
+                                        .chain(once(ready(Bytes::from_static(b"\r\n"))))
+                                    }).chain(once(ready(Bytes::from_static(b"--graphql--\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}"))))
+                                    .map(Ok::<_, BoxError>);
+
+                                (parts, StreamBody::new(body)).into_response()
+                            } else {
+                                tracing::trace_span!("serialize_response").in_scope(|| {
+                                    http_ext::Response::from(http::Response::from_parts(
+                                        parts, response,
+                                    ))
+                                    .into_response()
+                                })
+                            }
                         }
                     }
                 }

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.12.0"
+version = "0.12.1-alpha-defer4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -107,7 +107,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "8897e21ccba26e811f248d8d2f3b263d57278e26" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", branch = "geal/defer" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
 serde = { version = "1.0.139", features = ["derive", "rc"] }
@@ -120,6 +120,7 @@ static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.31"
 tokio = { version = "1.19.2", features = ["full"] }
+tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["full"] }

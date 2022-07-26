@@ -1,12 +1,17 @@
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 pub use fetch::OperationKind;
+use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use tokio::sync::broadcast::Sender;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
 use crate::error::Error;
@@ -78,6 +83,18 @@ pub(crate) enum PlanNode {
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
+
+    Defer {
+        primary: Primary,
+        deferred: Vec<DeferredNode>,
+    },
+
+    #[serde(rename_all = "camelCase")]
+    Condition {
+        condition: String,
+        if_clause: Option<Box<PlanNode>>,
+        else_clause: Option<Box<PlanNode>>,
+    },
 }
 
 impl PlanNode {
@@ -86,7 +103,147 @@ impl PlanNode {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::Defer { primary, .. } => primary
+                .node
+                .as_ref()
+                .map(|n| n.contains_mutations())
+                .unwrap_or(false),
             Self::Flatten(_) => false,
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(node) = if_clause {
+                    if node.contains_mutations() {
+                        return true;
+                    }
+                }
+                if let Some(node) = else_clause {
+                    if node.contains_mutations() {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    pub(crate) fn contains_defer(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_defer()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_defer()),
+            Self::Flatten(node) => node.node.contains_defer(),
+            Self::Fetch(..) => false,
+            Self::Defer { .. } => true,
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                // right now ConditionNode is only used with defer, but it might be used
+                // in the future to implement @skip and @include execution
+                if let Some(node) = if_clause {
+                    if node.contains_defer() {
+                        return true;
+                    }
+                }
+                if let Some(node) = else_clause {
+                    if node.contains_defer() {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    pub(crate) fn parse_subselections(
+        &self,
+        schema: &Schema,
+    ) -> HashMap<(Option<Path>, String), Query> {
+        if !self.contains_defer() {
+            return HashMap::new();
+        }
+        // re-create full query with the right path
+        // parse the subselection
+        let mut subselections = HashMap::new();
+        self.collect_subselections(schema, &Path::default(), &mut subselections);
+
+        subselections
+    }
+
+    fn collect_subselections(
+        &self,
+        schema: &Schema,
+        initial_path: &Path,
+        subselections: &mut HashMap<(Option<Path>, String), Query>,
+    ) {
+        // re-create full query with the right path
+        // parse the subselection
+        match self {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                nodes.iter().fold(subselections, |subs, current| {
+                    current.collect_subselections(schema, initial_path, subs);
+
+                    subs
+                });
+            }
+            Self::Flatten(node) => {
+                node.node
+                    .collect_subselections(schema, initial_path, subselections);
+            }
+            Self::Defer { primary, deferred } => {
+                // TODO rebuilt subselection from the root thanks to the path
+                let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
+                let query = reconstruct_full_query(&primary_path, &primary.subselection);
+                // ----------------------- Parse ---------------------------------
+                let sub_selection =
+                    Query::parse(&query, schema).expect("it must respect the schema");
+                // ----------------------- END Parse ---------------------------------
+
+                subselections.insert(
+                    (Some(primary_path), primary.subselection.clone()),
+                    sub_selection,
+                );
+                deferred.iter().fold(subselections, |subs, current| {
+                    if let Some(subselection) = &current.subselection {
+                        // TODO rebuilt subselection from the root thanks to the path
+                        let query = reconstruct_full_query(&current.path, subselection);
+                        // ----------------------- Parse ---------------------------------
+                        let sub_selection =
+                            Query::parse(&query, schema).expect("it must respect the schema");
+                        // ----------------------- END Parse ---------------------------------
+
+                        subs.insert(
+                            (current.path.clone().into(), subselection.clone()),
+                            sub_selection,
+                        );
+                    }
+                    if let Some(current_node) = &current.node {
+                        current_node.collect_subselections(
+                            schema,
+                            &initial_path.join(&current.path),
+                            subs,
+                        );
+                    }
+
+                    subs
+                });
+            }
+            Self::Fetch(..) => {}
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(node) = if_clause {
+                    node.collect_subselections(schema, initial_path, subselections);
+                }
+                if let Some(node) = else_clause {
+                    node.collect_subselections(schema, initial_path, subselections);
+                }
+            }
         }
     }
 }
@@ -105,8 +262,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SF>,
         originating_request: &'a Arc<http_ext::Request<Request>>,
         schema: &'a Schema,
-
-        _sender: futures::channel::mpsc::Sender<Response>,
+        sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response
     where
         SF: SubgraphServiceFactory,
@@ -114,8 +270,7 @@ impl QueryPlan {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
-
-        let (value, errors) = self
+        let (value, subselection, errors) = self
             .root
             .execute_recursively(
                 &root,
@@ -124,11 +279,17 @@ impl QueryPlan {
                 schema,
                 originating_request,
                 &Value::default(),
+                &HashMap::new(),
+                sender,
                 &self.options,
             )
             .await;
 
-        Response::builder().data(value).errors(errors).build()
+        Response::builder()
+            .data(value)
+            .and_subselection(subselection)
+            .errors(errors)
+            .build()
     }
 
     pub fn contains_mutations(&self) -> bool {
@@ -146,8 +307,10 @@ impl PlanNode {
         schema: &'a Schema,
         originating_request: &'a Arc<http_ext::Request<Request>>,
         parent_value: &'a Value,
+        deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+        sender: futures::channel::mpsc::Sender<Response>,
         options: &'a QueryPlanOptions,
-    ) -> future::BoxFuture<(Value, Vec<Error>)>
+    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)>
     where
         SF: SubgraphServiceFactory,
     {
@@ -155,6 +318,7 @@ impl PlanNode {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
             let mut errors;
+            let mut subselection = None;
 
             match self {
                 PlanNode::Sequence { nodes } => {
@@ -162,7 +326,7 @@ impl PlanNode {
                     errors = Vec::new();
                     let span = tracing::info_span!("sequence");
                     for node in nodes {
-                        let (v, err) = node
+                        let (v, subselect, err) = node
                             .execute_recursively(
                                 current_dir,
                                 context,
@@ -170,6 +334,8 @@ impl PlanNode {
                                 schema,
                                 originating_request,
                                 &value,
+                                deferred_fetches,
+                                sender.clone(),
                                 options,
                             )
                             .instrument(span.clone())
@@ -177,6 +343,7 @@ impl PlanNode {
                             .await;
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
+                        subselection = subselect;
                     }
                 }
                 PlanNode::Parallel { nodes } => {
@@ -194,13 +361,15 @@ impl PlanNode {
                                 schema,
                                 originating_request,
                                 parent_value,
+                                deferred_fetches,
+                                sender.clone(),
                                 options,
                             )
                             .instrument(span.clone())
                         })
                         .collect();
 
-                    while let Some((v, err)) = stream
+                    while let Some((v, _subselect, err)) = stream
                         .next()
                         .instrument(span.clone())
                         .in_current_span()
@@ -211,7 +380,7 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
-                    let (v, err) = node
+                    let (v, subselect, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
@@ -220,6 +389,8 @@ impl PlanNode {
                             schema,
                             originating_request,
                             parent_value,
+                            deferred_fetches,
+                            sender,
                             options,
                         )
                         .instrument(tracing::trace_span!("flatten"))
@@ -227,6 +398,7 @@ impl PlanNode {
 
                     value = v;
                     errors = err;
+                    subselection = subselect;
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
@@ -237,6 +409,7 @@ impl PlanNode {
                             service_factory,
                             originating_request,
                             schema,
+                            deferred_fetches,
                             options,
                         )
                         .instrument(tracing::info_span!(
@@ -256,9 +429,252 @@ impl PlanNode {
                         }
                     }
                 }
+                PlanNode::Defer {
+                    primary:
+                        Primary {
+                            path: _primary_path,
+                            subselection: primary_subselection,
+                            node,
+                        },
+                    deferred,
+                } => {
+                    let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
+                        HashMap::new();
+                    let mut futures = Vec::new();
+
+                    let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
+
+                    for deferred_node in deferred {
+                        let mut deferred_receivers = Vec::new();
+
+                        for d in deferred_node.depends.iter() {
+                            match deferred_fetches.get(&d.id) {
+                                None => {
+                                    let (sender, receiver) = tokio::sync::broadcast::channel(1);
+                                    deferred_fetches.insert(d.id.clone(), sender.clone());
+                                    deferred_receivers
+                                        .push(BroadcastStream::new(receiver).into_future());
+                                }
+                                Some(sender) => {
+                                    let receiver = sender.subscribe();
+                                    deferred_receivers
+                                        .push(BroadcastStream::new(receiver).into_future());
+                                }
+                            }
+                        }
+
+                        // if a deferred node has no depends (ie not waiting for data from fetches) then it has to
+                        // wait until the primary response is entirely created.
+                        //
+                        // If the depends list is not empty, the inner node can start working on the fetched data, then
+                        // it is merged into the primary response before applying the subselection
+                        let is_depends_empty = deferred_node.depends.is_empty();
+
+                        let mut stream: stream::FuturesUnordered<_> =
+                            deferred_receivers.into_iter().collect();
+                        //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
+                        let deferred_inner = deferred_node.node.clone();
+                        let deferred_path = deferred_node.path.clone();
+                        let subselection = deferred_node.subselection();
+                        let label = deferred_node.label.clone();
+                        let mut tx = sender.clone();
+                        let sc = schema.clone();
+                        let orig = originating_request.clone();
+                        let sf = service_factory.clone();
+                        let ctx = context.clone();
+                        let opt = options.clone();
+                        let mut primary_receiver = primary_sender.subscribe();
+                        let mut value = parent_value.clone();
+                        let fut = async move {
+                            let mut errors = Vec::new();
+
+                            if is_depends_empty {
+                                let primary_value =
+                                    primary_receiver.recv().await.unwrap_or_default();
+                                value.deep_merge(primary_value);
+                            } else {
+                                while let Some((v, _remaining)) = stream.next().await {
+                                    // a Err(RecvError) means either that the fetch was not performed and the
+                                    // sender was dropped, possibly because there was no need to do it,
+                                    // or because it is lagging, but here we only send one message so it
+                                    // will not happen
+                                    if let Some(Ok((deferred_value, err))) = v {
+                                        value.deep_merge(deferred_value);
+                                        errors.extend(err.into_iter())
+                                    }
+                                }
+                            }
+
+                            let span = tracing::info_span!("deferred");
+
+                            if let Some(node) = deferred_inner {
+                                let (mut v, node_subselection, err) = node
+                                    .execute_recursively(
+                                        &Path::default(),
+                                        &ctx,
+                                        &sf,
+                                        &sc,
+                                        &orig,
+                                        &value,
+                                        &HashMap::new(),
+                                        tx.clone(),
+                                        &opt,
+                                    )
+                                    .instrument(span.clone())
+                                    .in_current_span()
+                                    .await;
+
+                                if !is_depends_empty {
+                                    let primary_value =
+                                        primary_receiver.recv().await.unwrap_or_default();
+                                    v.deep_merge(primary_value);
+                                }
+
+                                if let Err(e) = tx
+                                    .send(
+                                        Response::builder()
+                                            .data(v)
+                                            .errors(err)
+                                            .and_path(Some(deferred_path.clone()))
+                                            .and_subselection(subselection.or(node_subselection))
+                                            .and_label(label)
+                                            .build(),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                };
+                            } else {
+                                let primary_value =
+                                    primary_receiver.recv().await.unwrap_or_default();
+                                value.deep_merge(primary_value);
+
+                                if let Err(e) = tx
+                                    .send(
+                                        Response::builder()
+                                            .data(value)
+                                            .errors(errors)
+                                            .and_path(Some(deferred_path.clone()))
+                                            .and_subselection(subselection)
+                                            .and_label(label)
+                                            .build(),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "error sending deferred response at path {}: {:?}",
+                                        deferred_path,
+                                        e
+                                    );
+                                }
+                            };
+                        };
+
+                        futures.push(fut);
+                    }
+
+                    tokio::task::spawn(
+                        async move {
+                            join_all(futures).await;
+                        }
+                        .in_current_span(),
+                    );
+
+                    value = parent_value.clone();
+                    errors = Vec::new();
+                    let span = tracing::info_span!("primary");
+                    if let Some(node) = node {
+                        let (v, _subselect, err) = node
+                            .execute_recursively(
+                                current_dir,
+                                context,
+                                service_factory,
+                                schema,
+                                originating_request,
+                                &value,
+                                &deferred_fetches,
+                                sender,
+                                options,
+                            )
+                            .instrument(span.clone())
+                            .in_current_span()
+                            .await;
+                        let _guard = span.enter();
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                        subselection = primary_subselection.clone().into();
+
+                        let _ = primary_sender.send(value.clone());
+                    } else {
+                        let _guard = span.enter();
+
+                        subselection = primary_subselection.clone().into();
+
+                        let _ = primary_sender.send(value.clone());
+                    }
+                }
+                PlanNode::Condition {
+                    condition,
+                    if_clause,
+                    else_clause,
+                } => {
+                    value = Value::default();
+                    errors = Vec::new();
+
+                    if let Some(&Value::Bool(true)) =
+                        originating_request.body().variables.get(condition.as_str())
+                    {
+                        //FIXME: should we show an error if the if_node was not present?
+                        if let Some(node) = if_clause {
+                            let span = tracing::info_span!("condition_if");
+                            let (v, subselect, err) = node
+                                .execute_recursively(
+                                    current_dir,
+                                    context,
+                                    service_factory,
+                                    schema,
+                                    originating_request,
+                                    parent_value,
+                                    deferred_fetches,
+                                    sender.clone(),
+                                    options,
+                                )
+                                .instrument(span.clone())
+                                .in_current_span()
+                                .await;
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                            subselection = subselect;
+                        }
+                    } else if let Some(node) = else_clause {
+                        let span = tracing::info_span!("condition_else");
+                        let (v, subselect, err) = node
+                            .execute_recursively(
+                                current_dir,
+                                context,
+                                service_factory,
+                                schema,
+                                &originating_request.clone(),
+                                parent_value,
+                                deferred_fetches,
+                                sender.clone(),
+                                options,
+                            )
+                            .instrument(span.clone())
+                            .in_current_span()
+                            .await;
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                        subselection = subselect;
+                    }
+                }
             }
 
-            (value, errors)
+            (value, subselection, errors)
         })
     }
 
@@ -273,8 +689,56 @@ impl PlanNode {
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
+            Self::Defer { primary, deferred } => primary
+                .node
+                .as_ref()
+                .map(|n| {
+                    Box::new(
+                        n.service_usage().chain(
+                            deferred
+                                .iter()
+                                .flat_map(|d| d.node.iter().flat_map(|node| node.service_usage())),
+                        ),
+                    ) as Box<dyn Iterator<Item = &'a str> + 'a>
+                })
+                .unwrap_or_else(|| {
+                    Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &'a str> + 'a>
+                }),
+
+            Self::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => match (if_clause, else_clause) {
+                (None, None) => Box::new(None.into_iter()),
+                (None, Some(node)) => node.service_usage(),
+                (Some(node), None) => node.service_usage(),
+                (Some(if_node), Some(else_node)) => {
+                    Box::new(if_node.service_usage().chain(else_node.service_usage()))
+                }
+            },
         }
     }
+}
+
+fn reconstruct_full_query(path: &Path, subselection: &str) -> String {
+    let mut query = String::new();
+    let mut len = 0;
+    for path_elt in path.iter() {
+        match path_elt {
+            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
+            json_ext::PathElement::Key(key) => {
+                write!(&mut query, "{{ {key}")
+                    .expect("writing to a String should not fail because it can reallocate");
+                len += 1;
+            }
+        }
+    }
+
+    query.push_str(subselection);
+    query.push_str(&" }".repeat(len));
+
+    query
 }
 
 pub(crate) mod fetch {
@@ -284,6 +748,7 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
+    use tokio::sync::broadcast::Sender;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
@@ -330,24 +795,27 @@ pub(crate) mod fetch {
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
-        service_name: String,
+        pub(crate) service_name: String,
 
         /// The data that is required for the subgraph fetch.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         #[serde(default)]
-        requires: Vec<Selection>,
+        pub(crate) requires: Vec<Selection>,
 
         /// The variables that are used for the subgraph fetch.
-        variable_usages: Vec<String>,
+        pub(crate) variable_usages: Vec<String>,
 
         /// The GraphQL subquery that is used for the fetch.
-        operation: String,
+        pub(crate) operation: String,
 
         /// The GraphQL subquery operation name.
-        operation_name: Option<String>,
+        pub(crate) operation_name: Option<String>,
 
         /// The GraphQL operation kind that is used for the fetch.
-        operation_kind: OperationKind,
+        pub(crate) operation_kind: OperationKind,
+
+        /// Optional id used by Deferred nodes
+        pub(crate) id: Option<String>,
     }
 
     struct Variables {
@@ -460,6 +928,7 @@ pub(crate) mod fetch {
             service_factory: &'a Arc<SF>,
             originating_request: &'a Arc<http_ext::Request<Request>>,
             schema: &'a Schema,
+            deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
             options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError>
         where
@@ -556,7 +1025,7 @@ pub(crate) mod fetch {
 
             // fix error path and erase subgraph error messages (we cannot expose subgraph information
             // to the client)
-            let errors = response
+            let errors: Vec<Error> = response
                 .errors
                 .into_iter()
                 .map(|error| Error {
@@ -567,8 +1036,20 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            self.response_at_path(current_dir, paths, response.data.unwrap_or_default())
-                .map(|value| (value, errors))
+            match self.response_at_path(current_dir, paths, response.data.unwrap_or_default()) {
+                Ok(value) => {
+                    if let Some(id) = &self.id {
+                        if let Some(sender) = deferred_fetches.get(id.as_str()) {
+                            if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                                tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                            }
+                        }
+                    }
+
+                    Ok((value, errors))
+                }
+                Err(e) => Err(e),
+            }
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]
@@ -639,6 +1120,63 @@ pub(crate) struct FlattenNode {
     node: Box<PlanNode>,
 }
 
+/// A primary query for a Defer node, the non deferred part
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Primary {
+    /// Optional path, set if and only if the defer node is a
+    /// nested defer. If set, `subselection` starts at that `path`.
+    path: Option<Path>,
+
+    /// The part of the original query that "selects" the data to
+    /// send in that primary response (once the plan in `node` completes).
+    subselection: String,
+
+    // The plan to get all the data for that primary part
+    node: Option<Box<PlanNode>>,
+}
+
+/// The "deferred" parts of the defer (note that it's an array). Each
+/// of those deferred elements will correspond to a different chunk of
+/// the response to the client (after the initial non-deferred one that is).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeferredNode {
+    /// References one or more fetch node(s) (by `id`) within
+    /// `primary.node`. The plan of this deferred part should not
+    /// be started before all those fetches returns.
+    depends: Vec<Depends>,
+
+    /// The optional defer label.
+    label: Option<String>,
+    /// Path to the @defer this correspond to. `subselection` start at that `path`.
+    path: Path,
+    /// The part of the original query that "selects" the data to send
+    /// in that deferred response (once the plan in `node` completes).
+    /// Will be set _unless_ `node` is a `DeferNode` itself.
+    subselection: Option<String>,
+    /// The plan to get all the data for that deferred part
+    node: Option<Arc<PlanNode>>,
+}
+
+impl DeferredNode {
+    fn subselection(&self) -> Option<String> {
+        self.subselection.clone().or_else(|| {
+            self.node.as_ref().and_then(|node| match node.as_ref() {
+                PlanNode::Defer { primary, .. } => Some(primary.subselection.clone()),
+                _ => None,
+            })
+        })
+    }
+}
+/// A deferred node.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Depends {
+    id: String,
+    defer_label: Option<String>,
+}
+
 // The code resides in a separate submodule to allow writing a log filter activating it
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
@@ -682,7 +1220,10 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::json_ext::PathElement;
     use crate::plugin::test::MockSubgraphFactory;
+    use crate::query_planner::fetch::FetchNode;
+
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
@@ -882,6 +1423,155 @@ mod tests {
         assert!(
             succeeded.load(Ordering::SeqCst),
             "subgraph requests must be http post"
+        );
+    }
+
+    #[tokio::test]
+    async fn defer() {
+        // plan for { t { x ... @defer { y } }}
+        let query_plan: QueryPlan = QueryPlan {
+            root: PlanNode::Defer {
+                primary: Primary {
+                    path: None,
+                    subselection: "{ t { x } }".to_string(),
+                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "X".to_string(),
+                        requires: vec![],
+                        variable_usages: vec![],
+                        operation: "{ t { id __typename x } }".to_string(),
+                        operation_name: Some("t".to_string()),
+                        operation_kind: OperationKind::Query,
+                        id: Some("fetch1".to_string()),
+                    }))),
+                },
+                deferred: vec![DeferredNode {
+                    depends: vec![Depends {
+                        id: "fetch1".to_string(),
+                        defer_label: None,
+                    }],
+                    label: None,
+                    path: Path(vec![PathElement::Key("t".to_string())]),
+                    subselection: Some("{ y }".to_string()),
+                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                        path: Path(vec![PathElement::Key("t".to_string())]),
+                        node: Box::new(PlanNode::Fetch(FetchNode {
+                            service_name: "Y".to_string(),
+                            requires: vec![query_planner::selection::Selection::InlineFragment(
+                                query_planner::selection::InlineFragment {
+                                    type_condition: Some("T".into()),
+                                    selections: vec![
+                                        query_planner::selection::Selection::Field(
+                                            query_planner::selection::Field {
+                                                alias: None,
+                                                name: "id".into(),
+                                                selections: None,
+                                            },
+                                        ),
+                                        query_planner::selection::Selection::Field(
+                                            query_planner::selection::Field {
+                                                alias: None,
+                                                name: "__typename".into(),
+                                                selections: None,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            )],
+                            variable_usages: vec![],
+                            operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}".to_string(),
+                            operation_name: None,
+                            operation_kind: OperationKind::Query,
+                            id: Some("fetch2".to_string()),
+                        })),
+                    }))),
+                }],
+            },
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+            options: QueryPlanOptions::default(),
+        };
+
+        let mut mock_x_service = plugin::test::MockSubgraphService::new();
+        mock_x_service
+            .expect_call()
+            .times(1)
+            .withf(move |_request| true)
+            .returning(|_| {
+                Ok(SubgraphResponse::fake_builder()
+                    .data(serde_json::json! {{
+                        "t": {"id": 1234,
+                        "__typename": "T",
+                         "x": "X"
+                        }
+                    }})
+                    .build())
+            });
+        let mut mock_y_service = plugin::test::MockSubgraphService::new();
+        mock_y_service
+            .expect_call()
+            .times(1)
+            .withf(move |_request| true)
+            .returning(|_| {
+                Ok(SubgraphResponse::fake_builder()
+                    .data(serde_json::json! {{
+                        "_entities": [{"y": "Y", "__typename": "T"}]
+                    }})
+                    .build())
+            });
+
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
+        let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([
+                (
+                    "X".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_x_service.build().boxed()),
+                ),
+                (
+                    "Y".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_y_service.build().boxed()),
+                ),
+            ]),
+            plugins: Default::default(),
+        });
+
+        let response = query_plan
+            .execute(
+                &Context::new(),
+                &sf,
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
+                &schema,
+                sender,
+            )
+            .await;
+
+        // primary response
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            r#"{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}"#
+        );
+
+        let response = receiver.next().await.unwrap();
+
+        // deferred response
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            // the primary response appears there because the deferred response gets data from it
+            // unneeded parts are removed in response formatting
+            r#"{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}"#
         );
     }
 
