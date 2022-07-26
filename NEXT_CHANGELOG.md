@@ -35,6 +35,13 @@ This generic type complicates the API with limited benefit because we use BoxStr
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
 
+### Remove the HTTP request from QueryPlannerRequest ([PR #1439](https://github.com/apollographql/router/pull/1439)
+
+The content of `QueryPlannerRequest` is used as argument to the query planner and as a cache key,
+so it should not change depending on the variables or HTTP headers.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
+
 ## 🚀 Features
 
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
