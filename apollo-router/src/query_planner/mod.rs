@@ -573,12 +573,12 @@ impl PlanNode {
                         let (v, _subselect, err) = node
                             .execute_recursively(
                                 &ExecutionParameters {
-                                    context: &parameters.context,
-                                    service_factory: &parameters.service_factory,
-                                    schema: &parameters.schema,
-                                    originating_request: &parameters.originating_request,
+                                    context: parameters.context,
+                                    service_factory: parameters.service_factory,
+                                    schema: parameters.schema,
+                                    originating_request: parameters.originating_request,
                                     deferred_fetches: &deferred_fetches,
-                                    options: &parameters.options,
+                                    options: parameters.options,
                                 },
                                 current_dir,
                                 &value,
