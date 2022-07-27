@@ -23,6 +23,7 @@ use serde_json::Value;
 use tower::util::BoxService;
 use tower::BoxError;
 
+use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugin::serde::deserialize_header_name;
@@ -67,12 +68,14 @@ pub(crate) struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
     #[serde(rename = "static")]
     pub(crate) insert: Option<Vec<Insert>>,
-    /// Configuration to forward headers or body values from the request custom attributes/labels in metrics
+    /// Configuration to forward headers or body values from the request to custom attributes/labels in metrics
     pub(crate) request: Option<Forward>,
-    /// Configuration to forward headers or body values from the response custom attributes/labels in metrics
+    /// Configuration to forward headers or body values from the response to custom attributes/labels in metrics
     pub(crate) response: Option<Forward>,
-    /// Configuration to forward values from the context custom attributes/labels in metrics
+    /// Configuration to forward values from the context to custom attributes/labels in metrics
     pub(crate) context: Option<Vec<ContextForward>>,
+    /// Configuration to forward values from the error to custom attributes/labels in metrics
+    pub(crate) errors: Option<ErrorsForward>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -90,6 +93,26 @@ pub(crate) struct Forward {
     pub(crate) header: Option<Vec<HeaderForward>>,
     /// Forward body values as custom attributes/labels in metrics
     pub(crate) body: Option<Vec<BodyForward>>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ErrorsForward {
+    /// Will include the error message in a "message" attribute
+    #[serde(default)]
+    pub(crate) include_messages: bool,
+    /// Forward extensions values as custom attributes/labels in metrics
+    pub(crate) extensions: Option<Vec<BodyForward>>,
+}
+
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(untagged)]
+pub(crate) enum IncludeOrFilter {
+    /// Include or not
+    Include(bool),
+    /// Only include with this filter
+    Filter(String),
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -189,6 +212,55 @@ impl Forward {
             }
             _ => {}
         }
+    }
+}
+
+impl ErrorsForward {
+    pub(crate) fn merge(&mut self, to_merge: Self) {
+        match (&mut self.extensions, to_merge.extensions) {
+            (Some(extensions), Some(extensions_to_merge)) => {
+                extensions.extend(extensions_to_merge);
+            }
+            (None, Some(extensions_to_merge)) => {
+                self.extensions = Some(extensions_to_merge);
+            }
+            _ => {}
+        }
+        self.include_messages = to_merge.include_messages;
+    }
+
+    pub(crate) fn get_attributes_from_error(&self, err: &BoxError) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+        if let Some(fetch_error) = err
+            .source()
+            .and_then(|e| e.downcast_ref::<FetchError>())
+            .or_else(|| err.downcast_ref::<FetchError>())
+        {
+            let gql_error = fetch_error.to_graphql_error(None);
+            // Include error message
+            if self.include_messages {
+                attributes.insert("message".to_string(), gql_error.message);
+            }
+            // Extract data from extensions
+            if let Some(extensions_fw) = &self.extensions {
+                for ext_fw in extensions_fw {
+                    let output = ext_fw.path.execute(&gql_error.extensions).unwrap();
+                    if let Some(val) = output {
+                        if let Value::String(val_str) = val {
+                            attributes.insert(ext_fw.name.clone(), val_str);
+                        } else {
+                            attributes.insert(ext_fw.name.clone(), val.to_string());
+                        }
+                    } else if let Some(default_val) = &ext_fw.default {
+                        attributes.insert(ext_fw.name.clone(), default_val.clone());
+                    }
+                }
+            }
+        } else if self.include_messages {
+            attributes.insert("message".to_string(), err.to_string());
+        }
+
+        attributes
     }
 }
 
@@ -384,6 +456,13 @@ impl AttributesForwardConf {
         }
 
         attributes
+    }
+
+    pub(crate) fn get_attributes_from_error(&self, err: &BoxError) -> HashMap<String, String> {
+        self.errors
+            .as_ref()
+            .map(|e| e.get_attributes_from_error(err))
+            .unwrap_or_default()
     }
 }
 
