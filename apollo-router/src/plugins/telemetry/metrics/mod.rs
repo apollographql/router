@@ -108,16 +108,6 @@ pub(crate) struct ErrorsForward {
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
-pub(crate) enum IncludeOrFilter {
-    /// Include or not
-    Include(bool),
-    /// Only include with this filter
-    Filter(String),
-}
-
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[serde(untagged)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
     /// Using a named header
