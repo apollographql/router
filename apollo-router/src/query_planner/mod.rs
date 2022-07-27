@@ -311,7 +311,6 @@ pub(crate) struct ExecutionParameters<'a, SF> {
 }
 
 impl PlanNode {
-    #[allow(clippy::too_many_arguments)]
     fn execute_recursively<'a, SF>(
         &'a self,
         parameters: &'a ExecutionParameters<'a, SF>,
