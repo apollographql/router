@@ -126,11 +126,14 @@ impl Query {
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
-        _configuration: &Configuration,
+        configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let string = query.into();
 
-        let parser = apollo_parser::Parser::new(string.as_str());
+        let parser = apollo_parser::Parser::with_recursion_limit(
+            string.as_str(),
+            configuration.server.experimental_parser_recursion_limit,
+        );
         let tree = parser.parse();
 
         // Trace log recursion limit data

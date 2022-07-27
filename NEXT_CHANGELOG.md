@@ -64,7 +64,7 @@ A `Configuration` value can be created from various formats by deserializing wit
 The removed methods correspond to `server.introspection` and `server.experimental_defer_support`
 configuration keys respectively.
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
 
 ## 🚀 Features
 
@@ -140,6 +140,21 @@ client decide how to generate the value to cache, instead of a complicated deleg
 cache.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
+
+### Add configurable parser recursion limit ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+A new option in the configuration file allows changing the recursion limit 
+used for parsing GraphQL operations and schemas.
+This limit is intended to protect against stack overflow and is enabled by default
+with some value that should accomodate any reasonable scenario.
+`router.yaml` configuration example:
+
+```yaml
+server:
+  experimental_parser_recursion_limit: 100
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
 
 ## 🐛 Fixes
 

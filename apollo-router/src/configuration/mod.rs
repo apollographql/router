@@ -272,11 +272,17 @@ pub(crate) struct Server {
     /// default: false
     #[serde(default = "default_defer_support")]
     pub(crate) experimental_defer_support: bool,
+
+    /// Experimental limitation of query depth
+    /// default: 4096
+    #[serde(default = "default_parser_recursion_limit")]
+    pub(crate) experimental_parser_recursion_limit: usize,
 }
 
 #[buildstructor::buildstructor]
 impl Server {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         cors: Option<Cors>,
@@ -285,6 +291,7 @@ impl Server {
         endpoint: Option<String>,
         health_check_path: Option<String>,
         defer_support: Option<bool>,
+        parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
@@ -294,6 +301,8 @@ impl Server {
             endpoint: endpoint.unwrap_or_else(default_endpoint),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
+            experimental_parser_recursion_limit: parser_recursion_limit
+                .unwrap_or_else(default_parser_recursion_limit),
         }
     }
 }
@@ -449,6 +458,13 @@ fn default_health_check_path() -> String {
 
 fn default_defer_support() -> bool {
     false
+}
+
+fn default_parser_recursion_limit() -> usize {
+    // This is `apollo-parser`’s default, which protects against stack overflow
+    // but is still very high for "reasonable" queries.
+    // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
+    4096
 }
 
 impl Default for Server {

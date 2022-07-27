@@ -345,7 +345,8 @@ expression: "&schema"
         "landing_page": true,
         "endpoint": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false
+        "experimental_defer_support": false,
+        "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
@@ -452,6 +453,13 @@ expression: "&schema"
           "description": "Experimental @defer directive support default: false",
           "default": false,
           "type": "boolean"
+        },
+        "experimental_parser_recursion_limit": {
+          "description": "Experimental limitation of query depth default: 4096",
+          "default": 4096,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
