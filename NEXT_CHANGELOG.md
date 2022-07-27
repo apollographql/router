@@ -16,7 +16,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-### **Headline** ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
+### Headline ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
 
 Description! And a link to a [reference](http://url)
 
@@ -27,15 +27,16 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Remove the generic stream type from RouterResponse and ExecutionResponse ([PR #1420](https://github.com/apollographql/router/pull/1420)
+### Remove the generic stream type from `RouterResponse` and `ExecutionResponse` ([PR #1420](https://github.com/apollographql/router/pull/1420))
 
-This generic type complicates the API with limited benefit because we use BoxStream everywhere in plugins:
+This generic type complicates the API with limited benefit because we use `BoxStream` everywhere in plugins:
+
 * `RouterResponse<BoxStream<'static, Response>>` -> `RouterResponse`
 * `ExecutionResponse<BoxStream<'static, Response>>` -> `ExecutionResponse`
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
 
-### Remove the HTTP request from QueryPlannerRequest ([PR #1439](https://github.com/apollographql/router/pull/1439)
+### Remove the HTTP request from `QueryPlannerRequest` ([PR #1439](https://github.com/apollographql/router/pull/1439))
 
 The content of `QueryPlannerRequest` is used as argument to the query planner and as a cache key,
 so it should not change depending on the variables or HTTP headers.
@@ -67,7 +68,7 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
-### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
 The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
 multiple parts that are sent one by one.
@@ -83,7 +84,7 @@ server:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
 
-### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
+### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281))
 
 This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
 database). The API revolves around an `Entry` structure that allows query deduplication and lets the
@@ -94,25 +95,31 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Update the scaffold template so it targets router v0.12.0 ([#PR1431](https://github.com/apollographql/router/pull/1431))
+### Update the scaffold template so it targets router v0.12.0 ([PR #1431](https://github.com/apollographql/router/pull/1431))
 
 The cargo scaffold template will target the latest version of the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
-### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
+### Selection merging on non-object field aliases ([PR #1406](https://github.com/apollographql/router/issues/1406))
 
-In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
+Fixed a bug where merging aliased fields would sometimes put `null`s instead of expected values. 
 
-By @SimonSapin
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1432
 
-### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423)
+### A Rhai error instead of a Rust panic ([PR #1414 https://github.com/apollographql/router/pull/1414))
 
-* do not clone the client request during query plan execution
-* do not clone the usage reporting
-* avoid path allocations when iterating over JSON values
+In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously, trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
 
-The benchmarks show that this PR gives a 23% gain in requests per second compared to main
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1414
+
+### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423))
+
+* Do not clone the client request during query plan execution
+* Do not clone the usage reporting
+* Avoid path allocations when iterating over JSON values
+
+The benchmarks show that this change brings a 23% gain in requests per second compared to the main branch.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
 
