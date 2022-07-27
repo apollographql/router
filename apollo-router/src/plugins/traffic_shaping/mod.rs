@@ -44,7 +44,7 @@ use crate::QueryPlannerResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
-const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
@@ -112,12 +112,12 @@ struct Config {
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RateLimitConf {
-    /// Number of requests
-    num: NonZeroU64,
+    /// Number of requests allowed
+    capacity: NonZeroU64,
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
-    /// Per time
-    per: Duration,
+    /// Per interval
+    interval: Duration,
 }
 
 impl Merge for RateLimitConf {
@@ -125,8 +125,8 @@ impl Merge for RateLimitConf {
         match fallback {
             None => self.clone(),
             Some(fallback) => Self {
-                num: fallback.num,
-                per: fallback.per,
+                capacity: fallback.capacity,
+                interval: fallback.interval,
             },
         }
     }
@@ -148,7 +148,10 @@ impl Plugin for TrafficShaping {
             .as_ref()
             .and_then(|r| r.rate_limit.as_ref())
             .map(|router_rate_limit_conf| {
-                RateLimitLayer::new(router_rate_limit_conf.num, router_rate_limit_conf.per)
+                RateLimitLayer::new(
+                    router_rate_limit_conf.capacity,
+                    router_rate_limit_conf.interval,
+                )
             });
 
         Ok(Self {
@@ -168,7 +171,7 @@ impl Plugin for TrafficShaping {
                     .router
                     .as_ref()
                     .and_then(|r| r.timeout)
-                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
+                    .unwrap_or(DEFAULT_TIMEOUT),
             ))
             .option_layer(self.rate_limit_router.clone())
             .service(service)
@@ -192,7 +195,7 @@ impl Plugin for TrafficShaping {
                     .unwrap()
                     .entry(name.to_string())
                     .or_insert_with(|| {
-                        RateLimitLayer::new(rate_limit_conf.num, rate_limit_conf.per)
+                        RateLimitLayer::new(rate_limit_conf.capacity, rate_limit_conf.interval)
                     })
                     .clone()
             });
@@ -206,7 +209,7 @@ impl Plugin for TrafficShaping {
                 .layer(TimeoutLayer::new(
                     config
                     .timeout
-                    .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECONDS)),
+                    .unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
                 .service(service)
@@ -463,8 +466,8 @@ mod test {
         subgraphs:
             test:
                 rate_limit:
-                    num: 1
-                    per: 1sec
+                    capacity: 1
+                    interval: 1sec
                 timeout: 500ms
         "#,
         )
@@ -503,8 +506,8 @@ mod test {
             r#"
         router:
             rate_limit:
-                num: 1
-                per: 1sec
+                capacity: 1
+                interval: 1sec
             timeout: 500ms
         "#,
         )

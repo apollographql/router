@@ -24,9 +24,9 @@ traffic_shaping:
   variables_deduplication: true # Enable the variable deduplication optimization.
   router: # Rules applied to requests from clients to the router
     rate_limit: # Accept a maximum of 10 requests per 5 secs from a given client. Excess requests must be rejected.
-      num: 10
-      per: 5sec
-    timeout: 50sec # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+      capacity: 10
+      interval: 5s
+    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
   all:
     query_deduplication: true # Enable query deduplication for all subgraphs.
     compression: br # Enable brotli compression for all subgraphs.
@@ -35,9 +35,9 @@ traffic_shaping:
       query_deduplication: false # Disable query for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
       rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
-        num: 10
-        per: 5sec
-      timeout: 50sec # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
+        capacity: 10
+        interval: 5s
+      timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, query deduplication is enabled for all subgraphs _except_ the `products` subgraph.

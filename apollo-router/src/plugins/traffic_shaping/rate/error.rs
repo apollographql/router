@@ -8,12 +8,12 @@ use http::StatusCode;
 
 /// The rate limit error.
 #[derive(Debug, Default)]
-pub(crate) struct RateLimited(pub(super) ());
+pub(crate) struct RateLimited;
 
 impl RateLimited {
     /// Construct a new RateLimited error
     pub(crate) fn new() -> Self {
-        RateLimited(())
+        RateLimited {}
     }
 }
 

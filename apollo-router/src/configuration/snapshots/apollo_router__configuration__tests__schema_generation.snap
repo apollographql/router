@@ -1751,18 +1751,18 @@ expression: "&schema"
               "description": "Enable rate limiting",
               "type": "object",
               "required": [
-                "num",
-                "per"
+                "capacity",
+                "interval"
               ],
               "properties": {
-                "num": {
-                  "description": "Number of requests",
+                "capacity": {
+                  "description": "Number of requests allowed",
                   "type": "integer",
                   "format": "uint64",
                   "minimum": 1.0
                 },
-                "per": {
-                  "description": "Per time",
+                "interval": {
+                  "description": "Per interval",
                   "type": "string"
                 }
               },
@@ -1786,18 +1786,18 @@ expression: "&schema"
               "description": "Enable rate limiting",
               "type": "object",
               "required": [
-                "num",
-                "per"
+                "capacity",
+                "interval"
               ],
               "properties": {
-                "num": {
-                  "description": "Number of requests",
+                "capacity": {
+                  "description": "Number of requests allowed",
                   "type": "integer",
                   "format": "uint64",
                   "minimum": 1.0
                 },
-                "per": {
-                  "description": "Per time",
+                "interval": {
+                  "description": "Per interval",
                   "type": "string"
                 }
               },
@@ -1838,18 +1838,18 @@ expression: "&schema"
                 "description": "Enable rate limiting",
                 "type": "object",
                 "required": [
-                  "num",
-                  "per"
+                  "capacity",
+                  "interval"
                 ],
                 "properties": {
-                  "num": {
-                    "description": "Number of requests",
+                  "capacity": {
+                    "description": "Number of requests allowed",
                     "type": "integer",
                     "format": "uint64",
                     "minimum": 1.0
                   },
-                  "per": {
-                    "description": "Per time",
+                  "interval": {
+                    "description": "Per interval",
                     "type": "string"
                   }
                 },
