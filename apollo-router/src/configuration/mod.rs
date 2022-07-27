@@ -12,9 +12,12 @@ use derivative::Derivative;
 use displaydoc::Display;
 use envmnt::ExpandOptions;
 use envmnt::ExpansionType;
+use http::request::Parts;
+use http::HeaderValue;
 use itertools::Itertools;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
+use regex::Regex;
 use schemars::gen::SchemaGenerator;
 use schemars::gen::SchemaSettings;
 use schemars::schema::ObjectValidation;
@@ -379,6 +382,12 @@ pub(crate) struct Cors {
     #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
+    /// `Regex`es you want to match the origins against to determine if they're allowed.
+    /// Defaults to an empty list.
+    /// Note that `origins` will be evaluated before `match_origins`
+    #[serde(default)]
+    pub(crate) match_origins: Option<Vec<String>>,
+
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
@@ -391,6 +400,7 @@ impl Default for Cors {
             allow_credentials: None,
             allow_headers: Default::default(),
             expose_headers: Default::default(),
+            match_origins: Default::default(),
             origins: default_origins(),
             methods: default_cors_methods(),
         }
@@ -441,6 +451,7 @@ impl Cors {
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
         origins: Option<Vec<String>>,
+        match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
     ) -> Self {
         Self {
@@ -448,6 +459,7 @@ impl Cors {
             allow_credentials,
             allow_headers,
             expose_headers,
+            match_origins,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
         }
@@ -495,6 +507,27 @@ impl Cors {
 
         if self.allow_any_origin.unwrap_or_default() {
             Ok(cors.allow_origin(cors::Any))
+        } else if let Some(match_origins) = self.match_origins {
+            let regexes = match_origins
+                .into_iter()
+                .filter_map(|regex| {
+                    Regex::from_str(regex.as_str())
+                        .map_err(|_| tracing::error!("origin regex '{regex}' is not valid"))
+                        .ok()
+                })
+                .collect::<Vec<_>>();
+
+            Ok(cors.allow_origin(cors::AllowOrigin::predicate(
+                move |origin: &HeaderValue, _: &Parts| {
+                    origin
+                        .to_str()
+                        .map(|o| {
+                            self.origins.iter().any(|origin| origin.as_str() == o)
+                                || regexes.iter().any(|regex| regex.is_match(o))
+                        })
+                        .unwrap_or_default()
+                },
+            )))
         } else {
             Ok(cors.allow_origin(cors::AllowOrigin::list(
                 self.origins.into_iter().filter_map(|origin| {
@@ -953,6 +986,11 @@ mod tests {
         assert!(
             cors.allow_headers.is_none(),
             "No allow_headers list should be present by default"
+        );
+
+        assert!(
+            cors.match_origins.is_none(),
+            "No origin regex list should be present by default"
         );
     }
 

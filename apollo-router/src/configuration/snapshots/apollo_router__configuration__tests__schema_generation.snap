@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 848
 expression: "&schema"
 ---
 {
@@ -358,6 +357,15 @@ expression: "&schema"
             },
             "expose_headers": {
               "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
+              "default": null,
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            },
+            "match_origins": {
+              "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
               "default": null,
               "type": "array",
               "items": {
