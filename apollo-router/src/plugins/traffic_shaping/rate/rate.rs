@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 /// A rate of requests per time period.
@@ -13,11 +14,13 @@ impl Rate {
     /// # Panics
     ///
     /// This function panics if `num` or `per` is 0.
-    pub(crate) fn new(num: u64, per: Duration) -> Self {
-        assert!(num > 0);
+    pub(crate) fn new(num: NonZeroU64, per: Duration) -> Self {
         assert!(per > Duration::from_millis(0));
 
-        Rate { num, per }
+        Rate {
+            num: num.into(),
+            per,
+        }
     }
 
     pub(crate) fn num(&self) -> u64 {

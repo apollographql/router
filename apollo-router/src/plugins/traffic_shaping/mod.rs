@@ -14,6 +14,7 @@ mod rate;
 mod timeout;
 
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -108,11 +109,11 @@ struct Config {
     variables_deduplication: Option<bool>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RateLimitConf {
     /// Number of requests
-    num: u64,
+    num: NonZeroU64,
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     /// Per time

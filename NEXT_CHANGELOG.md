@@ -45,17 +45,17 @@ Additions to the traffic shaping plugin:
 
 ```yaml
 traffic_shaping:
-  router: # Rules applied to the router requests
-    rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+  router: # Rules applied to requests from clients to the router
+    rate_limit: # Accept a maximum of 10 requests per 5 secs from a given client. Excess requests must be rejected.
       num: 10
       per: 5sec
-    timeout: 50sec # If request to the router hangs for more than 50secs then cancel the request (by default it's 30 secs)
-  subgraphs:
+    timeout: 50sec # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+  subgraphs: # Rules applied to requests from the router to individual subgraphs
     products:
-      rate_limit: # Only accept 10 requests per 5 secs maximum. If it reaches the limit, requests are waiting
+      rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
         num: 10
         per: 5sec
-      timeout: 50sec # If request to subgraph product hangs for more than 50secs then cancel the request (by default it's 30 secs)
+      timeout: 50sec # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347

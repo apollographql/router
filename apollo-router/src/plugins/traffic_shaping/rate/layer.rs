@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -20,7 +21,7 @@ pub(crate) struct RateLimitLayer {
 
 impl RateLimitLayer {
     /// Create new rate limit layer.
-    pub(crate) fn new(num: u64, per: Duration) -> Self {
+    pub(crate) fn new(num: NonZeroU64, per: Duration) -> Self {
         let rate = Rate::new(num, per);
         RateLimitLayer {
             rate,
