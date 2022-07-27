@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.12.0"
+version = "0.12.1-alpha-defer4"
 dependencies = [
  "access-json",
  "anyhow",
@@ -187,6 +187,7 @@ dependencies = [
  "test-span",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util 0.7.3",
  "tonic",
  "tower",
@@ -225,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -4384,7 +4385,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=8897e21ccba26e811f248d8d2f3b263d57278e26#8897e21ccba26e811f248d8d2f3b263d57278e26"
+source = "git+https://github.com/apollographql/federation-rs.git?branch=geal/defer#4cdcd574a967fc0fe61e0f6d6db92035ed395f0a"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5487,6 +5488,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]

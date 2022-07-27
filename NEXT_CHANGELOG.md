@@ -35,6 +35,13 @@ This generic type complicates the API with limited benefit because we use BoxStr
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
 
+### Remove the HTTP request from QueryPlannerRequest ([PR #1439](https://github.com/apollographql/router/pull/1439)
+
+The content of `QueryPlannerRequest` is used as argument to the query planner and as a cache key,
+so it should not change depending on the variables or HTTP headers.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
+
 ## 🚀 Features
 
 ### Add support of rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
@@ -60,6 +67,22 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
+
+The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
+multiple parts that are sent one by one.
+
+:warning: *this is still experimental and not fit for production use yet*
+
+To activate it, add this option to the configuration file:
+
+```yaml
+server:
+  experimental_defer_support: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
+
 ### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
 
 This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
@@ -70,6 +93,12 @@ cache.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
 
 ## 🐛 Fixes
+
+### Update the scaffold template so it targets router v0.12.0 ([#PR1431](https://github.com/apollographql/router/pull/1431))
+
+The cargo scaffold template will target the latest version of the router.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
 ### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
 

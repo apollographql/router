@@ -133,6 +133,7 @@ impl PluginTestHarness {
             BridgeQueryPlanner::new(
                 schema.clone(),
                 Some(Arc::new(Introspection::from_schema(&schema))),
+                false,
             )
             .await?,
             DEFAULT_BUFFER_SIZE,
