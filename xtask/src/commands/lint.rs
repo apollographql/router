@@ -15,26 +15,30 @@ const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=Std
 
 impl Lint {
     pub fn run(&self) -> Result<()> {
-        Self::install_rustfmt()?;
-        Self::check_fmt()?;
-        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
-        Ok(())
+        self.run_common(Self::check_fmt)
     }
 
     pub fn run_local(&self) -> Result<()> {
-        Self::install_rustfmt()?;
-        if Self::check_fmt().is_err() {
-            // cargo fmt check failed, this means there is some formatting to do
-            // given this task is running locally, let's do it and let our user know
-            let status = Self::fmt_command()?.status()?;
-            ensure!(status.success(), "cargo fmt failed");
-            eprintln!(
-                "🧹 cargo fmt job is complete 🧹\n\
-                Commit the changes and you should be good to go!"
-            );
-        };
-        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
+        self.run_common(|| {
+            if Self::check_fmt().is_err() {
+                // cargo fmt check failed, this means there is some formatting to do
+                // given this task is running locally, let's do it and let our user know
+                let status = Self::fmt_command()?.status()?;
+                ensure!(status.success(), "cargo fmt failed");
+                eprintln!(
+                    "🧹 cargo fmt job is complete 🧹\n\
+                    Commit the changes and you should be good to go!"
+                );
+            };
+            Ok(())
+        })
+    }
 
+    fn run_common(&self, fmt: impl FnOnce() -> Result<()>) -> Result<()> {
+        Self::install_rustfmt()?;
+        fmt()?;
+        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
+        cargo!(["doc", "--all", "--no-deps"], env = { "RUSTDOCFLAGS" => "-Dwarnings" });
         Ok(())
     }
 

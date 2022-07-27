@@ -46,7 +46,7 @@ impl<SF> Service<ExecutionRequest> for ExecutionService<SF>
 where
     SF: SubgraphServiceFactory,
 {
-    type Response = ExecutionResponse<BoxStream<'static, Response>>;
+    type Response = ExecutionResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -73,7 +73,7 @@ where
                 .execute(
                     &context,
                     &this.subgraph_creator,
-                    req.originating_request.clone(),
+                    &Arc::new(req.originating_request),
                     &this.schema,
                     sender,
                 )
@@ -98,7 +98,7 @@ pub(crate) trait ExecutionServiceFactory:
 {
     type ExecutionService: Service<
             ExecutionRequest,
-            Response = ExecutionResponse<BoxStream<'static, Response>>,
+            Response = ExecutionResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -116,8 +116,7 @@ impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
 where
     SF: SubgraphServiceFactory,
 {
-    type Service =
-        BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
+    type Service = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
 
     fn new_service(&self) -> Self::Service {
         ServiceBuilder::new()
@@ -137,8 +136,7 @@ where
 }
 
 impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
-    type ExecutionService =
-        BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>;
+    type ExecutionService = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
     type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
         ExecutionRequest,
     >>::Future;

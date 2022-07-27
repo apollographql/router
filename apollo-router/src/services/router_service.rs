@@ -26,6 +26,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -88,7 +89,7 @@ where
     QueryPlannerService::Future: Send + 'static,
     ExecutionFactory: ExecutionServiceFactory,
 {
-    type Response = RouterResponse<BoxStream<'static, Response>>;
+    type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -117,7 +118,12 @@ where
             let QueryPlannerResponse { content, context } = planning
                 .call(
                     QueryPlannerRequest::builder()
-                        .originating_request(req.originating_request.clone())
+                        .query(
+                            body.query
+                                .clone()
+                                .expect("the query presence was already checked by a plugin"),
+                        )
+                        .and_operation_name(body.operation_name.clone())
                         .query_plan_options(QueryPlanOptions::default())
                         .context(context)
                         .build(),
@@ -125,30 +131,32 @@ where
                 .await?;
 
             match content {
-                QueryPlannerContent::Introspection { response } => {
-                    return Ok(
-                        RouterResponse::new_from_graphql_response(*response, context).boxed(),
-                    );
-                }
+                QueryPlannerContent::Introspection { response } => Ok(
+                    RouterResponse::new_from_graphql_response(*response, context),
+                ),
                 QueryPlannerContent::IntrospectionDisabled => {
-                    let mut resp = http::Response::new(once(ready(
-                        graphql::Response::builder()
-                            .errors(vec![crate::error::Error::builder()
-                                .message(String::from("introspection has been disabled"))
-                                .build()])
-                            .build(),
-                    )));
+                    let mut resp = http::Response::new(
+                        once(ready(
+                            graphql::Response::builder()
+                                .errors(vec![crate::error::Error::builder()
+                                    .message(String::from("introspection has been disabled"))
+                                    .build()])
+                                .build(),
+                        ))
+                        .boxed(),
+                    );
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
-                    return Ok(RouterResponse {
+                    Ok(RouterResponse {
                         response: resp.into(),
                         context,
-                    }
-                    .boxed());
+                    })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
+                    let is_deferred = plan.root.contains_defer();
+
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_graphql_response(err, context).boxed())
+                        Ok(RouterResponse::new_from_graphql_response(err, context))
                     } else {
                         let operation_name = body.operation_name.clone();
 
@@ -177,13 +185,22 @@ where
                                                 schema.api_schema(),
                                             )
                                         });
+
+                                        // we use the path to look up the subselections, but the generated response
+                                        // is an object starting at the root so the path should be empty
+                                        response.path = None;
+
+                                        if is_deferred {
+                                            response.has_next = Some(true);
+                                        }
+
                                         response
                                     })
-                                    .in_current_span(),
+                                    .in_current_span()
+                                    .boxed(),
                             )
                             .into(),
-                        }
-                        .boxed())
+                        })
                     }
                 }
             }
@@ -211,8 +228,7 @@ where
                 .status_code(status_code)
                 .context(context_cloned)
                 .build()
-                .expect("building a response like this should not fail")
-                .boxed())
+                .expect("building a response like this should not fail"))
         });
 
         Box::pin(fut)
@@ -223,13 +239,14 @@ where
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
 /// collection of plugins, collection of subgraph services are assembled to generate a
-/// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
-/// response.
+/// [`tower::util::BoxCloneService`] capable of processing a router request
+/// through the entire stack to return a response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     introspection: bool,
+    defer_support: bool,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -239,6 +256,7 @@ impl PluggableRouterServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             introspection: false,
+            defer_support: false,
         }
     }
 
@@ -278,6 +296,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    pub fn with_defer_support(mut self) -> PluggableRouterServiceBuilder {
+        self.defer_support = true;
+        self
+    }
+
     pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
         &mut self.plugins
     }
@@ -310,16 +333,18 @@ impl PluggableRouterServiceBuilder {
         };
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone(), introspection)
-            .await
-            .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            ServiceBuilder::new()
-                .buffered()
-                .service(self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
-                    |acc, (_, e)| e.query_planning_service(acc),
-                ));
+        let bridge_query_planner =
+            BridgeQueryPlanner::new(self.schema.clone(), introspection, self.defer_support)
+                .await
+                .map_err(ServiceBuildError::QueryPlannerError)?;
+        let query_planner_service = ServiceBuilder::new().buffered().service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                    .await
+                    .boxed(),
+                |acc, (_, e)| e.query_planning_service(acc),
+            ),
+        );
 
         let plugins = Arc::new(self.plugins);
 
@@ -328,12 +353,14 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
+        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+
         Ok(RouterCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
             plugins,
-            apq: APQLayer::default(),
+            apq,
         })
     }
 }
@@ -375,6 +402,18 @@ impl RouterServiceFactory for RouterCreator {
     type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
         Request<graphql::Request>,
     >>::Future;
+
+    fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
+        self.plugins
+            .iter()
+            .filter_map(|(plugin_name, plugin)| {
+                (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
+                    .then(|| plugin.custom_endpoint())
+                    .flatten()
+                    .map(|h| (plugin_name.clone(), h))
+            })
+            .collect()
+    }
 }
 
 impl RouterCreator {
@@ -382,9 +421,9 @@ impl RouterCreator {
         &self,
     ) -> impl Service<
         RouterRequest,
-        Response = RouterResponse<BoxStream<'static, Response>>,
+        Response = RouterResponse,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<RouterResponse<BoxStream<'static, Response>>, BoxError>>,
+        Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
             .layer(self.apq.clone())
@@ -409,11 +448,7 @@ impl RouterCreator {
 
     pub fn test_service(
         &self,
-    ) -> tower::util::BoxCloneService<
-        RouterRequest,
-        RouterResponse<BoxStream<'static, Response>>,
-        BoxError,
-    > {
+    ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
         Buffer::new(self.make(), 512).boxed_clone()
     }
 }

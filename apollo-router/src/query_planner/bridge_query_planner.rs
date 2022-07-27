@@ -6,8 +6,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
+use router_bridge::planner::DeferStreamSupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::Service;
@@ -18,6 +20,7 @@ use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
+use crate::traits::QueryKey;
 use crate::traits::QueryPlanner;
 use crate::*;
 
@@ -37,9 +40,20 @@ impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
+        defer_support: bool,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
-            planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+            planner: Arc::new(
+                Planner::new(
+                    schema.as_str().to_string(),
+                    QueryPlannerConfig {
+                        defer_stream_support: Some(DeferStreamSupport {
+                            enable_defer: Some(defer_support),
+                        }),
+                    },
+                )
+                .await?,
+            ),
             schema,
             introspection,
         })
@@ -80,7 +94,7 @@ impl BridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-        selections: Query,
+        mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -94,14 +108,18 @@ impl BridgeQueryPlanner {
             PlanSuccess {
                 data: QueryPlan { node: Some(node) },
                 usage_reporting,
-            } => Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(query_planner::QueryPlan {
-                    usage_reporting,
-                    root: node,
-                    options,
-                }),
-                query: Arc::new(selections),
-            }),
+            } => {
+                let subselections = node.parse_subselections(&*self.schema);
+                selections.subselections = subselections;
+                Ok(QueryPlannerContent::Plan {
+                    plan: Arc::new(query_planner::QueryPlan {
+                        usage_reporting,
+                        root: node,
+                        options,
+                    }),
+                    query: Arc::new(selections),
+                })
+            }
             PlanSuccess {
                 data: QueryPlan { node: None },
                 usage_reporting,
@@ -130,15 +148,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = req.originating_request.body();
             match this
-                .get(
-                    body.query.clone().expect(
-                        "presence of a query has been checked by the RouterService before; qed",
-                    ),
-                    body.operation_name.to_owned(),
+                .get((
+                    req.query.clone(),
+                    req.operation_name.to_owned(),
                     req.query_plan_options,
-                )
+                ))
                 .await
             {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
@@ -156,19 +171,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(query.clone()).await?;
+    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(query.as_str()).await;
+            return self.introspection(key.0.as_str()).await;
         }
 
-        self.plan(query, operation, options, selections).await
+        self.plan(key.0, key.1, key.2, selections).await
     }
 }
 
@@ -192,15 +202,16 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
         let result = planner
-            .get(
+            .get((
                 include_str!("testdata/query.graphql").into(),
                 None,
                 Default::default(),
-            )
+            ))
             .await
             .unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -218,15 +229,16 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
         let err = planner
-            .get(
+            .get((
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 None,
                 Default::default(),
-            )
+            ))
             .await
             .unwrap_err();
 
@@ -260,6 +272,7 @@ mod tests {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap()
@@ -293,10 +306,11 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            false,
         )
         .await
         .unwrap();
-        let result = planner.get("".into(), None, Default::default()).await;
+        let result = planner.get(("".into(), None, Default::default())).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",

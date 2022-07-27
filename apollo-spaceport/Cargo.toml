@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -10,20 +10,23 @@ publish = false
 
 [dependencies]
 bytes = "1.1.0"
-clap = { version = "=3.1.18", default-features = false, features = ["std", "derive"] }
-flate2 = "1.0.23"
+clap = { version = "3.2.10", default-features = false, features = [
+    "std",
+    "derive",
+] }
+flate2 = "1.0.24"
 prost = "0.9.0"
 prost-types = "0.9.0"
 reqwest = { version = "0.11.11", default_features = false, features = [
     "rustls-tls",
     "json",
 ] }
-serde = {version = "1.0.137", features = ["derive"] }
+serde = { version = "1.0.139", features = ["derive"] }
 sys-info = "0.9.1"
 tonic = "0.6.2"
-tokio = { version = "1.18.2", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.19.2", features = ["macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.9", features = ["net"] }
-tracing = "0.1.34"
+tracing = "=0.1.34"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 
 [target.'cfg(macos)'.dependencies]

@@ -1,10 +1,7 @@
-use std::fmt::Debug;
-
 use async_trait::async_trait;
 
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
-use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanOptions;
 use crate::services::QueryPlannerContent;
 
@@ -27,39 +24,9 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 ///
 /// Implementations may cache query plans.
 #[async_trait]
-pub(crate) trait QueryPlanner: Send + Sync + Debug {
+pub(crate) trait QueryPlanner: Send + Sync {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> Result<QueryPlannerContent, QueryPlannerError>;
-}
-
-/// With caching trait.
-///
-/// Adds with_caching to any query planner.
-pub(crate) trait WithCaching: QueryPlanner
-where
-    Self: Sized + QueryPlanner + 'static,
-{
-    /// Wrap this query planner in a caching decorator.
-    /// The original query planner is consumed.
-    fn with_caching(self, plan_cache_limit: usize) -> CachingQueryPlanner<Self> {
-        CachingQueryPlanner::new(self, plan_cache_limit)
-    }
-}
-
-impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
-
-#[cfg(test)]
-mod tests {
-    use static_assertions::*;
-
-    use super::*;
-
-    assert_obj_safe!(QueryPlanner);
+    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError>;
 }

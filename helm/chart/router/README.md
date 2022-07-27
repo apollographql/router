@@ -2,11 +2,11 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 0.1.13](https://img.shields.io/badge/Version-0.1.13-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.11.0](https://img.shields.io/badge/AppVersion-v0.11.0-informational?style=flat-square)
+![Version: 0.1.13](https://img.shields.io/badge/Version-0.1.13-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.12.0](https://img.shields.io/badge/AppVersion-v0.12.0-informational?style=flat-square)
 
 ## Prerequisites
 
-* Kubernetes v1.19+
+- Kubernetes v1.19+
 
 ## Get Repo Info
 
@@ -33,53 +33,51 @@ See [Customizing the Chart Before Installing](https://helm.sh/docs/intro/using_h
 helm show values apollographql/router
 ```
 
-
-
 ## Values
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| affinity | object | `{}` |  |
-| autoscaling.enabled | bool | `false` |  |
-| autoscaling.maxReplicas | int | `100` |  |
-| autoscaling.minReplicas | int | `1` |  |
-| autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
-| containerPorts.http | int | `80` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
-| extraEnvVars | list | `[]` |  |
-| extraEnvVarsCM | string | `""` |  |
-| extraEnvVarsSecret | string | `""` |  |
-| extraVolumeMounts | list | `[]` |  |
-| extraVolumes | list | `[]` |  |
-| fullnameOverride | string | `""` |  |
-| image.pullPolicy | string | `"IfNotPresent"` |  |
-| image.repository | string | `"ghcr.io/apollographql/router"` |  |
-| image.tag | string | `""` |  |
-| imagePullSecrets | list | `[]` |  |
-| ingress.annotations | object | `{}` |  |
-| ingress.className | string | `""` |  |
-| ingress.enabled | bool | `false` |  |
-| ingress.hosts[0].host | string | `"chart-example.local"` |  |
-| ingress.hosts[0].paths[0].path | string | `"/"` |  |
-| ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
-| ingress.tls | list | `[]` |  |
-| managedFederation.apiKey | string | `nil` | If using managed federation, the graph API key to identify router to Studio |
-| managedFederation.existingSecret | string | `nil` | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name  |
-| managedFederation.graphRef | string | `""` | If using managed federation, the variant of which graph to use |
-| nameOverride | string | `""` |  |
-| nodeSelector | object | `{}` |  |
-| podAnnotations | object | `{}` |  |
-| podSecurityContext | object | `{}` |  |
-| replicaCount | int | `1` |  |
-| resources | object | `{}` |  |
-| router | object | `{"args":["--hot-reload"],"configuration":{"server":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
-| securityContext | object | `{}` |  |
-| service.port | int | `80` |  |
-| service.type | string | `"ClusterIP"` |  |
-| serviceAccount.annotations | object | `{}` |  |
-| serviceAccount.create | bool | `true` |  |
-| serviceAccount.name | string | `""` |  |
-| tolerations | list | `[]` |  |
+| Key                                        | Type   | Default                                                                        | Description                                                                                                                                                                                                                          |
+| ------------------------------------------ | ------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| affinity                                   | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| autoscaling.enabled                        | bool   | `false`                                                                        |                                                                                                                                                                                                                                      |
+| autoscaling.maxReplicas                    | int    | `100`                                                                          |                                                                                                                                                                                                                                      |
+| autoscaling.minReplicas                    | int    | `1`                                                                            |                                                                                                                                                                                                                                      |
+| autoscaling.targetCPUUtilizationPercentage | int    | `80`                                                                           |                                                                                                                                                                                                                                      |
+| containerPorts.http                        | int    | `80`                                                                           | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here                                                                                                                        |
+| extraEnvVars                               | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
+| extraEnvVarsCM                             | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| extraEnvVarsSecret                         | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| extraVolumeMounts                          | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
+| extraVolumes                               | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
+| fullnameOverride                           | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| image.pullPolicy                           | string | `"IfNotPresent"`                                                               |                                                                                                                                                                                                                                      |
+| image.repository                           | string | `"ghcr.io/apollographql/router"`                                               |                                                                                                                                                                                                                                      |
+| image.tag                                  | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| imagePullSecrets                           | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
+| ingress.annotations                        | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| ingress.className                          | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| ingress.enabled                            | bool   | `false`                                                                        |                                                                                                                                                                                                                                      |
+| ingress.hosts[0].host                      | string | `"chart-example.local"`                                                        |                                                                                                                                                                                                                                      |
+| ingress.hosts[0].paths[0].path             | string | `"/"`                                                                          |                                                                                                                                                                                                                                      |
+| ingress.hosts[0].paths[0].pathType         | string | `"ImplementationSpecific"`                                                     |                                                                                                                                                                                                                                      |
+| ingress.tls                                | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
+| managedFederation.apiKey                   | string | `nil`                                                                          | If using managed federation, the graph API key to identify router to Studio                                                                                                                                                          |
+| managedFederation.existingSecret           | string | `nil`                                                                          | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name |
+| managedFederation.graphRef                 | string | `""`                                                                           | If using managed federation, the variant of which graph to use                                                                                                                                                                       |
+| nameOverride                               | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| nodeSelector                               | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| podAnnotations                             | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| podSecurityContext                         | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| replicaCount                               | int    | `1`                                                                            |                                                                                                                                                                                                                                      |
+| resources                                  | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| router                                     | object | `{"args":["--hot-reload"],"configuration":{"server":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure                                                                                                                           |
+| securityContext                            | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| service.port                               | int    | `80`                                                                           |                                                                                                                                                                                                                                      |
+| service.type                               | string | `"ClusterIP"`                                                                  |                                                                                                                                                                                                                                      |
+| serviceAccount.annotations                 | object | `{}`                                                                           |                                                                                                                                                                                                                                      |
+| serviceAccount.create                      | bool   | `true`                                                                         |                                                                                                                                                                                                                                      |
+| serviceAccount.name                        | string | `""`                                                                           |                                                                                                                                                                                                                                      |
+| tolerations                                | list   | `[]`                                                                           |                                                                                                                                                                                                                                      |
 
+---
 
-----------------------------------------------
 Autogenerated from chart metadata using [helm-docs v1.10.0](https://github.com/norwoodj/helm-docs/releases/v1.10.0)

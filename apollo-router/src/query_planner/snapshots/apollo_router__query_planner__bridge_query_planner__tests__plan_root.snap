@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/query_planner/bridge_query_planner.rs
-assertion_line: 135
+assertion_line: 136
 expression: result.root
 ---
 Fetch(
@@ -11,5 +11,6 @@ Fetch(
         operation: "{me{name{first last}}}",
         operation_name: None,
         operation_kind: Query,
+        id: None,
     },
 )

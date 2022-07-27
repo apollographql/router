@@ -4,7 +4,6 @@
 
 use std::ops::ControlFlow;
 
-use futures::stream::BoxStream;
 use http::header::HeaderName;
 use http::Method;
 use http::StatusCode;
@@ -13,7 +12,6 @@ use tower::Layer;
 use tower::Service;
 
 use crate::graphql::Error;
-use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::ExecutionRequest;
@@ -24,9 +22,7 @@ pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse<BoxStream<'static, Response>>>
-        + Send
-        + 'static,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
     <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
@@ -54,7 +50,7 @@ where
                         "Allow".parse::<HeaderName>().unwrap(),
                         "POST".parse().unwrap(),
                     );
-                    Ok(ControlFlow::Break(res.boxed()))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -72,6 +68,7 @@ mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::error::Error;
     use crate::graphql;
+    use crate::graphql::Response;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
     use crate::query_planner::fetch::OperationKind;
@@ -85,7 +82,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -110,7 +107,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -135,7 +132,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().boxed()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 

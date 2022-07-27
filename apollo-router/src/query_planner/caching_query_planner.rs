@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
@@ -7,10 +6,11 @@ use std::task;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
+use serde_json_bytes::value::Serializer;
 
-use super::QueryPlanOptions;
 use super::USAGE_REPORTING;
-use crate::cache::CachingMap;
+use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
@@ -24,10 +24,10 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
-#[derive(Debug)]
-pub(crate) struct CachingQueryPlanner<T: QueryPlanner> {
-    cm: Arc<CachingMap<QueryKey, QueryPlannerContent>>,
-    phantom: PhantomData<T>,
+#[derive(Clone)]
+pub(crate) struct CachingQueryPlanner<T: QueryPlanner + Clone> {
+    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
+    delegate: Arc<T>,
 }
 
 /// A resolver for cache misses
@@ -35,14 +35,13 @@ struct CachingQueryPlannerResolver<T: QueryPlanner> {
     delegate: T,
 }
 
-impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
+impl<T: QueryPlanner + Clone + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub(crate) fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let resolver = CachingQueryPlannerResolver { delegate };
-        let cm = Arc::new(CachingMap::new(Box::new(resolver), plan_cache_limit));
+    pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
+        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
         Self {
-            cm,
-            phantom: PhantomData,
+            cache,
+            delegate: Arc::new(delegate),
         }
     }
 }
@@ -52,27 +51,29 @@ impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
     for CachingQueryPlannerResolver<T>
 {
     async fn retrieve(&self, key: QueryKey) -> Result<QueryPlannerContent, CacheResolverError> {
-        self.delegate
-            .get(key.0, key.1, key.2)
-            .await
-            .map_err(|err| err.into())
+        self.delegate.get(key).await.map_err(|err| err.into())
     }
 }
 
 #[async_trait]
-impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> PlanResult {
-        let key = (query, operation, options);
-        self.cm.get(key).await.map_err(|err| err.into())
+impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
+    async fn get(&self, key: QueryKey) -> PlanResult {
+        let entry = self.cache.get(&key).await;
+        if entry.is_first() {
+            let res = self.delegate.get(key).await;
+            entry.insert(res.clone()).await;
+            res
+        } else {
+            entry
+                .get()
+                .await
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
+        }
     }
 }
 
-impl<T: QueryPlanner> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
+impl<T: QueryPlanner + Clone + 'static> tower::Service<QueryPlannerRequest>
+    for CachingQueryPlanner<T>
 where
     T: tower::Service<
         QueryPlannerRequest,
@@ -90,34 +91,34 @@ where
     }
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let body = request.originating_request.body();
-
         let key = (
-            body.query
-                .clone()
-                .expect("presence of a query has been checked by the RouterService before; qed"),
-            body.operation_name.to_owned(),
+            request.query.clone(),
+            request.operation_name.to_owned(),
             request.query_plan_options,
         );
-        let cm = self.cm.clone();
+        let qp = self.clone();
         Box::pin(async move {
-            cm.get(key)
+            qp.get(key)
                 .await
                 .map(|query_planner_content| {
                     if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
-                        if let Err(e) = request
-                            .context
-                            .insert(USAGE_REPORTING, plan.usage_reporting.clone())
-                        {
-                            tracing::error!(
-                                "usage reporting was not serializable to context, {}",
-                                e
-                            );
+                        match (&plan.usage_reporting).serialize(Serializer) {
+                            Ok(v) => {
+                                request.context.insert_json_value(USAGE_REPORTING, v);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    e
+                                );
+                            }
                         }
                     }
                     query_planner_content
                 })
                 .map_err(|e| {
+                    let e = e.into();
+
                     let CacheResolverError::RetrievalError(re) = &e;
                     if let QueryPlannerError::PlanningErrors(pe) = re.deref() {
                         if let Err(inner_e) = request
@@ -164,28 +165,26 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::query_planner::QueryPlanOptions;
 
     mock! {
         #[derive(Debug)]
         MyQueryPlanner {
             fn sync_get(
                 &self,
-                query: String,
-                operation: Option<String>,
-                options: QueryPlanOptions,
+                key: QueryKey,
             ) -> PlanResult;
+        }
+
+        impl Clone for MyQueryPlanner {
+            fn clone(&self) -> MockMyQueryPlanner;
         }
     }
 
     #[async_trait]
     impl QueryPlanner for MockMyQueryPlanner {
-        async fn get(
-            &self,
-            query: String,
-            operation: Option<String>,
-            options: QueryPlanOptions,
-        ) -> PlanResult {
-            self.sync_get(query, operation, options)
+        async fn get(&self, key: QueryKey) -> PlanResult {
+            self.sync_get(key)
         }
     }
 
@@ -203,24 +202,24 @@ mod tests {
                 },
             })));
 
-        let planner = CachingQueryPlanner::new(delegate, 10);
+        let planner = CachingQueryPlanner::new(delegate, 10).await;
 
         for _ in 0..5 {
             assert!(planner
-                .get(
+                .get((
                     "query1".into(),
                     Some("".into()),
                     QueryPlanOptions::default()
-                )
+                ))
                 .await
                 .is_err());
         }
         assert!(planner
-            .get(
+            .get((
                 "query2".into(),
                 Some("".into()),
                 QueryPlanOptions::default()
-            )
+            ))
             .await
             .is_err());
     }

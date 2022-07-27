@@ -126,6 +126,8 @@ impl FetchError {
             path: Default::default(),
             errors: vec![self.to_graphql_error(None)],
             extensions: Default::default(),
+            subselection: Default::default(),
+            has_next: Default::default(),
         }
     }
 }
