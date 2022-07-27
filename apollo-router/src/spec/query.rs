@@ -35,17 +35,12 @@ pub struct Query {
 }
 
 impl Query {
-    /// Returns a reference to the underlying query string.
-    pub fn as_str(&self) -> &str {
-        self.string.as_str()
-    }
-
     /// Re-format the response value to match this query.
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn format_response(
+    pub(crate) fn format_response(
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
@@ -128,7 +123,7 @@ impl Query {
         response.data = Some(Value::default());
     }
 
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -632,7 +627,11 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn validate_variables(&self, request: &Request, schema: &Schema) -> Result<(), Response> {
+    pub(crate) fn validate_variables(
+        &self,
+        request: &Request,
+        schema: &Schema,
+    ) -> Result<(), Response> {
         let operation_name = request.operation_name.as_deref();
         let operation_variable_types =
             self.operations
@@ -682,7 +681,7 @@ impl Query {
         }
     }
 
-    pub fn contains_introspection(&self) -> bool {
+    pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
 }
