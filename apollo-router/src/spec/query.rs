@@ -248,7 +248,7 @@ impl Query {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                *output = input.take();
+                                *output = input.clone();
                                 Ok(())
                             } else {
                                 *output = Value::Null;
@@ -312,7 +312,7 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -320,7 +320,7 @@ impl Query {
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -328,7 +328,7 @@ impl Query {
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -336,7 +336,7 @@ impl Query {
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -344,7 +344,7 @@ impl Query {
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -1246,6 +1246,458 @@ mod tests {
                         {},
                     ],
                     "other": null,
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array stuff:array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get { aliased: array {stuff}}}",
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+            
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} aliased: array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array stuff: array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    // If this test fails, this means you got greedy about allocations,
+    // beware of aliases!
+    fn reformat_response_array_of_int_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_float_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Float]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_bool_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Boolean]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_string_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_id_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [ID]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
                 },
             }},
         );
