@@ -78,6 +78,12 @@ The cargo scaffold template will target the latest version of the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
 
+### Selection merging on non-object field aliases ([PR #1406](https://github.com/apollographql/router/issues/1406))
+
+Fixed a bug where merging aliased fields would sometimes put `null`s instead of expected values. 
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1432
+
 ### A Rhai error instead of a Rust panic ([PR #1414 https://github.com/apollographql/router/pull/1414))
 
 In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously, trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
