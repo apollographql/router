@@ -199,8 +199,8 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 let query = reconstruct_full_query(&primary_path, &primary.subselection);
                 // ----------------------- Parse ---------------------------------
-                let sub_selection =
-                    Query::parse(&query, schema).expect("it must respect the schema");
+                let sub_selection = Query::parse(&query, schema, &Default::default())
+                    .expect("it must respect the schema");
                 // ----------------------- END Parse ---------------------------------
 
                 subselections.insert(
@@ -212,8 +212,8 @@ impl PlanNode {
                         // TODO rebuilt subselection from the root thanks to the path
                         let query = reconstruct_full_query(&current.path, subselection);
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection =
-                            Query::parse(&query, schema).expect("it must respect the schema");
+                        let sub_selection = Query::parse(&query, schema, &Default::default())
+                            .expect("it must respect the schema");
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(

@@ -123,7 +123,11 @@ impl Query {
         response.data = Some(Value::default());
     }
 
-    pub(crate) fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn parse(
+        query: impl Into<String>,
+        schema: &Schema,
+        _configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -886,7 +890,8 @@ mod tests {
                 .parse::<Schema>()
                 .expect("could not parse schema");
             let api_schema = schema.api_schema();
-            let query = Query::parse($query, &schema).expect("could not parse query");
+            let query =
+                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
             query.format_response(
@@ -939,7 +944,8 @@ mod tests {
                 .parse::<Schema>()
                 .expect("could not parse schema");
             let api_schema = schema.api_schema();
-            let query = Query::parse($query, &schema).expect("could not parse query");
+            let query =
+                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
             query.format_response(
@@ -1747,6 +1753,7 @@ mod tests {
                     .as_ref()
                     .expect("query has been added right above; qed"),
                 &schema,
+                &Default::default(),
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
@@ -3647,6 +3654,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
         assert_eq!(query.operations.len(), 1);
@@ -3666,6 +3674,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3693,6 +3702,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3725,6 +3735,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3780,6 +3791,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
         assert_eq!(query.operations.len(), 1);
@@ -3799,6 +3811,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3826,6 +3839,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3858,6 +3872,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3902,6 +3917,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect_err("should not parse query");
     }
@@ -5138,7 +5154,8 @@ mod tests {
 
         let schema = schema.parse::<Schema>().expect("could not parse schema");
         let api_schema = schema.api_schema();
-        let query = Query::parse(query, &schema).expect("could not parse query");
+        let query =
+            Query::parse(query, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder()
             .data(json! {{
                 "object": {
@@ -5338,7 +5355,7 @@ mod tests {
               }
             }
           }}";
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)
@@ -5353,7 +5370,7 @@ mod tests {
             }
           }";
 
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)
@@ -5364,7 +5381,7 @@ mod tests {
             __typename
           }";
 
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)

@@ -34,13 +34,14 @@ pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlan>>,
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
+    configuration: Arc<Configuration>,
 }
 
 impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
-        defer_support: bool,
+        configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(
@@ -48,7 +49,7 @@ impl BridgeQueryPlanner {
                     schema.as_str().to_string(),
                     QueryPlannerConfig {
                         defer_stream_support: Some(DeferStreamSupport {
-                            enable_defer: Some(defer_support),
+                            enable_defer: Some(configuration.server.experimental_defer_support),
                         }),
                     },
                 )
@@ -56,13 +57,15 @@ impl BridgeQueryPlanner {
             ),
             schema,
             introspection,
+            configuration,
         })
     }
 
     async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
         let schema = self.schema.clone();
+        let configuration = self.configuration.clone();
         let query_parsing_future =
-            tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+            tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
                 .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
         match query_parsing_future.await {
             Ok(res) => res.map_err(QueryPlannerError::from),
@@ -202,7 +205,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -229,7 +232,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -272,7 +275,7 @@ mod tests {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -306,7 +309,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();

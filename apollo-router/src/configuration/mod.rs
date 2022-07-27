@@ -75,7 +75,7 @@ pub enum ConfigurationError {
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.

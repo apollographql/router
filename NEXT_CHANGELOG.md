@@ -23,7 +23,7 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.12.1] (unreleased) - 2022-mm-dd
+# [0.13.0] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
@@ -53,6 +53,18 @@ The content of `QueryPlannerRequest` is used as argument to the query planner an
 so it should not change depending on the variables or HTTP headers.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
+
+### Change `PluggableRouterServiceBuilder` methods ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+`with_naive_introspection` and `with_defer_support` where two parameter-less methods
+of this builder that enabled boolean configuration flags.
+They have been removed and replaced by `with_configuration` 
+which takes `Arc<apollo_router::Configuration>`.
+A `Configuration` value can be created from various formats by deserializing with `serde`.
+The removed methods correspond to `server.introspection` and `server.experimental_defer_support`
+configuration keys respectively.
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 

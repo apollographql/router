@@ -69,20 +69,15 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema).await?;
+
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-        if configuration.server.introspection {
-            builder = builder.with_naive_introspection();
-        }
-        if configuration.server.experimental_defer_support {
-            builder = builder.with_defer_support();
-        }
+        builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
             builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
-
-        // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
