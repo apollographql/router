@@ -32,12 +32,13 @@ where
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let curr_time_instant = *self.curr_time.read().unwrap();
-        let curr_time = curr_time_instant.elapsed();
+        let mut curr_time = self.curr_time.read().unwrap().elapsed();
         let time_unit = self.rate.per();
 
         if curr_time > time_unit {
-            *self.curr_time.write().unwrap() = Instant::now();
+            let new_curr_time = Instant::now();
+            *self.curr_time.write().unwrap() = new_curr_time;
+            curr_time = new_curr_time.elapsed();
             self.previous_counter.swap(
                 self.current_counter.load(Ordering::SeqCst),
                 Ordering::SeqCst,

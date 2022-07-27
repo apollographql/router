@@ -1759,7 +1759,7 @@ expression: "&schema"
                   "description": "Number of requests",
                   "type": "integer",
                   "format": "uint64",
-                  "minimum": 0.0
+                  "minimum": 1.0
                 },
                 "per": {
                   "description": "Per time",
@@ -1794,7 +1794,7 @@ expression: "&schema"
                   "description": "Number of requests",
                   "type": "integer",
                   "format": "uint64",
-                  "minimum": 0.0
+                  "minimum": 1.0
                 },
                 "per": {
                   "description": "Per time",
@@ -1846,7 +1846,7 @@ expression: "&schema"
                     "description": "Number of requests",
                     "type": "integer",
                     "format": "uint64",
-                    "minimum": 0.0
+                    "minimum": 1.0
                   },
                   "per": {
                     "description": "Per time",
