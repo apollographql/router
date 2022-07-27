@@ -1358,7 +1358,31 @@ impl Rhai {
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
 
-        register_rhai_interface!(engine, router, query_planner, execution, subgraph);
+        register_rhai_interface!(engine, router, execution, subgraph);
+
+        engine
+            .register_get_result("context", |obj: &mut SharedMut<query_planner::Request>| {
+                Ok(obj.with_mut(|request| request.context.clone()))
+            })
+            .register_get_result("context", |obj: &mut SharedMut<query_planner::Response>| {
+                Ok(obj.with_mut(|response| response.context.clone()))
+            });
+
+        engine
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<query_planner::Request>, context: Context| {
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
+                },
+            )
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<query_planner::Response>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                },
+            );
 
         engine
     }
