@@ -506,6 +506,7 @@ impl Cors {
             )));
 
         if self.allow_any_origin.unwrap_or_default() {
+            dbg!("allow any origin");
             Ok(cors.allow_origin(cors::Any))
         } else if let Some(match_origins) = self.match_origins {
             let regexes = match_origins

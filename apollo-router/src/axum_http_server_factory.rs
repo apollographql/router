@@ -1987,4 +1987,213 @@ Content-Type: application/json\r
         );
         server.shutdown().await
     }
+
+    #[tokio::test]
+    async fn cors_origin_default() -> Result<(), ApolloRouterError> {
+        let (server, client) = init(MockRouterService::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        // Post query
+        let response = client
+            .request(Method::OPTIONS, url.as_str())
+            .header("Origin", "https://thisisatest.com")
+            .header("accept", "application/json")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "Content-type")
+            .send()
+            .await
+            .unwrap();
+
+        let headers = response.headers();
+        dbg!(&headers);
+
+        assert!(response.status().is_success());
+        assert!(headers
+            .get("Access-Control-Allow-Methods")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("POST"));
+        assert_eq!(
+            "Content-type",
+            headers
+                .get("Access-Control-Allow-Headers")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        assert_eq!(
+            "https://thisisatest.com",
+            headers
+                .get("Access-Control-Allow-Origin")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_origin_list() -> Result<(), ApolloRouterError> {
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(
+                        Cors::builder()
+                            .origins(vec!["http://thisoriginisallowed.com".to_string()])
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        // Post query
+        let response = client
+            .request(Method::OPTIONS, url.as_str())
+            .header("Origin", "https://thisoriginisallowed.com")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "Content-type")
+            .send()
+            .await
+            .unwrap();
+
+        let headers = response.headers();
+        dbg!(&response);
+        dbg!(&headers);
+        assert!(response.status().is_success());
+        assert!(headers
+            .get("Access-Control-Allow-Methods")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("POST"));
+        assert_eq!(
+            "Content-type",
+            headers
+                .get("Access-Control-Allow-Headers")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        assert_eq!(
+            "https://thisisatest.com",
+            headers
+                .get("access-control-allow-origin")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+
+        // Post query
+        let response = client
+            .request(Method::OPTIONS, url.as_str())
+            .header("Origin", "https://thisoriginisnotallowed.com")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "Content-type")
+            .send()
+            .await
+            .unwrap();
+
+        let headers = response.headers();
+
+        assert!(response.status().is_success());
+        assert!(headers
+            .get("Access-Control-Allow-Methods")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("POST"));
+        assert_eq!(
+            "Content-type",
+            headers
+                .get("Access-Control-Allow-Headers")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        assert_eq!(
+            "https://thisisatest.com",
+            headers
+                .get("Access-Control-Allow-Origin")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
+        // TODO re-enable after the release
+        // test_span::init();
+        // let root_span = info_span!("root");
+        // {
+        // let _guard = root_span.enter();
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http_ext::Response::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(example_response)
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/", server.listen_address());
+
+        // Post query
+        let response = client
+            .post(url.as_str())
+            .body(json!({ "query": "query" }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let response = client
+            .get(url.as_str())
+            .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await?;
+        // }
+        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
+        //     &root_span.id().unwrap(),
+        //     &test_span::Filter::new(Level::INFO)
+        // ));
+        Ok(())
+    }
 }
