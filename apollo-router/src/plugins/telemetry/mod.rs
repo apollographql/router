@@ -42,6 +42,8 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_core::field;
+use tracing_core::Field;
 use url::Url;
 
 use self::apollo::client_name_header_default;
@@ -344,18 +346,8 @@ impl Plugin for Telemetry {
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
             .instrument(move |req: &QueryPlannerRequest| {
-                let query = req
-                    .originating_request
-                    .body()
-                    .query
-                    .clone()
-                    .unwrap_or_default();
-                let operation_name = req
-                    .originating_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or_default();
+                let query = req.query.clone();
+                let operation_name = req.operation_name.clone().unwrap_or_default();
 
                 info_span!("query_planning",
                     graphql.document = query.as_str(),
@@ -741,17 +733,15 @@ impl Telemetry {
                 kind: metadata::Kind::SPAN,
                 target: module_path!(),
                 level: Level::INFO,
-                fields: graphql.document = query.as_str(),
-                // TODO add graphql.operation.type
-                graphql.operation.name = operation_name.as_str(),
-                client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default(),
-                "otel.kind" = %SpanKind::Internal
+                fields: (graphql.document = query.as_str(),
+                "graphql.operation.name" = operation_name.as_str(),
+                "client_name" = client_name.to_str().unwrap_or_default(),
+                "client_version" = client_version.to_str().unwrap_or_default(),
+                "otel.kind" = %SpanKind::Internal)
             );
             let identifier = CALLSITE.metadata().callsite();
             // let test_str = String::from("coucou");
             // let test = Box::new(test_str.as_str());
-            let t = Box::leak(Box::new([string_to_static_str(String::from("coucou"))]));
             let static_fields = config
                 .tracing
                 .as_ref()
@@ -761,26 +751,31 @@ impl Telemetry {
                 .map(|r| r.get_static_names())
                 .unwrap_or_default();
             let fields_set = FieldSet::new(static_fields, identifier);
-
-            for field in &fields_set {
-                let val = String::from("coucou");
-                let mut test = vec![Some((&field, Some(&val.as_str() as &dyn Value)))];
-                // TODO use dynamic vec
-                let vs = fields_set.value_set(&[(&field, Some(&val.as_str() as &dyn Value))]);
-                let span = Span::new(CALLSITE.metadata(), &vs);
+            let static_value_set = static_fields
+                .iter()
+                .map(|sf| Some((sf, Some(field::Empty))))
+                .collect::<Vec<Option<(&&str, Option<field::Empty>)>>>()
+                .leak();
+            // FIXME: issue is here !!!
+            // I need to pass an array of [Option<(&'static str, Option<field::Empty>)>;N]
+            let vs = fields_set.value_set(static_value_set);
+            let span = Span::new(CALLSITE.metadata(), dbg!(&vs));
+            dbg!(&span);
+            for field in static_fields {
+                if let Some(val) = config
+                    .tracing
+                    .as_ref()
+                    .and_then(|t| t.trace_config.as_ref())
+                    .and_then(|tc| tc.new_attributes.as_ref())
+                    .and_then(|na| na.router.as_ref())
+                    .and_then(|r| r.insert.as_ref())
+                    .and_then(|sv| sv.iter().find(|f| &f.name == field).map(|i| &i.value))
+                {
+                    println!("record {field} = {val}");
+                    span.record(*field, &val.as_str());
+                }
             }
 
-            let span = Span::new(CALLSITE.metadata(), &[("test", "coucou")]);
-
-            // let span = info_span!(
-            //     ROUTER_SPAN_NAME,
-            //     graphql.document = query.as_str(),
-            //     // TODO add graphql.operation.type
-            //     graphql.operation.name = operation_name.as_str(),
-            //     client_name = client_name.to_str().unwrap_or_default(),
-            //     client_version = client_version.to_str().unwrap_or_default(),
-            //     "otel.kind" = %SpanKind::Internal
-            // );
             span
         }
     }

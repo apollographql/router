@@ -190,11 +190,8 @@ impl Forward {
 impl LocationForwardConf {
     pub(crate) async fn get_from_router_response(
         &self,
-        response: RouterResponse<BoxStream<'static, Response>>,
-    ) -> (
-        RouterResponse<BoxStream<'static, Response>>,
-        HashMap<String, String>,
-    ) {
+        response: RouterResponse,
+    ) -> (RouterResponse, HashMap<String, String>) {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -462,7 +459,7 @@ impl LocationForwardConf {
             }
         }
 
-        static_names.leak()
+        dbg!(static_names.leak())
     }
 }
 
