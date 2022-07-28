@@ -2,6 +2,7 @@ use std::collections::HashMap;
 // This entire file is license key functionality
 use std::sync::Arc;
 
+use apollo_compiler::ApolloCompiler;
 use futures::stream::BoxStream;
 use serde_json::Map;
 use serde_json::Value;
@@ -96,6 +97,9 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
             tracing::debug!("activating plugin {}", plugin.name());
             plugin.activate();
             tracing::debug!("activated plugin {}", plugin.name());
+            let ctx = ApolloCompiler::new(schema.as_str());
+            plugin.schema_update(ctx);
+            tracing::debug!("plugin schema updated {}", plugin.name());
         }
 
         let pluggable_router_service = builder.build().await?;

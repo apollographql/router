@@ -24,6 +24,7 @@ use std::task::Poll;
 
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
+use apollo_compiler::ApolloCompiler;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -110,6 +111,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// plugins are registered.
     async fn new(config: Self::Config) -> Result<Self, BoxError>;
 
+    /// This is invoked whenever a new schema is made available to
+    /// the router.
+    fn schema_update(&mut self, _ctx: ApolloCompiler) {}
+
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
     fn activate(&mut self) {}
@@ -176,6 +181,10 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
+    /// This is invoked whenever a new schema is made available to
+    /// the router.
+    fn schema_update(&mut self, ctx: ApolloCompiler);
+
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
     fn activate(&mut self);
@@ -226,6 +235,10 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
+    fn schema_update(&mut self, ctx: ApolloCompiler) {
+        self.schema_update(ctx)
+    }
+
     #[allow(deprecated)]
     fn activate(&mut self) {
         self.activate()

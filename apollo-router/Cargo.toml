@@ -19,6 +19,7 @@ failfast = []
 [dependencies]
 access-json = "0.1.0"
 anyhow = "1.0.58"
+apollo-compiler = "0.1.0"
 apollo-parser = "0.2.8"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
