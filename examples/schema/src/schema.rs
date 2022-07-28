@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use apollo_compiler::ApolloCompiler;
-use apollo_parser::SyntaxTree;
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
@@ -37,11 +34,10 @@ impl Plugin for Schema {
     // string and finally we store that string for later use.
     fn schema_update(&mut self, ctx: ApolloCompiler) {
         // Obtain the AST from our compiler context
-        let mut ast = ctx.parse();
-        // Get our own mutable reference to the AST
-        let my_ast = Arc::<SyntaxTree>::make_mut(&mut ast);
-        // Need an owned AST, so clone our mutable reference
-        let text = my_ast.clone().document().to_string();
+        let ast = ctx.parse();
+        // Need an owned AST, so clone before accessing document and then
+        // converting to a string
+        let text = (*ast).clone().document().to_string();
         // XXX: Uncomment to fail
         // self.ctx = ctx;
         // Store the re-constructed string representation of our schema

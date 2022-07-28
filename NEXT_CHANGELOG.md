@@ -45,6 +45,17 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Add support for schema compiler context for plugins ([PR #1446](https://github.com/apollographql/router/pull/1446))
+
+If your plugin implements the new `schema_update(ctx)` interface, then your plugin will be invoked with a new
+`ApolloCompiler` context each time the plugin is created. You can use this context to perform analysis on your
+schema using the `apollo-rs` tools.
+
+There is a new example (`schema`) which illustrates how to use this new capability. Note: it is not accessible
+from `rhai` plugins at this point in time.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
+
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
 The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
