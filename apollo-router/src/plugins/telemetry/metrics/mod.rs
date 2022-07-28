@@ -7,7 +7,6 @@ use access_json::JSONQuery;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
@@ -25,7 +24,6 @@ use tower::util::BoxService;
 use tower::BoxError;
 
 use crate::graphql::Request;
-use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
@@ -197,11 +195,8 @@ impl Forward {
 impl AttributesForwardConf {
     pub(crate) async fn get_attributes_from_router_response(
         &self,
-        response: RouterResponse<BoxStream<'static, Response>>,
-    ) -> (
-        RouterResponse<BoxStream<'static, Response>>,
-        HashMap<String, String>,
-    ) {
+        response: RouterResponse,
+    ) -> (RouterResponse, HashMap<String, String>) {
         let mut attributes = HashMap::new();
 
         // Fill from static

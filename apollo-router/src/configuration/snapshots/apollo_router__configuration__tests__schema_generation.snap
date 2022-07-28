@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 837
+assertion_line: 848
 expression: "&schema"
 ---
 {
@@ -298,19 +298,21 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "rhai": {
+      "description": "Configuration for the Rhai Plugin",
+      "type": "object",
+      "properties": {
+        "main": {
+          "type": "string",
+          "nullable": true
         },
-        "experimental.rhai": {
-          "description": "Configuration for the Rhai Plugin",
-          "type": "object",
-          "required": [
-            "filename"
-          ],
-          "properties": {
-            "filename": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
+        "scripts": {
+          "type": "string",
+          "nullable": true
         }
       },
       "additionalProperties": false
@@ -323,7 +325,8 @@ expression: "&schema"
         "introspection": true,
         "landing_page": true,
         "endpoint": "/",
-        "health_check_path": "/.well-known/apollo/server-health"
+        "health_check_path": "/.well-known/apollo/server-health",
+        "experimental_defer_support": false
       },
       "type": "object",
       "properties": {
@@ -392,6 +395,11 @@ expression: "&schema"
           "description": "GraphQL endpoint default: \"/\"",
           "default": "/",
           "type": "string"
+        },
+        "experimental_defer_support": {
+          "description": "Experimental @defer directive support default: false",
+          "default": false,
+          "type": "boolean"
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",

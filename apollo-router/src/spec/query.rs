@@ -14,6 +14,7 @@ use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
+use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
@@ -29,6 +30,8 @@ pub struct Query {
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
 }
 
 impl Query {
@@ -59,8 +62,34 @@ impl Query {
                     .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
                 None => self.operations.get(0),
             };
+            if let Some(subselection) = &response.subselection {
+                // Get subselection from hashmap
+                match self.subselections.get(&(
+                    //FIXME: we should not have optional paths at all in the subselections map
+                    response.path.clone().or_else(|| Some(Path::default())),
+                    subselection.clone(),
+                )) {
+                    Some(subselection_query) => {
+                        let mut output = Object::default();
+                        let operation = &subselection_query.operations[0];
+                        response.data = Some(
+                            match self.apply_root_selection_set(
+                                operation,
+                                &variables,
+                                &mut input,
+                                &mut output,
+                                schema,
+                            ) {
+                                Ok(()) => output.into(),
+                                Err(InvalidValue) => Value::Null,
+                            },
+                        );
 
-            if let Some(operation) = operation {
+                        return;
+                    }
+                    None => failfast_debug!("can't find subselection for {:?}", subselection),
+                }
+            } else if let Some(operation) = operation {
                 let mut output = Object::default();
 
                 let all_variables = if operation.variables.is_empty() {
@@ -98,6 +127,7 @@ impl Query {
 
         response.data = Some(Value::default());
     }
+
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
         let string = query.into();
 
@@ -138,6 +168,7 @@ impl Query {
             string,
             fragments,
             operations,
+            subselections: HashMap::new(),
         })
     }
 
@@ -217,7 +248,7 @@ impl Query {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                *output = input.take();
+                                *output = input.clone();
                                 Ok(())
                             } else {
                                 *output = Value::Null;
@@ -281,7 +312,7 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -289,7 +320,7 @@ impl Query {
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -297,7 +328,7 @@ impl Query {
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -305,7 +336,7 @@ impl Query {
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -313,7 +344,7 @@ impl Query {
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -657,7 +688,7 @@ impl Query {
 }
 
 #[derive(Debug)]
-struct Operation {
+pub(crate) struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
@@ -1215,6 +1246,458 @@ mod tests {
                         {},
                     ],
                     "other": null,
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array stuff:array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get { aliased: array {stuff}}}",
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+            
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} aliased: array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array stuff: array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    // If this test fails, this means you got greedy about allocations,
+    // beware of aliases!
+    fn reformat_response_array_of_int_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_float_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Float]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_bool_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Boolean]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_string_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_id_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [ID]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
                 },
             }},
         );

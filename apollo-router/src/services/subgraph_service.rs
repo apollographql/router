@@ -1,5 +1,6 @@
 //! Tower fetcher for subgraphs.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
@@ -23,14 +24,18 @@ use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
+use tower::util::BoxService;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
 
@@ -261,6 +266,77 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
+pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
+    type SubgraphService: Service<
+            crate::SubgraphRequest,
+            Response = crate::SubgraphResponse,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send
+        + 'static;
+    type Future: Send + 'static;
+
+    fn new_service(&self, name: &str) -> Option<Self::SubgraphService>;
+}
+
+#[derive(Clone)]
+pub(crate) struct SubgraphCreator {
+    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
+
+    pub(crate) plugins: Arc<Plugins>,
+}
+
+impl SubgraphCreator {
+    pub(crate) fn new(
+        services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+        plugins: Arc<Plugins>,
+    ) -> Self {
+        SubgraphCreator {
+            services: Arc::new(services.into_iter().collect()),
+            plugins,
+        }
+    }
+}
+
+/// make new instances of the subgraph service
+///
+/// there can be multiple instances of that service executing at any given time
+pub trait MakeSubgraphService: Send + Sync + 'static {
+    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+}
+
+impl<S> MakeSubgraphService for S
+where
+    S: Service<crate::SubgraphRequest, Response = crate::SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S as Service<crate::SubgraphRequest>>::Future: Send,
+{
+    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> {
+        self.clone().boxed()
+    }
+}
+
+impl SubgraphServiceFactory for SubgraphCreator {
+    type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+    type Future =
+        <BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> as Service<
+            crate::SubgraphRequest,
+        >>::Future;
+
+    fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
+        self.services.get(name).map(|service| {
+            let service = service.make();
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -281,7 +357,6 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::http_ext;
-    use crate::json_ext::Object;
     use crate::query_planner::fetch::OperationKind;
     use crate::Context;
     use crate::SubgraphRequest;
@@ -344,10 +419,7 @@ mod tests {
 
             let original_body = Response {
                 data: Some(Value::String(ByteString::from("test"))),
-                path: None,
-                label: None,
-                errors: vec![],
-                extensions: Object::new(),
+                ..Response::default()
             };
             let mut encoder = GzipEncoder::new(Vec::new());
             encoder
@@ -475,10 +547,7 @@ mod tests {
         // Test the right decompression of the body
         let resp_from_subgraph = Response {
             data: Some(Value::String(ByteString::from("test"))),
-            path: None,
-            label: None,
-            errors: vec![],
-            extensions: Object::new(),
+            ..Response::default()
         };
 
         assert_eq!(resp.response.body(), &resp_from_subgraph);

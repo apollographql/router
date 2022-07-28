@@ -20,7 +20,6 @@ use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::stream::BoxStream;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
@@ -50,7 +49,6 @@ use self::apollo::client_version_header_default;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
-use crate::graphql::Response;
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
@@ -146,8 +144,8 @@ impl Drop for Telemetry {
             // Tracer providers must be flushed. This may happen as part of otel if the provider was set
             // as the global, but may also happen in the case of an failed config reload.
             // If the tracer prover is present then it was not handed over so we must flush it.
-            // We must make the call to force_flush() from spawn_blocking() (or spawn a thread) to
-            // ensure that the call to force_flush() is made from a separate thread.
+            // We must make the call to force_flush() from a separate thread to prevent hangs:
+            // see https://github.com/open-telemetry/opentelemetry-rust/issues/536.
             ::tracing::debug!("flushing telemetry");
             let jh = tokio::task::spawn_blocking(move || {
                 opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
@@ -266,9 +264,9 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse<BoxStream<'static, Response>>, BoxError> {
+        &self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
@@ -286,10 +284,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let mut result: Result<
-                            RouterResponse<BoxStream<'static, Response>>,
-                            BoxError,
-                        > = fut.await;
+                        let mut result: Result<RouterResponse, BoxError> = fut.await;
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -314,12 +309,12 @@ impl Plugin for Telemetry {
                             Ok(router_response) => {
                                 let is_not_success =
                                     !router_response.response.status().is_success();
-                                Ok(router_response
-                                    .map(move |response_stream| {
-                                        let sender = sender.clone();
-                                        let ctx = ctx.clone();
+                                Ok(router_response.map(move |response_stream| {
+                                    let sender = sender.clone();
+                                    let ctx = ctx.clone();
 
-                                        response_stream.map(move |response| {
+                                    response_stream
+                                        .map(move |response| {
                                             let response_has_errors = !response.errors.is_empty();
 
                                             if !matches!(sender, Sender::Noop) {
@@ -332,8 +327,8 @@ impl Plugin for Telemetry {
                                             }
                                             response
                                         })
-                                    })
-                                    .boxed())
+                                        .boxed()
+                                }))
                             }
                         }
                     }
@@ -344,7 +339,7 @@ impl Plugin for Telemetry {
     }
 
     fn query_planning_service(
-        &mut self,
+        &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
@@ -373,14 +368,9 @@ impl Plugin for Telemetry {
     }
 
     fn execution_service(
-        &mut self,
-        service: BoxService<
-            ExecutionRequest,
-            ExecutionResponse<BoxStream<'static, Response>>,
-            BoxError,
-        >,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse<BoxStream<'static, Response>>, BoxError>
-    {
+        &self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let query = req
@@ -406,7 +396,7 @@ impl Plugin for Telemetry {
     }
 
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
@@ -867,9 +857,9 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<RouterResponse<BoxStream<'static, Response>>, BoxError>,
+        result: Result<RouterResponse, BoxError>,
         request_duration: Duration,
-    ) -> Result<RouterResponse<BoxStream<'static, Response>>, BoxError> {
+    ) -> Result<RouterResponse, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -1212,8 +1202,7 @@ mod tests {
                     .header("x-custom", "coming_from_header")
                     .data(json!({"data": {"my_value": 2}}))
                     .build()
-                    .unwrap()
-                    .boxed())
+                    .unwrap())
             });
 
         let mut mock_subgraph_service = MockSubgraphService::new();
@@ -1241,7 +1230,7 @@ mod tests {
                     .build())
             });
 
-        let mut dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(

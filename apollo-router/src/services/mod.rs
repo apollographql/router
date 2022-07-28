@@ -4,12 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::ready;
-use futures::future::Ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
-use futures::stream::Once;
 use futures::stream::StreamExt;
-use futures::Stream;
 use http::header::HeaderName;
 use http::method::Method;
 use http::HeaderValue;
@@ -39,6 +36,7 @@ use crate::*;
 mod execution_service;
 pub mod http_ext;
 pub(crate) mod layers;
+pub mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
 
@@ -139,18 +137,17 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse<BoxStream<'static, Response>>: Send);
+assert_impl_all!(RouterResponse: Send);
 /// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
-#[derive(Clone, Debug)]
-pub struct RouterResponse<T: Stream<Item = Response>> {
-    pub response: http_ext::Response<T>,
+pub struct RouterResponse {
+    pub response: http_ext::Response<BoxStream<'static, Response>>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse<Once<Ready<Response>>> {
+impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
@@ -189,7 +186,7 @@ impl RouterResponse<Once<Ready<Response>>> {
             }
         }
 
-        let http_response = builder.body(once(ready(res)))?;
+        let http_response = builder.body(once(ready(res)).boxed())?;
 
         // Create a compatible Response
         let compat_response = http_ext::Response {
@@ -254,35 +251,32 @@ impl RouterResponse<Once<Ready<Response>>> {
 
     pub fn new_from_graphql_response(response: Response, context: Context) -> Self {
         Self {
-            response: http::Response::new(once(ready(response))).into(),
+            response: http::Response::new(once(ready(response)).boxed()).into(),
             context,
         }
     }
 }
 
-impl<T: Stream<Item = Response> + Send + Unpin + 'static> RouterResponse<T> {
+impl RouterResponse {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
-}
 
-impl<T: Stream<Item = Response> + Send + 'static> RouterResponse<T> {
-    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(
+        response: http_ext::Response<BoxStream<'static, Response>>,
+        context: Context,
+    ) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> RouterResponse<U>
+    pub fn map<F>(self, f: F) -> RouterResponse
     where
-        F: FnMut(T) -> U,
+        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         RouterResponse {
             context: self.context,
             response: self.response.map(f),
         }
-    }
-
-    pub fn boxed(self) -> RouterResponse<BoxStream<'static, Response>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
     }
 }
 
@@ -290,8 +284,8 @@ assert_impl_all!(QueryPlannerRequest: Send);
 /// [`Context`] and [`QueryPlanOptions`] for the request.
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
-    /// Original request to the Router.
-    pub originating_request: http_ext::Request<Request>,
+    pub query: String,
+    pub operation_name: Option<String>,
     /// Query plan options
     pub query_plan_options: QueryPlanOptions,
 
@@ -305,12 +299,14 @@ impl QueryPlannerRequest {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub fn new(
-        originating_request: http_ext::Request<Request>,
+        query: String,
+        operation_name: Option<String>,
         query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
-            originating_request,
+            query,
+            operation_name,
             query_plan_options,
             context,
         }
@@ -602,18 +598,18 @@ impl ExecutionRequest {
     }
 }
 
-assert_impl_all!(ExecutionResponse<BoxStream<'static, Response>>: Send);
+assert_impl_all!(ExecutionResponse: Send);
 /// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the execution response and the context.
-pub struct ExecutionResponse<T: Stream<Item = Response>> {
-    pub response: http_ext::Response<T>,
+pub struct ExecutionResponse {
+    pub response: http_ext::Response<BoxStream<'static, Response>>,
 
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl ExecutionResponse<Once<Ready<Response>>> {
+impl ExecutionResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
@@ -640,7 +636,7 @@ impl ExecutionResponse<Once<Ready<Response>>> {
         // Build an http Response
         let http_response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
-            .body(once(ready(res)))
+            .body(once(ready(res)).boxed())
             .expect("Response is serializable; qed");
 
         // Create a compatible Response
@@ -703,18 +699,21 @@ impl ExecutionResponse<Once<Ready<Response>>> {
     }
 }
 
-impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
+impl ExecutionResponse {
     /// This is the constructor to use when constructing a real ExecutionResponse.
     ///
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_from_response(response: http_ext::Response<T>, context: Context) -> Self {
+    pub fn new_from_response(
+        response: http_ext::Response<BoxStream<'static, Response>>,
+        context: Context,
+    ) -> Self {
         Self { response, context }
     }
 
-    pub fn map<F, U: Stream<Item = Response>>(self, f: F) -> ExecutionResponse<U>
+    pub fn map<F>(self, f: F) -> ExecutionResponse
     where
-        F: FnMut(T) -> U,
+        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         ExecutionResponse {
             context: self.context,
@@ -722,12 +721,6 @@ impl<T: Stream<Item = Response> + Send + 'static> ExecutionResponse<T> {
         }
     }
 
-    pub fn boxed(self) -> ExecutionResponse<BoxStream<'static, Response>> {
-        self.map(|stream| Box::pin(stream) as BoxStream<'static, Response>)
-    }
-}
-
-impl<T: Stream<Item = Response> + Send + Unpin + 'static> ExecutionResponse<T> {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }

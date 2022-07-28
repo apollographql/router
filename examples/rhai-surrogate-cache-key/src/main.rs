@@ -25,7 +25,8 @@ mod tests {
     async fn test_surrogate_cache_key_created() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_surrogate_cache_key.rhai",
+            "scripts": "src",
+            "main": "rhai_surrogate_cache_key.rhai",
         }))
         .expect("valid conf supplied");
 

@@ -132,6 +132,10 @@ expression: get_spans()
               [
                 "otel.kind",
                 "internal"
+              ],
+              [
+                "message",
+                "flushing telemetry"
               ]
             ],
             "metadata": {

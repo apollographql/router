@@ -23,10 +23,11 @@ async fn all_rhai_callbacks_are_invoked() {
     let _guard = tracing::dispatcher::set_default(&subscriber);
 
     let dyn_plugin: Box<dyn DynPlugin> = plugins()
-        .get("experimental.rhai")
+        .get("apollo.rhai")
         .expect("Plugin not found")
         .create_instance(
-            &Value::from_str(r#"{"filename":"tests/fixtures/test_callbacks.rhai"}"#).unwrap(),
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main": "test_callbacks.rhai"}"#)
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -38,14 +39,14 @@ async fn all_rhai_callbacks_are_invoked() {
     );
 
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone())
-        .with_dyn_plugin("experimental.rhai".to_string(), dyn_plugin);
+        .with_dyn_plugin("apollo.rhai".to_string(), dyn_plugin);
 
     let subgraphs = schema.subgraphs();
     for (name, _url) in subgraphs {
         let service = SubgraphService::new(name.to_owned());
         builder = builder.with_subgraph_service(name, service);
     }
-    let (router, _) = builder.build().await.unwrap();
+    let router = builder.build().await.unwrap().test_service();
 
     let request = http_ext::Request::fake_builder()
         .body(

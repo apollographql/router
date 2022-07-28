@@ -25,7 +25,8 @@ mod tests {
     async fn test_subgraph_logs_data() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_subgraph_request_log.rhai",
+            "scripts": "src",
+            "main": "rhai_subgraph_request_log.rhai",
         }))
         .expect("valid conf supplied");
 
