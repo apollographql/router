@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## ❗ BREAKING ❗
 
-### Move `experimental.rhai` out of `experimental` [PR #1365](https://github.com/apollographql/router/pull/1365)
+### Move `experimental.rhai` out of `experimental` ([PR #1365](https://github.com/apollographql/router/pull/1365))
 
 You will need to update your YAML configuration file to use the correct name for `rhai` plugin.
 
@@ -29,7 +29,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### The opentelemetry-otlp crate needs a http-client feature [PR #1392](https://github.com/apollographql/router/pull/1392)
+### The opentelemetry-otlp crate needs a http-client feature ([PR #1392](https://github.com/apollographql/router/pull/1392))
 
 The opentelemetry-otlp crate only checks at runtime if a HTTP client was added through
 cargo features. We now use reqwest for that.
@@ -45,7 +45,7 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
+### Dependency updates ([PR #1389](https://github.com/apollographql/router/issues/1389), [PR #1394](https://github.com/apollographql/router/issues/1394), [PR #1395](https://github.com/apollographql/router/issues/1395))
 
 Dependency updates were blocked for some time due to incompatibilities:
 
@@ -60,7 +60,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## ❗ BREAKING ❗
 
-### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289))
 
 the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
 they work like a tower Layer, they can use `&self` instead. This change
@@ -75,7 +75,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
-### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
+### Add support to add custom resources on metrics. ([PR #1354](https://github.com/apollographql/router/pull/1354))
 
 Resources are almost like attributes but more global. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics.  This functionality can be used to, for example,
 apply a `service.name` to metrics to make them easier to find in larger infrastructure, as demonstrated here:
@@ -93,19 +93,19 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+### Fix fragment on interface without typename ([PR #1371](https://github.com/apollographql/router/pull/1371))
 
 When the subgraph doesn't return the `__typename` and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
 
-### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+### Fix detection of an introspection query ([PR #1370](https://github.com/apollographql/router/pull/1370))
 
 A query that only contains `__typename` at the root will now special-cased as merely an introspection query and will bypass more complex query-planner execution (its value will just be `Query`).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
 
-### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
+### Accept nullable list as input ([PR #1363](https://github.com/apollographql/router/pull/1363))
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
 
@@ -127,7 +127,7 @@ generate the first response right inside the same future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
 
-### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+### Remove deprecated `failure` crate from the dependency tree ([PR #1373](https://github.com/apollographql/router/pull/1373))
 
 This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
 
@@ -181,7 +181,7 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Rename `http_compat` to `http_ext` ([PR #1291](https://github.com/apollographql/router/pull/1291)
+### Rename `http_compat` to `http_ext` ([PR #1291](https://github.com/apollographql/router/pull/1291))
 
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
 such as the `Request::mock()` function.
@@ -359,7 +359,7 @@ use apollo_router::subscriber::set_global_subscriber;
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)), [PR #1263](https://github.com/apollographql/router/pull/1263))
 
 The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required.
 Most users will continue to use:
@@ -428,7 +428,7 @@ You will now be able to actually use the helm chart without being on a managed g
 
 By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
-### Fail when unknown fields are encountered in configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
+### Fail when unknown fields are encountered in configuration ([PR #1278](https://github.com/apollographql/router/pull/1278))
 
 Now if you add an unknown configuration field at the root of your configuration file it will return an error, rather than silently continuing with un-recognized options.
 
@@ -436,7 +436,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🚀 Features
 
-### Allow custom subgraph-specific attributes to be added to emitted metrics [PR #1300](https://github.com/apollographql/router/pull/1300)
+### Allow custom subgraph-specific attributes to be added to emitted metrics ([PR #1300](https://github.com/apollographql/router/pull/1300))
 
 Previously, it was only possible to add custom attributes from headers which the router received from the external GraphQL client. Now, you are able to add custom attributes coming from both the headers and the body of either the Router's or the Subgraph's router request or response. You also have the ability to add an attributes from the context. For example:
 
@@ -484,7 +484,7 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Add support for modifying variables from a plugin [PR #1257](https://github.com/apollographql/router/pull/1257)
+### Add support for modifying variables from a plugin ([PR #1257](https://github.com/apollographql/router/pull/1257))
 
 Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported via both Rust and Rhai plugins.
 
