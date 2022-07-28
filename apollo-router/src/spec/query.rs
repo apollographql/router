@@ -889,9 +889,9 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate($schema)
-                .parse::<Schema>()
-                .expect("could not parse schema");
+            let schema = with_supergraph_boilerplate($schema);
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
             let api_schema = schema.api_schema();
             let query =
                 Query::parse($query, &schema, &Default::default()).expect("could not parse query");
@@ -943,9 +943,9 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate_fed2($schema)
-                .parse::<Schema>()
-                .expect("could not parse schema");
+            let schema = with_supergraph_boilerplate_fed2($schema);
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
             let api_schema = schema.api_schema();
             let query =
                 Query::parse($query, &schema, &Default::default()).expect("could not parse query");
@@ -1745,7 +1745,8 @@ mod tests {
                 Value::Object(object) => object,
                 _ => unreachable!("variables must be an object"),
             };
-            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let schema =
+                Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
                 .query($query.to_string())
@@ -3644,9 +3645,8 @@ mod tests {
             id: String!
             body: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let query = Query::parse(
             "query  {
@@ -3781,9 +3781,8 @@ mod tests {
             id: String!
             body: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let query = Query::parse(
             "query  {
@@ -3910,9 +3909,8 @@ mod tests {
             id: String!
             name: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let _query_error = Query::parse(
             "query  {
@@ -5155,7 +5153,7 @@ mod tests {
             }
         }";
 
-        let schema = schema.parse::<Schema>().expect("could not parse schema");
+        let schema = Schema::parse(schema, &Default::default()).expect("could not parse schema");
         let api_schema = schema.api_schema();
         let query =
             Query::parse(query, &schema, &Default::default()).expect("could not parse query");
@@ -5342,9 +5340,8 @@ mod tests {
             baz: String
         }";
 
-        let schema = with_supergraph_boilerplate(schema)
-            .parse::<Schema>()
-            .expect("could not parse schema");
+        let schema = with_supergraph_boilerplate(schema);
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
         let api_schema = schema.api_schema();
 
         let query = "{

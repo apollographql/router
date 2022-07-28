@@ -689,8 +689,8 @@ async fn setup_router_and_registry(
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
-    let schema: Arc<Schema> =
-        Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
+    let schema = include_str!("fixtures/supergraph.graphql");
+    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(config);

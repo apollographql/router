@@ -66,6 +66,26 @@ configuration keys respectively.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
 
+### Changes to the `SchemaKind` enum ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+The `Instance` variant is replaced with a variant named `String` that contains… 
+a `String` instead of `Box<apollo_router::Schema>`,
+so you no longer need to parse the schema before giving it to the router.
+Similarly, the `Stream` variant now contains a stream of `String`s 
+instead of a stream of already-parsed `Schema`s.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+### `Schema` no longer implements `FromStr` ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+This means that `str.parse::<apollo_router::Schema>()` is no longer available.
+If you still need a parsed `Schema` (see above),
+use `apollo_router::Schema(str, &configuration)` instead.
+To use the default `apollo_router::Configuration` 
+you can call `apollo_router::Schema(str, &Default::default())`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
 ## 🚀 Features
 
 ### Publish helm chart to OCI registry ([PR #1447](https://github.com/apollographql/router/pull/1447))

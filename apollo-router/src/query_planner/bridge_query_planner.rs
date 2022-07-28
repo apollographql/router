@@ -259,7 +259,8 @@ mod tests {
     }
 
     fn example_schema() -> Schema {
-        include_str!("testdata/schema.graphql").parse().unwrap()
+        let schema = include_str!("testdata/schema.graphql");
+        Schema::parse(schema, &Default::default()).unwrap()
     }
 
     #[test]

@@ -105,7 +105,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let schema: Schema = schema.parse().unwrap();
+    let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
     let service = YamlRouterServiceFactory::default()
         .create(Arc::new(config), Arc::new(schema), None)
@@ -389,7 +389,8 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config).unwrap();
 
         let service = YamlRouterServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None)
@@ -399,9 +400,8 @@ mod test {
 
     #[test]
     fn test_inject_schema_id() {
-        let schema = include_str!("testdata/starstuff@current.graphql")
-            .parse()
-            .unwrap();
+        let schema = include_str!("testdata/starstuff@current.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =

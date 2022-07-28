@@ -916,7 +916,7 @@ mod tests {
 
     #[test]
     fn routing_url_in_schema() {
-        let schema: crate::Schema = r#"
+        let schema = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -936,9 +936,9 @@ mod tests {
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
-        }"#
-        .parse()
-        .unwrap();
+        }
+        "#;
+        let schema = crate::Schema::parse(schema, &Default::default()).unwrap();
 
         let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -989,9 +989,9 @@ mod tests {
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
-        }"#
-        .parse::<crate::Schema>()
-        .expect_err("Must have an error because we have one missing subgraph routing url");
+        }"#;
+        let schema_error = crate::Schema::parse(schema_error, &Default::default())
+            .expect_err("Must have an error because we have one missing subgraph routing url");
 
         if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
             assert_eq!(subgraph, "reviews");
