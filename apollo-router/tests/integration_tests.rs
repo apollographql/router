@@ -640,12 +640,9 @@ async fn setup_router_and_registry() -> (
     ))
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(PluginInit::new(
-        Default::default(),
-        Default::default(),
-    ))
-    .await
-    .unwrap();
+    let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))
+        .await
+        .unwrap();
     builder = builder
         .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
         .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
