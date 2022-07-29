@@ -320,7 +320,21 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": null,
+        "cors": {
+          "allow_any_origin": null,
+          "allow_credentials": null,
+          "allow_headers": null,
+          "expose_headers": null,
+          "origins": [
+            "https://studio.apollographql.com"
+          ],
+          "match_origins": null,
+          "methods": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ]
+        },
         "introspection": true,
         "landing_page": true,
         "endpoint": "/",
@@ -331,7 +345,21 @@ expression: "&schema"
       "properties": {
         "cors": {
           "description": "Cross origin request headers.",
-          "default": null,
+          "default": {
+            "allow_any_origin": null,
+            "allow_credentials": null,
+            "allow_headers": null,
+            "expose_headers": null,
+            "origins": [
+              "https://studio.apollographql.com"
+            ],
+            "match_origins": null,
+            "methods": [
+              "GET",
+              "POST",
+              "OPTIONS"
+            ]
+          },
           "type": "object",
           "properties": {
             "allow_any_origin": {
@@ -396,8 +424,7 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "endpoint": {
           "description": "GraphQL endpoint default: \"/\"",

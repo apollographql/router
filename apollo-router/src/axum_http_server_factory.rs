@@ -98,7 +98,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .server
                 .cors
                 .clone()
-                .unwrap_or_default()
                 .into_layer()
                 .map_err(|e| {
                     ApolloRouterError::ConfigError(
@@ -822,11 +821,6 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .cors(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                )
                                 .build(),
                         )
                         .build(),
@@ -915,11 +909,6 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                                .cors(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                )
                                 .build(),
                         )
                         .build(),
@@ -1605,7 +1594,7 @@ mod tests {
         let response = client
             .request(Method::OPTIONS, &format!("{}/", server.listen_address()))
             .header(ACCEPT, "text/html")
-            .header(ORIGIN, "http://studio")
+            .header(ORIGIN, "https://studio.apollographql.com")
             .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
             .header(
                 ACCESS_CONTROL_REQUEST_HEADERS,
@@ -1618,7 +1607,7 @@ mod tests {
         assert_header!(
             &response,
             ACCESS_CONTROL_ALLOW_ORIGIN,
-            vec!["http://studio"],
+            vec!["https://studio.apollographql.com"],
             "Incorrect access control allow origin header"
         );
         let headers = response.headers().get_all(ACCESS_CONTROL_ALLOW_HEADERS);
@@ -1990,6 +1979,22 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_origin_default() -> Result<(), ApolloRouterError> {
+        let (server, client) = init(MockRouterService::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com")
+                .await;
+        assert_cors_origin(response, "https://studio.apollographql.com");
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
+        assert_not_cors_origin(response, "https://this.wont.work.com");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
@@ -2104,7 +2109,7 @@ Content-Type: application/json\r
         assert!(response.status().is_success());
         let headers = response.headers();
         dbg!(headers);
-        assert_headers_valid(headers);
+        assert_headers_valid(&response);
         assert!(origin_valid(headers, origin));
     }
 
@@ -2114,21 +2119,9 @@ Content-Type: application/json\r
         assert!(!origin_valid(headers, origin));
     }
 
-    fn assert_headers_valid(headers: &HeaderMap) {
-        assert!(headers
-            .get("access-control-allow-methods")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("POST"));
-        assert_eq!(
-            "content-type",
-            headers
-                .get("access-control-allow-headers")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        )
+    fn assert_headers_valid(response: &reqwest::Response) {
+        assert_header_contains!(response, ACCESS_CONTROL_ALLOW_METHODS, &["POST"]);
+        assert_header_contains!(response, ACCESS_CONTROL_ALLOW_HEADERS, &["content-type"]);
     }
 
     fn origin_valid(headers: &HeaderMap, origin: &str) -> bool {

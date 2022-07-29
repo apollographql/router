@@ -246,7 +246,7 @@ pub(crate) struct Server {
 
     /// Cross origin request headers.
     #[serde(default)]
-    pub(crate) cors: Option<Cors>,
+    pub(crate) cors: Cors,
 
     /// introspection queries
     /// enabled by default
@@ -288,7 +288,7 @@ impl Server {
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors,
+            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
@@ -529,6 +529,7 @@ impl Cors {
                 },
             )))
         } else {
+            dbg!("list", &self.origins);
             Ok(cors.allow_origin(cors::AllowOrigin::list(
                 self.origins.into_iter().filter_map(|origin| {
                     origin
@@ -1138,7 +1139,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
@@ -1158,7 +1158,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
@@ -1178,7 +1177,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
