@@ -138,7 +138,6 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    // async fn new(config: Self::Config) -> Result<Self, BoxError>;
     async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError>;
 
     /// This is invoked after all plugins have been created and we're ready to go live.
