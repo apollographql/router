@@ -2035,13 +2035,15 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_origin_list() -> Result<(), ApolloRouterError> {
+        let valid_origin = "https://thisoriginisallowed.com";
+
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .cors(
                         Cors::builder()
-                            .origins(vec!["http://thisoriginisallowed.com".to_string()])
+                            .origins(vec![valid_origin.to_string()])
                             .build(),
                     )
                     .build(),
@@ -2051,79 +2053,67 @@ Content-Type: application/json\r
             init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
         let url = format!("{}/", server.listen_address());
 
-        // Post query
-        let response = client
-            .request(Method::OPTIONS, url.as_str())
-            .header("Origin", "https://thisoriginisallowed.com")
-            .header("Access-Control-Request-Method", "POST")
-            .header("Access-Control-Request-Headers", "Content-type")
-            .send()
-            .await
-            .unwrap();
+        let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
+        assert_cors_origin(response, valid_origin);
 
-        let headers = response.headers();
-        dbg!(&response);
-        dbg!(&headers);
-        assert!(response.status().is_success());
-        assert!(headers
-            .get("Access-Control-Allow-Methods")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("POST"));
-        assert_eq!(
-            "Content-type",
-            headers
-                .get("Access-Control-Allow-Headers")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
-        assert_eq!(
-            "https://thisisatest.com",
-            headers
-                .get("access-control-allow-origin")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
+        assert_not_cors_origin(response, "https://thisoriginisinvalid");
 
-        // Post query
-        let response = client
-            .request(Method::OPTIONS, url.as_str())
-            .header("Origin", "https://thisoriginisnotallowed.com")
-            .header("Access-Control-Request-Method", "POST")
-            .header("Access-Control-Request-Headers", "Content-type")
-            .send()
-            .await
-            .unwrap();
-
-        let headers = response.headers();
-
-        assert!(response.status().is_success());
-        assert!(headers
-            .get("Access-Control-Allow-Methods")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("POST"));
-        assert_eq!(
-            "Content-type",
-            headers
-                .get("Access-Control-Allow-Headers")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
-        assert_eq!(
-            "https://thisisatest.com",
-            headers
-                .get("Access-Control-Allow-Origin")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
         Ok(())
+    }
+
+    async fn request_cors_with_origin(
+        client: &Client,
+        url: &str,
+        origin: &str,
+    ) -> reqwest::Response {
+        client
+            .request(Method::OPTIONS, url)
+            .header("Origin", origin)
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .send()
+            .await
+            .unwrap()
+    }
+
+    fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+        assert!(response.status().is_success());
+        let headers = response.headers();
+        dbg!(&headers);
+        assert_headers_valid(&headers);
+        assert!(origin_valid(headers, origin));
+    }
+
+    fn assert_not_cors_origin(response: reqwest::Response, origin: &str) {
+        assert!(response.status().is_success());
+        let headers = response.headers();
+        assert!(!origin_valid(headers, origin));
+    }
+
+    fn assert_headers_valid(headers: &HeaderMap) {
+        assert!(headers
+            .get("access-control-allow-methods")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("POST"));
+        assert_eq!(
+            "content-type",
+            headers
+                .get("access-control-allow-headers")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        )
+    }
+
+    fn origin_valid(headers: &HeaderMap, origin: &str) -> bool {
+        headers
+            .get("access-control-allow-origin")
+            .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
+            .unwrap_or_default()
     }
 
     #[tokio::test]
