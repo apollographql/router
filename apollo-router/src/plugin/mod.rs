@@ -319,7 +319,6 @@ macro_rules! register_plugin {
                 $crate::plugin::PluginFactory::new(
                     |configuration, schema| Box::pin(async move {
                         let init = $crate::plugin::PluginInitialise::try_new(configuration.clone(), schema)?;
-                        // let configuration = $crate::_private::serde_json::from_value(configuration.config.clone())?;
                         let plugin = $value::new(init).await?;
                         Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
                     }),
