@@ -45,6 +45,19 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Configure Regex based CORS rules ([PR #1444](https://github.com/apollographql/router/pull/1444))
+
+The router now supports regex based CORS rules, as explained in the [docs](https://www.apollographql.com/docs/router/configuration/cors)
+
+```yaml title="router.yaml"
+server:
+  cors:
+    match_origins:
+      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
+```
+
+By [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/1444
+
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
 The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into

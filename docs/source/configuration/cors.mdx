@@ -38,7 +38,7 @@ server:
       - https://www.your-app.example.com/
       - https://studio.apollographql.com/ # Keep this so Apollo Studio can run queries against your router
     match_origins:
-      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with api.example.com
+      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
 ```
 
 You can also disable CORS entirely by setting `origins` to an empty list:
