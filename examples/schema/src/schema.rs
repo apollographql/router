@@ -1,6 +1,6 @@
 use apollo_compiler::ApolloCompiler;
 use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInitialise;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -21,7 +21,7 @@ impl Plugin for Schema {
     // Config is a unit, and `Schema` derives default.
     type Config = ();
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Schema {
             schema: init.schema,
         })

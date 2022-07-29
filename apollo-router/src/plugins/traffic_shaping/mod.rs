@@ -25,7 +25,7 @@ use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
@@ -74,7 +74,7 @@ struct TrafficShaping {
 impl Plugin for TrafficShaping {
     type Config = Config;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
             config: init.config,
         })

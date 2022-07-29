@@ -1,5 +1,5 @@
 use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInitialise;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::ExecutionRequest;
 use apollo_router::services::ExecutionResponse;
@@ -33,7 +33,7 @@ struct Conf {
 impl Plugin for HelloWorld {
     type Config = Conf;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(HelloWorld {
             configuration: init.config,
         })
@@ -110,7 +110,7 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInitialise;
+    use apollo_router::plugin::PluginInit;
 
     use super::Conf;
     use super::HelloWorld;
@@ -135,7 +135,7 @@ mod tests {
         };
 
         // Build an instance of our plugin to use in the test harness
-        let plugin = HelloWorld::new(PluginInitialise::new(conf, Default::default()))
+        let plugin = HelloWorld::new(PluginInit::new(conf, Default::default()))
             .await
             .expect("created plugin");
 

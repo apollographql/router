@@ -9,7 +9,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
@@ -23,7 +23,7 @@ struct OverrideSubgraphUrl {
 impl Plugin for OverrideSubgraphUrl {
     type Config = HashMap<String, url::Url>;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(OverrideSubgraphUrl {
             urls: init
                 .config

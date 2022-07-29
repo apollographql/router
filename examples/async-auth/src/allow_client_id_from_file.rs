@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInitialise;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -33,7 +33,7 @@ struct AllowClientIdFromFile {
 impl Plugin for AllowClientIdFromFile {
     type Config = AllowClientIdConfig;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let AllowClientIdConfig { path, header } = init.config;
         let allowed_ids_path = PathBuf::from(path.as_str());
         Ok(Self {
@@ -179,7 +179,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInitialise;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::services::RouterRequest;
     use apollo_router::services::RouterResponse;
     use http::StatusCode;
@@ -215,7 +215,7 @@ mod tests {
         let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),
@@ -259,7 +259,7 @@ mod tests {
         let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),
@@ -331,7 +331,7 @@ mod tests {
         let mock_service = mock.build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),

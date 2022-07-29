@@ -53,23 +53,25 @@ type InstanceFactory =
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
-/// Initialise a plugin
-pub struct PluginInitialise<T> {
+/// Initialise details for a plugin
+pub struct PluginInit<T> {
+    /// Configuration
     pub config: T,
+    /// Router Supergraph Schema
     pub schema: String,
 }
 
-impl<T> PluginInitialise<T>
+impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
     pub fn new(config: T, schema: String) -> Self {
-        PluginInitialise { config, schema }
+        PluginInit { config, schema }
     }
 
     pub fn try_new(config: serde_json::Value, schema: String) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
-        Ok(PluginInitialise { config, schema })
+        Ok(PluginInit { config, schema })
     }
 }
 
@@ -138,7 +140,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError>;
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>;
 
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
@@ -317,7 +319,7 @@ macro_rules! register_plugin {
                 qualified_name,
                 $crate::plugin::PluginFactory::new(
                     |configuration, schema| Box::pin(async move {
-                        let init = $crate::plugin::PluginInitialise::try_new(configuration.clone(), schema)?;
+                        let init = $crate::plugin::PluginInit::try_new(configuration.clone(), schema)?;
                         let plugin = $value::new(init).await?;
                         Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
                     }),

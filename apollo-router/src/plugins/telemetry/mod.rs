@@ -44,7 +44,7 @@ use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -181,7 +181,7 @@ impl Plugin for Telemetry {
         global::set_text_map_propagator(Self::create_propagator(&self.config));
     }
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
         let mut config = init.config;
         let apollo = config

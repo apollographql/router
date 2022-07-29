@@ -253,7 +253,7 @@ mod test {
     use crate::plugin::test::IntoSchema::Canned;
     use crate::plugin::test::PluginTestHarness;
     use crate::plugin::Plugin;
-    use crate::plugin::PluginInitialise;
+    use crate::plugin::PluginInit;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
@@ -406,7 +406,7 @@ mod test {
     async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInitialise::new(
+        Telemetry::new(PluginInit::new(
             config::Conf {
                 metrics: None,
                 tracing: None,

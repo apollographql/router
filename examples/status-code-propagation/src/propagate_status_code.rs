@@ -1,5 +1,5 @@
 use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInitialise;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -30,7 +30,7 @@ struct PropagateStatusCode {
 impl Plugin for PropagateStatusCode {
     type Config = PropagateStatusCodeConfig;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
             status_codes: init.config.status_codes,
         })
@@ -100,7 +100,7 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInitialise;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::services::RouterRequest;
     use apollo_router::services::RouterResponse;
     use apollo_router::services::SubgraphRequest;
@@ -149,7 +149,7 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
             },
@@ -188,7 +188,7 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
             },
@@ -238,7 +238,7 @@ mod tests {
         let mock_service = mock_service.build();
 
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
             },
@@ -282,7 +282,7 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInitialise::new(
+        let init = PluginInit::new(
             PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
             },

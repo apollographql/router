@@ -29,7 +29,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ### Modify the plugin `new` method to pass an initialisation structure ([PR #1446](https://github.com/apollographql/router/pull/1446))
 
-This change alters the `new` method for plugins to pass a `PluginInitialise` struct.
+This change alters the `new` method for plugins to pass a `PluginInit` struct.
 
 We are making this change so that we can pass more information during plugin startup. The first change is that as well as passing
 the plugin configuration, we are now also passing the router supergraph schema (as a string).

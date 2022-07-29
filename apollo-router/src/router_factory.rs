@@ -277,7 +277,7 @@ mod test {
 
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
-    use crate::plugin::PluginInitialise;
+    use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterServiceConfigurator;
@@ -309,7 +309,7 @@ mod test {
     impl Plugin for AlwaysStartsAndStopsPlugin {
         type Config = Conf;
 
-        async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
             tracing::debug!("{}", init.config.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
@@ -330,7 +330,7 @@ mod test {
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
-        async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
             tracing::debug!("{}", init.config.name);
             Err(BoxError::from("Error"))
         }

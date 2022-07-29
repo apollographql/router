@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
@@ -46,7 +46,7 @@ struct IncludeSubgraphErrors {
 impl Plugin for IncludeSubgraphErrors {
     type Config = Config;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(IncludeSubgraphErrors {
             config: init.config,
         })

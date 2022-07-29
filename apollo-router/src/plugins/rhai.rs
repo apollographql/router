@@ -46,7 +46,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -328,7 +328,7 @@ pub struct Conf {
 impl Plugin for Rhai {
     type Config = Conf;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),

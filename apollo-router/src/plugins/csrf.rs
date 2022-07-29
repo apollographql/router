@@ -12,7 +12,7 @@ use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
-use crate::plugin::PluginInitialise;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::RouterRequest;
 use crate::RouterResponse;
@@ -93,7 +93,7 @@ pub struct Csrf {
 impl Plugin for Csrf {
     type Config = CSRFConfig;
 
-    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Csrf {
             config: init.config,
         })
@@ -210,7 +210,7 @@ register_plugin!("apollo", "csrf", Csrf);
 
 #[cfg(test)]
 mod csrf_tests {
-    use crate::plugin::PluginInitialise;
+    use crate::plugin::PluginInit;
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugin::plugins()
@@ -309,7 +309,7 @@ mod csrf_tests {
         });
 
         let mock = mock_service.build();
-        let service_stack = Csrf::new(PluginInitialise::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
             .router_service(mock.boxed());
@@ -326,7 +326,7 @@ mod csrf_tests {
 
     async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
         let mock = MockRouterService::new().build();
-        let service_stack = Csrf::new(PluginInitialise::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
             .router_service(mock.boxed());

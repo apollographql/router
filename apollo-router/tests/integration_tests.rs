@@ -13,7 +13,7 @@ use apollo_router::http_ext;
 use apollo_router::json_ext::Object;
 use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInitialise;
+use apollo_router::plugin::PluginInit;
 use apollo_router::plugins::csrf;
 use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
@@ -630,7 +630,7 @@ async fn setup_router_and_registry() -> (
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-    let telemetry_plugin = Telemetry::new(PluginInitialise::new(
+    let telemetry_plugin = Telemetry::new(PluginInit::new(
         telemetry::config::Conf {
             metrics: Option::default(),
             tracing: Some(Tracing::default()),
@@ -640,7 +640,7 @@ async fn setup_router_and_registry() -> (
     ))
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(PluginInitialise::new(
+    let csrf_plugin = csrf::Csrf::new(PluginInit::new(
         Default::default(),
         Default::default(),
     ))

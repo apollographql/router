@@ -14,7 +14,7 @@ fn main() -> Result<()> {
 mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInitialise;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::plugins::rhai::Conf;
     use apollo_router::plugins::rhai::Rhai;
     use apollo_router::services::RouterRequest;
@@ -59,7 +59,7 @@ mod tests {
 
         // Build a rhai plugin instance from our conf
         // Build an instance of our plugin to use in the test harness
-        let rhai = Rhai::new(PluginInitialise::new(conf, Default::default()))
+        let rhai = Rhai::new(PluginInit::new(conf, Default::default()))
             .await
             .expect("created plugin");
 
