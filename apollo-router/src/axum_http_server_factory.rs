@@ -1990,46 +1990,22 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_origin_default() -> Result<(), ApolloRouterError> {
-        let (server, client) = init(MockRouterService::new()).await;
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Cors::builder().allow_any_origin(true).build())
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
         let url = format!("{}/", server.listen_address());
 
-        // Post query
-        let response = client
-            .request(Method::OPTIONS, url.as_str())
-            .header("Origin", "https://thisisatest.com")
-            .header("accept", "application/json")
-            .header("Access-Control-Request-Method", "POST")
-            .header("Access-Control-Request-Headers", "Content-type")
-            .send()
-            .await
-            .unwrap();
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
+        assert_cors_origin(response, "*");
 
-        let headers = response.headers();
-        dbg!(&headers);
-
-        assert!(response.status().is_success());
-        assert!(headers
-            .get("Access-Control-Allow-Methods")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("POST"));
-        assert_eq!(
-            "Content-type",
-            headers
-                .get("Access-Control-Allow-Headers")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
-        assert_eq!(
-            "https://thisisatest.com",
-            headers
-                .get("Access-Control-Allow-Origin")
-                .unwrap()
-                .to_str()
-                .unwrap()
-        );
         Ok(())
     }
 
@@ -2063,6 +2039,52 @@ Content-Type: application/json\r
         Ok(())
     }
 
+    #[tokio::test]
+    async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
+        let apollo_subdomains = "https://([a-z0-9]+[.])*apollographql[.]com";
+
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(
+                        Cors::builder()
+                            .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                            .match_origins(vec![apollo_subdomains.to_string()])
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        // regex tests
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
+        assert_cors_origin(response, "https://www.apollographql.com");
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com")
+                .await;
+        assert_cors_origin(response, "https://staging.apollographql.com");
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
+        assert_not_cors_origin(response, "https://thisshouldnotwork.com");
+
+        // exact match tests
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
+        assert_cors_origin(response, "https://anexactmatchorigin.com");
+
+        // won't match
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
+        assert_not_cors_origin(response, "https://thisshouldnotwork.com");
+
+        Ok(())
+    }
+
     async fn request_cors_with_origin(
         client: &Client,
         url: &str,
@@ -2081,8 +2103,8 @@ Content-Type: application/json\r
     fn assert_cors_origin(response: reqwest::Response, origin: &str) {
         assert!(response.status().is_success());
         let headers = response.headers();
-        dbg!(&headers);
-        assert_headers_valid(&headers);
+        dbg!(headers);
+        assert_headers_valid(headers);
         assert!(origin_valid(headers, origin));
     }
 
@@ -2114,76 +2136,5 @@ Content-Type: application/json\r
             .get("access-control-allow-origin")
             .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
             .unwrap_or_default()
-    }
-
-    #[tokio::test]
-    async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
-        let expected_response = graphql::Response::builder()
-            .data(json!({"response": "yay"}))
-            .build();
-        let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
-        expectations
-            .expect_service_call()
-            .times(2)
-            .returning(move |_| {
-                let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
-                ))
-            });
-        let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
-
-        // Post query
-        let response = client
-            .post(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap();
-
-        assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
-            expected_response,
-        );
-
-        // Get query
-        let response = client
-            .get(url.as_str())
-            .query(&json!({ "query": "query" }))
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap();
-
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE),
-            Some(&HeaderValue::from_static("application/json"))
-        );
-
-        assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
-            expected_response,
-        );
-
-        server.shutdown().await?;
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
-        Ok(())
     }
 }
