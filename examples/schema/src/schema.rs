@@ -1,5 +1,6 @@
 use apollo_compiler::ApolloCompiler;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInitialise;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -16,7 +17,7 @@ struct Schema {
     // ctx: Option<ApolloCompiler>,
     // XXX: Must store schema as a string until apollo-rs
     // becomes Send/Sync safe
-    schema: Option<String>,
+    schema: String,
 }
 
 #[async_trait::async_trait]
@@ -24,24 +25,10 @@ impl Plugin for Schema {
     // Config is a unit, and `Schema` derives default.
     type Config = ();
 
-    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
-        Ok(Self::default())
-    }
-
-    // This function is invoked whenever a new compiler context is available
-    // NB: Until apollo-rs is Send/Sync safe we can't store the supplied
-    // ctx. For now, we convert the context first to an AST, then to a
-    // string and finally we store that string for later use.
-    fn schema_update(&mut self, ctx: ApolloCompiler) {
-        // Obtain the AST from our compiler context
-        let ast = ctx.parse();
-        // Need an owned AST, so clone before accessing document and then
-        // converting to a string
-        let text = (*ast).clone().document().to_string();
-        // XXX: Uncomment to fail
-        // self.ctx = ctx;
-        // Store the re-constructed string representation of our schema
-        self.schema = Some(text);
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Schema {
+            schema: init.schema,
+        })
     }
 
     fn router_service(
@@ -55,20 +42,17 @@ impl Plugin for Schema {
         // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
             .map_request(move |req: RouterRequest| {
-                // If we have a schema
-                if let Some(schema) = &schema {
-                    // If we have a query
-                    if let Some(query) = &req.originating_request.body().query {
-                        // Compile our schema and query
-                        let input = format!("{}\n{}", schema, query);
-                        let ctx = ApolloCompiler::new(&input);
-                        // Do we have any diagnostics we'd like to print?
-                        let diagnostics = ctx.validate();
-                        for diagnostic in diagnostics {
-                            tracing::warn!(%diagnostic, "compiler diagnostics");
-                        }
-                        // TODO: Whatever else we want to do with our compiler context
+                // If we have a query
+                if let Some(query) = &req.originating_request.body().query {
+                    // Compile our schema and query
+                    let input = format!("{}\n{}", schema, query);
+                    let ctx = ApolloCompiler::new(&input);
+                    // Do we have any diagnostics we'd like to print?
+                    let diagnostics = ctx.validate();
+                    for diagnostic in diagnostics {
+                        tracing::warn!(%diagnostic, "compiler diagnostics");
                     }
+                    // TODO: Whatever else we want to do with our compiler context
                 }
                 req
             })

@@ -25,6 +25,7 @@ use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInitialise;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
@@ -73,8 +74,10 @@ struct TrafficShaping {
 impl Plugin for TrafficShaping {
     type Config = Config;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Self { config })
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Self {
+            config: init.config,
+        })
     }
 
     fn subgraph_service(
@@ -251,7 +254,7 @@ mod test {
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
-            .create_instance(config)
+            .create_instance_without_schema(config)
             .await
             .expect("Plugin not created")
     }

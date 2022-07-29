@@ -1,4 +1,5 @@
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInitialise;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -39,7 +40,7 @@ impl Plugin for ContextData {
     // Config is a unit, and `ContextData` derives default.
     type Config = ();
 
-    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 

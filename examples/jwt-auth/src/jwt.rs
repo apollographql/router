@@ -66,6 +66,7 @@ use std::str::FromStr;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInitialise;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -187,7 +188,8 @@ struct Conf {
 impl Plugin for JwtAuth {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        let configuration = init.config;
         // Try to figure out which authentication mechanism to use
         let key = configuration.key.trim().to_string();
 
@@ -405,7 +407,7 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
+            .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}), Default::default())
             .await
             .unwrap();
     }
@@ -593,7 +595,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(PluginInitialise::new(conf, Default::default()))
             .await
             .expect("valid configuration should succeed");
 
@@ -650,7 +652,7 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(PluginInitialise::new(conf, Default::default()))
             .await
             .expect("valid configuration should succeed");
 
@@ -704,7 +706,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(conf)
+        let jwt_auth = JwtAuth::new(PluginInitialise::new(conf, Default::default()))
             .await
             .expect("valid configuration should succeed");
 

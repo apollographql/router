@@ -1,4 +1,5 @@
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInitialise;
 use apollo_router::register_plugin;
 {{#if type_basic}}
 use apollo_router::services::{ExecutionRequest, ExecutionResponse};
@@ -43,9 +44,9 @@ struct Conf {
 impl Plugin for {{pascal_name}} {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::info!("{}", configuration.message);
-        Ok({{pascal_name}} { configuration })
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        tracing::info!("{}", init.config.message);
+        Ok({{pascal_name}} { configuration: init.config })
     }
 
     // Delete this function if you are not customizing it.
@@ -96,9 +97,9 @@ impl Plugin for {{pascal_name}} {
 impl Plugin for {{pascal_name}} {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::info!("{}", configuration.message);
-        Ok({{pascal_name}} { configuration })
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        tracing::info!("{}", init.config.message);
+        Ok({{pascal_name}} { configuration: init.config })
     }
 
     fn router_service(
@@ -123,9 +124,9 @@ impl Plugin for {{pascal_name}} {
 impl Plugin for {{pascal_name}} {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::info!("{}", configuration.message);
-        Ok({{pascal_name}} { configuration })
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+        tracing::info!("{}", init.config.message);
+        Ok({{pascal_name}} { configuration: init.config })
     }
 
     fn router_service(
@@ -161,6 +162,7 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
+    use apollo_router::plugin::PluginInitialise;
     use tower::BoxError;
 
     #[tokio::test]
@@ -168,7 +170,7 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("{{project_name}}.{{snake_name}}")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"message" : "Starting my plugin"}))
+            .create_instance(&serde_json::json!({"message" : "Starting my plugin"}), Default::default())
             .await
             .unwrap();
     }
@@ -181,7 +183,7 @@ mod tests {
         };
 
         // Build an instance of our plugin to use in the test harness
-        let plugin = {{pascal_name}}::new(conf).await.expect("created plugin");
+        let plugin = {{pascal_name}}::new(PluginInitialise::new(conf, Default::default())).await.expect("created plugin");
 
         // Create the test harness. You can add mocks for individual services, or use prebuilt canned services.
         let mut test_harness = PluginTestHarness::builder()

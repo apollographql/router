@@ -44,6 +44,7 @@ use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInitialise;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -180,8 +181,9 @@ impl Plugin for Telemetry {
         global::set_text_map_propagator(Self::create_propagator(&self.config));
     }
 
-    async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
+        let mut config = init.config;
         let apollo = config
             .apollo
             .as_mut()
@@ -934,7 +936,10 @@ mod tests {
         crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
+            .create_instance(
+                &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -944,64 +949,28 @@ mod tests {
         crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({
-                "apollo": {"schema_id":"abc"},
-                "tracing": {
-                    "trace_config": {
-                        "service_name": "router",
-                        "attributes": {
-                            "str": "a",
-                            "int": 1,
-                            "float": 1.0,
-                            "bool": true,
-                            "str_arr": ["a", "b"],
-                            "int_arr": [1, 2],
-                            "float_arr": [1.0, 2.0],
-                            "bool_arr": [true, false]
+            .create_instance(
+                &serde_json::json!({
+                    "apollo": {"schema_id":"abc"},
+                    "tracing": {
+                        "trace_config": {
+                            "service_name": "router",
+                            "attributes": {
+                                "str": "a",
+                                "int": 1,
+                                "float": 1.0,
+                                "bool": true,
+                                "str_arr": ["a", "b"],
+                                "int_arr": [1, 2],
+                                "float_arr": [1.0, 2.0],
+                                "bool_arr": [true, false]
+                            }
                         }
-                    }
-                },
-                "metrics": {
-                    "common": {
-                        "attributes": {
-                            "router": {
-                                "static": [
-                                    {
-                                        "name": "myname",
-                                        "value": "label_value"
-                                    }
-                                ],
-                                "request": {
-                                    "header": [{
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value"
-                                    }],
-                                    "body": [{
-                                        "path": ".data.test",
-                                        "name": "my_new_name",
-                                        "default": "default_value"
-                                    }]
-                                },
-                                "response": {
-                                    "header": [{
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value",
-                                    }, {
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value",
-                                    }],
-                                    "body": [{
-                                        "path": ".data.test",
-                                        "name": "my_new_name",
-                                        "default": "default_value"
-                                    }]
-                                }
-                            },
-                            "subgraph": {
-                                "all": {
+                    },
+                    "metrics": {
+                        "common": {
+                            "attributes": {
+                                "router": {
                                     "static": [
                                         {
                                             "name": "myname",
@@ -1012,7 +981,7 @@ mod tests {
                                         "header": [{
                                             "named": "test",
                                             "default": "default_value",
-                                            "rename": "renamed_value",
+                                            "rename": "renamed_value"
                                         }],
                                         "body": [{
                                             "path": ".data.test",
@@ -1037,9 +1006,9 @@ mod tests {
                                         }]
                                     }
                                 },
-                                "subgraphs": {
-                                    "subgraph_name_test": {
-                                         "static": [
+                                "subgraph": {
+                                    "all": {
+                                        "static": [
                                             {
                                                 "name": "myname",
                                                 "value": "label_value"
@@ -1073,13 +1042,52 @@ mod tests {
                                                 "default": "default_value"
                                             }]
                                         }
+                                    },
+                                    "subgraphs": {
+                                        "subgraph_name_test": {
+                                             "static": [
+                                                {
+                                                    "name": "myname",
+                                                    "value": "label_value"
+                                                }
+                                            ],
+                                            "request": {
+                                                "header": [{
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }],
+                                                "body": [{
+                                                    "path": ".data.test",
+                                                    "name": "my_new_name",
+                                                    "default": "default_value"
+                                                }]
+                                            },
+                                            "response": {
+                                                "header": [{
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }, {
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }],
+                                                "body": [{
+                                                    "path": ".data.test",
+                                                    "name": "my_new_name",
+                                                    "default": "default_value"
+                                                }]
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }))
+                }),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -1210,6 +1218,7 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();

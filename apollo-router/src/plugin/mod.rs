@@ -24,7 +24,6 @@ use std::task::Poll;
 
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
-use apollo_compiler::ApolloCompiler;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -49,9 +48,30 @@ use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
-type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory =
+    fn(&serde_json::Value, String) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+/// Initialise a plugin
+pub struct PluginInitialise<T> {
+    pub config: T,
+    pub schema: String,
+}
+
+impl<T> PluginInitialise<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    pub fn new(config: T, schema: String) -> Self {
+        PluginInitialise { config, schema }
+    }
+
+    pub fn try_new(config: serde_json::Value, schema: String) -> Result<Self, BoxError> {
+        let config: T = serde_json::from_value(config)?;
+        Ok(PluginInitialise { config, schema })
+    }
+}
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
@@ -71,8 +91,17 @@ impl PluginFactory {
     pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
+        schema: &str,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration).await
+        (self.instance_factory)(configuration, schema.to_string()).await
+    }
+
+    #[cfg(test)]
+    pub async fn create_instance_without_schema(
+        &self,
+        configuration: &serde_json::Value,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(configuration, Default::default()).await
     }
 
     pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
@@ -109,11 +138,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    async fn new(config: Self::Config) -> Result<Self, BoxError>;
-
-    /// This is invoked whenever a new schema is made available to
-    /// the router.
-    fn schema_update(&mut self, _ctx: ApolloCompiler) {}
+    // async fn new(config: Self::Config) -> Result<Self, BoxError>;
+    async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError>;
 
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
@@ -181,10 +207,6 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
-    /// This is invoked whenever a new schema is made available to
-    /// the router.
-    fn schema_update(&mut self, ctx: ApolloCompiler);
-
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
     fn activate(&mut self);
@@ -235,10 +257,6 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    fn schema_update(&mut self, ctx: ApolloCompiler) {
-        self.schema_update(ctx)
-    }
-
     #[allow(deprecated)]
     fn activate(&mut self) {
         self.activate()
@@ -299,9 +317,10 @@ macro_rules! register_plugin {
             $crate::plugin::register_plugin(
                 qualified_name,
                 $crate::plugin::PluginFactory::new(
-                    |configuration| Box::pin(async move {
-                        let configuration = $crate::_private::serde_json::from_value(configuration.clone())?;
-                        let plugin = $value::new(configuration).await?;
+                    |configuration, schema| Box::pin(async move {
+                        let init = $crate::plugin::PluginInitialise::try_new(configuration.clone(), schema)?;
+                        // let configuration = $crate::_private::serde_json::from_value(configuration.config.clone())?;
+                        let plugin = $value::new(init).await?;
                         Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
                     }),
                     |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()

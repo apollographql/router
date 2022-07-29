@@ -2,7 +2,6 @@ use std::collections::HashMap;
 // This entire file is license key functionality
 use std::sync::Arc;
 
-use apollo_compiler::ApolloCompiler;
 use futures::stream::BoxStream;
 use serde_json::Map;
 use serde_json::Value;
@@ -97,9 +96,6 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
             tracing::debug!("activating plugin {}", plugin.name());
             plugin.activate();
             tracing::debug!("activated plugin {}", plugin.name());
-            let ctx = ApolloCompiler::new(schema.as_str());
-            plugin.schema_update(ctx);
-            tracing::debug!("plugin schema updated {}", plugin.name());
         }
 
         let pluggable_router_service = builder.build().await?;
@@ -161,7 +157,10 @@ async fn create_plugins(
                     inject_schema_id(schema, &mut configuration);
                 }
                 // expand any env variables in the config before processing.
-                match factory.create_instance(&configuration).await {
+                match factory
+                    .create_instance(&configuration, schema.as_str())
+                    .await
+                {
                     Ok(plugin) => {
                         plugin_instances.push((name, plugin));
                     }
@@ -205,7 +204,7 @@ async fn create_plugins(
                         if *name == "apollo.telemetry" {
                             inject_schema_id(schema, &mut config);
                         }
-                        match factory.create_instance(&config).await {
+                        match factory.create_instance(&config, schema.as_str()).await {
                             Ok(plugin) => {
                                 plugin_instances
                                     .insert(desired_position, (name.to_string(), plugin));
@@ -278,6 +277,7 @@ mod test {
 
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
+    use crate::plugin::PluginInitialise;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterServiceConfigurator;
@@ -309,8 +309,8 @@ mod test {
     impl Plugin for AlwaysStartsAndStopsPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
     }
@@ -330,8 +330,8 @@ mod test {
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInitialise<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Err(BoxError::from("Error"))
         }
     }
