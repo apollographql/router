@@ -128,7 +128,6 @@ version = "0.12.1-alpha-defer4"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler",
  "apollo-parser",
  "apollo-spaceport",
  "apollo-uplink",
