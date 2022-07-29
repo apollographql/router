@@ -11,7 +11,7 @@ use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
-// We (optionally) keep our schema here as a string.
+// We keep our schema here as a string.
 struct Schema {
     schema: String,
 }
