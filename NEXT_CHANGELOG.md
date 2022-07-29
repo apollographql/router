@@ -27,6 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Modify the plugin `new` method to pass an initialisation structure ([PR #1446](https://github.com/apollographql/router/pull/1446))
+
+This change alters the `new` method for plugins to pass a `PluginInitialise` struct.
+
+We are making this change so that we can pass more information during plugin startup. The first change is that as well as passing
+the plugin configuration, we are now also passing the router supergraph schema (as a string).
+
+There is a new example (`schema`) which illustrates how to use this new capability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
+
 ### Remove the generic stream type from `RouterResponse` and `ExecutionResponse` ([PR #1420](https://github.com/apollographql/router/pull/1420))
 
 This generic type complicates the API with limited benefit because we use `BoxStream` everywhere in plugins:
@@ -44,17 +55,6 @@ so it should not change depending on the variables or HTTP headers.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
 
 ## 🚀 Features
-
-### Add support for schema compiler context for plugins ([PR #1446](https://github.com/apollographql/router/pull/1446))
-
-If your plugin implements the new `schema_update(ctx)` interface, then your plugin will be invoked with a new
-`ApolloCompiler` context each time the plugin is created. You can use this context to perform analysis on your
-schema using the `apollo-rs` tools.
-
-There is a new example (`schema`) which illustrates how to use this new capability. Note: it is not accessible
-from `rhai` plugins at this point in time.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
 
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
