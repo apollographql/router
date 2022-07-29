@@ -103,3 +103,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+### Updates wording and formatting of README.md
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1445
