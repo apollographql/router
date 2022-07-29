@@ -13,10 +13,6 @@ use tower::ServiceExt;
 // Global state for our plugin would live here.
 // We (optionally) keep our schema here as a string.
 struct Schema {
-    // XXX: Uncomment to fail
-    // ctx: Option<ApolloCompiler>,
-    // XXX: Must store schema as a string until apollo-rs
-    // becomes Send/Sync safe
     schema: String,
 }
 
