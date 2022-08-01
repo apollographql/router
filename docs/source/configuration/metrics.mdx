@@ -121,6 +121,7 @@ telemetry:
                   path: .type # JSON query path to fetch data from extensions
                 - name: message
                   path: .reason
+            # Will create this kind of metric for example http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
           subgraphs:
             my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
               request:

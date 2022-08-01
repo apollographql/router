@@ -301,7 +301,6 @@ impl Plugin for Telemetry {
                                     );
                                 }
                                 let mut metric_attrs = Vec::new();
-                                dbg!(&e);
                                 // Fill attributes from error
                                 if let Some(subgraph_attributes_conf) = config
                                     .metrics
