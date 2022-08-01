@@ -287,7 +287,7 @@ impl Plugin for Telemetry {
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
-                            metrics,
+                            metrics.clone(),
                             result,
                             start.elapsed(),
                         )
@@ -302,6 +302,24 @@ impl Plugin for Telemetry {
                                         start.elapsed(),
                                     );
                                 }
+                                let mut metric_attrs = Vec::new();
+                                // Fill attributes from error
+                                if let Some(subgraph_attributes_conf) = config
+                                    .metrics
+                                    .as_ref()
+                                    .and_then(|m| m.common.as_ref())
+                                    .and_then(|c| c.attributes.as_ref())
+                                    .and_then(|c| c.router.as_ref())
+                                {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_error(&e)
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
+                                }
+
+                                metrics.http_requests_error_total.add(1, &metric_attrs);
 
                                 Err(e)
                             }
@@ -415,6 +433,7 @@ impl Plugin for Telemetry {
                     let context = extend_config!(context);
                     let request = merge_config!(request);
                     let response = merge_config!(response);
+                    let errors = merge_config!(errors);
 
                     AttributesForwardConf {
                         insert: (!insert.is_empty()).then(|| insert),
@@ -422,6 +441,8 @@ impl Plugin for Telemetry {
                             .then(|| request),
                         response: (response.header.is_some() || response.body.is_some())
                             .then(|| response),
+                        errors: (errors.extensions.is_some() || errors.include_messages)
+                            .then(|| errors),
                         context: (!context.is_empty()).then(|| context),
                     }
                 }),
@@ -510,7 +531,17 @@ impl Plugin for Telemetry {
 
                                 metrics.http_requests_total.add(1, &metric_attrs);
                             }
-                            Err(_) => {
+                            Err(err) => {
+                                // Fill attributes from error
+                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_error(err)
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
+                                }
+
                                 metrics.http_requests_error_total.add(1, &metric_attrs);
                             }
                         }
@@ -919,6 +950,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
+    use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::http_ext;
@@ -1102,7 +1134,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2}}))
+                    .data(json!({"data": {"my_value": 2usize}}))
                     .build()
                     .unwrap())
             });
@@ -1130,6 +1162,17 @@ mod tests {
                             .build(),
                     )
                     .build())
+            });
+
+        let mut mock_subgraph_service_in_error = MockSubgraphService::new();
+        mock_subgraph_service_in_error
+            .expect_call()
+            .times(1)
+            .returning(move |_req: SubgraphRequest| {
+                Err(Box::new(FetchError::SubrequestHttpError {
+                    service: String::from("my_subgraph_name_error"),
+                    reason: String::from("cannot contact the subgraph"),
+                }))
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
@@ -1180,6 +1223,18 @@ mod tests {
                                 }
                             },
                             "subgraph": {
+                                "all": {
+                                    "errors": {
+                                        "include_messages": true,
+                                        "extensions": [{
+                                            "name": "subgraph_error_extended_type",
+                                            "path": ".type"
+                                        }, {
+                                            "name": "message",
+                                            "path": ".reason"
+                                        }]
+                                    }
+                                },
                                 "subgraphs": {
                                     "my_subgraph_name": {
                                         "request": {
@@ -1260,6 +1315,31 @@ mod tests {
             .call(subgraph_req)
             .await
             .unwrap();
+        // Another subgraph
+        let mut subgraph_service = dyn_plugin.subgraph_service(
+            "my_subgraph_name_error",
+            BoxService::new(mock_subgraph_service_in_error.build()),
+        );
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_ext::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
+            .await
+            .expect_err("Must be in error");
 
         let handler = dyn_plugin.custom_endpoint().unwrap();
         let http_req_prom = http_ext::Request::fake_builder()
@@ -1284,6 +1364,7 @@ mod tests {
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let prom_metrics = String::from_utf8_lossy(resp.body());
+        assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.001"}"#));

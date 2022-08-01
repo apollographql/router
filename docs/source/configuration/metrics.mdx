@@ -78,10 +78,10 @@ telemetry:
 
 You can add custom attributes (OpenTelemetry) and labels (Prometheus) to your generated metrics. You can apply these across _all_ requests, or you can selectively apply them based on the details of a particular request. These details include:
 
-* The presence of a particular HTTP header
-* The value at a particular JSON path within a request or response body (either from a subgraph or from the router itself)
-    * [See examples of querying a JSON path.](#example-json-path-queries)
-* A custom value provided via the router plugin context
+- The presence of a particular HTTP header
+- The value at a particular JSON path within a request or response body (either from a subgraph or from the router itself)
+  - [See examples of querying a JSON path.](#example-json-path-queries)
+- A custom value provided via the router plugin context
 
 Examples of all of these are shown in the file below:
 
@@ -114,6 +114,14 @@ telemetry:
               # Always apply this attribute to all metrics for all subgraphs
               - name: kind
                 value: subgraph_request
+            errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
+              include_messages: true # Will include the error message in a message attribute
+              extensions: # Include extensions data
+                - name: subgraph_error_extended_type # Name of the attribute
+                  path: .type # JSON query path to fetch data from extensions
+                - name: message
+                  path: .reason
+            # Will create this kind of metric for example http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
           subgraphs:
             my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
               request:

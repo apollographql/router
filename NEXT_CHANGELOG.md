@@ -56,6 +56,28 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Add support of error section in telemetry to add custom attributes ([PR #1443](https://github.com/apollographql/router/pull/1443))
+
+The telemetry is now able to hook at the error stage if router or a subgraph is returning an error. Here is an example of configuration:
+
+```yaml
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    common:
+      attributes:
+        subgraph:
+          all:
+            errors: # Only works if it's a valid GraphQL error
+              include_messages: true # Will include the error message in a message attribute
+              extensions: # Include extension data
+                - name: subgraph_error_extended_type # Name of the attribute
+                  path: .type # JSON query path to fetch data from extensions
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1443
+
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
 The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
