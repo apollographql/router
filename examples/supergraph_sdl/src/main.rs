@@ -10,7 +10,7 @@ use anyhow::Result;
 // will automatically register it to the router plugin registry.
 //
 // you can use the plugin by adding it to `router.yaml`
-mod schema;
+mod supergraph_sdl;
 
 // `cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml`
 fn main() -> Result<()> {

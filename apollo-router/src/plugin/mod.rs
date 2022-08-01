@@ -57,21 +57,27 @@ type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
-    /// Router Supergraph Schema
-    pub schema: String,
+    /// Router Supergraph Schema (schema definition language)
+    pub supergraph_sdl: String,
 }
 
 impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    pub fn new(config: T, schema: String) -> Self {
-        PluginInit { config, schema }
+    pub fn new(config: T, supergraph_sdl: String) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl,
+        }
     }
 
-    pub fn try_new(config: serde_json::Value, schema: String) -> Result<Self, BoxError> {
+    pub fn try_new(config: serde_json::Value, supergraph_sdl: String) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
-        Ok(PluginInit { config, schema })
+        Ok(PluginInit {
+            config,
+            supergraph_sdl,
+        })
     }
 }
 

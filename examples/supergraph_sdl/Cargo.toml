@@ -1,5 +1,5 @@
 [package]
-name = "schema"
+name = "supergraph_sdl"
 version = "0.1.0"
 edition = "2021"
 

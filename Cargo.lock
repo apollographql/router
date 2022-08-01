@@ -4689,22 +4689,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schema"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "apollo-compiler",
- "apollo-parser",
- "apollo-router",
- "async-trait",
- "futures",
- "http",
- "once_cell",
- "tower",
- "tracing",
-]
-
-[[package]]
 name = "schemars"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5234,6 +5218,22 @@ name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
+
+[[package]]
+name = "supergraph_sdl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-compiler",
+ "apollo-parser",
+ "apollo-router",
+ "async-trait",
+ "futures",
+ "http",
+ "once_cell",
+ "tower",
+ "tracing",
+]
 
 [[package]]
 name = "supports-color"

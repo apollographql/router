@@ -11,19 +11,19 @@ use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
-// We keep our schema here as a string.
-struct Schema {
-    schema: String,
+// We keep our supergraph sdl here as a string.
+struct SupergraphSDL {
+    supergraph_sdl: String,
 }
 
 #[async_trait::async_trait]
-impl Plugin for Schema {
-    // Config is a unit, and `Schema` derives default.
+impl Plugin for SupergraphSDL {
+    // Config is a unit, and `SupergraphSDL` derives default.
     type Config = ();
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(Schema {
-            schema: init.schema,
+        Ok(SupergraphSDL {
+            supergraph_sdl: init.supergraph_sdl,
         })
     }
 
@@ -31,8 +31,8 @@ impl Plugin for Schema {
         &self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        // Clone our schema for use in map_request
-        let schema = self.schema.clone();
+        // Clone our supergraph_sdl for use in map_request
+        let supergraph_sdl = self.supergraph_sdl.clone();
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
@@ -40,8 +40,8 @@ impl Plugin for Schema {
             .map_request(move |req: RouterRequest| {
                 // If we have a query
                 if let Some(query) = &req.originating_request.body().query {
-                    // Compile our schema and query
-                    let input = format!("{}\n{}", schema, query);
+                    // Compile our supergraph_sdl and query
+                    let input = format!("{}\n{}", supergraph_sdl, query);
                     let ctx = ApolloCompiler::new(&input);
                     // Do we have any diagnostics we'd like to print?
                     let diagnostics = ctx.validate();
@@ -62,4 +62,4 @@ impl Plugin for Schema {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("example", "schema", Schema);
+register_plugin!("example", "supergraph_sdl", SupergraphSDL);
