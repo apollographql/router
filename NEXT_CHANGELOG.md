@@ -27,6 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Modify the plugin `new` method to pass an initialisation structure ([PR #1446](https://github.com/apollographql/router/pull/1446))
+
+This change alters the `new` method for plugins to pass a `PluginInit` struct.
+
+We are making this change so that we can pass more information during plugin startup. The first change is that in addition to passing
+the plugin configuration, we are now also passing the router supergraph sdl (Schema Definition Language) as a string.
+
+There is a new example (`supergraph_sdl`) which illustrates how to use this new capability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
+
 ### Remove the generic stream type from `RouterResponse` and `ExecutionResponse` ([PR #1420](https://github.com/apollographql/router/pull/1420))
 
 This generic type complicates the API with limited benefit because we use `BoxStream` everywhere in plugins:
@@ -68,6 +79,28 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
+### Add support of error section in telemetry to add custom attributes ([PR #1443](https://github.com/apollographql/router/pull/1443))
+
+The telemetry is now able to hook at the error stage if router or a subgraph is returning an error. Here is an example of configuration:
+
+```yaml
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    common:
+      attributes:
+        subgraph:
+          all:
+            errors: # Only works if it's a valid GraphQL error
+              include_messages: true # Will include the error message in a message attribute
+              extensions: # Include extension data
+                - name: subgraph_error_extended_type # Name of the attribute
+                  path: .type # JSON query path to fetch data from extensions
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1443
+
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
 
 The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
@@ -94,6 +127,12 @@ cache.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
 
 ## 🐛 Fixes
+
+### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([ PR #1391](https://github.com/apollographql/router/pull/1391))
+
+The metadata format now uses `IndexMap<String, Vec<String>>`.
+
+By [@me-diru](https://github.com/me-diru) in https://github.com/apollographql/router/pull/1391 
 
 ### Update the scaffold template so it targets router v0.12.0 ([PR #1431](https://github.com/apollographql/router/pull/1431))
 
@@ -123,6 +162,25 @@ The benchmarks show that this change brings a 23% gain in requests per second co
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
 
+### do not perform nested fetches if the parent one returned null ([PR #1332](https://github.com/apollographql/router/pull/1332)
+
+In a query of the form:
+```graphql
+mutation {
+	mutationA {
+		mutationB
+	}
+}
+```
+
+If `mutationA` returned null, we should not execute `mutationB`.
+
+By [@Ty3uK](https://github.com/Ty3uK) in https://github.com/apollographql/router/pull/1332
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+### Updates wording and formatting of README.md
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1445

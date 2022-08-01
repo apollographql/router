@@ -472,7 +472,7 @@ expression: "&schema"
                       "type": "object",
                       "properties": {
                         "context": {
-                          "description": "Configuration to forward values from the context custom attributes/labels in metrics",
+                          "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
                           "type": "array",
                           "items": {
                             "description": "Configuration to forward context values in metric attributes/labels",
@@ -497,8 +497,47 @@ expression: "&schema"
                           },
                           "nullable": true
                         },
+                        "errors": {
+                          "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
+                          "type": "object",
+                          "properties": {
+                            "extensions": {
+                              "description": "Forward extensions values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward body values in metric attributes/labels",
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "path"
+                                ],
+                                "properties": {
+                                  "default": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "path": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "nullable": true
+                            },
+                            "include_messages": {
+                              "description": "Will include the error message in a \"message\" attribute",
+                              "default": false,
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
                         "request": {
-                          "description": "Configuration to forward headers or body values from the request custom attributes/labels in metrics",
+                          "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
                           "type": "object",
                           "properties": {
                             "body": {
@@ -576,7 +615,7 @@ expression: "&schema"
                           "nullable": true
                         },
                         "response": {
-                          "description": "Configuration to forward headers or body values from the response custom attributes/labels in metrics",
+                          "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
                           "type": "object",
                           "properties": {
                             "body": {
@@ -687,7 +726,7 @@ expression: "&schema"
                           "type": "object",
                           "properties": {
                             "context": {
-                              "description": "Configuration to forward values from the context custom attributes/labels in metrics",
+                              "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
                               "type": "array",
                               "items": {
                                 "description": "Configuration to forward context values in metric attributes/labels",
@@ -712,8 +751,47 @@ expression: "&schema"
                               },
                               "nullable": true
                             },
+                            "errors": {
+                              "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
+                              "type": "object",
+                              "properties": {
+                                "extensions": {
+                                  "description": "Forward extensions values as custom attributes/labels in metrics",
+                                  "type": "array",
+                                  "items": {
+                                    "description": "Configuration to forward body values in metric attributes/labels",
+                                    "type": "object",
+                                    "required": [
+                                      "name",
+                                      "path"
+                                    ],
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "nullable": true
+                                },
+                                "include_messages": {
+                                  "description": "Will include the error message in a \"message\" attribute",
+                                  "default": false,
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "nullable": true
+                            },
                             "request": {
-                              "description": "Configuration to forward headers or body values from the request custom attributes/labels in metrics",
+                              "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
                               "type": "object",
                               "properties": {
                                 "body": {
@@ -791,7 +869,7 @@ expression: "&schema"
                               "nullable": true
                             },
                             "response": {
-                              "description": "Configuration to forward headers or body values from the response custom attributes/labels in metrics",
+                              "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
                               "type": "object",
                               "properties": {
                                 "body": {
@@ -900,7 +978,7 @@ expression: "&schema"
                             "type": "object",
                             "properties": {
                               "context": {
-                                "description": "Configuration to forward values from the context custom attributes/labels in metrics",
+                                "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
                                 "type": "array",
                                 "items": {
                                   "description": "Configuration to forward context values in metric attributes/labels",
@@ -925,8 +1003,47 @@ expression: "&schema"
                                 },
                                 "nullable": true
                               },
+                              "errors": {
+                                "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
+                                "type": "object",
+                                "properties": {
+                                  "extensions": {
+                                    "description": "Forward extensions values as custom attributes/labels in metrics",
+                                    "type": "array",
+                                    "items": {
+                                      "description": "Configuration to forward body values in metric attributes/labels",
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "path"
+                                      ],
+                                      "properties": {
+                                        "default": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "path": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "nullable": true
+                                  },
+                                  "include_messages": {
+                                    "description": "Will include the error message in a \"message\" attribute",
+                                    "default": false,
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "nullable": true
+                              },
                               "request": {
-                                "description": "Configuration to forward headers or body values from the request custom attributes/labels in metrics",
+                                "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
                                 "type": "object",
                                 "properties": {
                                   "body": {
@@ -1004,7 +1121,7 @@ expression: "&schema"
                                 "nullable": true
                               },
                               "response": {
-                                "description": "Configuration to forward headers or body values from the response custom attributes/labels in metrics",
+                                "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
                                 "type": "object",
                                 "properties": {
                                   "body": {

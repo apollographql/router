@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use indexmap::map::Entry;
+use indexmap::IndexMap;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
@@ -188,8 +190,6 @@ impl Default for Protocol {
 }
 
 mod metadata_map_serde {
-    use std::collections::HashMap;
-
     use tonic::metadata::KeyAndValueRef;
     use tonic::metadata::MetadataKey;
 
@@ -203,19 +203,23 @@ mod metadata_map_serde {
             return serializer.serialize_none();
         }
 
-        let mut serializable_format =
-            Vec::with_capacity(map.as_ref().map(|x| x.len()).unwrap_or(0));
+        let mut serializable_format: IndexMap<&str, Vec<&str>> = IndexMap::new();
 
-        serializable_format.extend(map.iter().flat_map(|x| x.iter()).map(|key_and_value| {
+        for key_and_value in map.iter().flat_map(|x| x.iter()) {
             match key_and_value {
                 KeyAndValueRef::Ascii(key, value) => {
-                    let mut map = HashMap::with_capacity(1);
-                    map.insert(key.as_str(), value.to_str().unwrap());
-                    map
+                    match serializable_format.entry(key.as_str()) {
+                        Entry::Vacant(values) => {
+                            values.insert(vec![value.to_str().unwrap()]);
+                        }
+                        Entry::Occupied(mut values) => {
+                            values.get_mut().push(value.to_str().unwrap())
+                        }
+                    }
                 }
                 KeyAndValueRef::Binary(_, _) => todo!(),
-            }
-        }));
+            };
+        }
 
         serializable_format.serialize(serializer)
     }
@@ -224,7 +228,7 @@ mod metadata_map_serde {
     where
         D: serde::de::Deserializer<'de>,
     {
-        let serializable_format: Vec<HashMap<String, String>> =
+        let serializable_format: IndexMap<String, Vec<String>> =
             Deserialize::deserialize(deserializer)?;
 
         if serializable_format.is_empty() {
@@ -233,10 +237,10 @@ mod metadata_map_serde {
 
         let mut map = MetadataMap::new();
 
-        for submap in serializable_format.into_iter() {
-            for (key, value) in submap.into_iter() {
-                let key = MetadataKey::from_bytes(key.as_bytes()).unwrap();
-                map.append(key, value.parse().unwrap());
+        for (key, values) in serializable_format.into_iter() {
+            let key = MetadataKey::from_bytes(key.as_bytes()).unwrap();
+            for value in values {
+                map.append(key.clone(), value.parse().unwrap());
             }
         }
 

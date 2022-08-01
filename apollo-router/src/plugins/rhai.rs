@@ -46,6 +46,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -327,13 +328,13 @@ pub struct Conf {
 impl Plugin for Rhai {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        let scripts_path = match configuration.scripts {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),
         };
 
-        let main_file = match configuration.main {
+        let main_file = match init.config.main {
             Some(main) => main,
             None => "main.rhai".to_string(),
         };
@@ -1431,6 +1432,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1483,6 +1485,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();

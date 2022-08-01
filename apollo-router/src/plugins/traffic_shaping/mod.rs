@@ -34,6 +34,7 @@ pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
@@ -142,8 +143,9 @@ struct TrafficShaping {
 impl Plugin for TrafficShaping {
     type Config = Config;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        let rate_limit_router = config
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let rate_limit_router = init
+            .config
             .router
             .as_ref()
             .and_then(|r| r.rate_limit.as_ref())
@@ -370,7 +372,7 @@ mod test {
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
-            .create_instance(config)
+            .create_instance_without_schema(config)
             .await
             .expect("Plugin not created")
     }
