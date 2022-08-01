@@ -31,10 +31,10 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 This change alters the `new` method for plugins to pass a `PluginInit` struct.
 
-We are making this change so that we can pass more information during plugin startup. The first change is that as well as passing
-the plugin configuration, we are now also passing the router supergraph schema (as a string).
+We are making this change so that we can pass more information during plugin startup. The first change is that in addition to passing
+the plugin configuration, we are now also passing the router supergraph sdl (Schema Definition Language) as a string.
 
-There is a new example (`schema`) which illustrates how to use this new capability.
+There is a new example (`supergraph_sdl`) which illustrates how to use this new capability.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
 
