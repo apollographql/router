@@ -105,7 +105,13 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([ PR #1391](https://github.com/apollographql/router/pull/1391))
+### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
+
+Change attribute name `query` to `graphql.document` and `operation_name` to `graphql.operation.name` in spans.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
+
+### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([PR #1391](https://github.com/apollographql/router/pull/1391))
 
 The metadata format now uses `IndexMap<String, Vec<String>>`.
 
