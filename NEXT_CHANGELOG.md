@@ -54,7 +54,7 @@ Additions to the traffic shaping plugin:
 ```yaml
 traffic_shaping:
   router: # Rules applied to requests from clients to the router
-    rate_limit: # Accept a maximum of 10 requests per 5 secs from a given client. Excess requests must be rejected.
+    rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
       interval: 5s
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
