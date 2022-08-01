@@ -1,3 +1,4 @@
+//! Cross Site Request Forgery (CSRF) plugin.
 use std::ops::ControlFlow;
 
 use http::header;
@@ -17,6 +18,7 @@ use crate::register_plugin;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
+/// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CSRFConfig {

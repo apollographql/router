@@ -1,3 +1,4 @@
+//! GraphQL operation planning.
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -766,6 +767,7 @@ pub(crate) mod fetch {
     use crate::services::subgraph_service::SubgraphServiceFactory;
     use crate::*;
 
+    /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {

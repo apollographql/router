@@ -312,6 +312,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     }
 }
 
+/// Extension trait for [`Service`].
 pub trait ServiceExt<Request>: Service<Request> {
     /// Similar to map_future but also providing an opportunity to extract information out of the
     /// request for use when constructing the response.

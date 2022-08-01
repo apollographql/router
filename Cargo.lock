@@ -136,7 +136,7 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
- "buildstructor",
+ "buildstructor 0.4.1",
  "bytes",
  "clap 3.2.10",
  "dashmap 5.3.4",
@@ -662,6 +662,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildstructor"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a7772d3542812693473268c2308979967035162dd36d053ec728e6c947ba93f"
+dependencies = [
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "str_inflector",
+ "syn",
+ "thiserror",
+ "try_match",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -787,7 +802,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f6232669ff969fc9827d8a47dbc9e128a8eb1c7dffc9bcf1cf71be34dee5ef9"
 dependencies = [
  "anyhow",
- "buildstructor",
+ "buildstructor 0.3.2",
  "cargo",
  "clap 2.34.0",
  "console 0.12.0",
