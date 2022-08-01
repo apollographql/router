@@ -65,6 +65,7 @@ impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
+    /// Create a new PluginInit for the supplied config and SDL.
     pub fn new(config: T, supergraph_sdl: String) -> Self {
         PluginInit {
             config,
@@ -72,6 +73,10 @@ where
         }
     }
 
+    /// Try to create a new PluginInit for the supplied JSON and SDL.
+    ///
+    /// This will fail if the supplied JSON cannot be deserialized into the configuration
+    /// struct.
     pub fn try_new(config: serde_json::Value, supergraph_sdl: String) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
