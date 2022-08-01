@@ -117,6 +117,21 @@ The benchmarks show that this change brings a 23% gain in requests per second co
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
 
+### do not perform nested fetches if the parent one returned null ([PR #1332](https://github.com/apollographql/router/pull/1332)
+
+In a query of the form:
+```graphql
+mutation {
+	mutationA {
+		mutationB
+	}
+}
+```
+
+If `mutationA` returned null, we should not execute `mutationB`.
+
+By [@Ty3uK](https://github.com/Ty3uK) in https://github.com/apollographql/router/pull/1332
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
