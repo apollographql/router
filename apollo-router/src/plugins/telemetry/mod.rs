@@ -82,7 +82,6 @@ static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-const SERVICE_NAME_RESOURCE: &str = "service.name";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 pub struct Telemetry {
@@ -361,18 +360,8 @@ impl Plugin for Telemetry {
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
             .instrument(move |req: &QueryPlannerRequest| {
-                let query = req
-                    .originating_request
-                    .body()
-                    .query
-                    .clone()
-                    .unwrap_or_default();
-                let operation_name = req
-                    .originating_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or_default();
+                let query = req.query.clone();
+                let operation_name = req.operation_name.clone().unwrap_or_default();
 
                 info_span!("query_planning",
                     graphql.document = query.as_str(),
@@ -691,11 +680,11 @@ impl Telemetry {
         // Set default service name for metrics
         if metrics_common_config
             .resources
-            .get(SERVICE_NAME_RESOURCE)
+            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str())
             .is_none()
         {
             metrics_common_config.resources.insert(
-                String::from(SERVICE_NAME_RESOURCE),
+                String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
                 String::from(DEFAULT_SERVICE_NAME),
             );
         }
