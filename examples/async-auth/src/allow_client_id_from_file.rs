@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -32,8 +33,8 @@ struct AllowClientIdFromFile {
 impl Plugin for AllowClientIdFromFile {
     type Config = AllowClientIdConfig;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        let AllowClientIdConfig { path, header } = configuration;
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let AllowClientIdConfig { path, header } = init.config;
         let allowed_ids_path = PathBuf::from(path.as_str());
         Ok(Self {
             allowed_ids_path,
@@ -178,6 +179,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::services::RouterRequest;
     use apollo_router::services::RouterResponse;
     use http::StatusCode;
@@ -196,7 +198,10 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("example.allow_client_id_from_file")
             .expect("Plugin not found")
-            .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))
+            .create_instance(
+                &json!({"header": "x-client-id","path": "allowedClientIds.json"}),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -210,13 +215,17 @@ mod tests {
         let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
-            path: "allowedClientIds.json".to_string(),
-            header: "x-client-id".to_string(),
-        })
-        .await
-        .expect("couldn't create AllowClientIdFromFile")
-        .router_service(mock_service.boxed());
+        let init = PluginInit::new(
+            AllowClientIdConfig {
+                path: "allowedClientIds.json".to_string(),
+                header: "x-client-id".to_string(),
+            },
+            Default::default(),
+        );
+        let service_stack = AllowClientIdFromFile::new(init)
+            .await
+            .expect("couldn't create AllowClientIdFromFile")
+            .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
         let request_without_client_id = RouterRequest::fake_builder()
@@ -250,13 +259,17 @@ mod tests {
         let mock_service = test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
-            path: "allowedClientIds.json".to_string(),
-            header: "x-client-id".to_string(),
-        })
-        .await
-        .expect("couldn't create AllowClientIdFromFile")
-        .router_service(mock_service.boxed());
+        let init = PluginInit::new(
+            AllowClientIdConfig {
+                path: "allowedClientIds.json".to_string(),
+                header: "x-client-id".to_string(),
+            },
+            Default::default(),
+        );
+        let service_stack = AllowClientIdFromFile::new(init)
+            .await
+            .expect("couldn't create AllowClientIdFromFile")
+            .router_service(mock_service.boxed());
 
         // Let's create a request with a not allowed client id...
         let request_with_unauthorized_client_id = RouterRequest::fake_builder()
@@ -318,13 +331,17 @@ mod tests {
         let mock_service = mock.build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
-            path: "allowedClientIds.json".to_string(),
-            header: "x-client-id".to_string(),
-        })
-        .await
-        .expect("couldn't create AllowClientIdFromFile")
-        .router_service(mock_service.boxed());
+        let init = PluginInit::new(
+            AllowClientIdConfig {
+                path: "allowedClientIds.json".to_string(),
+                header: "x-client-id".to_string(),
+            },
+            Default::default(),
+        );
+        let service_stack = AllowClientIdFromFile::new(init)
+            .await
+            .expect("couldn't create AllowClientIdFromFile")
+            .router_service(mock_service.boxed());
 
         // Let's create a request with an valid client id...
         let request_with_valid_client_id = RouterRequest::fake_builder()

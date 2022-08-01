@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -26,7 +27,7 @@ impl Plugin for ForbidAnonymousOperations {
     // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = ();
 
-    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
@@ -115,7 +116,7 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
-            .create_instance(&Value::Null)
+            .create_instance(&Value::Null, Default::default())
             .await
             .unwrap();
     }

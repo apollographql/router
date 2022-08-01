@@ -1,0 +1,4 @@
+plugins:
+  # this plugin doesn't have any configuration
+  # mention it here and you're set!
+  example.supergraph_sdl:

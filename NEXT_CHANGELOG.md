@@ -27,6 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Modify the plugin `new` method to pass an initialisation structure ([PR #1446](https://github.com/apollographql/router/pull/1446))
+
+This change alters the `new` method for plugins to pass a `PluginInit` struct.
+
+We are making this change so that we can pass more information during plugin startup. The first change is that in addition to passing
+the plugin configuration, we are now also passing the router supergraph sdl (Schema Definition Language) as a string.
+
+There is a new example (`supergraph_sdl`) which illustrates how to use this new capability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
+
 ### Remove the generic stream type from `RouterResponse` and `ExecutionResponse` ([PR #1420](https://github.com/apollographql/router/pull/1420))
 
 This generic type complicates the API with limited benefit because we use `BoxStream` everywhere in plugins:

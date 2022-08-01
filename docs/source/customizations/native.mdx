@@ -75,14 +75,16 @@ The trait also provides a default implementations for each hook, which returns t
 
 ```rust title="hello_world.rs"
 // This is a bare-bones plugin that you can duplicate when creating your own.
+use apollo_router::plugin::PluginInit;
+
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
     type Config = Conf;
 
     // This is invoked once after the router starts and compiled-in
     // plugins are registered
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        Ok(HelloWorld { configuration })
+    fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(HelloWorld { configuration: init.config })
     }
 
     /// This is invoked after all plugins have been created and we're ready to go live.

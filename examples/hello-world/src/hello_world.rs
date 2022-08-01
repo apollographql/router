@@ -1,4 +1,5 @@
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::ExecutionRequest;
 use apollo_router::services::ExecutionResponse;
@@ -32,8 +33,10 @@ struct Conf {
 impl Plugin for HelloWorld {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        Ok(HelloWorld { configuration })
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(HelloWorld {
+            configuration: init.config,
+        })
     }
 
     fn router_service(
@@ -107,6 +110,7 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
+    use apollo_router::plugin::PluginInit;
 
     use super::Conf;
     use super::HelloWorld;
@@ -116,7 +120,7 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("example.hello_world")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"name" : "Bob"}))
+            .create_instance(&serde_json::json!({"name" : "Bob"}), Default::default())
             .await
             .unwrap();
     }
@@ -131,7 +135,9 @@ mod tests {
         };
 
         // Build an instance of our plugin to use in the test harness
-        let plugin = HelloWorld::new(conf).await.expect("created plugin");
+        let plugin = HelloWorld::new(PluginInit::new(conf, Default::default()))
+            .await
+            .expect("created plugin");
 
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
