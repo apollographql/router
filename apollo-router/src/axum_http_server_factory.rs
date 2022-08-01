@@ -1589,7 +1589,16 @@ mod tests {
     #[tokio::test]
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
-        let (server, client) = init(expectations).await;
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Cors::builder().allow_any_headers(true).build())
+                    .endpoint(String::from("/graphql/*"))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
 
         let response = client
             .request(Method::OPTIONS, &format!("{}/", server.listen_address()))
