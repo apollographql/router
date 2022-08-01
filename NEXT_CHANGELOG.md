@@ -83,6 +83,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([ PR #1391](https://github.com/apollographql/router/pull/1391))
+
+The metadata format now uses `IndexMap<String, Vec<String>>`.
+
+By [@me-diru](https://github.com/me-diru) in https://github.com/apollographql/router/pull/1391 
+
 ### Update the scaffold template so it targets router v0.12.0 ([PR #1431](https://github.com/apollographql/router/pull/1431))
 
 The cargo scaffold template will target the latest version of the router.
@@ -114,3 +120,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+### Updates wording and formatting of README.md
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1445
