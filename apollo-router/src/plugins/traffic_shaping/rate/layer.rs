@@ -14,9 +14,9 @@ use super::RateLimit;
 #[derive(Debug, Clone)]
 pub(crate) struct RateLimitLayer {
     rate: Rate,
-    curr_time: Arc<RwLock<Instant>>,
-    previous_counter: Arc<AtomicUsize>,
-    current_counter: Arc<AtomicUsize>,
+    window_start: Arc<RwLock<Instant>>,
+    previous_nb_requests: Arc<AtomicUsize>,
+    current_nb_requests: Arc<AtomicUsize>,
 }
 
 impl RateLimitLayer {
@@ -25,9 +25,9 @@ impl RateLimitLayer {
         let rate = Rate::new(num, per);
         RateLimitLayer {
             rate,
-            curr_time: Arc::new(RwLock::new(Instant::now())),
-            previous_counter: Arc::default(),
-            current_counter: Arc::new(AtomicUsize::new(1)),
+            window_start: Arc::new(RwLock::new(Instant::now())),
+            previous_nb_requests: Arc::default(),
+            current_nb_requests: Arc::new(AtomicUsize::new(1)),
         }
     }
 }
@@ -39,9 +39,9 @@ impl<S> Layer<S> for RateLimitLayer {
         RateLimit {
             inner: service,
             rate: self.rate,
-            curr_time: self.curr_time.clone(),
-            previous_counter: self.previous_counter.clone(),
-            current_counter: self.current_counter.clone(),
+            window_start: self.window_start.clone(),
+            previous_nb_requests: self.previous_nb_requests.clone(),
+            current_nb_requests: self.current_nb_requests.clone(),
         }
     }
 }
