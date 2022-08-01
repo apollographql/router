@@ -91,13 +91,9 @@ where
     }
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let body = request.originating_request.body();
-
         let key = (
-            body.query
-                .clone()
-                .expect("presence of a query has been checked by the RouterService before; qed"),
-            body.operation_name.to_owned(),
+            request.query.clone(),
+            request.operation_name.to_owned(),
             request.query_plan_options,
         );
         let qp = self.clone();
