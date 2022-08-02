@@ -31,6 +31,15 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🐛 Fixes
 
+### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
+
+Router config handling now:
+* Allows completely empty configuration without error.
+* Prevents unknown tags at the root of the configuration from being silently ignored.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
+
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
