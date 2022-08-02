@@ -4,7 +4,6 @@ mod mock;
 mod service;
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
@@ -35,6 +34,7 @@ use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
+use crate::Configuration;
 use crate::RouterService;
 use crate::Schema;
 
@@ -58,15 +58,16 @@ impl From<String> for IntoSchema {
     }
 }
 
-impl From<IntoSchema> for Schema {
-    fn from(s: IntoSchema) -> Self {
-        match s {
-            IntoSchema::String(s) => Schema::from_str(&s).expect("test schema must be valid"),
+impl IntoSchema {
+    fn into_schema(self, config: &Configuration) -> Schema {
+        match self {
+            IntoSchema::String(s) => Schema::parse(&s, config).expect("test schema must be valid"),
             IntoSchema::Schema(s) => *s,
-            IntoSchema::Canned => {
-                Schema::from_str(include_str!("../../../../examples/graphql/local.graphql"))
-                    .expect("test schema must be valid")
-            }
+            IntoSchema::Canned => Schema::parse(
+                include_str!("../../../../examples/graphql/local.graphql"),
+                config,
+            )
+            .expect("test schema must be valid"),
         }
     }
 }
@@ -127,13 +128,13 @@ impl PluginTestHarness {
                 });
         }
 
-        let schema = Arc::new(Schema::from(schema));
+        let schema = Arc::new(schema.into_schema(&Default::default()));
 
         let query_planner = CachingQueryPlanner::new(
             BridgeQueryPlanner::new(
                 schema.clone(),
                 Some(Arc::new(Introspection::from_schema(&schema))),
-                false,
+                Default::default(),
             )
             .await?,
             DEFAULT_BUFFER_SIZE,

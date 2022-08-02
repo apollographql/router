@@ -42,6 +42,7 @@ use crate::query_planner::QueryPlanOptions;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::Configuration;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
@@ -245,8 +246,7 @@ pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-    introspection: bool,
-    defer_support: bool,
+    configuration: Option<Arc<Configuration>>,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -255,8 +255,7 @@ impl PluggableRouterServiceBuilder {
             schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
-            introspection: false,
-            defer_support: false,
+            configuration: None,
         }
     }
 
@@ -291,13 +290,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_naive_introspection(mut self) -> PluggableRouterServiceBuilder {
-        self.introspection = true;
-        self
-    }
-
-    pub fn with_defer_support(mut self) -> PluggableRouterServiceBuilder {
-        self.defer_support = true;
+    pub fn with_configuration(
+        mut self,
+        configuration: Arc<Configuration>,
+    ) -> PluggableRouterServiceBuilder {
+        self.configuration = Some(configuration);
         self
     }
 
@@ -313,12 +310,14 @@ impl PluggableRouterServiceBuilder {
         // various iterators that we create for folding and leave
         // the plugins in their original order.
 
+        let configuration = self.configuration.unwrap_or_default();
+
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
 
-        let introspection = if self.introspection {
+        let introspection = if configuration.server.introspection {
             // Introspection instantiation can potentially block for some time
             // We don't need to use the api schema here because on the deno side we always convert to API schema
 
@@ -334,7 +333,7 @@ impl PluggableRouterServiceBuilder {
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, self.defer_support)
+            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service = ServiceBuilder::new().buffered().service(

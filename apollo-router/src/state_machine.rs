@@ -34,7 +34,7 @@ use crate::Schema;
 enum State<RS> {
     Startup {
         configuration: Option<Configuration>,
-        schema: Option<Schema>,
+        schema: Option<String>,
     },
     Running {
         configuration: Arc<Configuration>,
@@ -109,7 +109,7 @@ where
                 (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
                     .maybe_transition_to_running(Startup {
                         configuration,
-                        schema: Some(*new_schema),
+                        schema: Some(new_schema),
                     })
                     .await
                     .into_ok_or_err2(),
@@ -152,22 +152,34 @@ where
                     Running {
                         configuration,
                         schema,
-                        router_service_factory: router_service,
+                        router_service_factory,
                         server_handle,
                     },
                     UpdateSchema(new_schema),
                 ) => {
                     tracing::info!("reloading schema");
-                    self.reload_server(
-                        configuration,
-                        schema,
-                        router_service,
-                        server_handle,
-                        None,
-                        Some(Arc::new(*new_schema)),
-                    )
-                    .await
-                    .into_ok_or_err2()
+                    match Schema::parse(&new_schema, &configuration) {
+                        Ok(new_schema) => self
+                            .reload_server(
+                                configuration,
+                                schema,
+                                router_service_factory,
+                                server_handle,
+                                None,
+                                Some(Arc::new(new_schema)),
+                            )
+                            .await
+                            .into_ok_or_err2(),
+                        Err(e) => {
+                            tracing::error!("could not parse schema: {:?}", e);
+                            Running {
+                                configuration,
+                                schema,
+                                router_service_factory,
+                                server_handle,
+                            }
+                        }
+                    }
                 }
 
                 // Running: Handle configuration updates
@@ -261,6 +273,16 @@ where
             schema: Some(schema),
         } = state
         {
+            let schema = match Schema::parse(&schema, &configuration) {
+                Ok(schema) => schema,
+                Err(e) => {
+                    tracing::error!("could not parse schema: {:?}", e);
+                    return Ok(Startup {
+                        configuration: Some(configuration),
+                        schema: None,
+                    });
+                }
+            };
             tracing::debug!("starting http");
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
@@ -406,8 +428,8 @@ mod tests {
     use crate::router_factory::RouterServiceFactory;
     use crate::services::new_service::NewService;
 
-    fn example_schema() -> Schema {
-        include_str!("testdata/supergraph.graphql").parse().unwrap()
+    fn example_schema() -> String {
+        include_str!("testdata/supergraph.graphql").to_owned()
     }
 
     #[test(tokio::test)]
@@ -451,7 +473,7 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(example_schema()),
                     Shutdown
                 ],
             )
@@ -472,8 +494,8 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(minimal_schema.parse().unwrap())),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(example_schema()),
                     Shutdown
                 ],
             )
@@ -494,7 +516,7 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(example_schema()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .server(
@@ -525,7 +547,7 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(example_schema()),
                     Shutdown
                 ],
             )
@@ -551,7 +573,7 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(example_schema()),
                 ],
             )
             .await,
@@ -588,8 +610,8 @@ mod tests {
                 router_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().build().boxed()),
-                    UpdateSchema(Box::new(example_schema())),
-                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(example_schema()),
+                    UpdateSchema(example_schema()),
                     Shutdown
                 ],
             )

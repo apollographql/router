@@ -23,7 +23,7 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.12.1] (unreleased) - 2022-mm-dd
+# [0.13.0] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
@@ -53,6 +53,38 @@ The content of `QueryPlannerRequest` is used as argument to the query planner an
 so it should not change depending on the variables or HTTP headers.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
+
+### Change `PluggableRouterServiceBuilder` methods ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+`with_naive_introspection` and `with_defer_support` where two parameter-less methods
+of this builder that enabled boolean configuration flags.
+They have been removed and replaced by `with_configuration` 
+which takes `Arc<apollo_router::Configuration>`.
+A `Configuration` value can be created from various formats by deserializing with `serde`.
+The removed methods correspond to `server.introspection` and `server.experimental_defer_support`
+configuration keys respectively.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+### Changes to the `SchemaKind` enum ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+The `Instance` variant is replaced with a variant named `String` that contains… 
+a `String` instead of `Box<apollo_router::Schema>`,
+so you no longer need to parse the schema before giving it to the router.
+Similarly, the `Stream` variant now contains a stream of `String`s 
+instead of a stream of already-parsed `Schema`s.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+### `Schema` no longer implements `FromStr` ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+This means that `str.parse::<apollo_router::Schema>()` is no longer available.
+If you still need a parsed `Schema` (see above),
+use `apollo_router::Schema(str, &configuration)` instead.
+To use the default `apollo_router::Configuration` 
+you can call `apollo_router::Schema(str, &Default::default())`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
 
 ## 🚀 Features
 
@@ -128,6 +160,21 @@ client decide how to generate the value to cache, instead of a complicated deleg
 cache.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
+
+### Add configurable parser recursion limit ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+A new option in the configuration file allows changing the recursion limit 
+used for parsing GraphQL operations and schemas.
+This limit is intended to protect against stack overflow and is enabled by default
+with some value that should accomodate any reasonable scenario.
+`router.yaml` configuration example:
+
+```yaml
+server:
+  experimental_parser_recursion_limit: 100
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
 
 ## 🐛 Fixes
 
