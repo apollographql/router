@@ -1,4 +1,4 @@
-//! plugins implementing router customizations.
+//! Plugins implementing router customizations.
 //!
 //! These plugins are compiled into the router and configured via YAML configuration.
 

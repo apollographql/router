@@ -217,11 +217,8 @@ pub fn setup() -> PluggableRouterServiceBuilder {
             ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     let product_service = MockSubgraph::new(product_mocks);
 
-    let schema: Arc<Schema> = Arc::new(
-        include_str!("../benches/fixtures/supergraph.graphql")
-            .parse()
-            .unwrap(),
-    );
+    let schema = include_str!("../benches/fixtures/supergraph.graphql");
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
     let builder = PluggableRouterServiceBuilder::new(schema);
 

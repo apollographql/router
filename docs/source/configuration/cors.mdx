@@ -13,12 +13,15 @@ By default, the Apollo Router enables _only_ Apollo Studio to initiate browser c
 
 * Add the origins of those web applications to the router's list of allowed `origins`.
     * Use this option if there is a known, finite list of web applications that consume your supergraph.
-    * You _must_ use this option if clients need to [authenticate their requests with cookies](#passing-credentials-with-cors).
+* Add a regex that matches the origins of those web applications to the router's list of allowed `origins`.
+    * This option comes in handy if you want to match origins against a pattern, see the example below that matches subdomains of a specific namespace.
 * Enable the `allow_any_origin` option.
     * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
     * With this option enabled, the router sends the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the `Access-Control-Allow-Origin` header. This enables _any_ website to initiate browser connections to it (but they can't provide cookies or other credentials).
 
-The following snippet includes an example of each option (use only one):
+* You _must_ use the `origins` + `match_origins` option if clients need to [authenticate their requests with cookies](#passing-credentials-with-cors).
+
+The following snippet includes an example of each option (use either `allow_any_origin`, or `origins + match_origins`):
 
 ```yaml title="router.yaml"
 server:
@@ -34,6 +37,8 @@ server:
     origins:
       - https://www.your-app.example.com/
       - https://studio.apollographql.com/ # Keep this so Apollo Studio can run queries against your router
+    match_origins:
+      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
 ```
 
 You can also disable CORS entirely by setting `origins` to an empty list:
@@ -94,10 +99,14 @@ server:
     # (Defaults to false)
     allow_credentials: true
 
+    # Set to true to mirror a client's received `access-control-request-headers`
+    # This is equivalent to allowing any headers,
+    # except it will also work if allow_credentials is set to true
+    allow_any_header: true
+
     # The headers to allow.
-    # If this field is not set, CORS will default to the `mirror_request` mode,
-    # which mirrors the received `access-control-request-headers`
-    # (This is equivalent to allowing any headers)
+    # If this field is not set, and `allow_any_header` is not set to `true`
+    # CORS will default to accepting `content-type`, `apollographql-client-version` and `apollographql-client-name`,
     allow_headers: [ Content-Type, Authorization, x-my-custom-required-header, x-and-an-other-required-header ]
 
     # Allowed request methods

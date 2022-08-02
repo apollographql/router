@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 848
 expression: "&schema"
 ---
 {
@@ -10,6 +9,7 @@ expression: "&schema"
   "type": "object",
   "properties": {
     "csrf": {
+      "description": "CSRF Configuration.",
       "type": "object",
       "properties": {
         "required_headers": {
@@ -321,34 +321,88 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": null,
+        "cors": {
+          "allow_any_origin": false,
+          "allow_credentials": false,
+          "allow_headers": [
+            "content-type",
+            "apollographql-client-version",
+            "apollographql-client-name"
+          ],
+          "allow_any_header": false,
+          "expose_headers": null,
+          "origins": [
+            "https://studio.apollographql.com"
+          ],
+          "match_origins": null,
+          "methods": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ]
+        },
         "introspection": true,
         "landing_page": true,
         "endpoint": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false
+        "experimental_defer_support": false,
+        "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
         "cors": {
           "description": "Cross origin request headers.",
-          "default": null,
+          "default": {
+            "allow_any_origin": false,
+            "allow_credentials": false,
+            "allow_headers": [
+              "content-type",
+              "apollographql-client-version",
+              "apollographql-client-name"
+            ],
+            "allow_any_header": false,
+            "expose_headers": null,
+            "origins": [
+              "https://studio.apollographql.com"
+            ],
+            "match_origins": null,
+            "methods": [
+              "GET",
+              "POST",
+              "OPTIONS"
+            ]
+          },
           "type": "object",
           "properties": {
+            "allow_any_header": {
+              "description": "Set to true to mirror headers sent by clients.\n\nIf this is not set, we will default to the `mirror_request` mode, which mirrors the received `access-control-request-headers` preflight has sent..",
+              "default": false,
+              "type": "boolean"
+            },
             "allow_any_origin": {
               "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
-              "default": null,
-              "type": "boolean",
-              "nullable": true
+              "default": false,
+              "type": "boolean"
             },
             "allow_credentials": {
               "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
-              "default": null,
-              "type": "boolean",
-              "nullable": true
+              "default": false,
+              "type": "boolean"
             },
             "allow_headers": {
-              "description": "The headers to allow. If this is not set, we will default to the `mirror_request` mode, which mirrors the received `access-control-request-headers` preflight has sent.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
+              "description": "The headers to allow.\n\nDefaults to `default_headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
+              "default": [
+                "content-type",
+                "apollographql-client-version",
+                "apollographql-client-name"
+              ],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "expose_headers": {
+              "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
               "default": null,
               "type": "array",
               "items": {
@@ -356,8 +410,8 @@ expression: "&schema"
               },
               "nullable": true
             },
-            "expose_headers": {
-              "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
+            "match_origins": {
+              "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
               "default": null,
               "type": "array",
               "items": {
@@ -388,8 +442,7 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "endpoint": {
           "description": "GraphQL endpoint default: \"/\"",
@@ -400,6 +453,13 @@ expression: "&schema"
           "description": "Experimental @defer directive support default: false",
           "default": false,
           "type": "boolean"
+        },
+        "experimental_parser_recursion_limit": {
+          "description": "Experimental limitation of query depth default: 4096",
+          "default": 4096,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",

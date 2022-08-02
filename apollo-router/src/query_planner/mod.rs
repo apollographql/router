@@ -1,3 +1,4 @@
+//! GraphQL operation planning.
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -198,8 +199,8 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 let query = reconstruct_full_query(&primary_path, &primary.subselection);
                 // ----------------------- Parse ---------------------------------
-                let sub_selection =
-                    Query::parse(&query, schema).expect("it must respect the schema");
+                let sub_selection = Query::parse(&query, schema, &Default::default())
+                    .expect("it must respect the schema");
                 // ----------------------- END Parse ---------------------------------
 
                 subselections.insert(
@@ -211,8 +212,8 @@ impl PlanNode {
                         // TODO rebuilt subselection from the root thanks to the path
                         let query = reconstruct_full_query(&current.path, subselection);
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection =
-                            Query::parse(&query, schema).expect("it must respect the schema");
+                        let sub_selection = Query::parse(&query, schema, &Default::default())
+                            .expect("it must respect the schema");
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
@@ -766,6 +767,7 @@ pub(crate) mod fetch {
     use crate::services::subgraph_service::SubgraphServiceFactory;
     use crate::*;
 
+    /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
@@ -1210,7 +1212,6 @@ mod log {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -1299,7 +1300,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1360,7 +1361,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1415,7 +1416,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1523,7 +1524,8 @@ mod tests {
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
-        let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
+        let schema = include_str!("testdata/defer_schema.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([
                 (
@@ -1688,7 +1690,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(schema).unwrap(),
+                &Schema::parse(schema, &Default::default()).unwrap(),
                 sender,
             )
             .await;

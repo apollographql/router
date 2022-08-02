@@ -69,20 +69,15 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema).await?;
+
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-        if configuration.server.introspection {
-            builder = builder.with_naive_introspection();
-        }
-        if configuration.server.experimental_defer_support {
-            builder = builder.with_defer_support();
-        }
+        builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
             builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
-
-        // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
@@ -110,7 +105,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let schema: Schema = schema.parse().unwrap();
+    let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
     let service = YamlRouterServiceFactory::default()
         .create(Arc::new(config), Arc::new(schema), None)
@@ -394,7 +389,8 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config).unwrap();
 
         let service = YamlRouterServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None)
@@ -404,9 +400,8 @@ mod test {
 
     #[test]
     fn test_inject_schema_id() {
-        let schema = include_str!("testdata/starstuff@current.graphql")
-            .parse()
-            .unwrap();
+        let schema = include_str!("testdata/starstuff@current.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =

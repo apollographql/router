@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.12.1-alpha-defer4"
+version = "0.14.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -136,7 +136,7 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
- "buildstructor",
+ "buildstructor 0.4.1",
  "bytes",
  "clap 3.2.10",
  "dashmap 5.3.4",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.12.0"
+version = "0.14.0"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.12.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.12.0"
+version = "0.14.0"
 dependencies = [
  "bytes",
  "clap 3.2.10",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.12.0"
+version = "0.14.0"
 dependencies = [
  "futures",
  "graphql_client",
@@ -450,9 +450,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axum"
-version = "0.5.12"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16705af05732b7d3258ec0f7b73c03a658a28925e050d8852d5b568ee8bcf4e"
+checksum = "6b9496f0c1d1afb7a2af4338bbe1d969cddfead41d87a9fb3aaa6d0bbc7af648"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -662,6 +662,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildstructor"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a7772d3542812693473268c2308979967035162dd36d053ec728e6c947ba93f"
+dependencies = [
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "str_inflector",
+ "syn",
+ "thiserror",
+ "try_match",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -787,7 +802,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f6232669ff969fc9827d8a47dbc9e128a8eb1c7dffc9bcf1cf71be34dee5ef9"
 dependencies = [
  "anyhow",
- "buildstructor",
+ "buildstructor 0.3.2",
  "cargo",
  "clap 2.34.0",
  "console 0.12.0",
@@ -6456,7 +6471,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.12.0"
+version = "0.14.0"
 dependencies = [
  "ansi_term",
  "anyhow",

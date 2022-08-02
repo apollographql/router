@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::str::FromStr;
 
 use apollo_parser::ast;
 use http::Uri;
@@ -33,15 +34,13 @@ pub struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
-impl std::str::FromStr for Schema {
-    type Err = SchemaError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut schema = parse(s)?;
-        schema.api_schema = Some(Box::new(api_schema(s)?));
+impl Schema {
+    pub fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        let mut schema = parse(s, configuration)?;
+        schema.api_schema = Some(Box::new(api_schema(s, configuration)?));
         return Ok(schema);
 
-        fn api_schema(schema: &str) -> Result<Schema, SchemaError> {
+        fn api_schema(schema: &str, configuration: &Configuration) -> Result<Schema, SchemaError> {
             let api_schema = format!(
                 "{}\n",
                 api_schema::api_schema(schema)
@@ -51,10 +50,10 @@ impl std::str::FromStr for Schema {
                     })?
             );
 
-            parse(&api_schema)
+            parse(&api_schema, configuration)
         }
 
-        fn parse(schema: &str) -> Result<Schema, SchemaError> {
+        fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
             let schema_with_introspection = Schema::with_introspection(schema);
             let parser = apollo_parser::Parser::new(&schema_with_introspection);
             let tree = parser.parse();
@@ -431,11 +430,6 @@ impl std::str::FromStr for Schema {
 }
 
 impl Schema {
-    /// Read a [`Schema`] from a file at a path.
-    pub fn read(path: impl AsRef<std::path::Path>) -> Result<Self, SchemaError> {
-        std::fs::read_to_string(path)?.parse()
-    }
-
     /// Extracts a string slice containing the entire [`Schema`].
     pub fn as_str(&self) -> &str {
         &self.string
@@ -634,8 +628,6 @@ implement_input_object_type_or_interface!(
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     fn with_supergraph_boilerplate(content: &str) -> String {
@@ -679,7 +671,8 @@ mod tests {
             union UnionType2 = Foo | Bar
             "#,
             );
-            format!("{}\n{}", base_schema, schema).parse().unwrap()
+            let schema = format!("{}\n{}", base_schema, schema);
+            Schema::parse(&schema, &Default::default()).unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
@@ -702,7 +695,8 @@ mod tests {
             interface InterfaceType2 implements Foo & Bar { me: String }
             "#,
             );
-            format!("{}\n{}", base_schema, schema).parse().unwrap()
+            let schema = format!("{}\n{}", base_schema, schema);
+            Schema::parse(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
@@ -737,7 +731,7 @@ mod tests {
 
     #[test]
     fn routing_urls() {
-        let schema: Schema = r#"
+        let schema = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -757,9 +751,8 @@ mod tests {
             PRODUCTS
             @join__graph(name: "products" url: "http://localhost:4003/graphql")
             REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#
-        .parse()
-        .unwrap();
+        }"#;
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
@@ -807,7 +800,8 @@ mod tests {
 
     #[test]
     fn api_schema() {
-        let schema = Schema::from_str(include_str!("../testdata/contract_schema.graphql")).unwrap();
+        let schema = include_str!("../testdata/contract_schema.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         assert!(schema.object_types["Product"]
             .fields
             .get("inStock")
@@ -822,8 +816,8 @@ mod tests {
     fn schema_id() {
         #[cfg(not(windows))]
         {
-            let schema =
-                Schema::from_str(include_str!("../testdata/starstuff@current.graphql")).unwrap();
+            let schema = include_str!("../testdata/starstuff@current.graphql");
+            let schema = Schema::parse(schema, &Default::default()).unwrap();
 
             assert_eq!(
                 schema.schema_id,
@@ -844,7 +838,8 @@ mod tests {
     // test for https://github.com/apollographql/federation/pull/1769
     #[test]
     fn inaccessible_on_non_core() {
-        match Schema::from_str(include_str!("../testdata/inaccessible_on_non_core.graphql")) {
+        let schema = include_str!("../testdata/inaccessible_on_non_core.graphql");
+        match Schema::parse(schema, &Default::default()) {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
