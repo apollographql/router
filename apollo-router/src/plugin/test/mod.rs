@@ -245,13 +245,14 @@ mod testing {
     use insta::assert_json_snapshot;
 
     use super::*;
+    use crate::plugin::PluginInit;
 
     struct EmptyPlugin {}
     #[async_trait::async_trait]
     impl Plugin for EmptyPlugin {
         type Config = ();
 
-        async fn new(_config: Self::Config) -> Result<Self, tower::BoxError> {
+        async fn new(_init: PluginInit<Self::Config>) -> Result<Self, tower::BoxError> {
             Ok(Self {})
         }
     }

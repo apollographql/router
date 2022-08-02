@@ -1,4 +1,5 @@
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
@@ -29,9 +30,9 @@ struct PropagateStatusCode {
 impl Plugin for PropagateStatusCode {
     type Config = PropagateStatusCodeConfig;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
-            status_codes: configuration.status_codes,
+            status_codes: init.config.status_codes,
         })
     }
 
@@ -99,6 +100,7 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::services::RouterRequest;
     use apollo_router::services::RouterResponse;
     use apollo_router::services::SubgraphRequest;
@@ -119,7 +121,10 @@ mod tests {
         apollo_router::plugin::plugins()
             .get("example.propagate_status_code")
             .expect("Plugin not found")
-            .create_instance(&json!({ "status_codes" : [500, 403, 401] }))
+            .create_instance(
+                &json!({ "status_codes" : [500, 403, 401] }),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -144,12 +149,16 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
-            status_codes: vec![500, 403, 401],
-        })
-        .await
-        .expect("couldn't create plugin")
-        .subgraph_service("accounts", mock_service.boxed());
+        let init = PluginInit::new(
+            PropagateStatusCodeConfig {
+                status_codes: vec![500, 403, 401],
+            },
+            Default::default(),
+        );
+        let service_stack = PropagateStatusCode::new(init)
+            .await
+            .expect("couldn't create plugin")
+            .subgraph_service("accounts", mock_service.boxed());
 
         let subgraph_request = SubgraphRequest::fake_builder().build();
 
@@ -179,12 +188,16 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
-            status_codes: vec![500, 403, 401],
-        })
-        .await
-        .expect("couldn't create plugin")
-        .subgraph_service("accounts", mock_service.boxed());
+        let init = PluginInit::new(
+            PropagateStatusCodeConfig {
+                status_codes: vec![500, 403, 401],
+            },
+            Default::default(),
+        );
+        let service_stack = PropagateStatusCode::new(init)
+            .await
+            .expect("couldn't create plugin")
+            .subgraph_service("accounts", mock_service.boxed());
 
         let subgraph_request = SubgraphRequest::fake_builder().build();
 
@@ -225,12 +238,16 @@ mod tests {
         let mock_service = mock_service.build();
 
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
-        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
-            status_codes: vec![500, 403, 401],
-        })
-        .await
-        .expect("couldn't create plugin")
-        .router_service(mock_service.boxed());
+        let init = PluginInit::new(
+            PropagateStatusCodeConfig {
+                status_codes: vec![500, 403, 401],
+            },
+            Default::default(),
+        );
+        let service_stack = PropagateStatusCode::new(init)
+            .await
+            .expect("couldn't create plugin")
+            .router_service(mock_service.boxed());
 
         let router_request = RouterRequest::fake_builder()
             .build()
@@ -265,12 +282,16 @@ mod tests {
         let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
-            status_codes: vec![500, 403, 401],
-        })
-        .await
-        .expect("couldn't create plugin")
-        .router_service(mock_service.boxed());
+        let init = PluginInit::new(
+            PropagateStatusCodeConfig {
+                status_codes: vec![500, 403, 401],
+            },
+            Default::default(),
+        );
+        let service_stack = PropagateStatusCode::new(init)
+            .await
+            .expect("couldn't create plugin")
+            .router_service(mock_service.boxed());
 
         let router_request = RouterRequest::fake_builder()
             .build()

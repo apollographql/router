@@ -13,6 +13,7 @@ use apollo_router::http_ext;
 use apollo_router::json_ext::Object;
 use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::plugins::csrf;
 use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
@@ -629,14 +630,19 @@ async fn setup_router_and_registry() -> (
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-    let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
-        metrics: Option::default(),
-        tracing: Some(Tracing::default()),
-        apollo: Some(apollo::Config::default()),
-    })
+    let telemetry_plugin = Telemetry::new(PluginInit::new(
+        telemetry::config::Conf {
+            metrics: Option::default(),
+            tracing: Some(Tracing::default()),
+            apollo: Some(apollo::Config::default()),
+        },
+        Default::default(),
+    ))
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(Default::default()).await.unwrap();
+    let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))
+        .await
+        .unwrap();
     builder = builder
         .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
         .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));

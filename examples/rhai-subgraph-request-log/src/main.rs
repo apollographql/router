@@ -15,6 +15,7 @@ mod tests {
     use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
     use apollo_router::plugin::Plugin;
+    use apollo_router::plugin::PluginInit;
     use apollo_router::plugins::rhai::Conf;
     use apollo_router::plugins::rhai::Rhai;
     use apollo_router::services::RouterRequest;
@@ -31,7 +32,9 @@ mod tests {
         .expect("valid conf supplied");
 
         // Build an instance of our plugin to use in the test harness
-        let plugin = Rhai::new(conf).await.expect("created plugin");
+        let plugin = Rhai::new(PluginInit::new(conf, Default::default()))
+            .await
+            .expect("created plugin");
 
         // Build a test harness.
         let mut test_harness = PluginTestHarness::builder()
