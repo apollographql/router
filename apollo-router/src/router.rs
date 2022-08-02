@@ -33,7 +33,7 @@ use crate::reload::Error as ReloadError;
 use crate::router_factory::YamlRouterServiceFactory;
 use crate::state_machine::StateMachine;
 
-type SchemaStream = Pin<Box<dyn Stream<Item = crate::Schema> + Send>>;
+type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -81,13 +81,13 @@ pub enum ApolloRouterError {
     ReloadTracingLayerError(ReloadError),
 }
 
-/// The user supplied schema. Either a static instance or a stream for hot reloading.
+/// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
 pub enum SchemaKind {
     /// A static schema.
-    #[display(fmt = "Instance")]
-    Instance(Box<crate::Schema>),
+    #[display(fmt = "String")]
+    String(String),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -123,9 +123,9 @@ pub enum SchemaKind {
     },
 }
 
-impl From<crate::Schema> for SchemaKind {
-    fn from(schema: crate::Schema) -> Self {
-        Self::Instance(Box::new(schema))
+impl From<&'_ str> for SchemaKind {
+    fn from(s: &'_ str) -> Self {
+        Self::String(s.to_owned())
     }
 }
 
@@ -133,10 +133,8 @@ impl SchemaKind {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            SchemaKind::Instance(instance) => stream::iter(vec![UpdateSchema(instance)]).boxed(),
-            SchemaKind::Stream(stream) => {
-                stream.map(|schema| UpdateSchema(Box::new(schema))).boxed()
-            }
+            SchemaKind::String(schema) => stream::once(future::ready(UpdateSchema(schema))).boxed(),
+            SchemaKind::Stream(stream) => stream.map(UpdateSchema).boxed(),
             SchemaKind::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -147,17 +145,17 @@ impl SchemaKind {
                     stream::empty().boxed()
                 } else {
                     //The schema file exists try and load it
-                    match ConfigurationKind::read_schema(&path) {
+                    match std::fs::read_to_string(&path) {
                         Ok(schema) => {
                             if watch {
                                 crate::files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(ConfigurationKind::read_schema(&path).ok())
+                                        future::ready(std::fs::read_to_string(&path).ok())
                                     })
-                                    .map(|schema| UpdateSchema(Box::new(schema)))
+                                    .map(UpdateSchema)
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateSchema(Box::new(schema)))).boxed()
+                                stream::once(future::ready(UpdateSchema(schema))).boxed()
                             }
                         }
                         Err(err) => {
@@ -176,14 +174,7 @@ impl SchemaKind {
                 apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
-                            Ok(schema_result) => schema_result
-                                .schema
-                                .parse()
-                                .map_err(|e| {
-                                    tracing::error!("could not parse schema: {:?}", e);
-                                })
-                                .ok(),
-
+                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
                             Err(e) => {
                                 tracing::error!(
                                     "error downloading the schema from Uplink: {:?}",
@@ -193,7 +184,6 @@ impl SchemaKind {
                             }
                         })
                     })
-                    .map(|schema| UpdateSchema(Box::new(schema)))
                     .boxed()
             }
         }
@@ -290,10 +280,6 @@ impl ConfigurationKind {
 
         Ok(config)
     }
-
-    fn read_schema(path: &Path) -> Result<crate::Schema, ApolloRouterError> {
-        crate::Schema::read(path).map_err(ApolloRouterError::ReadSchemaError)
-    }
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -344,7 +330,7 @@ impl ShutdownKind {
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: apollo_router::Schema = "schema".parse().unwrap();
+///     let schema = "schema";
 ///     let server = ApolloRouter::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
@@ -362,7 +348,7 @@ impl ShutdownKind {
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema: apollo_router::Schema = "schema".parse().unwrap();
+///     let schema = "schema";
 ///     let server = ApolloRouter::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
@@ -416,7 +402,7 @@ pub(crate) enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(Box<crate::Schema>),
+    UpdateSchema(String),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -538,7 +524,7 @@ mod tests {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let schema: crate::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
         ApolloRouter::builder()
             .configuration(configuration)
             .schema(schema)

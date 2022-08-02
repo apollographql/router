@@ -158,8 +158,9 @@ mod introspection_tests {
         // and those queries don’t cause errors,
         // thus preventing regressions if a wrong query is added
         // to the `well_known_introspection_queries` folder
+        let config = Default::default();
         let schema = include_str!("query_planner/testdata/schema.graphql");
-        let schema = schema.parse().unwrap();
+        let schema = Schema::parse(schema, &config).unwrap();
         assert_eq!(
             Introspection::from_schema(&schema).cache.len(),
             KNOWN_INTROSPECTION_QUERIES.len()
@@ -169,7 +170,7 @@ mod introspection_tests {
             .files()
             .zip(&*KNOWN_INTROSPECTION_QUERIES)
         {
-            let result = Query::parse(query, &schema);
+            let result = Query::parse(query, &schema, &config);
             assert!(
                 result.is_ok(),
                 "{}: {}",

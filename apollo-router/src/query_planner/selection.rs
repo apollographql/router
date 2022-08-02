@@ -173,7 +173,7 @@ mod tests {
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
-            let schema: Schema = $schema.parse().unwrap();
+            let schema = Schema::parse(&$schema, &Default::default()).unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -266,13 +266,12 @@ mod tests {
 
     #[test]
     fn test_array() {
-        let schema: Schema = with_supergraph_boilerplate(
+        let schema = with_supergraph_boilerplate(
             "type Query { me: String }
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
-        )
-        .parse()
-        .unwrap();
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",

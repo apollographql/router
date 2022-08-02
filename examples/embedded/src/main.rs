@@ -19,7 +19,8 @@ async fn main() -> Result<()> {
     set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
 
     // get the supergraph from ../../examples/graphql/supergraph.graphql
-    let schema = Arc::new(include_str!("../../graphql/supergraph.graphql").parse()?);
+    let schema = include_str!("../../graphql/supergraph.graphql");
+    let schema = Arc::new(apollo_router::Schema::parse(schema, &Default::default())?);
 
     // PluggableRouterServiceBuilder creates a GraphQL pipeline to process queries against a supergraph Schema
     // The whole pipeline is set up...
