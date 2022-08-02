@@ -1,3 +1,4 @@
+//! serde support for commonly used data structures.
 use std::fmt::Formatter;
 use std::str::FromStr;
 

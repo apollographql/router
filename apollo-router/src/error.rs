@@ -1,3 +1,4 @@
+//! Router errors.
 use std::sync::Arc;
 
 use displaydoc::Display;

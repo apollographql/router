@@ -9,6 +9,7 @@ expression: "&schema"
   "type": "object",
   "properties": {
     "csrf": {
+      "description": "CSRF Configuration.",
       "type": "object",
       "properties": {
         "required_headers": {

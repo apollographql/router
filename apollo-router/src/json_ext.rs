@@ -1,3 +1,4 @@
+//! Performance oriented JSON manipulation.
 use std::cmp::min;
 use std::fmt;
 
