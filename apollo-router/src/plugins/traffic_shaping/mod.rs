@@ -157,7 +157,7 @@ impl Plugin for TrafficShaping {
             });
 
         Ok(Self {
-            config,
+            config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
         })
