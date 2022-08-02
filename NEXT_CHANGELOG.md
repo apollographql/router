@@ -56,6 +56,24 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Configure Regex based CORS rules ([PR #1444](https://github.com/apollographql/router/pull/1444))
+
+The router now supports regex based CORS rules, as explained in the [docs](https://www.apollographql.com/docs/router/configuration/cors)
+It also supports the `allow_any_header` setting that will mirror client's requested headers.
+
+```yaml title="router.yaml"
+server:
+  cors:
+    match_origins:
+      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
+    allow_any_header: true # mirror client's headers
+```
+
+The default CORS headers configuration of the router allows `content-type`, `apollographql-client-version` and `apollographql-client-name`.
+
+By [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/1444
+
+
 ### Add support of error section in telemetry to add custom attributes ([PR #1443](https://github.com/apollographql/router/pull/1443))
 
 The telemetry is now able to hook at the error stage if router or a subgraph is returning an error. Here is an example of configuration:
