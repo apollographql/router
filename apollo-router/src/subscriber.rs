@@ -1,4 +1,4 @@
-//! The apollo-router Subscriber.
+//! The apollo-router Tracing Subscriber.
 //!
 //! Here are some constraints:
 //!  - We'd like to use tower to compose our services

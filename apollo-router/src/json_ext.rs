@@ -1,3 +1,4 @@
+//! Performance oriented JSON manipulation.
 use std::cmp::min;
 use std::fmt;
 
@@ -64,9 +65,13 @@ pub trait ValueExt {
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 
-    /// Insert a `value` at a `Path`
+    /// Insert a `Value` at a `Path`
     #[track_caller]
     fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
+
+    /// Get a `Value` from a `Path`
+    #[track_caller]
+    fn get_path<'a>(&'a self, path: &'a Path) -> Result<&'a Value, FetchError>;
 
     /// Select all values matching a `Path`.
     ///
@@ -241,7 +246,7 @@ impl ValueExt for Value {
         res_value
     }
 
-    /// Insert a `value` at a `Path`
+    /// Insert a `Value` at a `Path`
     #[track_caller]
     fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
         let mut current_node = self;
@@ -316,6 +321,18 @@ impl ValueExt for Value {
 
         *current_node = value;
         Ok(())
+    }
+
+    /// Get a `Value` from a `Path`
+    #[track_caller]
+    fn get_path<'a>(&'a self, path: &'a Path) -> Result<&'a Value, FetchError> {
+        let mut res = Err(FetchError::ExecutionPathNotFound {
+            reason: "value not found".to_string(),
+        });
+        iterate_path(&mut Path::default(), &path.0, self, &mut |_path, value| {
+            res = Ok(value);
+        });
+        res
     }
 
     #[track_caller]

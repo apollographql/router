@@ -28,6 +28,7 @@ async fn all_rhai_callbacks_are_invoked() {
         .create_instance(
             &Value::from_str(r#"{"scripts":"tests/fixtures", "main": "test_callbacks.rhai"}"#)
                 .unwrap(),
+            Default::default(),
         )
         .await
         .unwrap();

@@ -365,6 +365,7 @@ impl PluggableRouterServiceBuilder {
     }
 }
 
+/// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub struct RouterCreator {
     query_planner_service: Buffer<
@@ -446,6 +447,7 @@ impl RouterCreator {
             )
     }
 
+    /// Create a test service.
     pub fn test_service(
         &self,
     ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
