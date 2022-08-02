@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 914
 expression: "&schema"
 ---
 {
@@ -1919,13 +1920,8 @@ expression: "&schema"
               ],
               "nullable": true
             },
-            "query_deduplication": {
-              "description": "Enable query deduplication",
-              "type": "boolean",
-              "nullable": true
-            },
-            "rate_limit": {
-              "description": "Enable rate limiting",
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
               "type": "object",
               "required": [
                 "capacity",
@@ -1946,6 +1942,11 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
+            "query_deduplication": {
+              "description": "Enable query deduplication",
+              "type": "boolean",
+              "nullable": true
+            },
             "timeout": {
               "description": "Enable timeout for incoming requests",
               "default": null,
@@ -1959,8 +1960,8 @@ expression: "&schema"
           "description": "Applied at the router level",
           "type": "object",
           "properties": {
-            "rate_limit": {
-              "description": "Enable rate limiting",
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
               "type": "object",
               "required": [
                 "capacity",
@@ -2006,13 +2007,8 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
-              "query_deduplication": {
-                "description": "Enable query deduplication",
-                "type": "boolean",
-                "nullable": true
-              },
-              "rate_limit": {
-                "description": "Enable rate limiting",
+              "global_rate_limit": {
+                "description": "Enable global rate limiting",
                 "type": "object",
                 "required": [
                   "capacity",
@@ -2031,6 +2027,11 @@ expression: "&schema"
                   }
                 },
                 "additionalProperties": false,
+                "nullable": true
+              },
+              "query_deduplication": {
+                "description": "Enable query deduplication",
+                "type": "boolean",
                 "nullable": true
               },
               "timeout": {

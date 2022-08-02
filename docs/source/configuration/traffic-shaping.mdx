@@ -10,7 +10,7 @@ The Apollo Router supports the following types of traffic shaping between itself
 - **Variable deduplication** - If a request to a subgraph includes multiple GraphQL variables with the same value, the router can replace those with a single variable.
 - **Compression** - The router can compress request bodies to subgraphs (along with response bodies to clients) with a supported algorithm
   - The router currently supports `gzip`, `br`, and `deflate`.
-- **Rate limiting** - If you want to rate limit requests to a subgraphs or to the router itself.
+- **Global rate limiting** - If you want to rate limit requests to subgraphs or to the router itself.
 - **Timeout**: - Set a timeout to subgraphs and router requests.
 
 Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
@@ -23,7 +23,7 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 traffic_shaping:
   variables_deduplication: true # Enable the variable deduplication optimization.
   router: # Rules applied to requests from clients to the router
-    rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
       interval: 5s
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
@@ -34,7 +34,7 @@ traffic_shaping:
     products:
       query_deduplication: false # Disable query for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
-      rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
+      global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
         capacity: 10
         interval: 5s
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)

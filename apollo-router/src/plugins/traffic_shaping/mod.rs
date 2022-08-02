@@ -57,8 +57,8 @@ struct Shaping {
     query_deduplication: Option<bool>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
-    /// Enable rate limiting
-    rate_limit: Option<RateLimitConf>,
+    /// Enable global rate limiting
+    global_rate_limit: Option<RateLimitConf>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
@@ -73,10 +73,10 @@ impl Merge for Shaping {
                 query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
-                rate_limit: self
-                    .rate_limit
+                global_rate_limit: self
+                    .global_rate_limit
                     .as_ref()
-                    .or(fallback.rate_limit.as_ref())
+                    .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
             },
         }
@@ -86,8 +86,8 @@ impl Merge for Shaping {
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RouterShaping {
-    /// Enable rate limiting
-    rate_limit: Option<RateLimitConf>,
+    /// Enable global rate limiting
+    global_rate_limit: Option<RateLimitConf>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
@@ -148,7 +148,7 @@ impl Plugin for TrafficShaping {
             .config
             .router
             .as_ref()
-            .and_then(|r| r.rate_limit.as_ref())
+            .and_then(|r| r.global_rate_limit.as_ref())
             .map(|router_rate_limit_conf| {
                 RateLimitLayer::new(
                     router_rate_limit_conf.capacity,
@@ -191,7 +191,7 @@ impl Plugin for TrafficShaping {
         let final_config = Self::merge_config(all_config, subgraph_config);
 
         if let Some(config) = final_config {
-            let rate_limit = config.rate_limit.as_ref().map(|rate_limit_conf| {
+            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
                 self.rate_limit_subgraphs
                     .lock()
                     .unwrap()
@@ -464,7 +464,7 @@ mod test {
             r#"
         subgraphs:
             test:
-                rate_limit:
+                global_rate_limit:
                     capacity: 1
                     interval: 1sec
                 timeout: 500ms
@@ -504,7 +504,7 @@ mod test {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
         router:
-            rate_limit:
+            global_rate_limit:
                 capacity: 1
                 interval: 1sec
             timeout: 500ms
