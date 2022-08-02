@@ -56,6 +56,14 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Publish helm chart to OCI registry ([PR #1447](https://github.com/apollographql/router/pull/1447))
+
+When we make a release, publish our helm chart to the same OCI registry that we use for our docker images.
+
+For more information about using OCI registries with helm, see [the helm documentation](https://helm.sh/blog/storing-charts-in-oci/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1447
+
 ### Configure Regex based CORS rules ([PR #1444](https://github.com/apollographql/router/pull/1444))
 
 The router now supports regex based CORS rules, as explained in the [docs](https://www.apollographql.com/docs/router/configuration/cors)

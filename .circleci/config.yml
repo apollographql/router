@@ -645,6 +645,19 @@ jobs:
             docker push ${ROUTER_TAG}:${VERSION}-debug
             # Push release image
             docker push ${ROUTER_TAG}:${VERSION}
+      - run:
+          name: Helm build
+          command: |
+            # Install Helm
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            # Package up the helm chart
+            helm package helm/chart/router
+            # Make sure we have the newest chart
+            CHART=$(ls -t router*.tgz| head -1)
+            # NB: GH token expires 30/3/2023
+            echo ${GITHUB_DOCKER_TOKEN} | helm registry login -u garypen --password-stdin ghcr.io
+            # Push chart to repository
+            helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
   ci_checks:
