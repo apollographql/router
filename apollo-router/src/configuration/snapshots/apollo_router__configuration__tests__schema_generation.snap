@@ -328,7 +328,7 @@ expression: "&schema"
             "apollographql-client-version",
             "apollographql-client-name"
           ],
-          "allow_any_headers": false,
+          "allow_any_header": false,
           "expose_headers": null,
           "origins": [
             "https://studio.apollographql.com"
@@ -358,7 +358,7 @@ expression: "&schema"
               "apollographql-client-version",
               "apollographql-client-name"
             ],
-            "allow_any_headers": false,
+            "allow_any_header": false,
             "expose_headers": null,
             "origins": [
               "https://studio.apollographql.com"
@@ -372,7 +372,7 @@ expression: "&schema"
           },
           "type": "object",
           "properties": {
-            "allow_any_headers": {
+            "allow_any_header": {
               "description": "Set to true to mirror headers sent by clients.\n\nIf this is not set, we will default to the `mirror_request` mode, which mirrors the received `access-control-request-headers` preflight has sent..",
               "default": false,
               "type": "boolean"

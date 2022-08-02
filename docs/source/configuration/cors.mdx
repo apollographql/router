@@ -99,10 +99,14 @@ server:
     # (Defaults to false)
     allow_credentials: true
 
+    # Set to true to mirror a client's received `access-control-request-headers`
+    # This is equivalent to allowing any headers,
+    # except it will also work if allow_credentials is set to true
+    allow_any_header: true
+
     # The headers to allow.
-    # If this field is not set, CORS will default to the `mirror_request` mode,
-    # which mirrors the received `access-control-request-headers`
-    # (This is equivalent to allowing any headers)
+    # If this field is not set, and `allow_any_header` is not set to `true`
+    # CORS will default to accepting `content-type`, `apollographql-client-version` and `apollographql-client-name`,
     allow_headers: [ Content-Type, Authorization, x-my-custom-required-header, x-and-an-other-required-header ]
 
     # Allowed request methods

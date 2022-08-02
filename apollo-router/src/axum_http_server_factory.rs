@@ -1593,7 +1593,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Cors::builder().allow_any_headers(true).build())
+                    .cors(Cors::builder().allow_any_header(true).build())
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )
@@ -2117,7 +2117,6 @@ Content-Type: application/json\r
     fn assert_cors_origin(response: reqwest::Response, origin: &str) {
         assert!(response.status().is_success());
         let headers = response.headers();
-        dbg!(headers);
         assert_headers_valid(&response);
         assert!(origin_valid(headers, origin));
     }

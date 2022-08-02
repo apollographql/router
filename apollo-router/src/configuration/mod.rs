@@ -377,7 +377,7 @@ pub(crate) struct Cors {
     /// the `mirror_request` mode, which mirrors the received
     /// `access-control-request-headers` preflight has sent..
     #[serde(default)]
-    pub(crate) allow_any_headers: bool,
+    pub(crate) allow_any_header: bool,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
@@ -404,7 +404,7 @@ impl Default for Cors {
     fn default() -> Self {
         Self {
             allow_any_origin: Default::default(),
-            allow_any_headers: Default::default(),
+            allow_any_header: Default::default(),
             allow_credentials: Default::default(),
             allow_headers: default_headers(),
             expose_headers: Default::default(),
@@ -464,7 +464,7 @@ impl Cors {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
-        allow_any_headers: Option<bool>,
+        allow_any_header: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
@@ -474,7 +474,7 @@ impl Cors {
     ) -> Self {
         Self {
             allow_any_origin: allow_any_origin.unwrap_or_default(),
-            allow_any_headers: allow_any_headers.unwrap_or_default(),
+            allow_any_header: allow_any_header.unwrap_or_default(),
             allow_credentials: allow_credentials.unwrap_or_default(),
             allow_headers: allow_headers.unwrap_or_else(default_headers),
             expose_headers,
@@ -491,7 +491,7 @@ impl Cors {
 
         self.ensure_usable_cors_rules()?;
 
-        let allow_headers = if self.allow_any_headers {
+        let allow_headers = if self.allow_any_header {
             cors::AllowHeaders::mirror_request()
         } else {
             cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
@@ -1000,8 +1000,8 @@ mod tests {
             "Allow any origin should be disabled by default"
         );
         assert!(
-            !cors.allow_any_headers,
-            "Allow any headers should be disabled by default"
+            !cors.allow_any_header,
+            "Allow any header should be disabled by default"
         );
 
         assert_eq!(
