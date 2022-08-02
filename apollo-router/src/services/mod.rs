@@ -320,6 +320,7 @@ pub struct QueryPlannerResponse {
     pub context: Context,
 }
 
+/// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
 pub enum QueryPlannerContent {
     Plan {

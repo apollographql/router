@@ -100,7 +100,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .server
                 .cors
                 .clone()
-                .unwrap_or_default()
                 .into_layer()
                 .map_err(|e| {
                     ApolloRouterError::ConfigError(
@@ -841,11 +840,6 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .cors(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                )
                                 .build(),
                         )
                         .build(),
@@ -934,11 +928,6 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                                .cors(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                )
                                 .build(),
                         )
                         .build(),
@@ -1619,12 +1608,21 @@ mod tests {
     #[tokio::test]
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
-        let (server, client) = init(expectations).await;
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Cors::builder().allow_any_header(true).build())
+                    .endpoint(String::from("/graphql/*"))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
 
         let response = client
             .request(Method::OPTIONS, &format!("{}/", server.listen_address()))
             .header(ACCEPT, "text/html")
-            .header(ORIGIN, "http://studio")
+            .header(ORIGIN, "https://studio.apollographql.com")
             .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
             .header(
                 ACCESS_CONTROL_REQUEST_HEADERS,
@@ -1637,7 +1635,7 @@ mod tests {
         assert_header!(
             &response,
             ACCESS_CONTROL_ALLOW_ORIGIN,
-            vec!["http://studio"],
+            vec!["https://studio.apollographql.com"],
             "Incorrect access control allow origin header"
         );
         let headers = response.headers().get_all(ACCESS_CONTROL_ALLOW_HEADERS);
@@ -2005,5 +2003,158 @@ Content-Type: application/json\r
             .unwrap()
         );
         server.shutdown().await
+    }
+
+    #[tokio::test]
+    async fn cors_origin_default() -> Result<(), ApolloRouterError> {
+        let (server, client) = init(MockRouterService::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com")
+                .await;
+        assert_cors_origin(response, "https://studio.apollographql.com");
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
+        assert_not_cors_origin(response, "https://this.wont.work.com");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Cors::builder().allow_any_origin(true).build())
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
+        assert_cors_origin(response, "*");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_origin_list() -> Result<(), ApolloRouterError> {
+        let valid_origin = "https://thisoriginisallowed.com";
+
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(
+                        Cors::builder()
+                            .origins(vec![valid_origin.to_string()])
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
+        assert_cors_origin(response, valid_origin);
+
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
+        assert_not_cors_origin(response, "https://thisoriginisinvalid");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
+        let apollo_subdomains = "https://([a-z0-9]+[.])*apollographql[.]com";
+
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(
+                        Cors::builder()
+                            .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                            .match_origins(vec![apollo_subdomains.to_string()])
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+        let url = format!("{}/", server.listen_address());
+
+        // regex tests
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
+        assert_cors_origin(response, "https://www.apollographql.com");
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com")
+                .await;
+        assert_cors_origin(response, "https://staging.apollographql.com");
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
+        assert_not_cors_origin(response, "https://thisshouldnotwork.com");
+
+        // exact match tests
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
+        assert_cors_origin(response, "https://anexactmatchorigin.com");
+
+        // won't match
+        let response =
+            request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
+        assert_not_cors_origin(response, "https://thisshouldnotwork.com");
+
+        Ok(())
+    }
+
+    async fn request_cors_with_origin(
+        client: &Client,
+        url: &str,
+        origin: &str,
+    ) -> reqwest::Response {
+        client
+            .request(Method::OPTIONS, url)
+            .header("Origin", origin)
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .send()
+            .await
+            .unwrap()
+    }
+
+    fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+        assert!(response.status().is_success());
+        let headers = response.headers();
+        assert_headers_valid(&response);
+        assert!(origin_valid(headers, origin));
+    }
+
+    fn assert_not_cors_origin(response: reqwest::Response, origin: &str) {
+        assert!(response.status().is_success());
+        let headers = response.headers();
+        assert!(!origin_valid(headers, origin));
+    }
+
+    fn assert_headers_valid(response: &reqwest::Response) {
+        assert_header_contains!(response, ACCESS_CONTROL_ALLOW_METHODS, &["POST"]);
+        assert_header_contains!(response, ACCESS_CONTROL_ALLOW_HEADERS, &["content-type"]);
+    }
+
+    fn origin_valid(headers: &HeaderMap, origin: &str) -> bool {
+        headers
+            .get("access-control-allow-origin")
+            .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
+            .unwrap_or_default()
     }
 }

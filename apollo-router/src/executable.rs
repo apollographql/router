@@ -135,7 +135,7 @@ impl fmt::Display for ProjectDir {
 
 /// This is the main router entrypoint.
 ///
-/// Refer to the examples if you would like how to run your own router with plugins.
+/// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();

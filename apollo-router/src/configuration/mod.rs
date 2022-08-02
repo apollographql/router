@@ -12,9 +12,12 @@ use derivative::Derivative;
 use displaydoc::Display;
 use envmnt::ExpandOptions;
 use envmnt::ExpansionType;
+use http::request::Parts;
+use http::HeaderValue;
 use itertools::Itertools;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
+use regex::Regex;
 use schemars::gen::SchemaGenerator;
 use schemars::gen::SchemaSettings;
 use schemars::schema::ObjectValidation;
@@ -243,7 +246,7 @@ pub(crate) struct Server {
 
     /// Cross origin request headers.
     #[serde(default)]
-    pub(crate) cors: Option<Cors>,
+    pub(crate) cors: Cors,
 
     /// introspection queries
     /// enabled by default
@@ -285,7 +288,7 @@ impl Server {
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors,
+            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
@@ -349,16 +352,15 @@ pub(crate) struct Cors {
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
     #[serde(default)]
-    pub(crate) allow_any_origin: Option<bool>,
+    pub(crate) allow_any_origin: bool,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
     #[serde(default)]
-    pub(crate) allow_credentials: Option<bool>,
+    pub(crate) allow_credentials: bool,
 
     /// The headers to allow.
-    /// If this is not set, we will default to
-    /// the `mirror_request` mode, which mirrors the received
-    /// `access-control-request-headers` preflight has sent.
+    ///
+    /// Defaults to `default_headers`.
     ///
     /// Note that if you set headers here,
     /// you also want to have a look at your `CSRF` plugins configuration,
@@ -366,8 +368,16 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    #[serde(default = "default_headers")]
+    pub(crate) allow_headers: Vec<String>,
+
+    /// Set to true to mirror headers sent by clients.
+    ///
+    /// If this is not set, we will default to
+    /// the `mirror_request` mode, which mirrors the received
+    /// `access-control-request-headers` preflight has sent..
     #[serde(default)]
-    pub(crate) allow_headers: Option<Vec<String>>,
+    pub(crate) allow_any_header: bool,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
@@ -379,6 +389,12 @@ pub(crate) struct Cors {
     #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
+    /// `Regex`es you want to match the origins against to determine if they're allowed.
+    /// Defaults to an empty list.
+    /// Note that `origins` will be evaluated before `match_origins`
+    #[serde(default)]
+    pub(crate) match_origins: Option<Vec<String>>,
+
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
@@ -387,10 +403,12 @@ pub(crate) struct Cors {
 impl Default for Cors {
     fn default() -> Self {
         Self {
-            allow_any_origin: None,
-            allow_credentials: None,
-            allow_headers: Default::default(),
+            allow_any_origin: Default::default(),
+            allow_any_header: Default::default(),
+            allow_credentials: Default::default(),
+            allow_headers: default_headers(),
             expose_headers: Default::default(),
+            match_origins: Default::default(),
             origins: default_origins(),
             methods: default_cors_methods(),
         }
@@ -403,6 +421,14 @@ fn default_origins() -> Vec<String> {
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+}
+
+fn default_headers() -> Vec<String> {
+    vec![
+        "content-type".into(),
+        "apollographql-client-version".into(),
+        "apollographql-client-name".into(),
+    ]
 }
 
 fn default_introspection() -> bool {
@@ -435,19 +461,24 @@ impl Default for Server {
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
+        allow_any_header: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
         origins: Option<Vec<String>>,
+        match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
     ) -> Self {
         Self {
-            allow_any_origin,
-            allow_credentials,
-            allow_headers,
+            allow_any_origin: allow_any_origin.unwrap_or_default(),
+            allow_any_header: allow_any_header.unwrap_or_default(),
+            allow_credentials: allow_credentials.unwrap_or_default(),
+            allow_headers: allow_headers.unwrap_or_else(default_headers),
             expose_headers,
+            match_origins,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
         }
@@ -460,18 +491,18 @@ impl Cors {
 
         self.ensure_usable_cors_rules()?;
 
-        let allow_headers = if let Some(headers_to_allow) = self.allow_headers {
-            cors::AllowHeaders::list(headers_to_allow.iter().filter_map(|header| {
+        let allow_headers = if self.allow_any_header {
+            cors::AllowHeaders::mirror_request()
+        } else {
+            cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
                 header
                     .parse()
                     .map_err(|_| tracing::error!("header name '{header}' is not valid"))
                     .ok()
             }))
-        } else {
-            cors::AllowHeaders::mirror_request()
         };
         let cors = CorsLayer::new()
-            .allow_credentials(self.allow_credentials.unwrap_or_default())
+            .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
             .expose_headers(cors::ExposeHeaders::list(
                 self.expose_headers
@@ -493,8 +524,29 @@ impl Cors {
                 },
             )));
 
-        if self.allow_any_origin.unwrap_or_default() {
+        if self.allow_any_origin {
             Ok(cors.allow_origin(cors::Any))
+        } else if let Some(match_origins) = self.match_origins {
+            let regexes = match_origins
+                .into_iter()
+                .filter_map(|regex| {
+                    Regex::from_str(regex.as_str())
+                        .map_err(|_| tracing::error!("origin regex '{regex}' is not valid"))
+                        .ok()
+                })
+                .collect::<Vec<_>>();
+
+            Ok(cors.allow_origin(cors::AllowOrigin::predicate(
+                move |origin: &HeaderValue, _: &Parts| {
+                    origin
+                        .to_str()
+                        .map(|o| {
+                            self.origins.iter().any(|origin| origin.as_str() == o)
+                                || regexes.iter().any(|regex| regex.is_match(o))
+                        })
+                        .unwrap_or_default()
+                },
+            )))
         } else {
             Ok(cors.allow_origin(cors::AllowOrigin::list(
                 self.origins.into_iter().filter_map(|origin| {
@@ -512,12 +564,10 @@ impl Cors {
     // don't want the router to panic in such cases, so this function returns an error
     // with a message describing what the problem is.
     fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
-        if self.allow_credentials.unwrap_or_default() {
-            if let Some(headers) = &self.allow_headers {
-                if headers.iter().any(|x| x == "*") {
-                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+        if self.allow_credentials {
+            if self.allow_headers.iter().any(|x| x == "*") {
+                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                         with `Access-Control-Allow-Headers: *`");
-                }
             }
 
             if self.methods.iter().any(|x| x == "*") {
@@ -530,7 +580,7 @@ impl Cors {
                     with `Access-Control-Allow-Origin: *`");
             }
 
-            if self.allow_any_origin.unwrap_or_default() {
+            if self.allow_any_origin {
                 return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                     with `Access-Control-Allow-Origin: *`");
             }
@@ -946,13 +996,26 @@ mod tests {
             cors.origins.as_slice()
         );
         assert!(
-            !cors.allow_any_origin.unwrap_or_default(),
+            !cors.allow_any_origin,
             "Allow any origin should be disabled by default"
+        );
+        assert!(
+            !cors.allow_any_header,
+            "Allow any header should be disabled by default"
+        );
+
+        assert_eq!(
+            vec![
+                "content-type".to_string(),
+                "apollographql-client-version".to_string(),
+                "apollographql-client-name".to_string(),
+            ],
+            cors.allow_headers,
         );
 
         assert!(
-            cors.allow_headers.is_none(),
-            "No allow_headers list should be present by default"
+            cors.match_origins.is_none(),
+            "No origin regex list should be present by default"
         );
     }
 
@@ -1100,7 +1163,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
@@ -1120,7 +1182,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
@@ -1140,7 +1201,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
