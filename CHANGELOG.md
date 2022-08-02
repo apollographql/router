@@ -144,7 +144,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([ PR #1391](https://github.com/apollographql/router/pull/1391))
+### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([PR #1391](https://github.com/apollographql/router/pull/1391))
 
 The metadata format now uses `IndexMap<String, Vec<String>>`.
 
