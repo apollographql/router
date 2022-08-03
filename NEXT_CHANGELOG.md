@@ -43,3 +43,9 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
+
+Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457
