@@ -6,6 +6,7 @@ pub mod csrf;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
+mod include_query_plan;
 pub mod override_url;
 pub mod rhai;
 pub mod telemetry;

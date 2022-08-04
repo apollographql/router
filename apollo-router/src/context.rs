@@ -90,6 +90,16 @@ impl Context {
         self.entries.insert(key.into(), value)
     }
 
+    /// Get a json value from the context using the provided key.
+    ///
+    /// Semantics: the result is the old value as an [`Option`].
+    pub fn get_json_value<K>(&self, key: K) -> Option<Value>
+    where
+        K: Into<String>,
+    {
+        self.entries.get(&key.into()).map(|v| v.value().clone())
+    }
+
     /// Upsert a value in the context using the provided key and resolving
     /// function.
     ///
