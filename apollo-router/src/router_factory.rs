@@ -153,7 +153,7 @@ async fn create_plugins(
                 }
                 // expand any env variables in the config before processing.
                 match factory
-                    .create_instance(&configuration, schema.as_str())
+                    .create_instance(&configuration, schema.as_string().clone())
                     .await
                 {
                     Ok(plugin) => {
@@ -199,7 +199,10 @@ async fn create_plugins(
                         if *name == "apollo.telemetry" {
                             inject_schema_id(schema, &mut config);
                         }
-                        match factory.create_instance(&config, schema.as_str()).await {
+                        match factory
+                            .create_instance(&config, schema.as_string().clone())
+                            .await
+                        {
                             Ok(plugin) => {
                                 plugin_instances
                                     .insert(desired_position, (name.to_string(), plugin));

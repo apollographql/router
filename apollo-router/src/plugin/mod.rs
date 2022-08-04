@@ -18,6 +18,7 @@ pub mod serde;
 pub mod test;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
@@ -49,7 +50,7 @@ use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
 type InstanceFactory =
-    fn(&serde_json::Value, String) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+    fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -58,7 +59,7 @@ pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
-    pub supergraph_sdl: String,
+    pub supergraph_sdl: Arc<String>,
 }
 
 impl<T> PluginInit<T>
@@ -66,7 +67,7 @@ where
     T: for<'de> Deserialize<'de>,
 {
     /// Create a new PluginInit for the supplied config and SDL.
-    pub fn new(config: T, supergraph_sdl: String) -> Self {
+    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
         PluginInit {
             config,
             supergraph_sdl,
@@ -77,7 +78,10 @@ where
     ///
     /// This will fail if the supplied JSON cannot be deserialized into the configuration
     /// struct.
-    pub fn try_new(config: serde_json::Value, supergraph_sdl: String) -> Result<Self, BoxError> {
+    pub fn try_new(
+        config: serde_json::Value,
+        supergraph_sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
             config,
@@ -104,13 +108,13 @@ impl PluginFactory {
     pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
-        schema: &str,
+        schema: Arc<String>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, schema.to_string()).await
+        (self.instance_factory)(configuration, schema).await
     }
 
     #[cfg(test)]
-    pub async fn create_instance_without_schema(
+    pub(crate) async fn create_instance_without_schema(
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {

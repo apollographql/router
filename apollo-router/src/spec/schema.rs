@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use apollo_parser::ast;
 use http::Uri;
@@ -21,7 +22,7 @@ use crate::*;
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]
 pub struct Schema {
-    string: String,
+    string: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
@@ -414,7 +415,7 @@ impl Schema {
 
             Ok(Schema {
                 subtype_map,
-                string: schema.to_owned(),
+                string: Arc::new(schema.to_owned()),
                 subgraphs,
                 object_types,
                 input_types,
@@ -430,8 +431,8 @@ impl Schema {
 }
 
 impl Schema {
-    /// Extracts a string slice containing the entire [`Schema`].
-    pub fn as_str(&self) -> &str {
+    /// Extracts a string containing the entire [`Schema`].
+    pub fn as_string(&self) -> &Arc<String> {
         &self.string
     }
 
