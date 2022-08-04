@@ -76,7 +76,7 @@ mod metrics;
 mod otlp;
 mod tracing;
 
-pub static ROUTER_SPAN_NAME: &str = "router";
+static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";

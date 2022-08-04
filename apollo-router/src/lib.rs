@@ -77,6 +77,7 @@ pub use configuration::*;
 pub use context::Context;
 pub use executable::*;
 pub use router::*;
+#[doc(hidden)]
 pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
 pub use spec::Schema;
