@@ -27,6 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Remove telemetry configuration hot reloading ([PR #1463](https://github.com/apollographql/router/pull/1463))
+
+Configuration hot reloading is not very useful for telemetry, and is the
+source of regular bugs that are hard to fix.
+
+This removes the support for configuration reloading entirely. Now, the
+router will reject a configuration reload with an error log if the
+telemetry configuration changed.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
+
 ## 🚀 Features
 
 ## 🐛 Fixes
