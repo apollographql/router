@@ -29,8 +29,9 @@ in lieu of an official changelog.
 6. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
    - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
    - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
-7. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
-8. Update the version in docker-compose files in `dockerfiles` directory.
+7. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
+8. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+9. Update the version in docker-compose files in `dockerfiles` directory.
 
 ### Start a release PR
 
@@ -44,9 +45,7 @@ in lieu of an official changelog.
 5. Clear `NEXT_CHANGELOG.md` leaving only the template.
 6. Run `cargo check` so the lock file gets updated.
 7. Run `cargo xtask check-compliance`.
-8. Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
-    `NEXT_CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
-    "release: v#.#.#-rc.#"
+8. Push up a commit with all the changes. The commit message should be "release: v#.#.#" or "release: v#.#.#-rc.#"
 9. Request review from the Router team.
 
 ### Review
