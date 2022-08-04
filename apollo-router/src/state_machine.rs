@@ -193,10 +193,8 @@ where
                     UpdateConfiguration(new_configuration),
                 ) => {
                     tracing::info!("reloading configuration");
-                    if !configuration.is_compatible(&new_configuration) {
-                        tracing::error!(
-                            "could not reload configuration: telemetry cannot be reloaded"
-                        );
+                    if let Err(e) = configuration.is_compatible(&new_configuration) {
+                        tracing::error!("could not reload configuration: {e}");
 
                         Running {
                             configuration,
