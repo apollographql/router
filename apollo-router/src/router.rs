@@ -18,6 +18,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
+use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
 use Event::NoMoreSchema;
@@ -29,7 +30,6 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::reload::Error as ReloadError;
 use crate::router_factory::YamlRouterServiceFactory;
 use crate::state_machine::StateMachine;
 
@@ -76,9 +76,6 @@ pub enum ApolloRouterError {
 
     /// could not set global subscriber: {0}
     SetGlobalSubscriberError(SetGlobalDefaultError),
-
-    /// could not reload tracing layer: {0}
-    ReloadTracingLayerError(ReloadError),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
@@ -466,16 +463,20 @@ impl ApolloRouter {
 
         let state_machine = StateMachine::new(server_factory, self.router_factory);
         let listen_address = state_machine.listen_address.clone();
-        let result = spawn(async move { state_machine.process_events(event_stream).await })
-            .map(|r| match r {
-                Ok(Ok(ok)) => Ok(ok),
-                Ok(Err(err)) => Err(err),
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    Err(ApolloRouterError::StartupError)
-                }
-            })
-            .boxed();
+        let result = spawn(
+            async move { state_machine.process_events(event_stream).await }
+                .with_current_subscriber(),
+        )
+        .map(|r| match r {
+            Ok(Ok(ok)) => Ok(ok),
+            Ok(Err(err)) => Err(err),
+            Err(err) => {
+                tracing::error!("{}", err);
+                Err(ApolloRouterError::StartupError)
+            }
+        })
+        .with_current_subscriber()
+        .boxed();
 
         RouterHandle {
             result,

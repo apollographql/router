@@ -127,12 +127,11 @@ async fn create_plugins(
     schema: &Schema,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
-    let mut mandatory_plugins = vec!["experimental.include_subgraph_errors", "apollo.csrf"];
-
-    // Telemetry is *only* mandatory if the global subscriber is set
-    if crate::subscriber::is_global_subscriber_set() {
-        mandatory_plugins.insert(0, "apollo.telemetry");
-    }
+    let mandatory_plugins = vec![
+        "experimental.include_subgraph_errors",
+        "apollo.csrf",
+        "apollo.telemetry",
+    ];
 
     let mut errors = Vec::new();
     let plugin_registry = crate::plugin::plugins();

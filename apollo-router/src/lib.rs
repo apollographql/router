@@ -62,7 +62,6 @@ pub mod layers;
 pub mod plugin;
 pub mod plugins;
 pub mod query_planner;
-mod reload;
 mod request;
 mod response;
 mod router;
@@ -70,7 +69,6 @@ mod router_factory;
 pub mod services;
 mod spec;
 mod state_machine;
-pub mod subscriber;
 mod traits;
 
 pub use configuration::Configuration;
