@@ -144,7 +144,7 @@ impl Configuration {
         plugins
     }
 
-    //. checks that we can reload configuration from the current one to the new one
+    // checks that we can reload configuration from the current one to the new one
     pub fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
         if self.apollo_plugins.plugins.get("telemetry")
             == new.apollo_plugins.plugins.get("telemetry")

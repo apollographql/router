@@ -337,7 +337,7 @@ fn setup_panic_handler(dispatcher: Dispatch) {
     let show_backtraces =
         backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
     if show_backtraces {
-        tracing::info!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
     }
     std::panic::set_hook(Box::new(move |e| {
         with_default(&dispatcher, || {
