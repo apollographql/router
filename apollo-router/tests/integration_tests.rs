@@ -35,6 +35,8 @@ use test_span::prelude::*;
 use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower::ServiceExt;
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::EnvFilter;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -694,14 +696,22 @@ async fn setup_router_and_registry(
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(config);
-    let telemetry_plugin = Telemetry::new(PluginInit::new(
-        telemetry::config::Conf {
-            metrics: Option::default(),
-            tracing: Some(Tracing::default()),
-            apollo: Some(apollo::Config::default()),
-        },
-        Default::default(),
-    ))
+    let telemetry_plugin = Telemetry::new_with_subscriber(
+        PluginInit::new(
+            telemetry::config::Conf {
+                metrics: Option::default(),
+                tracing: Some(Tracing::default()),
+                apollo: Some(apollo::Config::default()),
+            },
+            Default::default(),
+        ),
+        Some(
+            tracing_subscriber::fmt::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .finish()
+                .with(test_span::Layer {}),
+        ),
+    )
     .await
     .unwrap();
     let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))

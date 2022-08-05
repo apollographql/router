@@ -10,6 +10,7 @@ use std::time::Instant;
 use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
+use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
@@ -37,7 +38,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Registry;
 use url::Url;
 
 use self::config::Conf;
@@ -151,120 +154,7 @@ impl Plugin for Telemetry {
     fn activate(&mut self) {}
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        // Apollo config is special because we enable tracing if some env variables are present.
-        let mut config = init.config;
-        let apollo = config
-            .apollo
-            .as_mut()
-            .expect("telemetry apollo config must be present");
-
-        // If we have key and graph ref but no endpoint we start embedded spaceport
-        let (spaceport, shutdown_tx) = match apollo {
-            apollo::Config {
-                apollo_key: Some(_),
-                apollo_graph_ref: Some(_),
-                endpoint: None,
-                ..
-            } => {
-                ::tracing::debug!("starting Spaceport");
-                let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
-                let report_spaceport = ReportSpaceport::new(
-                    "127.0.0.1:0".parse()?,
-                    Some(Box::pin(shutdown_rx.map(|_| ()))),
-                )
-                .await?;
-                // Now that the port is known update the config
-                apollo.endpoint = Some(Url::parse(&format!(
-                    "https://{}",
-                    report_spaceport.address()
-                ))?);
-                (Some(report_spaceport), Some(shutdown_tx))
-            }
-            _ => (None, None),
-        };
-
-        // Setup metrics
-        // The act of setting up metrics will overwrite a global meter. However it is essential that
-        // we use the aggregate meter provider that is created below. It enables us to support
-        // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
-        // eventually be one.
-        let mut builder = Self::create_metrics_exporters(&config)?;
-
-        // the global tracer and subscriber initialization step must be performed only once
-        TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
-            use anyhow::Context;
-            let tracer_provider = Self::create_tracer_provider(&config)?;
-
-            let tracer = tracer_provider.versioned_tracer(
-                "apollo-router",
-                Some(env!("CARGO_PKG_VERSION")),
-                None,
-            );
-
-            opentelemetry::global::set_tracer_provider(tracer_provider);
-            opentelemetry::global::set_error_handler(handle_error)
-                .expect("otel error handler lock poisoned, fatal");
-            global::set_text_map_propagator(Self::create_propagator(&config));
-
-            let log_level = GLOBAL_ENV_FILTER
-                .get()
-                .map(|s| s.as_str())
-                .unwrap_or("info");
-
-            let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-            );
-
-            if atty::is(atty::Stream::Stdout) {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                let subscriber = sub_builder.finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            } else {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                let subscriber = sub_builder.json().finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            };
-
-            Ok(true)
-        })?;
-
-        //
-        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
-
-        let plugin = Ok(Telemetry {
-            spaceport_shutdown: shutdown_tx,
-            custom_endpoints: builder.custom_endpoints(),
-            _metrics_exporters: builder.exporters(),
-            meter_provider: builder.meter_provider(),
-            apollo_metrics_sender: builder.apollo_metrics_provider(),
-            config,
-            // metrics_response_queries,
-        });
-
-        // We're safe now for shutdown.
-        // Start spaceport
-        if let Some(spaceport) = spaceport {
-            tokio::spawn(async move {
-                if let Err(e) = spaceport.serve().await {
-                    match e.source() {
-                        Some(source) => {
-                            ::tracing::warn!("spaceport did not terminate normally: {}", source);
-                        }
-                        None => {
-                            ::tracing::warn!("spaceport did not terminate normally: {}", e);
-                        }
-                    }
-                };
-            });
-        }
-
-        plugin
+        Self::new_with_subscriber::<Registry>(init, None).await
     }
 
     fn router_service(
@@ -592,6 +482,136 @@ impl Plugin for Telemetry {
 }
 
 impl Telemetry {
+    /// This method can be used instead of `Plugin::new` to override the subscriber
+    pub async fn new_with_subscriber<S>(
+        init: PluginInit<<Self as Plugin>::Config>,
+        subscriber: Option<S>,
+    ) -> Result<Self, BoxError>
+    where
+        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
+    {
+        // Apollo config is special because we enable tracing if some env variables are present.
+        let mut config = init.config;
+        let apollo = config
+            .apollo
+            .as_mut()
+            .expect("telemetry apollo config must be present");
+
+        // If we have key and graph ref but no endpoint we start embedded spaceport
+        let (spaceport, shutdown_tx) = match apollo {
+            apollo::Config {
+                apollo_key: Some(_),
+                apollo_graph_ref: Some(_),
+                endpoint: None,
+                ..
+            } => {
+                ::tracing::debug!("starting Spaceport");
+                let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
+                let report_spaceport = ReportSpaceport::new(
+                    "127.0.0.1:0".parse()?,
+                    Some(Box::pin(shutdown_rx.map(|_| ()))),
+                )
+                .await?;
+                // Now that the port is known update the config
+                apollo.endpoint = Some(Url::parse(&format!(
+                    "https://{}",
+                    report_spaceport.address()
+                ))?);
+                (Some(report_spaceport), Some(shutdown_tx))
+            }
+            _ => (None, None),
+        };
+
+        // Setup metrics
+        // The act of setting up metrics will overwrite a global meter. However it is essential that
+        // we use the aggregate meter provider that is created below. It enables us to support
+        // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
+        // eventually be one.
+        let mut builder = Self::create_metrics_exporters(&config)?;
+
+        // the global tracer and subscriber initialization step must be performed only once
+        TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
+            use anyhow::Context;
+            let tracer_provider = Self::create_tracer_provider(&config)?;
+
+            let tracer = tracer_provider.versioned_tracer(
+                "apollo-router",
+                Some(env!("CARGO_PKG_VERSION")),
+                None,
+            );
+
+            opentelemetry::global::set_tracer_provider(tracer_provider);
+            opentelemetry::global::set_error_handler(handle_error)
+                .expect("otel error handler lock poisoned, fatal");
+            global::set_text_map_propagator(Self::create_propagator(&config));
+
+            let log_level = GLOBAL_ENV_FILTER
+                .get()
+                .map(|s| s.as_str())
+                .unwrap_or("info");
+
+            let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
+                EnvFilter::try_new(log_level).context("could not parse log configuration")?,
+            );
+
+            if let Some(sub) = subscriber {
+                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                let subscriber = sub.with(telemetry);
+                if let Err(e) = set_global_default(subscriber) {
+                    ::tracing::error!("cannot set global subscriber: {:?}", e);
+                }
+            } else if atty::is(atty::Stream::Stdout) {
+                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                let subscriber = sub_builder.finish().with(telemetry);
+                if let Err(e) = set_global_default(subscriber) {
+                    ::tracing::error!("cannot set global subscriber: {:?}", e);
+                }
+            } else {
+                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                let subscriber = sub_builder.json().finish().with(telemetry);
+                if let Err(e) = set_global_default(subscriber) {
+                    ::tracing::error!("cannot set global subscriber: {:?}", e);
+                }
+            };
+
+            Ok(true)
+        })?;
+
+        //
+        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
+
+        let plugin = Ok(Telemetry {
+            spaceport_shutdown: shutdown_tx,
+            custom_endpoints: builder.custom_endpoints(),
+            _metrics_exporters: builder.exporters(),
+            meter_provider: builder.meter_provider(),
+            apollo_metrics_sender: builder.apollo_metrics_provider(),
+            config,
+            // metrics_response_queries,
+        });
+
+        // We're safe now for shutdown.
+        // Start spaceport
+        if let Some(spaceport) = spaceport {
+            tokio::spawn(async move {
+                if let Err(e) = spaceport.serve().await {
+                    match e.source() {
+                        Some(source) => {
+                            ::tracing::warn!("spaceport did not terminate normally: {}", source);
+                        }
+                        None => {
+                            ::tracing::warn!("spaceport did not terminate normally: {}", e);
+                        }
+                    }
+                };
+            });
+        }
+
+        plugin
+    }
+
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
         let propagation = config
             .clone()
