@@ -19,8 +19,8 @@ use crate::services::RouterResponse;
 
 const INCLUDE_QUERY_PLAN_HEADER_NAME: &str = "X-Apollo-Query-Plan";
 const INCLUDE_QUERY_PLAN_ENV: &str = "APOLLO_INCLUDE_QUERY_PLAN";
-const QUERY_PLAN_CONTEXT_KEY: &str = "apollo::include_query_plan.plan";
-const ENABLED_CONTEXT_KEY: &str = "apollo::include_query_plan.enabled";
+const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::include_query_plan.plan";
+const ENABLED_CONTEXT_KEY: &str = "experimental::include_query_plan.enabled";
 
 #[derive(Debug, Clone)]
 struct IncludeQueryPlan {
