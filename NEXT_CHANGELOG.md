@@ -52,6 +52,16 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 📚 Documentation
 
+
+### CORS: Fix trailing slashes, and display defaults ([PR #1471](https://github.com/apollographql/router/pull/1471))
+
+The CORS documentation now displays a valid `origins` configuration (without trailing slash!), and the full configuration section displays its default settings.
+
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
+
+
+
 ### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
 
 Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
