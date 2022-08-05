@@ -108,9 +108,9 @@ impl PluginFactory {
     pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
-        schema: Arc<String>,
+        supergraph_sdl: Arc<String>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, schema).await
+        (self.instance_factory)(configuration, supergraph_sdl).await
     }
 
     #[cfg(test)]
