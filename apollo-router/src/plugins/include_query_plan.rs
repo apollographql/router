@@ -1,6 +1,7 @@
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
+use http::HeaderValue;
 use serde_json_bytes::json;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -16,11 +17,14 @@ use crate::services::QueryPlannerResponse;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 
+const INCLUDE_QUERY_PLAN_HEADER_NAME: &str = "X-Apollo-Query-Plan";
+const INCLUDE_QUERY_PLAN_ENV: &str = "APOLLO_INCLUDE_QUERY_PLAN";
 const QUERY_PLAN_CONTEXT_KEY: &str = "apollo::include_query_plan.plan";
+const ENABLED_CONTEXT_KEY: &str = "apollo::include_query_plan.enabled";
 
 #[derive(Debug, Clone)]
 struct IncludeQueryPlan {
-    enabled: bool,
+    enabled: bool
 }
 
 #[async_trait::async_trait]
@@ -37,10 +41,15 @@ impl Plugin for IncludeQueryPlan {
         &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        let is_enabled = self.enabled;
         service
             .map_response(move |res| {
-                if is_enabled {
+                if res
+                    .context
+                    .get::<_, bool>(ENABLED_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
                     if let QueryPlannerContent::Plan { plan, .. } = &res.content {
                         res.context
                             .insert(QUERY_PLAN_CONTEXT_KEY, plan.root.clone())
@@ -57,19 +66,22 @@ impl Plugin for IncludeQueryPlan {
         &self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let is_enabled = self.enabled;
-
+        let conf_enabled = self.enabled;
         service
-            .map_future_with_context(|req: &RouterRequest| {
-                req.originating_request.body().query.clone()
-            }, move |query: Option<String>, f| async move {
+            .map_future_with_context(move |req: &RouterRequest| {
+                let is_enabled = (conf_enabled || std::env::var(INCLUDE_QUERY_PLAN_ENV).as_deref() == Ok("true")) && req.originating_request.headers().get(INCLUDE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
+                if is_enabled {
+                    req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
+                }
+                (req.originating_request.body().query.clone(), is_enabled)
+            }, move |(query, is_enabled): (Option<String>, bool), f| async move {
                 let mut res: Result<RouterResponse, BoxError>  = f.await;
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {
                             let (parts, stream) = http::Response::from(res.response).into_parts();
                             let (mut first, rest) = stream.into_future().await;
-
+    
                             if let Some(first) = &mut first {
                                 if let Some(plan) =
                                     res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
@@ -79,13 +91,13 @@ impl Plugin for IncludeQueryPlan {
                                         .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan, "text": query } }));
                                 }
                             }
-
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),
                             )
                             .into();
                         }
+
                         Ok(res)
                     }
                     Err(err) => Err(err),
@@ -97,7 +109,7 @@ impl Plugin for IncludeQueryPlan {
     }
 }
 
-register_plugin!("apollo", "include_query_plan", IncludeQueryPlan);
+register_plugin!("experimental", "include_query_plan", IncludeQueryPlan);
 
 #[cfg(test)]
 mod tests {
@@ -168,7 +180,7 @@ mod tests {
 
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
         let builder = builder
-            .with_dyn_plugin("apollo.include_query_plan".to_string(), plugin)
+            .with_dyn_plugin("experimental.include_query_plan".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -180,7 +192,7 @@ mod tests {
 
     async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         crate::plugin::plugins()
-            .get("apollo.include_query_plan")
+            .get("experimental.include_query_plan")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -195,6 +207,7 @@ mod tests {
         let request = RouterRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
+            .header(INCLUDE_QUERY_PLAN_HEADER_NAME, "true")
             .build()
             .expect("expecting valid request");
 
