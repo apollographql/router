@@ -71,6 +71,6 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Clarify path parameter usage ([PR #1473](https://github.com/apollographql/router/pull/1473))
 
-Adds an inline path parameter usage to the section of the docs explaining that you cannot specify a wildcard in the middle of a path.
+Add an inline example of path parameter usage to the [section of the docs](https://www.apollographql.com/docs/router/configuration/overview/#endpoint-path) explaining that you cannot specify a wildcard in the middle of a path.
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1473
