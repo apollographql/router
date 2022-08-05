@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
+
+The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
+was changed from `String` to `Arc<String>`.
+This reduces the number of copies of this string we keep in memory, as schemas can get large.
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ## 🐛 Fixes

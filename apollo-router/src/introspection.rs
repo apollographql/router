@@ -48,7 +48,7 @@ impl Introspection {
         let _guard = span.enter();
 
         let cache = introspect::batch_introspect(
-            schema.as_str(),
+            schema.as_string(),
             KNOWN_INTROSPECTION_QUERIES.iter().cloned().collect(),
         )
         .map_err(|deno_runtime_error| {
