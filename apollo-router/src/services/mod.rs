@@ -126,9 +126,7 @@ impl RouterRequest {
     ) -> Result<RouterRequest, BoxError> {
         // Avoid testing requests getting blocked by the CSRF-prevention plugin
         headers
-            .entry(IntoHeaderName::HeaderName(HeaderName::from_static(
-                "content-type",
-            )))
+            .entry(IntoHeaderName::HeaderName(http::header::CONTENT_TYPE))
             .or_insert(IntoHeaderValue::HeaderValue(HeaderValue::from_static(
                 "application/json",
             )));

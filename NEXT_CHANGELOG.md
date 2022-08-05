@@ -35,9 +35,9 @@ This reduces the number of copies of this string we keep in memory, as schemas c
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Changes to `PluginTestHarness` API ([PR #1468](https://github.com/apollographql/router/pull/1468))
+### Changes to `PluginTestHarness` ([PR #1468](https://github.com/apollographql/router/pull/1468))
 
-The `plugin` method of `PluginTestHarness`’s builder was removed.
+The `plugin` method of the builder for `apollo_router::plugin::test::PluginTestHarness` was removed.
 Users of `PluginTestHarness` don’t create plugin instances themselves anymore.
 
 Instead, the builder has a new mandatory `configuration` method,
@@ -49,6 +49,13 @@ A convenient way to create such a value in Rust code is with the `json!` macro.
 The `IntoSchema` enum has been removed.
 The `schema` method of the builder is now optional and takes a `&str`.
 If not provided, the canned testing schema is used by default.
+
+Additionally, `PluginTestHarness` internally creates a Tower `Service`
+that is closer to a “full” Router than before:
+Apollo plugins that are enabled by default (such as CSRF protection)
+will be enabled in the test harness,
+and all enabled plugins will have their `Plugin::activate` method called
+during harness creation.
 
 Changes to tests for an example plugin:
 
@@ -83,7 +90,33 @@ Changes to tests for an example plugin:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Changes to `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #1468](https://github.com/apollographql/router/pull/1468))
+
+Because of the change above, tests that use `PluginTestHarness` will now go through
+CSRF-protection, which might reject some requests.
+`apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
+When no `Content-Type` header is specified, this builder will now default to `application/json`
+which makes the request be accepted by CSRF protection.
+If a test requires a request specifically *without* a `Content-Type` header,
+this default can be removed from a `RouterRequest` after building it:
+
+```rust
+let mut router_request = RouterRequesT::fake_builder().build();
+router_request.originating_request.headers_mut().remove("content-type");
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
+
+### `mock_execution_service` for `PluginTestHarness` ([PR #1468](https://github.com/apollographql/router/pull/1468))
+
+The builder for `apollo_router::plugin::test::PluginTestHarness` 
+has a new `mock_execution_service` method.
+This allows adding a mock at the execution stage of the pipeline,
+similar to the other `mock_*` methods taht were already present.
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🐛 Fixes
 
