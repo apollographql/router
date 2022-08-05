@@ -75,7 +75,7 @@ For examples of sending cookies and authorization headers from Apollo Client, se
 
 ## All `cors` options
 
-The following snippet shows all CORS configuration for the Apollo Router:
+The following snippet shows all CORS configuration defaults for the Apollo Router:
 
 ```yaml title="router.yaml"
 server:
@@ -85,36 +85,35 @@ server:
   cors:
 
     # Set to true to allow any origin
-    # (Defaults to false)
-    allow_any_origin: true
+    allow_any_origin: false
 
     # List of accepted origins
-    # (Ignored if allow_any_origin is true)
-    # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
+    # (Ignored if allow_any_origin is set to true)
     origins:
-      - https://www.your-app.example.com
       - https://studio.apollographql.com # Keep this so Apollo Studio can still run queries against your router
 
     # Set to true to add the `Access-Control-Allow-Credentials` header
-    # (Defaults to false)
-    allow_credentials: true
+    allow_credentials: false
 
     # Set to true to mirror a client's received `access-control-request-headers`
     # This is equivalent to allowing any headers,
     # except it will also work if allow_credentials is set to true
-    allow_any_header: true
+    allow_any_header: false
 
     # The headers to allow.
-    # If this field is not set, and `allow_any_header` is not set to `true`
-    # CORS will default to accepting `content-type`, `apollographql-client-version` and `apollographql-client-name`,
-    allow_headers: [ Content-Type, Authorization, x-my-custom-required-header, x-and-an-other-required-header ]
+    # (Ignored if allow_any_header is set to true)
+    allow_headers: 
+      - content-type
+      - apollographql-client-version
+      - apollographql-client-name
 
     # Allowed request methods
-    # (Defaults to [ GET, POST, OPTIONS ])
-    methods: [ POST, OPTIONS ]
+    methods:
+      - GET
+      - POST
+      - OPTIONS
 
     # Which response headers are available to scripts running in the
     # browser in response to a cross-origin request.
-    # (Defaults to empty array)
     expose_headers: []
 ```
