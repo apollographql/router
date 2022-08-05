@@ -35,8 +35,8 @@ server:
     # (Ignored if allow_any_origin is true)
     # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
     origins:
-      - https://www.your-app.example.com/
-      - https://studio.apollographql.com/ # Keep this so Apollo Studio can run queries against your router
+      - https://www.your-app.example.com
+      - https://studio.apollographql.com # Keep this so Apollo Studio can run queries against your router
     match_origins:
       - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
 ```
@@ -65,8 +65,8 @@ To allow browsers to pass credentials to the Apollo Router, set `allow_credentia
 server:
   cors:
     origins:
-      - https://www.your-app.example.com/
-      - https://studio.apollographql.com/
+      - https://www.your-app.example.com
+      - https://studio.apollographql.com
     allow_credentials: true
 ```
 
@@ -92,8 +92,8 @@ server:
     # (Ignored if allow_any_origin is true)
     # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
     origins:
-      - https://www.your-app.example.com/
-      - https://studio.apollographql.com/ # Keep this so Apollo Studio can still run queries against your router
+      - https://www.your-app.example.com
+      - https://studio.apollographql.com # Keep this so Apollo Studio can still run queries against your router
 
     # Set to true to add the `Access-Control-Allow-Credentials` header
     # (Defaults to false)
