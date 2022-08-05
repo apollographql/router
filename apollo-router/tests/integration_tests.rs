@@ -36,7 +36,6 @@ use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
-use tracing_subscriber::EnvFilter;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -705,12 +704,7 @@ async fn setup_router_and_registry(
             },
             Default::default(),
         ),
-        Some(
-            tracing_subscriber::registry().with(test_span::Layer {}), /*tracing_subscriber::fmt::fmt()
-                                                                      .with_env_filter(EnvFilter::from_default_env())
-                                                                      .finish()
-                                                                      .with(test_span::Layer {}),*/
-        ),
+        Some(tracing_subscriber::registry().with(test_span::Layer {})),
     )
     .await
     .unwrap();
