@@ -706,10 +706,10 @@ async fn setup_router_and_registry(
             Default::default(),
         ),
         Some(
-            tracing_subscriber::fmt::fmt()
-                .with_env_filter(EnvFilter::from_default_env())
-                .finish()
-                .with(test_span::Layer {}),
+            tracing_subscriber::registry().with(test_span::Layer {}), /*tracing_subscriber::fmt::fmt()
+                                                                      .with_env_filter(EnvFilter::from_default_env())
+                                                                      .finish()
+                                                                      .with(test_span::Layer {}),*/
         ),
     )
     .await
