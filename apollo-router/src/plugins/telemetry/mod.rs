@@ -206,7 +206,10 @@ impl Plugin for Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
             global::set_text_map_propagator(Self::create_propagator(&config));
 
-            let log_level = GLOBAL_ENV_FILTER.get().unwrap();
+            let log_level = GLOBAL_ENV_FILTER
+                .get()
+                .map(|s| s.as_str())
+                .unwrap_or("info");
 
             let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
                 EnvFilter::try_new(log_level).context("could not parse log configuration")?,
