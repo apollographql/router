@@ -76,7 +76,7 @@ Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://g
 
   2. Run the Apollo Router with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --supergraph starstuff.graphql --dev
 ```
 
 This is because Apollo Router requires a supergraph schema and we aren't providing it one! Let's fix that.
@@ -180,7 +180,7 @@ This file is all that the router needs to communicate with our subgraphs!
 Now from your project root, run the following:
 
 ```sh
-./router --supergraph supergraph-schema.graphql
+./router --supergraph supergraph-schema.graphql --dev
 ```
 
 The console output should look like the following:

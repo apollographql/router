@@ -37,6 +37,12 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
+### Adds a dev mode that can be enabled with the `--dev` flag ([PR #1475](https://github.com/apollographql/router/pull/1475))
+
+This flag enables some experimental plugins to enable development with the router. It should not be enabled in production, and the plugins it enables may change over time. For now, it just enables error passthrough for all subgraphs.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper)
+
 ## 🐛 Fixes
 
 ### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))

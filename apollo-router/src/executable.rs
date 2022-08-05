@@ -61,6 +61,10 @@ pub(crate) struct Opt {
     )]
     config_path: Option<PathBuf>,
 
+    /// Enable development mode.
+    #[clap(long, env = "APOLLO_ROUTER_DEV_MODE")]
+    dev: bool,
+
     /// Schema location relative to the project directory.
     #[clap(
         short,
@@ -228,7 +232,7 @@ impl Executable {
                     delay: None,
                 }
             })
-            .unwrap_or_else(|| Configuration::builder().build().into());
+            .unwrap_or_else(|| Configuration::builder().dev(opt.dev).build().into());
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
         let schema = match (opt.supergraph_path, opt.apollo_key) {
             (Some(supergraph_path), _) => {

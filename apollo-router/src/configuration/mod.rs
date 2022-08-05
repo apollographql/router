@@ -27,6 +27,7 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -105,7 +106,16 @@ impl Configuration {
         server: Option<Server>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: bool,
     ) -> Self {
+        let mut plugins = plugins;
+        if dev {
+            plugins.insert(
+                "experimental.include_subgraph_errors".to_string(),
+                json!({"all": true}),
+            );
+        }
+
         Self {
             server: server.unwrap_or_default(),
             plugins: UserPlugins {

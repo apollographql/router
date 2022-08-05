@@ -331,6 +331,10 @@ plugins:
     var2: 1
 ```
 
+### Development mode
+
+You can pass the `--dev` flag when starting up the Apollo Router to enable plugins that make developing easier. For now, this flag enables [subgraph error inclusion](/subgraph-error-inclusion), but in the future it may enable other plugins or modify other behavior. You should never run a production router with this flag enabled.
+
 ### Environment variable expansion
 
 You can reference environment variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
