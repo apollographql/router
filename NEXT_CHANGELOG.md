@@ -67,3 +67,10 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457
+
+
+### Clarify path parameter usage ([PR #1473](https://github.com/apollographql/router/pull/1473))
+
+Adds an inline path parameter usage to the section of the docs explaining that you cannot specify a wildcard in the middle of a path.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1473
