@@ -34,6 +34,9 @@ server:
     # List of accepted origins
     # (Ignored if allow_any_origin is true)
     # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
+    #
+    # An origin is a combination of scheme, hostname and port.
+    # It does not have any path section, so no trailing slash.
     origins:
       - https://www.your-app.example.com
       - https://studio.apollographql.com # Keep this so Apollo Studio can run queries against your router
@@ -89,6 +92,9 @@ server:
 
     # List of accepted origins
     # (Ignored if allow_any_origin is set to true)
+    #
+    # An origin is a combination of scheme, hostname and port.
+    # It does not have any path section, so no trailing slash.
     origins:
       - https://studio.apollographql.com # Keep this so Apollo Studio can still run queries against your router
 
