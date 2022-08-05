@@ -259,7 +259,7 @@ Path parameters and wildcards are supported. For example:
 - `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
 - `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
 
-> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter.
+> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
 
 ### Introspection
 
