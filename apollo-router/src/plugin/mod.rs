@@ -17,6 +17,7 @@
 pub mod serde;
 pub mod test;
 
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -265,6 +266,13 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
+
+    fn type_id(&self) -> TypeId
+    where
+        Self: 'static,
+    {
+        TypeId::of::<Self>()
+    }
 }
 
 #[async_trait]
@@ -313,6 +321,17 @@ where
 
     fn name(&self) -> &'static str {
         self.name()
+    }
+}
+
+impl dyn DynPlugin {
+    // Same pattern as https://github.com/rust-lang/rust/blob/1.62.1/library/std/src/error.rs#L675-L685
+    pub(crate) fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        if TypeId::of::<T>() == self.type_id() {
+            Some(unsafe { &*(self as *const dyn DynPlugin as *const T) })
+        } else {
+            None
+        }
     }
 }
 

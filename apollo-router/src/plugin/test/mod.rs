@@ -6,71 +6,37 @@ mod service;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use indexmap::IndexMap;
 pub use mock::subgraph::MockSubgraph;
 pub use service::MockExecutionService;
 pub use service::MockQueryPlanningService;
 pub use service::MockRouterService;
 pub use service::MockSubgraphService;
 use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use super::DynPlugin;
-use crate::cache::DeduplicatingCache;
-use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugin::Plugin;
-use crate::query_planner::BridgeQueryPlanner;
-use crate::query_planner::CachingQueryPlanner;
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::router_factory::RouterServiceConfigurator;
+use crate::router_factory::YamlRouterServiceFactory;
 use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::services::ExecutionCreator;
 use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
-use crate::Configuration;
-use crate::RouterService;
 use crate::Schema;
 
 pub struct PluginTestHarness {
-    router_service: BoxService<RouterRequest, RouterResponse, BoxError>,
-}
-pub enum IntoSchema {
-    String(String),
-    Schema(Box<Schema>),
-    Canned,
+    router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+    plugins: Arc<Plugins>,
 }
 
-impl From<Schema> for IntoSchema {
-    fn from(schema: Schema) -> Self {
-        IntoSchema::Schema(Box::new(schema))
-    }
-}
-impl From<String> for IntoSchema {
-    fn from(schema: String) -> Self {
-        IntoSchema::String(schema)
-    }
-}
-
-impl IntoSchema {
-    fn into_schema(self, config: &Configuration) -> Schema {
-        match self {
-            IntoSchema::String(s) => Schema::parse(&s, config).expect("test schema must be valid"),
-            IntoSchema::Schema(s) => *s,
-            IntoSchema::Canned => Schema::parse(
-                include_str!("../../../../examples/graphql/local.graphql"),
-                config,
-            )
-            .expect("test schema must be valid"),
-        }
-    }
-}
+pub(crate) type BufferedSubgraphService = Buffer<
+    BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>,
+    crate::SubgraphRequest,
+>;
 
 #[buildstructor::buildstructor]
 impl PluginTestHarness {
@@ -80,7 +46,7 @@ impl PluginTestHarness {
     /// # Arguments
     ///
     /// * `plugin`: The plugin to test
-    /// * `schema`: The schema, either Canned, or a custom schema.
+    /// * `schema`: (Optional) the supergraph schema to use. If not provided, a canned testing schema is used.
     /// * `mock_router_service`: (Optional) router service. If none is supplied it will be defaulted.
     /// * `mock_query_planner_service`: (Optional) query planner service. If none is supplied it will be defaulted.
     /// * `mock_execution_service`: (Optional) execution service. If none is supplied it will be defaulted.
@@ -89,19 +55,26 @@ impl PluginTestHarness {
     /// returns: Result<PluginTestHarness, Box<dyn Error+Send+Sync, Global>>
     ///
     #[builder]
-    pub async fn new<P: Plugin>(
-        plugin: P,
-        schema: IntoSchema,
+    #[allow(clippy::needless_lifetimes)] // Not needless in the builder
+    pub async fn new<'schema>(
+        configuration: serde_json::Value,
+        schema: Option<&'schema str>,
         mock_router_service: Option<MockRouterService>,
         mock_query_planner_service: Option<MockQueryPlanningService>,
+        mock_execution_service: Option<MockExecutionService>,
         mock_subgraph_services: HashMap<String, MockSubgraphService>,
     ) -> Result<PluginTestHarness, BoxError> {
+        let configuration: Arc<_> = serde_json::from_value(configuration)?;
+        let canned_schema = schema.is_none();
+        let schema = schema.unwrap_or(include_str!("../../../../examples/graphql/local.graphql"));
+        let schema = Arc::new(Schema::parse(schema, &configuration)?);
+
         let mut subgraph_services = mock_subgraph_services
             .into_iter()
             .map(|(k, v)| (k, Buffer::new(v.build().boxed(), DEFAULT_BUFFER_SIZE)))
-            .collect::<HashMap<_, _>>();
+            .collect::<HashMap<_, BufferedSubgraphService>>();
         // If we're using the canned schema then add some canned results
-        if let IntoSchema::Canned = schema {
+        if canned_schema {
             subgraph_services
                 .entry("products".to_string())
                 .or_insert_with(|| {
@@ -128,65 +101,22 @@ impl PluginTestHarness {
                 });
         }
 
-        let schema = Arc::new(schema.into_schema(&Default::default()));
-
-        let query_planner = CachingQueryPlanner::new(
-            BridgeQueryPlanner::new(
-                schema.clone(),
-                Some(Arc::new(Introspection::from_schema(&schema))),
-                Default::default(),
+        let router_creator = YamlRouterServiceFactory
+            .create_with_mocks(
+                configuration,
+                schema,
+                mock_router_service,
+                mock_query_planner_service,
+                mock_execution_service,
+                Some(subgraph_services),
+                None,
             )
-            .await?,
-            DEFAULT_BUFFER_SIZE,
-        )
-        .await
-        .boxed();
-        let query_planner_service = plugin.query_planning_service(
-            mock_query_planner_service
-                .map(|s| s.build().boxed())
-                .unwrap_or(query_planner),
-        );
-
-        let mut plugins = IndexMap::new();
-        plugins.insert(
-            "tested_plugin".to_string(),
-            Box::new(plugin) as Box<dyn DynPlugin + 'static>,
-        );
-        let plugins = Arc::new(plugins);
-
-        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-        let router_service = mock_router_service
-            .map(|s| s.build().boxed())
-            .unwrap_or_else(|| {
-                BoxService::new(
-                    RouterService::builder()
-                        .query_planner_service(Buffer::new(
-                            query_planner_service,
-                            DEFAULT_BUFFER_SIZE,
-                        ))
-                        .execution_service_factory(ExecutionCreator {
-                            schema: schema.clone(),
-                            plugins: plugins.clone(),
-                            subgraph_creator: Arc::new(MockSubgraphFactory {
-                                plugins: plugins.clone(),
-                                subgraphs: subgraph_services,
-                            }),
-                        })
-                        .schema(schema.clone())
-                        .build(),
-                )
-            });
-        let router_service = ServiceBuilder::new()
-            .layer(apq)
-            .layer(EnsureQueryPresence::default())
-            .service(
-                plugins
-                    .get("tested_plugin")
-                    .unwrap()
-                    .router_service(router_service),
-            )
-            .boxed();
-        Ok(Self { router_service })
+            .await?;
+        let router_service = router_creator.test_service();
+        Ok(Self {
+            router_service,
+            plugins: router_creator.plugins,
+        })
     }
 
     /// Call the test harness with a request. Not that you will need to have set up appropriate responses via mocks.
@@ -206,6 +136,14 @@ impl PluginTestHarness {
                     .build()?,
             )
             .await
+    }
+
+    /// Return the plugin instance that has the given `name`
+    ///
+    /// Returns `None` if the name or `Plugin` type does not match those given to [`register_plugin!`],
+    /// or if that plugin was not enabled in configuration.
+    pub fn plugin<Plugin: 'static>(&self, name: &str) -> Option<&Plugin> {
+        self.plugins.get(name)?.downcast_ref::<Plugin>()
     }
 }
 
@@ -244,9 +182,12 @@ impl SubgraphServiceFactory for MockSubgraphFactory {
 #[cfg(test)]
 mod testing {
     use insta::assert_json_snapshot;
+    use serde_json::json;
 
     use super::*;
+    use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::register_plugin;
 
     struct EmptyPlugin {}
     #[async_trait::async_trait]
@@ -257,15 +198,16 @@ mod testing {
             Ok(Self {})
         }
     }
+    register_plugin!("apollo.test", "empty_plugin", EmptyPlugin);
 
     #[tokio::test]
     async fn test_test_harness() -> Result<(), BoxError> {
         let mut harness = PluginTestHarness::builder()
-            .plugin(EmptyPlugin {})
-            .schema(IntoSchema::Canned)
+            .configuration(json!({ "test.empty_plugin": null }))
             .build()
             .await?;
         let graphql = harness.call_canned().await?.next_response().await.unwrap();
+        assert_eq!(graphql.errors, []);
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(graphql.data);
         });

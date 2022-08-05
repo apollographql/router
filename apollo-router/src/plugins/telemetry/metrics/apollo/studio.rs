@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
+#[cfg(not(test))]
 use std::time::SystemTime;
 
 use apollo_spaceport::ReferencedFieldsForType;
+#[cfg(not(test))]
 use apollo_spaceport::ReportHeader;
 use apollo_spaceport::StatsContext;
 use itertools::Itertools;
@@ -21,6 +23,7 @@ impl Report {
         aggregated_report
     }
 
+    #[cfg(not(test))]
     pub(crate) fn into_report(self, header: ReportHeader) -> apollo_spaceport::Report {
         let mut report = apollo_spaceport::Report {
             header: Some(header),

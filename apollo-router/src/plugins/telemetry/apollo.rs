@@ -14,11 +14,13 @@ pub struct Config {
     pub endpoint: Option<Url>,
 
     #[schemars(skip)]
-    #[serde(skip, default = "apollo_key")]
+    #[serde(default = "apollo_key")]
+    #[cfg_attr(not(test), serde(skip))]
     pub apollo_key: Option<String>,
 
     #[schemars(skip)]
-    #[serde(skip, default = "apollo_graph_reference")]
+    #[serde(default = "apollo_graph_reference")]
+    #[cfg_attr(not(test), serde(skip))]
     pub apollo_graph_ref: Option<String>,
 
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]

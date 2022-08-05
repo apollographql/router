@@ -1902,6 +1902,9 @@ expression: "&schema"
         }
       }
     },
+    "test.empty_plugin": {
+      "type": "null"
+    },
     "traffic_shaping": {
       "type": "object",
       "properties": {

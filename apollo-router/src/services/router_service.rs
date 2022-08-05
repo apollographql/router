@@ -34,6 +34,9 @@ use crate::graphql::Response;
 use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::test::MockExecutionService;
+use crate::plugin::test::MockQueryPlanningService;
+use crate::plugin::test::MockRouterService;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
@@ -247,6 +250,9 @@ pub struct PluggableRouterServiceBuilder {
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
+    pub(crate) mock_router_service: Option<MockRouterService>,
+    pub(crate) mock_query_planner_service: Option<MockQueryPlanningService>,
+    pub(crate) mock_execution_service: Option<MockExecutionService>,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -256,6 +262,9 @@ impl PluggableRouterServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             configuration: None,
+            mock_router_service: None,
+            mock_query_planner_service: None,
+            mock_execution_service: None,
         }
     }
 
@@ -312,37 +321,43 @@ impl PluggableRouterServiceBuilder {
 
         let configuration = self.configuration.unwrap_or_default();
 
-        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-
-        let introspection = if configuration.server.introspection {
-            // Introspection instantiation can potentially block for some time
-            // We don't need to use the api schema here because on the deno side we always convert to API schema
-
-            let schema = self.schema.clone();
-            Some(Arc::new(
-                tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
-                    .await
-                    .expect("Introspection instantiation panicked"),
-            ))
+        let query_planner_service = if let Some(mock) = self.mock_query_planner_service {
+            mock.build().boxed()
         } else {
-            None
+            let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+                .ok()
+                .and_then(|x| x.parse().ok())
+                .unwrap_or(100);
+            let introspection = if configuration.server.introspection {
+                // Introspection instantiation can potentially block for some time
+                // We don't need to use the api schema here because on the deno side we always convert to API schema
+
+                let schema = self.schema.clone();
+                Some(Arc::new(
+                    tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
+                        .await
+                        .expect("Introspection instantiation panicked"),
+                ))
+            } else {
+                None
+            };
+            // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+            let bridge_query_planner =
+                BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
+                    .await
+                    .map_err(ServiceBuildError::QueryPlannerError)?;
+            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                .await
+                .boxed()
         };
 
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
-                .await
-                .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service = ServiceBuilder::new().buffered().service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
-                    .await
-                    .boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ),
+            self.plugins
+                .iter_mut()
+                .rev()
+                .fold(query_planner_service, |acc, (_, e)| {
+                    e.query_planning_service(acc)
+                }),
         );
 
         let plugins = Arc::new(self.plugins);
@@ -360,6 +375,12 @@ impl PluggableRouterServiceBuilder {
             schema: self.schema,
             plugins,
             apq,
+            mock_router_service: self
+                .mock_router_service
+                .map(|m| ServiceBuilder::new().buffered().service(m.build())),
+            mock_execution_service: self
+                .mock_execution_service
+                .map(|m| ServiceBuilder::new().buffered().service(m.build())),
         })
     }
 }
@@ -373,8 +394,13 @@ pub struct RouterCreator {
     >,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
-    plugins: Arc<Plugins>,
+    pub(crate) plugins: Arc<Plugins>,
     apq: APQLayer,
+    mock_router_service:
+        Option<Buffer<tower_test::mock::Mock<RouterRequest, RouterResponse>, RouterRequest>>,
+    mock_execution_service: Option<
+        Buffer<tower_test::mock::Mock<ExecutionRequest, ExecutionResponse>, ExecutionRequest>,
+    >,
 }
 
 impl NewService<Request<graphql::Request>> for RouterCreator {
@@ -425,24 +451,37 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
     > + Send {
+        let router_service = if let Some(mock) = &self.mock_router_service {
+            mock.clone().boxed()
+        } else {
+            macro_rules! router_service {
+                ($execution_service: expr) => {
+                    RouterService::builder()
+                        .query_planner_service(self.query_planner_service.clone())
+                        .execution_service_factory($execution_service)
+                        .schema(self.schema.clone())
+                        .build()
+                        .boxed()
+                };
+            }
+            if let Some(mock) = &self.mock_execution_service {
+                router_service!(mock.clone())
+            } else {
+                router_service!(ExecutionCreator {
+                    schema: self.schema.clone(),
+                    plugins: self.plugins.clone(),
+                    subgraph_creator: self.subgraph_creator.clone(),
+                })
+            }
+        };
         ServiceBuilder::new()
             .layer(self.apq.clone())
             .layer(EnsureQueryPresence::default())
             .service(
-                self.plugins.iter().rev().fold(
-                    BoxService::new(
-                        RouterService::builder()
-                            .query_planner_service(self.query_planner_service.clone())
-                            .execution_service_factory(ExecutionCreator {
-                                schema: self.schema.clone(),
-                                plugins: self.plugins.clone(),
-                                subgraph_creator: self.subgraph_creator.clone(),
-                            })
-                            .schema(self.schema.clone())
-                            .build(),
-                    ),
-                    |acc, (_, e)| e.router_service(acc),
-                ),
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(router_service, |acc, (_, e)| e.router_service(acc)),
             )
     }
 

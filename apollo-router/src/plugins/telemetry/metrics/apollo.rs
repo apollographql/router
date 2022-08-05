@@ -4,17 +4,24 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[cfg(not(test))]
 use apollo_spaceport::ReportHeader;
 use apollo_spaceport::Reporter;
 use apollo_spaceport::ReporterError;
 use async_trait::async_trait;
 use deadpool::managed;
+#[cfg(not(test))]
 use deadpool::managed::Pool;
+#[cfg(not(test))]
 use deadpool::Runtime;
 use futures::channel::mpsc;
+#[cfg(test)]
+use futures::lock::Mutex;
 use futures::stream::StreamExt;
+#[cfg(not(test))]
 use studio::Report;
 use studio::SingleReport;
+#[cfg(not(test))]
 use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
@@ -90,6 +97,7 @@ impl MetricsConfigurator for Config {
     }
 }
 
+#[cfg(not(test))]
 #[cfg(not(target_os = "windows"))]
 fn get_uname() -> Result<String, std::io::Error> {
     let u = uname::uname()?;
@@ -99,6 +107,7 @@ fn get_uname() -> Result<String, std::io::Error> {
     ))
 }
 
+#[cfg(not(test))]
 #[cfg(target_os = "windows")]
 fn get_uname() -> Result<String, std::io::Error> {
     // Best we can do on windows right now
@@ -115,9 +124,27 @@ fn get_uname() -> Result<String, std::io::Error> {
 
 struct ApolloMetricsExporter {
     tx: mpsc::Sender<SingleReport>,
+    #[cfg(test)]
+    testing_rx: Mutex<Option<mpsc::Receiver<SingleReport>>>,
 }
 
 impl ApolloMetricsExporter {
+    #[cfg(test)]
+    fn new(
+        _endpoint: &Url,
+        _apollo_key: &str,
+        _apollo_graph_ref: &str,
+        _schema_id: &str,
+    ) -> Result<ApolloMetricsExporter, BoxError> {
+        let (tx, rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
+        Ok(ApolloMetricsExporter {
+            tx,
+            #[cfg(test)]
+            testing_rx: Mutex::new(Some(rx)),
+        })
+    }
+
+    #[cfg(not(test))]
     fn new(
         endpoint: &Url,
         apollo_key: &str,
@@ -187,6 +214,7 @@ impl ApolloMetricsExporter {
         Sender::Spaceport(self.tx.clone())
     }
 
+    #[cfg(not(test))]
     async fn send_report(
         pool: &Pool<ReporterManager>,
         apollo_key: &str,
@@ -244,17 +272,10 @@ impl managed::Manager for ReporterManager {
 
 #[cfg(test)]
 mod test {
-    use std::future::Future;
+    use serde_json::json;
 
-    use http::header::HeaderName;
-
-    use super::super::super::config;
     use super::*;
-    use crate::plugin::test::IntoSchema::Canned;
     use crate::plugin::test::PluginTestHarness;
-    use crate::plugin::Plugin;
-    use crate::plugin::PluginInit;
-    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::Context;
@@ -262,22 +283,29 @@ mod test {
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
-        let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
-            endpoint: None,
-            apollo_key: None,
-            apollo_graph_ref: None,
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            schema_id: "schema_sha".to_string(),
-        })
-        .await?;
+        let config = with_apollo_config(json!({
+            "client_name_header": "name_header",
+            "client_version_header": "version_header",
+            "schema_id": "schema_sha",
+        }));
+        let harness = PluginTestHarness::builder()
+            .configuration(config)
+            .build()
+            .await
+            .unwrap();
+        let plugin = harness.plugin::<Telemetry>("apollo.telemetry").unwrap();
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_enabled() -> Result<(), BoxError> {
-        let plugin = create_plugin().await?;
+        let harness = PluginTestHarness::builder()
+            .configuration(config())
+            .build()
+            .await
+            .unwrap();
+        let plugin = harness.plugin::<Telemetry>("apollo.telemetry").unwrap();
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Spaceport(_)));
         Ok(())
     }
@@ -352,15 +380,23 @@ mod test {
         context: Option<Context>,
     ) -> Result<Vec<SingleReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut plugin = create_plugin().await?;
-        // Replace the apollo metrics sender so we can test metrics collection.
-        let (tx, rx) = futures::channel::mpsc::channel(100);
-        plugin.apollo_metrics_sender = Sender::Spaceport(tx);
         let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+            .configuration(config())
             .build()
             .await?;
+        let plugin = test_harness
+            .plugin::<Telemetry>("apollo.telemetry")
+            .unwrap();
+        // The apollo metrics sender differs in cfg(test) so we can test metrics collection.
+        assert_eq!(plugin._metrics_exporters.len(), 1);
+        let rx = plugin._metrics_exporters[0]
+            .downcast_ref::<ApolloMetricsExporter>()
+            .unwrap()
+            .testing_rx
+            .lock()
+            .await
+            .take()
+            .unwrap();
         let _ = test_harness
             .call(
                 RouterRequest::fake_builder()
@@ -392,28 +428,21 @@ mod test {
         Ok(results)
     }
 
-    fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        create_plugin_with_apollo_config(apollo::Config {
-            endpoint: None,
-            apollo_key: Some("key".to_string()),
-            apollo_graph_ref: Some("ref".to_string()),
-            client_name_header: HeaderName::from_static("name_header"),
-            client_version_header: HeaderName::from_static("version_header"),
-            schema_id: "schema_sha".to_string(),
-        })
+    fn config() -> serde_json::Value {
+        with_apollo_config(json!({
+            "apollo_key": "key",
+            "apollo_graph_ref": "ref",
+            "client_name_header": "name_header",
+            "client_version_header": "version_header",
+            "schema_id": "schema_sha",
+        }))
     }
 
-    async fn create_plugin_with_apollo_config(
-        apollo_config: apollo::Config,
-    ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInit::new(
-            config::Conf {
-                metrics: None,
-                tracing: None,
-                apollo: Some(apollo_config),
+    fn with_apollo_config(apollo_config: serde_json::Value) -> serde_json::Value {
+        json!({
+            "telemetry": {
+                "apollo": apollo_config,
             },
-            Default::default(),
-        ))
-        .await
+        })
     }
 }

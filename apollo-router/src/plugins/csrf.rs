@@ -263,7 +263,10 @@ mod csrf_tests {
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let config = CSRFConfig::default();
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        let non_preflighted_request = RouterRequest::fake_builder()
+            .header("content-type", "text/plain")
+            .build()
+            .unwrap();
         assert_rejected(config, non_preflighted_request).await
     }
 
@@ -323,6 +326,7 @@ mod csrf_tests {
             .await
             .unwrap();
 
+        assert_eq!(res.errors, []);
         assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
     }
 

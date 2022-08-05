@@ -122,8 +122,16 @@ impl RouterRequest {
         variables: HashMap<String, Value>,
         extensions: HashMap<String, Value>,
         context: Option<Context>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        mut headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
     ) -> Result<RouterRequest, BoxError> {
+        // Avoid testing requests getting blocked by the CSRF-prevention plugin
+        headers
+            .entry(IntoHeaderName::HeaderName(HeaderName::from_static(
+                "content-type",
+            )))
+            .or_insert(IntoHeaderValue::HeaderValue(HeaderValue::from_static(
+                "application/json",
+            )));
         RouterRequest::new(
             query,
             operation_name,

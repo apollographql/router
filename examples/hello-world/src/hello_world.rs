@@ -107,13 +107,8 @@ register_plugin!("example", "hello_world", HelloWorld);
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
-
-    use super::Conf;
-    use super::HelloWorld;
+    use serde_json::json;
 
     #[tokio::test]
     async fn plugin_registered() {
@@ -129,22 +124,20 @@ mod tests {
     // we will see the message "Hello Bob" printed to standard out
     #[tokio::test]
     async fn display_message() {
-        // Define a configuration to use with our plugin
-        let conf = Conf {
-            name: "Bob".to_string(),
-        };
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = HelloWorld::new(PluginInit::new(conf, Default::default()))
-            .await
-            .expect("created plugin");
+        // Define a configuration that enables our plugin
+        let conf = json!({
+            "plugins": {
+                "example.hello_world": {
+                    "name": "Bob"
+                }
+            }
+        });
 
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
         let _test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+            .configuration(conf)
             .build()
             .await
             .expect("building harness");

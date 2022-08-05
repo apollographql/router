@@ -157,12 +157,7 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 
 #[cfg(test)]
 mod tests {
-    use super::{Conf, {{pascal_name}}};
-
-    use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
     use tower::BoxError;
 
     #[tokio::test]
@@ -177,18 +172,18 @@ mod tests {
 
     #[tokio::test]
     async fn basic_test() -> Result<(), BoxError> {
-        // Define a configuration to use with our plugin
-        let conf = Conf {
-            message: "Starting my plugin".to_string(),
-        };
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = {{pascal_name}}::new(PluginInit::new(conf, Default::default())).await.expect("created plugin");
+        // Define a configuration that enables our plugin
+        let conf = serde_json::json!({
+            "plugins": {
+                "{{project_name}}.{{snake_name}}": {
+                    "message": "Starting my plugin"
+                }
+            }
+        });
 
         // Create the test harness. You can add mocks for individual services, or use prebuilt canned services.
         let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+            .configuration(conf)
             .build()
             .await?;
 

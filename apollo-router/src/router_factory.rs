@@ -13,6 +13,10 @@ use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::http_ext::Request;
 use crate::http_ext::Response;
+use crate::plugin::test::BufferedSubgraphService;
+use crate::plugin::test::MockExecutionService;
+use crate::plugin::test::MockQueryPlanningService;
+use crate::plugin::test::MockRouterService;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::services::new_service::NewService;
@@ -52,7 +56,33 @@ pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<Self::RouterServiceFactory, BoxError>;
+    ) -> Result<Self::RouterServiceFactory, BoxError> {
+        self.create_with_mocks(
+            configuration,
+            schema,
+            None,
+            None,
+            None,
+            None,
+            previous_router,
+        )
+        .await
+    }
+
+    // TODO refactor PluggableRouterServiceBuilder etc to pass a struct here
+    #[allow(clippy::too_many_arguments)]
+    async fn create_with_mocks<'a>(
+        &'a mut self,
+        _configuration: Arc<Configuration>,
+        _schema: Arc<crate::Schema>,
+        _mock_router_service: Option<MockRouterService>,
+        _mock_query_planner_service: Option<MockQueryPlanningService>,
+        _mock_execution_service: Option<MockExecutionService>,
+        _mock_subgraph_services: Option<HashMap<String, BufferedSubgraphService>>,
+        _previous_router: Option<&'a Self::RouterServiceFactory>,
+    ) -> Result<Self::RouterServiceFactory, BoxError> {
+        unimplemented!()
+    }
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -63,20 +93,33 @@ pub(crate) struct YamlRouterServiceFactory;
 impl RouterServiceConfigurator for YamlRouterServiceFactory {
     type RouterServiceFactory = RouterCreator;
 
-    async fn create<'a>(
+    async fn create_with_mocks<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
+        mock_router_service: Option<MockRouterService>,
+        mock_query_planner_service: Option<MockQueryPlanningService>,
+        mock_execution_service: Option<MockExecutionService>,
+        mock_subgraph_services: Option<HashMap<String, BufferedSubgraphService>>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema).await?;
 
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        builder.mock_router_service = mock_router_service;
+        builder.mock_query_planner_service = mock_query_planner_service;
+        builder.mock_execution_service = mock_execution_service;
         builder = builder.with_configuration(configuration);
 
-        for (name, _) in schema.subgraphs() {
-            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
+        if let Some(mocks) = mock_subgraph_services {
+            for (name, service) in mocks {
+                builder = builder.with_subgraph_service(&name, service);
+            }
+        } else {
+            for (name, _) in schema.subgraphs() {
+                builder = builder.with_subgraph_service(name, SubgraphService::new(name));
+            }
         }
 
         for (plugin_name, plugin) in plugins {

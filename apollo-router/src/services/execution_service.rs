@@ -141,3 +141,26 @@ impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF
         ExecutionRequest,
     >>::Future;
 }
+
+impl<S> ExecutionServiceFactory for S
+where
+    S: Clone
+        + Send
+        + Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>
+        + 'static,
+    <S as Service<ExecutionRequest>>::Future: Send,
+{
+    type ExecutionService = S;
+
+    type Future = <S as Service<ExecutionRequest>>::Future;
+}
+impl<S> NewService<ExecutionRequest> for S
+where
+    S: Clone + Send + Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>,
+{
+    type Service = S;
+
+    fn new_service(&self) -> Self::Service {
+        self.clone()
+    }
+}

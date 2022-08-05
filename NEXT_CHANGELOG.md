@@ -35,6 +35,54 @@ This reduces the number of copies of this string we keep in memory, as schemas c
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Changes to `PluginTestHarness` API ([PR #1468](https://github.com/apollographql/router/pull/1468))
+
+The `plugin` method of `PluginTestHarness`’s builder was removed.
+Users of `PluginTestHarness` don’t create plugin instances themselves anymore.
+
+Instead, the builder has a new mandatory `configuration` method,
+which takes the full Router configuration as would be found in a `router.yaml` file.
+Through that configuration, plugins can be enabled (and configured) by name.
+Instead of YAML syntax though, the method takes a `serde_json::Value`.
+A convenient way to create such a value in Rust code is with the `json!` macro.
+
+The `IntoSchema` enum has been removed.
+The `schema` method of the builder is now optional and takes a `&str`.
+If not provided, the canned testing schema is used by default.
+
+Changes to tests for an example plugin:
+
+```diff
+-use apollo_router::plugin::test::IntoSchema::Canned;
+ use apollo_router::plugin::test::PluginTestHarness;
+-use apollo_router::plugin::Plugin;
+-use apollo_router::plugin::PluginInit;
++use serde_json::json;
+ 
+-let conf = MyPluginConfig {
+-    something: "something".to_string(),
+-};
+-let plugin = MyPlugin::new(PluginInit::new(conf, Default::default()))
+-    .await
+-    .unwrap();
++let conf = json!({
++    "plugins": {
++        "example.my_plugin": {
++            "something": "something"
++        }
++    }
++});
+ let test_harness = PluginTestHarness::builder()
+-            .plugin(plugin)
+-            .schema(Canned)
++            .configuration(conf)
+             .build()
+             .await
+             .unwarp();
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ## 🐛 Fixes

@@ -174,8 +174,10 @@ impl Plugin for Telemetry {
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         Self::replace_tracer_provider(tracer_provider);
 
-        replace_layer(Box::new(telemetry))
-            .expect("set_global_subscriber() was not called at startup, fatal");
+        let result = replace_layer(Box::new(telemetry));
+        if cfg!(not(test)) {
+            result.expect("set_global_subscriber() was not called at startup, fatal");
+        }
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
         global::set_text_map_propagator(Self::create_propagator(&self.config));

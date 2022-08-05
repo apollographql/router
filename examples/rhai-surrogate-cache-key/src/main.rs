@@ -12,12 +12,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test::IntoSchema::Canned;
     use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
-    use apollo_router::plugins::rhai::Conf;
-    use apollo_router::plugins::rhai::Rhai;
     use apollo_router::services::RouterRequest;
     use apollo_router::Context;
     use http::StatusCode;
@@ -25,21 +20,16 @@ mod tests {
     #[tokio::test]
     async fn test_surrogate_cache_key_created() {
         // Define a configuration to use with our plugin
-        let conf: Conf = serde_json::from_value(serde_json::json!({
-            "scripts": "src",
-            "main": "rhai_surrogate_cache_key.rhai",
-        }))
-        .expect("valid conf supplied");
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = Rhai::new(PluginInit::new(conf, Default::default()))
-            .await
-            .expect("created plugin");
+        let conf = serde_json::json!({
+            "rhai": {
+                "scripts": "src",
+                "main": "rhai_surrogate_cache_key.rhai",
+            }
+        });
 
         // Build a test harness.
         let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+            .configuration(conf)
             .build()
             .await
             .expect("building harness");
