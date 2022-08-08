@@ -1,3 +1,4 @@
+//! Router errors.
 use std::sync::Arc;
 
 use displaydoc::Display;
@@ -16,10 +17,12 @@ use thiserror::Error;
 use tokio::task::JoinError;
 use tracing::level_filters::LevelFilter;
 
+pub use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+pub use crate::reload::Error as ReloadError;
 pub use crate::spec::SpecError;
 
 /// Error types for execution.

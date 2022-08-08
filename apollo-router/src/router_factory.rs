@@ -69,20 +69,15 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema).await?;
+
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-        if configuration.server.introspection {
-            builder = builder.with_naive_introspection();
-        }
-        if configuration.server.experimental_defer_support {
-            builder = builder.with_defer_support();
-        }
+        builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
             builder = builder.with_subgraph_service(name, SubgraphService::new(name));
         }
-
-        // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
@@ -110,7 +105,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let schema: Schema = schema.parse().unwrap();
+    let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
     let service = YamlRouterServiceFactory::default()
         .create(Arc::new(config), Arc::new(schema), None)
@@ -157,7 +152,10 @@ async fn create_plugins(
                     inject_schema_id(schema, &mut configuration);
                 }
                 // expand any env variables in the config before processing.
-                match factory.create_instance(&configuration).await {
+                match factory
+                    .create_instance(&configuration, schema.as_string().clone())
+                    .await
+                {
                     Ok(plugin) => {
                         plugin_instances.push((name, plugin));
                     }
@@ -201,7 +199,10 @@ async fn create_plugins(
                         if *name == "apollo.telemetry" {
                             inject_schema_id(schema, &mut config);
                         }
-                        match factory.create_instance(&config).await {
+                        match factory
+                            .create_instance(&config, schema.as_string().clone())
+                            .await
+                        {
                             Ok(plugin) => {
                                 plugin_instances
                                     .insert(desired_position, (name.to_string(), plugin));
@@ -274,6 +275,7 @@ mod test {
 
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
+    use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterServiceConfigurator;
@@ -305,8 +307,8 @@ mod test {
     impl Plugin for AlwaysStartsAndStopsPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
     }
@@ -326,8 +328,8 @@ mod test {
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Err(BoxError::from("Error"))
         }
     }
@@ -390,7 +392,8 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config).unwrap();
 
         let service = YamlRouterServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None)
@@ -400,9 +403,8 @@ mod test {
 
     #[test]
     fn test_inject_schema_id() {
-        let schema = include_str!("testdata/starstuff@current.graphql")
-            .parse()
-            .unwrap();
+        let schema = include_str!("testdata/starstuff@current.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =

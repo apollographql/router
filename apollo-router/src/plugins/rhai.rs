@@ -46,6 +46,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -327,13 +328,13 @@ pub struct Conf {
 impl Plugin for Rhai {
     type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        let scripts_path = match configuration.scripts {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),
         };
 
-        let main_file = match configuration.main {
+        let main_file = match init.config.main {
             Some(main) => main,
             None => "main.rhai".to_string(),
         };
@@ -1358,7 +1359,31 @@ impl Rhai {
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
 
-        register_rhai_interface!(engine, router, query_planner, execution, subgraph);
+        register_rhai_interface!(engine, router, execution, subgraph);
+
+        engine
+            .register_get_result("context", |obj: &mut SharedMut<query_planner::Request>| {
+                Ok(obj.with_mut(|request| request.context.clone()))
+            })
+            .register_get_result("context", |obj: &mut SharedMut<query_planner::Response>| {
+                Ok(obj.with_mut(|response| response.context.clone()))
+            });
+
+        engine
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<query_planner::Request>, context: Context| {
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
+                },
+            )
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<query_planner::Response>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                },
+            );
 
         engine
     }
@@ -1407,6 +1432,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1464,6 +1490,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();

@@ -1,3 +1,4 @@
+//! GraphQL operation planning.
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -198,8 +199,8 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 let query = reconstruct_full_query(&primary_path, &primary.subselection);
                 // ----------------------- Parse ---------------------------------
-                let sub_selection =
-                    Query::parse(&query, schema).expect("it must respect the schema");
+                let sub_selection = Query::parse(&query, schema, &Default::default())
+                    .expect("it must respect the schema");
                 // ----------------------- END Parse ---------------------------------
 
                 subselections.insert(
@@ -211,8 +212,8 @@ impl PlanNode {
                         // TODO rebuilt subselection from the root thanks to the path
                         let query = reconstruct_full_query(&current.path, subselection);
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection =
-                            Query::parse(&query, schema).expect("it must respect the schema");
+                        let sub_selection = Query::parse(&query, schema, &Default::default())
+                            .expect("it must respect the schema");
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
@@ -270,18 +271,21 @@ impl QueryPlan {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
+        let deferred_fetches = HashMap::new();
         let (value, subselection, errors) = self
             .root
             .execute_recursively(
+                &ExecutionParameters {
+                    context,
+                    service_factory,
+                    schema,
+                    originating_request,
+                    deferred_fetches: &deferred_fetches,
+                    options: &self.options,
+                },
                 &root,
-                context,
-                service_factory,
-                schema,
-                originating_request,
                 &Value::default(),
-                &HashMap::new(),
                 sender,
-                &self.options,
             )
             .await;
 
@@ -297,19 +301,23 @@ impl QueryPlan {
     }
 }
 
+// holds the query plan executon arguments that do not change between calls
+pub(crate) struct ExecutionParameters<'a, SF> {
+    context: &'a Context,
+    service_factory: &'a Arc<SF>,
+    schema: &'a Schema,
+    originating_request: &'a Arc<http_ext::Request<Request>>,
+    deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    options: &'a QueryPlanOptions,
+}
+
 impl PlanNode {
-    #[allow(clippy::too_many_arguments)]
     fn execute_recursively<'a, SF>(
         &'a self,
+        parameters: &'a ExecutionParameters<'a, SF>,
         current_dir: &'a Path,
-        context: &'a Context,
-        service_factory: &'a Arc<SF>,
-        schema: &'a Schema,
-        originating_request: &'a Arc<http_ext::Request<Request>>,
         parent_value: &'a Value,
-        deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
         sender: futures::channel::mpsc::Sender<Response>,
-        options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)>
     where
         SF: SubgraphServiceFactory,
@@ -327,17 +335,7 @@ impl PlanNode {
                     let span = tracing::info_span!("sequence");
                     for node in nodes {
                         let (v, subselect, err) = node
-                            .execute_recursively(
-                                current_dir,
-                                context,
-                                service_factory,
-                                schema,
-                                originating_request,
-                                &value,
-                                deferred_fetches,
-                                sender.clone(),
-                                options,
-                            )
+                            .execute_recursively(parameters, current_dir, &value, sender.clone())
                             .instrument(span.clone())
                             .in_current_span()
                             .await;
@@ -355,15 +353,10 @@ impl PlanNode {
                         .iter()
                         .map(|plan| {
                             plan.execute_recursively(
+                                parameters,
                                 current_dir,
-                                context,
-                                service_factory,
-                                schema,
-                                originating_request,
                                 parent_value,
-                                deferred_fetches,
                                 sender.clone(),
-                                options,
                             )
                             .instrument(span.clone())
                         })
@@ -382,16 +375,11 @@ impl PlanNode {
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     let (v, subselect, err) = node
                         .execute_recursively(
+                            parameters,
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
-                            context,
-                            service_factory,
-                            schema,
-                            originating_request,
                             parent_value,
-                            deferred_fetches,
                             sender,
-                            options,
                         )
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
@@ -402,16 +390,7 @@ impl PlanNode {
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(
-                            parent_value,
-                            current_dir,
-                            context,
-                            service_factory,
-                            originating_request,
-                            schema,
-                            deferred_fetches,
-                            options,
-                        )
+                        .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             "fetch",
                             "otel.kind" = %SpanKind::Internal,
@@ -478,11 +457,11 @@ impl PlanNode {
                         let subselection = deferred_node.subselection();
                         let label = deferred_node.label.clone();
                         let mut tx = sender.clone();
-                        let sc = schema.clone();
-                        let orig = originating_request.clone();
-                        let sf = service_factory.clone();
-                        let ctx = context.clone();
-                        let opt = options.clone();
+                        let sc = parameters.schema.clone();
+                        let orig = parameters.originating_request.clone();
+                        let sf = parameters.service_factory.clone();
+                        let ctx = parameters.context.clone();
+                        let opt = parameters.options.clone();
                         let mut primary_receiver = primary_sender.subscribe();
                         let mut value = parent_value.clone();
                         let fut = async move {
@@ -506,19 +485,22 @@ impl PlanNode {
                             }
 
                             let span = tracing::info_span!("deferred");
+                            let deferred_fetches = HashMap::new();
 
                             if let Some(node) = deferred_inner {
                                 let (mut v, node_subselection, err) = node
                                     .execute_recursively(
+                                        &ExecutionParameters {
+                                            context: &ctx,
+                                            service_factory: &sf,
+                                            schema: &sc,
+                                            originating_request: &orig,
+                                            deferred_fetches: &deferred_fetches,
+                                            options: &opt,
+                                        },
                                         &Path::default(),
-                                        &ctx,
-                                        &sf,
-                                        &sc,
-                                        &orig,
                                         &value,
-                                        &HashMap::new(),
                                         tx.clone(),
-                                        &opt,
                                     )
                                     .instrument(span.clone())
                                     .in_current_span()
@@ -590,15 +572,17 @@ impl PlanNode {
                     if let Some(node) = node {
                         let (v, _subselect, err) = node
                             .execute_recursively(
+                                &ExecutionParameters {
+                                    context: parameters.context,
+                                    service_factory: parameters.service_factory,
+                                    schema: parameters.schema,
+                                    originating_request: parameters.originating_request,
+                                    deferred_fetches: &deferred_fetches,
+                                    options: parameters.options,
+                                },
                                 current_dir,
-                                context,
-                                service_factory,
-                                schema,
-                                originating_request,
                                 &value,
-                                &deferred_fetches,
                                 sender,
-                                options,
                             )
                             .instrument(span.clone())
                             .in_current_span()
@@ -625,23 +609,21 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    if let Some(&Value::Bool(true)) =
-                        originating_request.body().variables.get(condition.as_str())
+                    if let Some(&Value::Bool(true)) = parameters
+                        .originating_request
+                        .body()
+                        .variables
+                        .get(condition.as_str())
                     {
                         //FIXME: should we show an error if the if_node was not present?
                         if let Some(node) = if_clause {
                             let span = tracing::info_span!("condition_if");
                             let (v, subselect, err) = node
                                 .execute_recursively(
+                                    parameters,
                                     current_dir,
-                                    context,
-                                    service_factory,
-                                    schema,
-                                    originating_request,
                                     parent_value,
-                                    deferred_fetches,
                                     sender.clone(),
-                                    options,
                                 )
                                 .instrument(span.clone())
                                 .in_current_span()
@@ -654,15 +636,10 @@ impl PlanNode {
                         let span = tracing::info_span!("condition_else");
                         let (v, subselect, err) = node
                             .execute_recursively(
+                                parameters,
                                 current_dir,
-                                context,
-                                service_factory,
-                                schema,
-                                &originating_request.clone(),
                                 parent_value,
-                                deferred_fetches,
                                 sender.clone(),
-                                options,
                             )
                             .instrument(span.clone())
                             .in_current_span()
@@ -748,14 +725,13 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
-    use tokio::sync::broadcast::Sender;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
 
     use super::selection::select_object;
     use super::selection::Selection;
-    use super::QueryPlanOptions;
+    use super::ExecutionParameters;
     use crate::error::Error;
     use crate::error::FetchError;
     use crate::graphql::Request;
@@ -766,6 +742,7 @@ pub(crate) mod fetch {
     use crate::services::subgraph_service::SubgraphServiceFactory;
     use crate::*;
 
+    /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
@@ -889,6 +866,20 @@ pub(crate) mod fetch {
 
                 Some(Variables { variables, paths })
             } else {
+                // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
+                // when the first fetch fails, the query plan wwill still execute up until the second fetch,
+                // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
+                // the previous operation field) and the data is null. In that case, we recognize that we
+                // should not perform the next fetch
+                if !current_dir.is_empty()
+                    && data
+                        .get_path(current_dir)
+                        .map(|value| value.is_null())
+                        .unwrap_or(true)
+                {
+                    return None;
+                }
+
                 Some(Variables {
                     variables: variable_usages
                         .iter()
@@ -908,14 +899,9 @@ pub(crate) mod fetch {
         #[allow(clippy::too_many_arguments)]
         pub(crate) async fn fetch_node<'a, SF>(
             &'a self,
+            parameters: &'a ExecutionParameters<'a, SF>,
             data: &'a Value,
             current_dir: &'a Path,
-            context: &'a Context,
-            service_factory: &'a Arc<SF>,
-            originating_request: &'a Arc<http_ext::Request<Request>>,
-            schema: &'a Schema,
-            deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
-            options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError>
         where
             SF: SubgraphServiceFactory,
@@ -934,9 +920,9 @@ pub(crate) mod fetch {
                 data,
                 current_dir,
                 // Needs the original request here
-                originating_request,
-                schema,
-                options.enable_variable_deduplication,
+                parameters.originating_request,
+                parameters.schema,
+                parameters.options.enable_variable_deduplication,
             )
             .await
             {
@@ -947,12 +933,13 @@ pub(crate) mod fetch {
             };
 
             let subgraph_request = SubgraphRequest::builder()
-                .originating_request(originating_request.clone())
+                .originating_request(parameters.originating_request.clone())
                 .subgraph_request(
                     http_ext::Request::builder()
                         .method(http::Method::POST)
                         .uri(
-                            schema
+                            parameters
+                                .schema
                                 .subgraphs()
                                 .find_map(|(name, url)| (name == service_name).then(|| url))
                                 .unwrap_or_else(|| {
@@ -976,10 +963,11 @@ pub(crate) mod fetch {
                         ),
                 )
                 .operation_kind(*operation_kind)
-                .context(context.clone())
+                .context(parameters.context.clone())
                 .build();
 
-            let service = service_factory
+            let service = parameters
+                .service_factory
                 .new_service(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
@@ -1025,7 +1013,7 @@ pub(crate) mod fetch {
             match self.response_at_path(current_dir, paths, response.data.unwrap_or_default()) {
                 Ok(value) => {
                     if let Some(id) = &self.id {
-                        if let Some(sender) = deferred_fetches.get(id.as_str()) {
+                        if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                             if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
                                 tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
                             }
@@ -1196,7 +1184,6 @@ mod log {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -1290,7 +1277,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1353,7 +1340,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1412,7 +1399,7 @@ mod tests {
                         .build()
                         .expect("fake builds should always work; qed"),
                 ),
-                &Schema::from_str(test_schema!()).unwrap(),
+                &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
             .await;
@@ -1529,7 +1516,8 @@ mod tests {
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
-        let schema = Schema::from_str(include_str!("testdata/defer_schema.graphql")).unwrap();
+        let schema = include_str!("testdata/defer_schema.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([
                 (
@@ -1562,18 +1550,137 @@ mod tests {
 
         // primary response
         assert_eq!(
-            serde_json::to_string(&response).unwrap(),
-            r#"{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}"#
+            serde_json::to_value(&response).unwrap(),
+            serde_json::json! {{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}}
         );
 
         let response = receiver.next().await.unwrap();
 
         // deferred response
         assert_eq!(
-            serde_json::to_string(&response).unwrap(),
+            serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            r#"{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}"#
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
         );
+    }
+
+    #[tokio::test]
+    async fn dependent_mutations() {
+        let schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1"),
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+      {
+        query: Query
+        mutation: Mutation
+      }
+
+      directive @core(feature: String!) repeatable on SCHEMA
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      scalar join__FieldSet
+
+      enum join__Graph {
+        A @join__graph(name: "A" url: "http://localhost:4001")
+        B @join__graph(name: "B" url: "http://localhost:4004")
+      }
+
+      type Mutation {
+          mutationA: Mutation @join__field(graph: A)
+          mutationB: Boolean @join__field(graph: B)
+      }
+
+      type Query {
+          query: Boolean @join__field(graph: A)
+      }"#;
+
+        let query_plan: QueryPlan = QueryPlan {
+            // generated from:
+            // mutation {
+            //   mutationA {
+            //     mutationB
+            //   }
+            // }
+            root: serde_json::from_str(
+                r#"{
+                "kind": "Sequence",
+                "nodes": [
+                    {
+                        "kind": "Fetch",
+                        "serviceName": "A",
+                        "variableUsages": [],
+                        "operation": "mutation{mutationA{__typename}}",
+                        "operationKind": "mutation"
+                    },
+                    {
+                        "kind": "Flatten",
+                        "path": [
+                            "mutationA"
+                        ],
+                        "node": {
+                            "kind": "Fetch",
+                            "serviceName": "B",
+                            "variableUsages": [],
+                            "operation": "mutation{...on Mutation{mutationB}}",
+                            "operationKind": "mutation"
+                        }
+                    }
+                ]
+            }"#,
+            )
+            .unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+            options: QueryPlanOptions::default(),
+        };
+
+        let mut mock_a_service = plugin::test::MockSubgraphService::new();
+        mock_a_service
+            .expect_call()
+            .times(1)
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        // the first fetch returned null, so there should never be a call to B
+        let mut mock_b_service = plugin::test::MockSubgraphService::new();
+        mock_b_service.expect_call().never();
+
+        let sf = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([
+                (
+                    "A".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_a_service.build().boxed()),
+                ),
+                (
+                    "B".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_b_service.build().boxed()),
+                ),
+            ]),
+            plugins: Default::default(),
+        });
+
+        let (sender, _) = futures::channel::mpsc::channel(10);
+        let _response = query_plan
+            .execute(
+                &Context::new(),
+                &sf,
+                &Arc::new(
+                    http_ext::Request::fake_builder()
+                        .headers(Default::default())
+                        .body(Default::default())
+                        .build()
+                        .expect("fake builds should always work; qed"),
+                ),
+                &Schema::parse(schema, &Default::default()).unwrap(),
+                sender,
+            )
+            .await;
     }
 }

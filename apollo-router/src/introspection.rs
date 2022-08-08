@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use include_dir::include_dir;
 use once_cell::sync::Lazy;
+use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::introspect::{self};
 
 use crate::graphql::Response;
 use crate::*;
@@ -48,7 +48,7 @@ impl Introspection {
         let _guard = span.enter();
 
         let cache = introspect::batch_introspect(
-            schema.as_str(),
+            schema.as_string(),
             KNOWN_INTROSPECTION_QUERIES.iter().cloned().collect(),
         )
         .map_err(|deno_runtime_error| {
@@ -154,9 +154,29 @@ mod introspection_tests {
 
     #[test]
     fn test_known_introspection_queries() {
-        // this only makes sure KNOWN_INTROSPECTION_QUERIES get created correctly.
+        // This makes sure KNOWN_INTROSPECTION_QUERIES get created correctly
+        // and those queries don’t cause errors,
         // thus preventing regressions if a wrong query is added
         // to the `well_known_introspection_queries` folder
-        let _ = &*KNOWN_INTROSPECTION_QUERIES;
+        let config = Default::default();
+        let schema = include_str!("query_planner/testdata/schema.graphql");
+        let schema = Schema::parse(schema, &config).unwrap();
+        assert_eq!(
+            Introspection::from_schema(&schema).cache.len(),
+            KNOWN_INTROSPECTION_QUERIES.len()
+        );
+
+        for (file, query) in include_dir!("$CARGO_MANIFEST_DIR/well_known_introspection_queries")
+            .files()
+            .zip(&*KNOWN_INTROSPECTION_QUERIES)
+        {
+            let result = Query::parse(query, &schema, &config);
+            assert!(
+                result.is_ok(),
+                "{}: {}",
+                file.path().display(),
+                result.unwrap_err()
+            )
+        }
     }
 }

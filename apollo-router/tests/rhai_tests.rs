@@ -28,15 +28,13 @@ async fn all_rhai_callbacks_are_invoked() {
         .create_instance(
             &Value::from_str(r#"{"scripts":"tests/fixtures", "main": "test_callbacks.rhai"}"#)
                 .unwrap(),
+            Default::default(),
         )
         .await
         .unwrap();
 
-    let schema: Arc<Schema> = Arc::new(
-        include_str!("./fixtures/supergraph.graphql")
-            .parse()
-            .unwrap(),
-    );
+    let schema = include_str!("./fixtures/supergraph.graphql");
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone())
         .with_dyn_plugin("apollo.rhai".to_string(), dyn_plugin);

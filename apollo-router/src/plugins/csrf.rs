@@ -1,3 +1,4 @@
+//! Cross Site Request Forgery (CSRF) plugin.
 use std::ops::ControlFlow;
 
 use http::header;
@@ -12,10 +13,12 @@ use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
+/// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CSRFConfig {
@@ -92,8 +95,10 @@ pub struct Csrf {
 impl Plugin for Csrf {
     type Config = CSRFConfig;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Csrf { config })
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Csrf {
+            config: init.config,
+        })
     }
 
     fn router_service(
@@ -207,19 +212,20 @@ register_plugin!("apollo", "csrf", Csrf);
 
 #[cfg(test)]
 mod csrf_tests {
+    use crate::plugin::PluginInit;
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
+            .create_instance_without_schema(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
         crate::plugin::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({}))
+            .create_instance_without_schema(&serde_json::json!({}))
             .await
             .unwrap();
     }
@@ -304,7 +310,7 @@ mod csrf_tests {
                 .unwrap())
         });
 
-        let service_stack = Csrf::new(config)
+        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
             .router_service(mock_service.boxed());
@@ -320,7 +326,7 @@ mod csrf_tests {
     }
 
     async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
-        let service_stack = Csrf::new(config)
+        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
             .router_service(MockRouterService::new().boxed());

@@ -13,6 +13,7 @@ use apollo_router::http_ext;
 use apollo_router::json_ext::Object;
 use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::plugins::csrf;
 use apollo_router::plugins::telemetry::apollo;
 use apollo_router::plugins::telemetry::config::Tracing;
@@ -23,6 +24,7 @@ use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
 use apollo_router::services::SubgraphService;
+use apollo_router::Configuration;
 use apollo_router::Context;
 use apollo_router::Schema;
 use http::Method;
@@ -430,7 +432,7 @@ async fn mutation_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
-    let (router, registry) = setup_router_and_registry().await;
+    let (router, registry) = setup_router_and_registry(Default::default()).await;
 
     let mut extensions: Object = Default::default();
     extensions.insert("code", "PERSISTED_QUERY_NOT_FOUND".into());
@@ -589,6 +591,60 @@ async fn missing_variables() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn query_just_under_recursion_limit() {
+    let config = json!({
+        "server": {"experimental_parser_recursion_limit": 12_usize}
+    });
+    let config = serde_json_bytes::from_value(config).unwrap();
+    let request = Request::builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "reviews".to_string() => 1,
+        "accounts".to_string() => 2,
+    };
+
+    let originating_request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, registry) = query_rust_with_config(originating_request.into(), config).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_just_at_recursion_limit() {
+    let config = json!({
+        "server": {"experimental_parser_recursion_limit": 11_usize}
+    });
+    let config = serde_json_bytes::from_value(config).unwrap();
+    let request = Request::builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build();
+
+    let expected_service_hits = hashmap! {};
+
+    let originating_request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, registry) = query_rust_with_config(originating_request.into(), config).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert!(actual.errors[0]
+        .message
+        .contains("parser limit(11) reached"));
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
 async fn query_node(
     request: &graphql::Request,
 ) -> Result<graphql::Response, apollo_router::error::FetchError> {
@@ -616,27 +672,41 @@ async fn query_node(
 async fn query_rust(
     request: RouterRequest,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
-    let (router, counting_registry) = setup_router_and_registry().await;
+    query_rust_with_config(request, Default::default()).await
+}
+
+async fn query_rust_with_config(
+    request: RouterRequest,
+    config: Arc<Configuration>,
+) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
+    let (router, counting_registry) = setup_router_and_registry(config).await;
     (query_with_router(router, request).await, counting_registry)
 }
 
-async fn setup_router_and_registry() -> (
+async fn setup_router_and_registry(
+    config: Arc<Configuration>,
+) -> (
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
-    let schema: Arc<Schema> =
-        Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
+    let schema = include_str!("fixtures/supergraph.graphql");
+    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
-    let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-    let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
-        metrics: Option::default(),
-        tracing: Some(Tracing::default()),
-        apollo: Some(apollo::Config::default()),
-    })
+    let mut builder = PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(config);
+    let telemetry_plugin = Telemetry::new(PluginInit::new(
+        telemetry::config::Conf {
+            metrics: Option::default(),
+            tracing: Some(Tracing::default()),
+            apollo: Some(apollo::Config::default()),
+        },
+        Default::default(),
+    ))
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(Default::default()).await.unwrap();
+    let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))
+        .await
+        .unwrap();
     builder = builder
         .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
         .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));

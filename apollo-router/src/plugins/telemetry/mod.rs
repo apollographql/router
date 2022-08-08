@@ -44,6 +44,7 @@ use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -75,13 +76,12 @@ mod metrics;
 mod otlp;
 mod tracing;
 
-pub static ROUTER_SPAN_NAME: &str = "router";
+static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-const SERVICE_NAME_RESOURCE: &str = "service.name";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 pub struct Telemetry {
@@ -180,8 +180,9 @@ impl Plugin for Telemetry {
         global::set_text_map_propagator(Self::create_propagator(&self.config));
     }
 
-    async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
+        let mut config = init.config;
         let apollo = config
             .apollo
             .as_mut()
@@ -285,7 +286,7 @@ impl Plugin for Telemetry {
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
-                            metrics,
+                            metrics.clone(),
                             result,
                             start.elapsed(),
                         )
@@ -300,6 +301,24 @@ impl Plugin for Telemetry {
                                         start.elapsed(),
                                     );
                                 }
+                                let mut metric_attrs = Vec::new();
+                                // Fill attributes from error
+                                if let Some(subgraph_attributes_conf) = config
+                                    .metrics
+                                    .as_ref()
+                                    .and_then(|m| m.common.as_ref())
+                                    .and_then(|c| c.attributes.as_ref())
+                                    .and_then(|c| c.router.as_ref())
+                                {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_error(&e)
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
+                                }
+
+                                metrics.http_requests_error_total.add(1, &metric_attrs);
 
                                 Err(e)
                             }
@@ -340,7 +359,16 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
+            .instrument(move |req: &QueryPlannerRequest| {
+                let query = req.query.clone();
+                let operation_name = req.operation_name.clone().unwrap_or_default();
+
+                info_span!("query_planning",
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                )
+            })
             .service(service)
             .boxed()
     }
@@ -350,7 +378,25 @@ impl Plugin for Telemetry {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
+            .instrument(move |req: &ExecutionRequest| {
+                let query = req
+                    .originating_request
+                    .body()
+                    .query
+                    .clone()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .originating_request
+                    .body()
+                    .operation_name
+                    .clone()
+                    .unwrap_or_default();
+                info_span!("execution",
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                )
+            })
             .service(service)
             .boxed()
     }
@@ -413,6 +459,7 @@ impl Plugin for Telemetry {
                     let context = extend_config!(context);
                     let request = merge_config!(request);
                     let response = merge_config!(response);
+                    let errors = merge_config!(errors);
 
                     AttributesForwardConf {
                         insert: (!insert.is_empty()).then(|| insert),
@@ -420,15 +467,32 @@ impl Plugin for Telemetry {
                             .then(|| request),
                         response: (response.header.is_some() || response.body.is_some())
                             .then(|| response),
+                        errors: (errors.extensions.is_some() || errors.include_messages)
+                            .then(|| errors),
                         context: (!context.is_empty()).then(|| context),
                     }
                 }),
         );
         let subgraph_metrics_conf = subgraph_metrics.clone();
         ServiceBuilder::new()
-            .instrument(move |_| {
+            .instrument(move |req: &SubgraphRequest| {
+                let query = req
+                    .subgraph_request
+                    .body()
+                    .query
+                    .clone()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .subgraph_request
+                    .body()
+                    .operation_name
+                    .clone()
+                    .unwrap_or_default();
+
                 info_span!("subgraph",
                     name = name.as_str(),
+                    graphql.document = query.as_str(),
+                    graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
@@ -508,7 +572,17 @@ impl Plugin for Telemetry {
 
                                 metrics.http_requests_total.add(1, &metric_attrs);
                             }
-                            Err(_) => {
+                            Err(err) => {
+                                // Fill attributes from error
+                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                                    metric_attrs.extend(
+                                        subgraph_attributes_conf
+                                            .get_attributes_from_error(err)
+                                            .into_iter()
+                                            .map(|(k, v)| KeyValue::new(k, v)),
+                                    );
+                                }
+
                                 metrics.http_requests_error_total.add(1, &metric_attrs);
                             }
                         }
@@ -606,11 +680,11 @@ impl Telemetry {
         // Set default service name for metrics
         if metrics_common_config
             .resources
-            .get(SERVICE_NAME_RESOURCE)
+            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str())
             .is_none()
         {
             metrics_common_config.resources.insert(
-                String::from(SERVICE_NAME_RESOURCE),
+                String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
                 String::from(DEFAULT_SERVICE_NAME),
             );
         }
@@ -674,8 +748,9 @@ impl Telemetry {
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
                 ROUTER_SPAN_NAME,
-                query = query.as_str(),
-                operation_name = operation_name.as_str(),
+                graphql.document = query.as_str(),
+                // TODO add graphql.operation.type
+                graphql.operation.name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal
@@ -917,6 +992,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
+    use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::http_ext;
@@ -934,7 +1010,10 @@ mod tests {
         crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
+            .create_instance(
+                &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -944,64 +1023,28 @@ mod tests {
         crate::plugin::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({
-                "apollo": {"schema_id":"abc"},
-                "tracing": {
-                    "trace_config": {
-                        "service_name": "router",
-                        "attributes": {
-                            "str": "a",
-                            "int": 1,
-                            "float": 1.0,
-                            "bool": true,
-                            "str_arr": ["a", "b"],
-                            "int_arr": [1, 2],
-                            "float_arr": [1.0, 2.0],
-                            "bool_arr": [true, false]
+            .create_instance(
+                &serde_json::json!({
+                    "apollo": {"schema_id":"abc"},
+                    "tracing": {
+                        "trace_config": {
+                            "service_name": "router",
+                            "attributes": {
+                                "str": "a",
+                                "int": 1,
+                                "float": 1.0,
+                                "bool": true,
+                                "str_arr": ["a", "b"],
+                                "int_arr": [1, 2],
+                                "float_arr": [1.0, 2.0],
+                                "bool_arr": [true, false]
+                            }
                         }
-                    }
-                },
-                "metrics": {
-                    "common": {
-                        "attributes": {
-                            "router": {
-                                "static": [
-                                    {
-                                        "name": "myname",
-                                        "value": "label_value"
-                                    }
-                                ],
-                                "request": {
-                                    "header": [{
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value"
-                                    }],
-                                    "body": [{
-                                        "path": ".data.test",
-                                        "name": "my_new_name",
-                                        "default": "default_value"
-                                    }]
-                                },
-                                "response": {
-                                    "header": [{
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value",
-                                    }, {
-                                        "named": "test",
-                                        "default": "default_value",
-                                        "rename": "renamed_value",
-                                    }],
-                                    "body": [{
-                                        "path": ".data.test",
-                                        "name": "my_new_name",
-                                        "default": "default_value"
-                                    }]
-                                }
-                            },
-                            "subgraph": {
-                                "all": {
+                    },
+                    "metrics": {
+                        "common": {
+                            "attributes": {
+                                "router": {
                                     "static": [
                                         {
                                             "name": "myname",
@@ -1012,7 +1055,7 @@ mod tests {
                                         "header": [{
                                             "named": "test",
                                             "default": "default_value",
-                                            "rename": "renamed_value",
+                                            "rename": "renamed_value"
                                         }],
                                         "body": [{
                                             "path": ".data.test",
@@ -1037,9 +1080,9 @@ mod tests {
                                         }]
                                     }
                                 },
-                                "subgraphs": {
-                                    "subgraph_name_test": {
-                                         "static": [
+                                "subgraph": {
+                                    "all": {
+                                        "static": [
                                             {
                                                 "name": "myname",
                                                 "value": "label_value"
@@ -1073,13 +1116,52 @@ mod tests {
                                                 "default": "default_value"
                                             }]
                                         }
+                                    },
+                                    "subgraphs": {
+                                        "subgraph_name_test": {
+                                             "static": [
+                                                {
+                                                    "name": "myname",
+                                                    "value": "label_value"
+                                                }
+                                            ],
+                                            "request": {
+                                                "header": [{
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }],
+                                                "body": [{
+                                                    "path": ".data.test",
+                                                    "name": "my_new_name",
+                                                    "default": "default_value"
+                                                }]
+                                            },
+                                            "response": {
+                                                "header": [{
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }, {
+                                                    "named": "test",
+                                                    "default": "default_value",
+                                                    "rename": "renamed_value",
+                                                }],
+                                                "body": [{
+                                                    "path": ".data.test",
+                                                    "name": "my_new_name",
+                                                    "default": "default_value"
+                                                }]
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }))
+                }),
+                Default::default(),
+            )
             .await
             .unwrap();
     }
@@ -1094,7 +1176,7 @@ mod tests {
                 Ok(RouterResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2}}))
+                    .data(json!({"data": {"my_value": 2usize}}))
                     .build()
                     .unwrap())
             });
@@ -1122,6 +1204,17 @@ mod tests {
                             .build(),
                     )
                     .build())
+            });
+
+        let mut mock_subgraph_service_in_error = MockSubgraphService::new();
+        mock_subgraph_service_in_error
+            .expect_call()
+            .times(1)
+            .returning(move |_req: SubgraphRequest| {
+                Err(Box::new(FetchError::SubrequestHttpError {
+                    service: String::from("my_subgraph_name_error"),
+                    reason: String::from("cannot contact the subgraph"),
+                }))
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
@@ -1172,6 +1265,18 @@ mod tests {
                                 }
                             },
                             "subgraph": {
+                                "all": {
+                                    "errors": {
+                                        "include_messages": true,
+                                        "extensions": [{
+                                            "name": "subgraph_error_extended_type",
+                                            "path": ".type"
+                                        }, {
+                                            "name": "message",
+                                            "path": ".reason"
+                                        }]
+                                    }
+                                },
                                 "subgraphs": {
                                     "my_subgraph_name": {
                                         "request": {
@@ -1210,6 +1315,7 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1249,6 +1355,31 @@ mod tests {
             .call(subgraph_req)
             .await
             .unwrap();
+        // Another subgraph
+        let mut subgraph_service = dyn_plugin.subgraph_service(
+            "my_subgraph_name_error",
+            BoxService::new(mock_subgraph_service_in_error.build()),
+        );
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_ext::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
+            .await
+            .expect_err("Must be in error");
 
         let handler = dyn_plugin.custom_endpoint().unwrap();
         let http_req_prom = http_ext::Request::fake_builder()
@@ -1273,6 +1404,7 @@ mod tests {
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let prom_metrics = String::from_utf8_lossy(resp.body());
+        assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.001"}"#));

@@ -12,9 +12,12 @@ use derivative::Derivative;
 use displaydoc::Display;
 use envmnt::ExpandOptions;
 use envmnt::ExpansionType;
+use http::request::Parts;
+use http::HeaderValue;
 use itertools::Itertools;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
+use regex::Regex;
 use schemars::gen::SchemaGenerator;
 use schemars::gen::SchemaSettings;
 use schemars::schema::ObjectValidation;
@@ -72,7 +75,7 @@ pub enum ConfigurationError {
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
@@ -243,7 +246,7 @@ pub(crate) struct Server {
 
     /// Cross origin request headers.
     #[serde(default)]
-    pub(crate) cors: Option<Cors>,
+    pub(crate) cors: Cors,
 
     /// introspection queries
     /// enabled by default
@@ -269,11 +272,17 @@ pub(crate) struct Server {
     /// default: false
     #[serde(default = "default_defer_support")]
     pub(crate) experimental_defer_support: bool,
+
+    /// Experimental limitation of query depth
+    /// default: 4096
+    #[serde(default = "default_parser_recursion_limit")]
+    pub(crate) experimental_parser_recursion_limit: usize,
 }
 
 #[buildstructor::buildstructor]
 impl Server {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         cors: Option<Cors>,
@@ -282,15 +291,18 @@ impl Server {
         endpoint: Option<String>,
         health_check_path: Option<String>,
         defer_support: Option<bool>,
+        parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors,
+            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
+            experimental_parser_recursion_limit: parser_recursion_limit
+                .unwrap_or_else(default_parser_recursion_limit),
         }
     }
 }
@@ -349,16 +361,15 @@ pub(crate) struct Cors {
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
     #[serde(default)]
-    pub(crate) allow_any_origin: Option<bool>,
+    pub(crate) allow_any_origin: bool,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
     #[serde(default)]
-    pub(crate) allow_credentials: Option<bool>,
+    pub(crate) allow_credentials: bool,
 
     /// The headers to allow.
-    /// If this is not set, we will default to
-    /// the `mirror_request` mode, which mirrors the received
-    /// `access-control-request-headers` preflight has sent.
+    ///
+    /// Defaults to `default_headers`.
     ///
     /// Note that if you set headers here,
     /// you also want to have a look at your `CSRF` plugins configuration,
@@ -366,8 +377,16 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    #[serde(default = "default_headers")]
+    pub(crate) allow_headers: Vec<String>,
+
+    /// Set to true to mirror headers sent by clients.
+    ///
+    /// If this is not set, we will default to
+    /// the `mirror_request` mode, which mirrors the received
+    /// `access-control-request-headers` preflight has sent..
     #[serde(default)]
-    pub(crate) allow_headers: Option<Vec<String>>,
+    pub(crate) allow_any_header: bool,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
@@ -379,6 +398,12 @@ pub(crate) struct Cors {
     #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
+    /// `Regex`es you want to match the origins against to determine if they're allowed.
+    /// Defaults to an empty list.
+    /// Note that `origins` will be evaluated before `match_origins`
+    #[serde(default)]
+    pub(crate) match_origins: Option<Vec<String>>,
+
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
@@ -387,10 +412,12 @@ pub(crate) struct Cors {
 impl Default for Cors {
     fn default() -> Self {
         Self {
-            allow_any_origin: None,
-            allow_credentials: None,
-            allow_headers: Default::default(),
+            allow_any_origin: Default::default(),
+            allow_any_header: Default::default(),
+            allow_credentials: Default::default(),
+            allow_headers: default_headers(),
             expose_headers: Default::default(),
+            match_origins: Default::default(),
             origins: default_origins(),
             methods: default_cors_methods(),
         }
@@ -403,6 +430,14 @@ fn default_origins() -> Vec<String> {
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+}
+
+fn default_headers() -> Vec<String> {
+    vec![
+        "content-type".into(),
+        "apollographql-client-version".into(),
+        "apollographql-client-name".into(),
+    ]
 }
 
 fn default_introspection() -> bool {
@@ -425,6 +460,13 @@ fn default_defer_support() -> bool {
     false
 }
 
+fn default_parser_recursion_limit() -> usize {
+    // This is `apollo-parser`’s default, which protects against stack overflow
+    // but is still very high for "reasonable" queries.
+    // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
+    4096
+}
+
 impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
@@ -435,19 +477,24 @@ impl Default for Server {
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
+        allow_any_header: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
         origins: Option<Vec<String>>,
+        match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
     ) -> Self {
         Self {
-            allow_any_origin,
-            allow_credentials,
-            allow_headers,
+            allow_any_origin: allow_any_origin.unwrap_or_default(),
+            allow_any_header: allow_any_header.unwrap_or_default(),
+            allow_credentials: allow_credentials.unwrap_or_default(),
+            allow_headers: allow_headers.unwrap_or_else(default_headers),
             expose_headers,
+            match_origins,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
         }
@@ -460,18 +507,18 @@ impl Cors {
 
         self.ensure_usable_cors_rules()?;
 
-        let allow_headers = if let Some(headers_to_allow) = self.allow_headers {
-            cors::AllowHeaders::list(headers_to_allow.iter().filter_map(|header| {
+        let allow_headers = if self.allow_any_header {
+            cors::AllowHeaders::mirror_request()
+        } else {
+            cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
                 header
                     .parse()
                     .map_err(|_| tracing::error!("header name '{header}' is not valid"))
                     .ok()
             }))
-        } else {
-            cors::AllowHeaders::mirror_request()
         };
         let cors = CorsLayer::new()
-            .allow_credentials(self.allow_credentials.unwrap_or_default())
+            .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
             .expose_headers(cors::ExposeHeaders::list(
                 self.expose_headers
@@ -493,8 +540,29 @@ impl Cors {
                 },
             )));
 
-        if self.allow_any_origin.unwrap_or_default() {
+        if self.allow_any_origin {
             Ok(cors.allow_origin(cors::Any))
+        } else if let Some(match_origins) = self.match_origins {
+            let regexes = match_origins
+                .into_iter()
+                .filter_map(|regex| {
+                    Regex::from_str(regex.as_str())
+                        .map_err(|_| tracing::error!("origin regex '{regex}' is not valid"))
+                        .ok()
+                })
+                .collect::<Vec<_>>();
+
+            Ok(cors.allow_origin(cors::AllowOrigin::predicate(
+                move |origin: &HeaderValue, _: &Parts| {
+                    origin
+                        .to_str()
+                        .map(|o| {
+                            self.origins.iter().any(|origin| origin.as_str() == o)
+                                || regexes.iter().any(|regex| regex.is_match(o))
+                        })
+                        .unwrap_or_default()
+                },
+            )))
         } else {
             Ok(cors.allow_origin(cors::AllowOrigin::list(
                 self.origins.into_iter().filter_map(|origin| {
@@ -512,12 +580,10 @@ impl Cors {
     // don't want the router to panic in such cases, so this function returns an error
     // with a message describing what the problem is.
     fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
-        if self.allow_credentials.unwrap_or_default() {
-            if let Some(headers) = &self.allow_headers {
-                if headers.iter().any(|x| x == "*") {
-                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+        if self.allow_credentials {
+            if self.allow_headers.iter().any(|x| x == "*") {
+                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                         with `Access-Control-Allow-Headers: *`");
-                }
             }
 
             if self.methods.iter().any(|x| x == "*") {
@@ -530,7 +596,7 @@ impl Cors {
                     with `Access-Control-Allow-Origin: *`");
             }
 
-            if self.allow_any_origin.unwrap_or_default() {
+            if self.allow_any_origin {
                 return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                     with `Access-Control-Allow-Origin: *`");
             }
@@ -553,8 +619,15 @@ pub(crate) fn generate_config_schema() -> RootSchema {
         s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
+
+    // Manually patch up the schema
+    // We don't want to allow unknown fields, but serde doesn't work if we put the annotation on Configuration as the struct has a flattened type.
+    // It's fine to just add it here.
     let gen = settings.into_generator();
-    gen.into_root_schema_for::<Configuration>()
+    let mut schema = gen.into_root_schema_for::<Configuration>();
+    let mut root = schema.schema.object.as_mut().expect("schema not generated");
+    root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
+    schema
 }
 
 /// Validate config yaml against the generated json schema.
@@ -562,21 +635,28 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 /// In the case that validation cannot be performed then it will let serde validate as normal. The
 /// goal is to give a good enough experience until more time can be spent making this better,
 ///
-/// THe validation sequence is:
+/// The validation sequence is:
 /// 1. Parse the config into yaml
 /// 2. Create the json schema
 /// 3. Validate the yaml against the json schema.
 /// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
 /// 5. Convert the json paths from the error messages into nice error snippets.
 ///
-/// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
+/// There may still be serde validation issues later.
 ///
 pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
-    let yaml =
-        &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
+    let defaulted_yaml = if raw_yaml.trim().is_empty() {
+        "plugins:".to_string()
+    } else {
+        raw_yaml.to_string()
+    };
+
+    let yaml = &serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+        ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
-        })?;
+        }
+    })?;
     let expanded_yaml = expand_env_variables(yaml);
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
@@ -850,7 +930,7 @@ mod tests {
 
     #[test]
     fn routing_url_in_schema() {
-        let schema: crate::Schema = r#"
+        let schema = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -870,9 +950,9 @@ mod tests {
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
-        }"#
-        .parse()
-        .unwrap();
+        }
+        "#;
+        let schema = crate::Schema::parse(schema, &Default::default()).unwrap();
 
         let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -923,9 +1003,9 @@ mod tests {
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
-        }"#
-        .parse::<crate::Schema>()
-        .expect_err("Must have an error because we have one missing subgraph routing url");
+        }"#;
+        let schema_error = crate::Schema::parse(schema_error, &Default::default())
+            .expect_err("Must have an error because we have one missing subgraph routing url");
 
         if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
             assert_eq!(subgraph, "reviews");
@@ -946,13 +1026,26 @@ mod tests {
             cors.origins.as_slice()
         );
         assert!(
-            !cors.allow_any_origin.unwrap_or_default(),
+            !cors.allow_any_origin,
             "Allow any origin should be disabled by default"
+        );
+        assert!(
+            !cors.allow_any_header,
+            "Allow any header should be disabled by default"
+        );
+
+        assert_eq!(
+            vec![
+                "content-type".to_string(),
+                "apollographql-client-version".to_string(),
+                "apollographql-client-name".to_string(),
+            ],
+            cors.allow_headers,
         );
 
         assert!(
-            cors.allow_headers.is_none(),
-            "No allow_headers list should be present by default"
+            cors.match_origins.is_none(),
+            "No origin regex list should be present by default"
         );
     }
 
@@ -992,6 +1085,27 @@ subgraphs:
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
+    }
+
+    #[test]
+    fn unknown_fields_at_root() {
+        let error = validate_configuration(
+            r#"
+unknown:
+  foo: true
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"));
+    }
+
+    #[test]
+    fn empty_config() {
+        validate_configuration(
+            r#"
+  "#,
+        )
+        .expect("should have been ok with an empty config");
     }
 
     #[test]
@@ -1100,7 +1214,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
@@ -1120,7 +1233,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
@@ -1140,7 +1252,6 @@ server:
         let error = cfg
             .server
             .cors
-            .expect("should not have resulted in an error")
             .into_layer()
             .expect_err("should have resulted in an error");
         assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");

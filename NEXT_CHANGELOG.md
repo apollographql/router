@@ -16,24 +16,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-### **Headline** ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
+### Headline ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
 
 Description! And a link to a [reference](http://url)
 
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.12.1] (unreleased) - 2022-mm-dd
+# [0.14.1] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
-### Remove the generic stream type from RouterResponse and ExecutionResponse ([PR #1420](https://github.com/apollographql/router/pull/1420)
+### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
 
-This generic type complicates the API with limited benefit because we use BoxStream everywhere in plugins:
-* `RouterResponse<BoxStream<'static, Response>>` -> `RouterResponse`
-* `ExecutionResponse<BoxStream<'static, Response>>` -> `ExecutionResponse`
+The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
+was changed from `String` to `Arc<String>`.
+This reduces the number of copies of this string we keep in memory, as schemas can get large.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Remove Buffer from Mock*Service ([PR #1440](https://github.com/apollographql/router/pull/1440)
 
@@ -46,55 +46,39 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
-### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
-
-The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
-multiple parts that are sent one by one.
-
-:warning: *this is still experimental and not fit for production use yet*
-
-To activate it, add this option to the configuration file:
-
-```yaml
-server:
-  experimental_defer_support: true
-```
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
-
-### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281)
-
-This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
-database). The API revolves around an `Entry` structure that allows query deduplication and lets the
-client decide how to generate the value to cache, instead of a complicated delegate system inside the
-cache.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
-
 ## 🐛 Fixes
 
-### Update the scaffold template so it targets router v0.12.0 ([#PR1431](https://github.com/apollographql/router/pull/1431))
+### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
 
-The cargo scaffold template will target the latest version of the router.
+Change attribute name `query` to `graphql.document` and `operation_name` to `graphql.operation.name` in spans.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
 
-### **A Rhai error instead of a Rust panic** ([PR #1414 https://github.com/apollographql/router/pull/1414)
+### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
 
-In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
+Router config handling now:
+* Allows completely empty configuration without error.
+* Prevents unknown tags at the root of the configuration from being silently ignored.
 
-By @SimonSapin
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
 
-### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423)
-
-* do not clone the client request during query plan execution
-* do not clone the usage reporting
-* avoid path allocations when iterating over JSON values
-
-The benchmarks show that this PR gives a 23% gain in requests per second compared to main
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
 
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+
+### CORS: Fix trailing slashes, and display defaults ([PR #1471](https://github.com/apollographql/router/pull/1471))
+
+The CORS documentation now displays a valid `origins` configuration (without trailing slash!), and the full configuration section displays its default settings.
+
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
+
+
+
+### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
+
+Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457

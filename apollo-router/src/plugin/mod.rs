@@ -18,6 +18,7 @@ pub mod serde;
 pub mod test;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
@@ -48,9 +49,46 @@ use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
-type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory =
+    fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+/// Initialise details for a plugin
+pub struct PluginInit<T> {
+    /// Configuration
+    pub config: T,
+    /// Router Supergraph Schema (schema definition language)
+    pub supergraph_sdl: Arc<String>,
+}
+
+impl<T> PluginInit<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    /// Create a new PluginInit for the supplied config and SDL.
+    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl,
+        }
+    }
+
+    /// Try to create a new PluginInit for the supplied JSON and SDL.
+    ///
+    /// This will fail if the supplied JSON cannot be deserialized into the configuration
+    /// struct.
+    pub fn try_new(
+        config: serde_json::Value,
+        supergraph_sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
+        let config: T = serde_json::from_value(config)?;
+        Ok(PluginInit {
+            config,
+            supergraph_sdl,
+        })
+    }
+}
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
@@ -70,8 +108,17 @@ impl PluginFactory {
     pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
+        supergraph_sdl: Arc<String>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration).await
+        (self.instance_factory)(configuration, supergraph_sdl).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn create_instance_without_schema(
+        &self,
+        configuration: &serde_json::Value,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(configuration, Default::default()).await
     }
 
     pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
@@ -108,7 +155,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    async fn new(config: Self::Config) -> Result<Self, BoxError>;
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>;
 
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
@@ -286,9 +333,9 @@ macro_rules! register_plugin {
             $crate::plugin::register_plugin(
                 qualified_name,
                 $crate::plugin::PluginFactory::new(
-                    |configuration| Box::pin(async move {
-                        let configuration = $crate::_private::serde_json::from_value(configuration.clone())?;
-                        let plugin = $value::new(configuration).await?;
+                    |configuration, schema| Box::pin(async move {
+                        let init = $crate::plugin::PluginInit::try_new(configuration.clone(), schema)?;
+                        let plugin = $value::new(init).await?;
                         Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
                     }),
                     |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()

@@ -34,21 +34,22 @@ pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlan>>,
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
+    configuration: Arc<Configuration>,
 }
 
 impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         introspection: Option<Arc<Introspection>>,
-        defer_support: bool,
+        configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
-                    schema.as_str().to_string(),
+                    schema.as_string().to_string(),
                     QueryPlannerConfig {
                         defer_stream_support: Some(DeferStreamSupport {
-                            enable_defer: Some(defer_support),
+                            enable_defer: Some(configuration.server.experimental_defer_support),
                         }),
                     },
                 )
@@ -56,13 +57,15 @@ impl BridgeQueryPlanner {
             ),
             schema,
             introspection,
+            configuration,
         })
     }
 
     async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
         let schema = self.schema.clone();
+        let configuration = self.configuration.clone();
         let query_parsing_future =
-            tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+            tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
                 .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
         match query_parsing_future.await {
             Ok(res) => res.map_err(QueryPlannerError::from),
@@ -77,7 +80,7 @@ impl BridgeQueryPlanner {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
-                    .execute(self.schema.as_str(), query)
+                    .execute(self.schema.as_string(), query)
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 
@@ -148,13 +151,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = req.originating_request.body();
             match this
                 .get((
-                    body.query.clone().expect(
-                        "presence of a query has been checked by the RouterService before; qed",
-                    ),
-                    body.operation_name.to_owned(),
+                    req.query.clone(),
+                    req.operation_name.to_owned(),
                     req.query_plan_options,
                 ))
                 .await
@@ -205,7 +205,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -232,7 +232,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -259,7 +259,8 @@ mod tests {
     }
 
     fn example_schema() -> Schema {
-        include_str!("testdata/schema.graphql").parse().unwrap()
+        let schema = include_str!("testdata/schema.graphql");
+        Schema::parse(schema, &Default::default()).unwrap()
     }
 
     #[test]
@@ -275,7 +276,7 @@ mod tests {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -309,7 +310,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
             Some(Arc::new(Introspection::from_schema(&example_schema()))),
-            false,
+            Default::default(),
         )
         .await
         .unwrap();

@@ -1,4 +1,24 @@
-//! Starts a server that will handle http graphql requests.
+//! Components of a federated GraphQL Server.
+//!
+//! Most of these modules are of varying interest to different audiences.
+//!
+//! If your interests are confined to developing plugins, then the following modules
+//! are likely to be of most interest to you: [`self`] [`error`] [`graphql`] [`layers`] [`plugin`] [`services`]
+//!
+//! self - this module (apollo_router) contains high level building blocks for a federated GraphQL router
+//!
+//! error - the various errors that the router is expected to handle
+//!
+//! graphql - graphql specific functionality for requests, responses, errors
+//!
+//! layers - examples of tower layers used to implement plugins
+//!
+//! plugin - various APIs for implementing a plugin
+//!
+//! services - definition of the various services a plugin may process
+//!
+//! Ultimately, you might want to be interested in all aspects of the implementation, in which case
+//! you'll want to become familiar with all of the code.
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
@@ -53,14 +73,11 @@ mod state_machine;
 pub mod subscriber;
 mod traits;
 
-pub use configuration::Configuration;
+pub use configuration::*;
 pub use context::Context;
-pub use executable::main;
-pub use executable::Executable;
-pub use router::ApolloRouter;
-pub use router::ConfigurationKind;
-pub use router::SchemaKind;
-pub use router::ShutdownKind;
+pub use executable::*;
+pub use router::*;
+#[doc(hidden)]
 pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
 pub use spec::Schema;

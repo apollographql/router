@@ -9,6 +9,7 @@ use tower::ServiceExt;
 
 use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
@@ -45,8 +46,10 @@ struct IncludeSubgraphErrors {
 impl Plugin for IncludeSubgraphErrors {
     type Config = Config;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(IncludeSubgraphErrors { config })
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(IncludeSubgraphErrors {
+            config: init.config,
+        })
     }
 
     fn subgraph_service(
@@ -188,11 +191,9 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
-        let schema: Arc<Schema> = Arc::new(
-            include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
-                .parse()
-                .unwrap(),
-        );
+        let schema =
+            include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
+        let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
         let builder = builder
@@ -211,7 +212,7 @@ mod test {
         crate::plugin::plugins()
             .get("experimental.include_subgraph_errors")
             .expect("Plugin not found")
-            .create_instance(config)
+            .create_instance_without_schema(config)
             .await
             .expect("Plugin not created")
     }

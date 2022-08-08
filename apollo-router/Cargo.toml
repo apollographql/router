@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.12.1-alpha-defer4"
+version = "0.14.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -30,9 +30,9 @@ async-compression = { version = "0.3.14", features = [
 ] }
 async-trait = "0.1.56"
 atty = "0.2.14"
-axum = { version = "0.5.12", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.5.13", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
-buildstructor = "0.3.2"
+buildstructor = "0.4.1"
 bytes = "1.1.0"
 clap = { version = "3.2.10", default-features = false, features = [
     "env",
@@ -59,7 +59,7 @@ humantime-serde = "1.1.1"
 hyper = { version = "0.14.20", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
 include_dir = "0.7.2"
-indexmap = "1.9.1"
+indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"

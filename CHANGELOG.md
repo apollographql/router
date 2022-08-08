@@ -4,11 +4,207 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.14.0] - 2022-08-02
+
+## ❗ BREAKING ❗
+
+### Modify the plugin `new` method to pass an initialisation structure ([PR #1446](https://github.com/apollographql/router/pull/1446))
+
+This change alters the `new` method for plugins to pass a `PluginInit` struct.
+
+We are making this change so that we can pass more information during plugin startup. The first change is that in addition to passing
+the plugin configuration, we are now also passing the router supergraph sdl (Schema Definition Language) as a string.
+
+There is a new example (`supergraph_sdl`) which illustrates how to use this new capability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1446
+
+### Remove the generic stream type from `RouterResponse` and `ExecutionResponse` ([PR #1420](https://github.com/apollographql/router/pull/1420))
+
+This generic type complicates the API with limited benefit because we use `BoxStream` everywhere in plugins:
+
+* `RouterResponse<BoxStream<'static, Response>>` -> `RouterResponse`
+* `ExecutionResponse<BoxStream<'static, Response>>` -> `ExecutionResponse`
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
+
+### Remove the HTTP request from `QueryPlannerRequest` ([PR #1439](https://github.com/apollographql/router/pull/1439))
+
+The content of `QueryPlannerRequest` is used as argument to the query planner and as a cache key,
+so it should not change depending on the variables or HTTP headers.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1439
+
+### Change `PluggableRouterServiceBuilder` methods ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+`with_naive_introspection` and `with_defer_support` where two parameter-less methods
+of this builder that enabled boolean configuration flags.
+They have been removed and replaced by `with_configuration` 
+which takes `Arc<apollo_router::Configuration>`.
+A `Configuration` value can be created from various formats by deserializing with `serde`.
+The removed methods correspond to `server.introspection` and `server.experimental_defer_support`
+configuration keys respectively.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+### Changes to the `SchemaKind` enum ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+The `Instance` variant is replaced with a variant named `String` that contains… 
+a `String` instead of `Box<apollo_router::Schema>`,
+so you no longer need to parse the schema before giving it to the router.
+Similarly, the `Stream` variant now contains a stream of `String`s 
+instead of a stream of already-parsed `Schema`s.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+### `Schema` no longer implements `FromStr` ([PR #1437](https://github.com/apollographql/router/pull/1437))
+
+This means that `str.parse::<apollo_router::Schema>()` is no longer available.
+If you still need a parsed `Schema` (see above),
+use `apollo_router::Schema(str, &configuration)` instead.
+To use the default `apollo_router::Configuration` 
+you can call `apollo_router::Schema(str, &Default::default())`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1437
+
+## 🚀 Features
+
+### Publish helm chart to OCI registry ([PR #1447](https://github.com/apollographql/router/pull/1447))
+
+When we make a release, publish our helm chart to the same OCI registry that we use for our docker images.
+
+For more information about using OCI registries with helm, see [the helm documentation](https://helm.sh/blog/storing-charts-in-oci/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1447
+
+### Configure Regex based CORS rules ([PR #1444](https://github.com/apollographql/router/pull/1444))
+
+The router now supports regex based CORS rules, as explained in the [docs](https://www.apollographql.com/docs/router/configuration/cors)
+It also supports the `allow_any_header` setting that will mirror client's requested headers.
+
+```yaml title="router.yaml"
+server:
+  cors:
+    match_origins:
+      - "https://([a-z0-9]+[.])*api[.]example[.]com" # any host that uses https and ends with .api.example.com
+    allow_any_header: true # mirror client's headers
+```
+
+The default CORS headers configuration of the router allows `content-type`, `apollographql-client-version` and `apollographql-client-name`.
+
+By [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/1444
+
+
+### Add support of error section in telemetry to add custom attributes ([PR #1443](https://github.com/apollographql/router/pull/1443))
+
+The telemetry is now able to hook at the error stage if router or a subgraph is returning an error. Here is an example of configuration:
+
+```yaml
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    common:
+      attributes:
+        subgraph:
+          all:
+            errors: # Only works if it's a valid GraphQL error
+              include_messages: true # Will include the error message in a message attribute
+              extensions: # Include extension data
+                - name: subgraph_error_extended_type # Name of the attribute
+                  path: .type # JSON query path to fetch data from extensions
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1443
+
+### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182))
+
+The router can now understand the `@defer` directive, used to tag parts of a query so the response is split into
+multiple parts that are sent one by one.
+
+:warning: *this is still experimental and not fit for production use yet*
+
+To activate it, add this option to the configuration file:
+
+```yaml
+server:
+  experimental_defer_support: true
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1182
+
+### Rewrite the caching API ([PR #1281](https://github.com/apollographql/router/pull/1281))
+
+This introduces a new asynchronous caching API that opens the way to multi level caching (in memory and
+database). The API revolves around an `Entry` structure that allows query deduplication and lets the
+client decide how to generate the value to cache, instead of a complicated delegate system inside the
+cache.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1281
+
+## 🐛 Fixes
+
+### Update serialization format for telemetry.tracing.otlp.grpc.metadata ([PR #1391](https://github.com/apollographql/router/pull/1391))
+
+The metadata format now uses `IndexMap<String, Vec<String>>`.
+
+By [@me-diru](https://github.com/me-diru) in https://github.com/apollographql/router/pull/1391 
+
+### Update the scaffold template so it targets router v0.14.0 ([PR #1431](https://github.com/apollographql/router/pull/1431))
+
+The cargo scaffold template will target the latest version of the router.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1248
+
+### Selection merging on non-object field aliases ([PR #1406](https://github.com/apollographql/router/issues/1406))
+
+Fixed a bug where merging aliased fields would sometimes put `null`s instead of expected values. 
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1432
+
+### A Rhai error instead of a Rust panic ([PR #1414 https://github.com/apollographql/router/pull/1414))
+
+In Rhai plugins, accessors that mutate the originating request are not available when in the subgraph phase. Previously, trying to mutate anyway would cause a Rust panic. This has been changed to a Rhai error instead.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1414
+
+### Optimizations ([PR #1423](https://github.com/apollographql/router/pull/1423))
+
+* Do not clone the client request during query plan execution
+* Do not clone the usage reporting
+* Avoid path allocations when iterating over JSON values
+
+The benchmarks show that this change brings a 23% gain in requests per second compared to the main branch.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1423
+
+### do not perform nested fetches if the parent one returned null ([PR #1332](https://github.com/apollographql/router/pull/1332)
+
+In a query of the form:
+```graphql
+mutation {
+	mutationA {
+		mutationB
+	}
+}
+```
+
+If `mutationA` returned null, we should not execute `mutationB`.
+
+By [@Ty3uK](https://github.com/Ty3uK) in https://github.com/apollographql/router/pull/1332
+
+## 🛠 Maintenance
+
+## 📚 Documentation
+
+### Updates wording and formatting of README.md
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1445
 # [0.12.0] - 2022-08-18
 
 ## ❗ BREAKING ❗
 
-### Move `experimental.rhai` out of `experimental` [PR #1365](https://github.com/apollographql/router/pull/1365)
+### Move `experimental.rhai` out of `experimental` ([PR #1365](https://github.com/apollographql/router/pull/1365))
 
 You will need to update your YAML configuration file to use the correct name for `rhai` plugin.
 
@@ -29,7 +225,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### The opentelemetry-otlp crate needs a http-client feature [PR #1392](https://github.com/apollographql/router/pull/1392)
+### The opentelemetry-otlp crate needs a http-client feature ([PR #1392](https://github.com/apollographql/router/pull/1392))
 
 The opentelemetry-otlp crate only checks at runtime if a HTTP client was added through
 cargo features. We now use reqwest for that.
@@ -45,7 +241,7 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### Dependency updates [PR #1389](https://github.com/apollographql/router/issues/1389) [PR #1394](https://github.com/apollographql/router/issues/1394) [PR #1395](https://github.com/apollographql/router/issues/1395)
+### Dependency updates ([PR #1389](https://github.com/apollographql/router/issues/1389), [PR #1394](https://github.com/apollographql/router/issues/1394), [PR #1395](https://github.com/apollographql/router/issues/1395))
 
 Dependency updates were blocked for some time due to incompatibilities:
 
@@ -60,7 +256,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## ❗ BREAKING ❗
 
-### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289)
+### Relax plugin api mutability ([PR #1340](https://github.com/apollographql/router/pull/1340) ([PR #1289](https://github.com/apollographql/router/pull/1289))
 
 the `Plugin::*_service()` methods were taking a `&mut self` as argument, but since
 they work like a tower Layer, they can use `&self` instead. This change
@@ -75,7 +271,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
-### Add support to add custom resources on metrics. [PR #1354](https://github.com/apollographql/router/pull/1354)
+### Add support to add custom resources on metrics. ([PR #1354](https://github.com/apollographql/router/pull/1354))
 
 Resources are almost like attributes but more global. They are directly configured on the metrics exporter which means you'll always have these resources on each of your metrics.  This functionality can be used to, for example,
 apply a `service.name` to metrics to make them easier to find in larger infrastructure, as demonstrated here:
@@ -93,19 +289,19 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Fix fragment on interface without typename [PR #1371](https://github.com/apollographql/router/pull/1371)
+### Fix fragment on interface without typename ([PR #1371](https://github.com/apollographql/router/pull/1371))
 
 When the subgraph doesn't return the `__typename` and the type condition of a fragment is an interface, we should return the values if the entity implements the interface
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1371
 
-### Fix detection of an introspection query [PR #1370](https://github.com/apollographql/router/pull/1370)
+### Fix detection of an introspection query ([PR #1370](https://github.com/apollographql/router/pull/1370))
 
 A query that only contains `__typename` at the root will now special-cased as merely an introspection query and will bypass more complex query-planner execution (its value will just be `Query`).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1370
 
-### Accept nullable list as input [PR #1363](https://github.com/apollographql/router/pull/1363)
+### Accept nullable list as input ([PR #1363](https://github.com/apollographql/router/pull/1363))
 
 Do not throw a validation error when you give `null` for an input variable of type `[Int!]`.
 
@@ -127,7 +323,7 @@ generate the first response right inside the same future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1357
 
-### Remove deprecated `failure` crate from the dependency tree [PR #1373](https://github.com/apollographql/router/pull/1373)
+### Remove deprecated `failure` crate from the dependency tree ([PR #1373](https://github.com/apollographql/router/pull/1373))
 
 This should fix automated reports about [GHSA-jq66-xh47-j9f3](https://github.com/advisories/GHSA-jq66-xh47-j9f3).
 
@@ -181,7 +377,7 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Rename `http_compat` to `http_ext` ([PR #1291](https://github.com/apollographql/router/pull/1291)
+### Rename `http_compat` to `http_ext` ([PR #1291](https://github.com/apollographql/router/pull/1291))
 
 The module provides extensions to the `http` crate which are specific to the way we use that crate in the router. This change also cleans up the provided extensions and fixes a few potential sources of error (by removing them)
 such as the `Request::mock()` function.
@@ -359,7 +555,7 @@ use apollo_router::subscriber::set_global_subscriber;
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)) ([PR #1263](https://github.com/apollographql/router/pull/1263))
+### Entry point improvements ([PR #1227](https://github.com/apollographql/router/pull/1227)) ([PR #1234](https://github.com/apollographql/router/pull/1234)) ([PR #1239](https://github.com/apollographql/router/pull/1239)), [PR #1263](https://github.com/apollographql/router/pull/1263))
 
 The interfaces around the entry point have been improved for naming consistency and to enable reuse when customization is required.
 Most users will continue to use:
@@ -428,7 +624,7 @@ You will now be able to actually use the helm chart without being on a managed g
 
 By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1283
 
-### Fail when unknown fields are encountered in configuration [PR #1278](https://github.com/apollographql/router/pull/1278)
+### Fail when unknown fields are encountered in configuration ([PR #1278](https://github.com/apollographql/router/pull/1278))
 
 Now if you add an unknown configuration field at the root of your configuration file it will return an error, rather than silently continuing with un-recognized options.
 
@@ -436,7 +632,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🚀 Features
 
-### Allow custom subgraph-specific attributes to be added to emitted metrics [PR #1300](https://github.com/apollographql/router/pull/1300)
+### Allow custom subgraph-specific attributes to be added to emitted metrics ([PR #1300](https://github.com/apollographql/router/pull/1300))
 
 Previously, it was only possible to add custom attributes from headers which the router received from the external GraphQL client. Now, you are able to add custom attributes coming from both the headers and the body of either the Router's or the Subgraph's router request or response. You also have the ability to add an attributes from the context. For example:
 
@@ -484,7 +680,7 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1300
 
-### Add support for modifying variables from a plugin [PR #1257](https://github.com/apollographql/router/pull/1257)
+### Add support for modifying variables from a plugin ([PR #1257](https://github.com/apollographql/router/pull/1257))
 
 Previously, it was not possible to modify variables in a `Request` from a plugin. This is now supported via both Rust and Rhai plugins.
 

@@ -35,17 +35,12 @@ pub struct Query {
 }
 
 impl Query {
-    /// Returns a reference to the underlying query string.
-    pub fn as_str(&self) -> &str {
-        self.string.as_str()
-    }
-
     /// Re-format the response value to match this query.
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn format_response(
+    pub(crate) fn format_response(
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
@@ -128,10 +123,17 @@ impl Query {
         response.data = Some(Value::default());
     }
 
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn parse(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
         let string = query.into();
 
-        let parser = apollo_parser::Parser::new(string.as_str());
+        let parser = apollo_parser::Parser::with_recursion_limit(
+            string.as_str(),
+            configuration.server.experimental_parser_recursion_limit,
+        );
         let tree = parser.parse();
 
         // Trace log recursion limit data
@@ -248,7 +250,7 @@ impl Query {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                *output = input.take();
+                                *output = input.clone();
                                 Ok(())
                             } else {
                                 *output = Value::Null;
@@ -312,7 +314,7 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -320,7 +322,7 @@ impl Query {
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -328,7 +330,7 @@ impl Query {
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -336,7 +338,7 @@ impl Query {
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -344,7 +346,7 @@ impl Query {
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.take();
+                    *output = input.clone();
                 } else {
                     *output = Value::Null;
                 }
@@ -632,7 +634,11 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn validate_variables(&self, request: &Request, schema: &Schema) -> Result<(), Response> {
+    pub(crate) fn validate_variables(
+        &self,
+        request: &Request,
+        schema: &Schema,
+    ) -> Result<(), Response> {
         let operation_name = request.operation_name.as_deref();
         let operation_variable_types =
             self.operations
@@ -682,7 +688,7 @@ impl Query {
         }
     }
 
-    pub fn contains_introspection(&self) -> bool {
+    pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
 }
@@ -883,11 +889,12 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate($schema)
-                .parse::<Schema>()
-                .expect("could not parse schema");
+            let schema = with_supergraph_boilerplate($schema);
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
             let api_schema = schema.api_schema();
-            let query = Query::parse($query, &schema).expect("could not parse query");
+            let query =
+                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
             query.format_response(
@@ -936,11 +943,12 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate_fed2($schema)
-                .parse::<Schema>()
-                .expect("could not parse schema");
+            let schema = with_supergraph_boilerplate_fed2($schema);
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
             let api_schema = schema.api_schema();
-            let query = Query::parse($query, &schema).expect("could not parse query");
+            let query =
+                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
             query.format_response(
@@ -1252,6 +1260,458 @@ mod tests {
     }
 
     #[test]
+    fn reformat_response_array_of_scalar_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array stuff:array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                    "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get { aliased: array {stuff}}}",
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_type_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+            
+            type Element {
+                stuff: String
+            }
+            ",
+            "{get {array{stuff} aliased: array{stuff}}}",
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                    "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_simple() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {stuff: array}}",
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_enum_duplicate_alias() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Element]
+            }
+
+            enum Element {
+                FOO
+                BAR
+            }
+            ",
+            "{get {array stuff: array}}",
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["FOO", "BAR"],
+                    "stuff": ["FOO", "BAR"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    // If this test fails, this means you got greedy about allocations,
+    // beware of aliases!
+    fn reformat_response_array_of_int_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_float_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Float]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1.2,3.4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_bool_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Boolean]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [true,false],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_string_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_id_duplicate() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [ID]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }},
+        );
+    }
+
+    #[test]
     fn reformat_response_query_with_root_typename() {
         assert_format_response!(
             "type Query {
@@ -1285,7 +1745,8 @@ mod tests {
                 Value::Object(object) => object,
                 _ => unreachable!("variables must be an object"),
             };
-            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let schema =
+                Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
                 .query($query.to_string())
@@ -1296,6 +1757,7 @@ mod tests {
                     .as_ref()
                     .expect("query has been added right above; qed"),
                 &schema,
+                &Default::default(),
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
@@ -3183,9 +3645,8 @@ mod tests {
             id: String!
             body: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let query = Query::parse(
             "query  {
@@ -3196,6 +3657,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
         assert_eq!(query.operations.len(), 1);
@@ -3215,6 +3677,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3242,6 +3705,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3274,6 +3738,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3316,9 +3781,8 @@ mod tests {
             id: String!
             body: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let query = Query::parse(
             "query  {
@@ -3329,6 +3793,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
         assert_eq!(query.operations.len(), 1);
@@ -3348,6 +3813,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3375,6 +3841,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3407,6 +3874,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect("could not parse query");
 
@@ -3441,9 +3909,8 @@ mod tests {
             id: String!
             name: String
         }",
-        )
-        .parse::<Schema>()
-        .expect("could not parse schema");
+        );
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
 
         let _query_error = Query::parse(
             "query  {
@@ -3451,6 +3918,7 @@ mod tests {
                 }
             }",
             &schema,
+            &Default::default(),
         )
         .expect_err("should not parse query");
     }
@@ -4685,9 +5153,10 @@ mod tests {
             }
         }";
 
-        let schema = schema.parse::<Schema>().expect("could not parse schema");
+        let schema = Schema::parse(schema, &Default::default()).expect("could not parse schema");
         let api_schema = schema.api_schema();
-        let query = Query::parse(query, &schema).expect("could not parse query");
+        let query =
+            Query::parse(query, &schema, &Default::default()).expect("could not parse query");
         let mut response = Response::builder()
             .data(json! {{
                 "object": {
@@ -4871,9 +5340,8 @@ mod tests {
             baz: String
         }";
 
-        let schema = with_supergraph_boilerplate(schema)
-            .parse::<Schema>()
-            .expect("could not parse schema");
+        let schema = with_supergraph_boilerplate(schema);
+        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
         let api_schema = schema.api_schema();
 
         let query = "{
@@ -4887,7 +5355,7 @@ mod tests {
               }
             }
           }}";
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)
@@ -4902,7 +5370,7 @@ mod tests {
             }
           }";
 
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)
@@ -4913,7 +5381,7 @@ mod tests {
             __typename
           }";
 
-        assert!(Query::parse(query, api_schema)
+        assert!(Query::parse(query, api_schema, &Default::default())
             .unwrap()
             .operations
             .get(0)

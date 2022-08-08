@@ -25,6 +25,7 @@ use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
@@ -73,8 +74,10 @@ struct TrafficShaping {
 impl Plugin for TrafficShaping {
     type Config = Config;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Self { config })
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Self {
+            config: init.config,
+        })
     }
 
     fn subgraph_service(
@@ -225,13 +228,10 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
-        let schema: Arc<Schema> = Arc::new(
-            include_str!(
-                "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
-            )
-            .parse()
-            .unwrap(),
+        let schema = include_str!(
+            "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
         );
+        let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
@@ -251,7 +251,7 @@ mod test {
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
-            .create_instance(config)
+            .create_instance_without_schema(config)
             .await
             .expect("Plugin not created")
     }

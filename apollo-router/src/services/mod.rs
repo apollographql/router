@@ -17,11 +17,11 @@ use http_ext::IntoHeaderValue;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
-pub use subgraph_service::SubgraphService;
 use tower::BoxError;
 
 pub use self::execution_service::*;
 pub use self::router_service::*;
+pub use self::subgraph_service::*;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -31,12 +31,13 @@ use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
 use crate::query_planner::QueryPlanOptions;
-use crate::*;
+pub use crate::spec::Query;
+use crate::Context;
 
 mod execution_service;
 pub mod http_ext;
 pub(crate) mod layers;
-pub mod new_service;
+pub(crate) mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
 
@@ -284,8 +285,8 @@ assert_impl_all!(QueryPlannerRequest: Send);
 /// [`Context`] and [`QueryPlanOptions`] for the request.
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
-    /// Original request to the Router.
-    pub originating_request: http_ext::Request<Request>,
+    pub query: String,
+    pub operation_name: Option<String>,
     /// Query plan options
     pub query_plan_options: QueryPlanOptions,
 
@@ -299,12 +300,14 @@ impl QueryPlannerRequest {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub fn new(
-        originating_request: http_ext::Request<Request>,
+        query: String,
+        operation_name: Option<String>,
         query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
-            originating_request,
+            query,
+            operation_name,
             query_plan_options,
             context,
         }
@@ -318,6 +321,7 @@ pub struct QueryPlannerResponse {
     pub context: Context,
 }
 
+/// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
 pub enum QueryPlannerContent {
     Plan {

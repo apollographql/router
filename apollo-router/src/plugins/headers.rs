@@ -31,6 +31,7 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
@@ -115,8 +116,10 @@ fn option_string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::s
 impl Plugin for Headers {
     type Config = Config;
 
-    async fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Headers { config })
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Headers {
+            config: init.config,
+        })
     }
     fn subgraph_service(
         &self,
