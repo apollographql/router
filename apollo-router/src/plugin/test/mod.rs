@@ -124,7 +124,7 @@ impl PluginTestHarness {
         .boxed();
         let query_planner_service = plugin.query_planning_service(
             mock_query_planner_service
-                .map(|s| s.build().boxed())
+                .map(|s| s.boxed())
                 .unwrap_or(query_planner),
         );
 
@@ -136,27 +136,22 @@ impl PluginTestHarness {
         let plugins = Arc::new(plugins);
 
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-        let router_service = mock_router_service
-            .map(|s| s.build().boxed())
-            .unwrap_or_else(|| {
-                BoxService::new(
-                    RouterService::builder()
-                        .query_planner_service(Buffer::new(
-                            query_planner_service,
-                            DEFAULT_BUFFER_SIZE,
-                        ))
-                        .execution_service_factory(ExecutionCreator {
-                            schema: schema.clone(),
+        let router_service = mock_router_service.map(|s| s.boxed()).unwrap_or_else(|| {
+            BoxService::new(
+                RouterService::builder()
+                    .query_planner_service(Buffer::new(query_planner_service, DEFAULT_BUFFER_SIZE))
+                    .execution_service_factory(ExecutionCreator {
+                        schema: schema.clone(),
+                        plugins: plugins.clone(),
+                        subgraph_creator: Arc::new(MockSubgraphFactory {
                             plugins: plugins.clone(),
-                            subgraph_creator: Arc::new(MockSubgraphFactory {
-                                plugins: plugins.clone(),
-                                subgraphs: subgraph_services,
-                            }),
-                        })
-                        .schema(schema.clone())
-                        .build(),
-                )
-            });
+                            subgraphs: subgraph_services,
+                        }),
+                    })
+                    .schema(schema.clone())
+                    .build(),
+            )
+        });
         let router_service = ServiceBuilder::new()
             .layer(apq)
             .layer(EnsureQueryPresence::default())

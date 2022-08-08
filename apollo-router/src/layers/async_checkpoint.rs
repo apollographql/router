@@ -153,23 +153,24 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
 
         let mut execution_service = MockExecutionService::new();
+        execution_service.expect_clone().return_once(move || {
+            let mut execution_service = MockExecutionService::new();
+            execution_service.expect_call().times(1).returning(
+                move |_req: crate::ExecutionRequest| {
+                    Ok(ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .build())
+                },
+            );
 
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req: crate::ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
-            });
-
-        let service = execution_service.build();
+            execution_service
+        });
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: crate::ExecutionRequest| async {
                 Ok(ControlFlow::Continue(req))
             })
-            .service(service);
+            .service(execution_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -191,20 +192,22 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
         let mut router_service = MockExecutionService::new();
 
-        router_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
-            });
-
-        let service = router_service.build();
+        router_service.expect_clone().return_once(move || {
+            let mut router_service = MockExecutionService::new();
+            router_service
+                .expect_call()
+                .times(1)
+                .returning(move |_req| {
+                    Ok(ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .build())
+                });
+            router_service
+        });
 
         let service_stack =
             AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) })
-                .layer(service);
+                .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -224,9 +227,10 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_return() {
         let expected_label = "returned_before_mock_service";
-        let router_service = MockExecutionService::new();
-
-        let service = router_service.build();
+        let mut router_service = MockExecutionService::new();
+        router_service
+            .expect_clone()
+            .return_once(move || MockExecutionService::new());
 
         let service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -235,7 +239,7 @@ mod async_checkpoint_tests {
                     .build(),
             ))
         })
-        .layer(service);
+        .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -255,15 +259,16 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let router_service = MockExecutionService::new();
-
-        let service = router_service.build();
+        let mut router_service = MockExecutionService::new();
+        router_service
+            .expect_clone()
+            .return_once(move || MockExecutionService::new());
 
         let service_stack =
             AsyncCheckpointLayer::new(
                 move |_req| async move { Err(BoxError::from(expected_error)) },
             )
-            .layer(service);
+            .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 

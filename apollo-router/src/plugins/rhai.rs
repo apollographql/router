@@ -1410,7 +1410,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let router_req = RouterRequest::fake_builder().context(context).build()?;
@@ -1445,14 +1445,19 @@ mod tests {
     #[tokio::test]
     async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
         let mut mock_service = MockExecutionService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            });
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = MockExecutionService::new();
+            mock_service
+                .expect_call()
+                .times(1)
+                .returning(move |req: ExecutionRequest| {
+                    Ok(ExecutionResponse::fake_builder()
+                        .context(req.context)
+                        .build())
+                });
+
+            mock_service
+        });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.rhai")
@@ -1462,8 +1467,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service =
-            dyn_plugin.execution_service(BoxService::new(mock_service.build()));
+        let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
         let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
             .body(Request::builder().query(String::new()).build())
