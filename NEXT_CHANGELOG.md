@@ -90,6 +90,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 * `ConfigurationKind` → `ConfigurationSource`
 * `ConfigurationKind::Instance` → `ConfigurationSource::Static`
 * `ShutdownKind` → `ShutdownSource`
+* `ApolloRouter` → `RouterHttpServer`
 
 By [@SimonSapin](https://github.com/SimonSapin)
 

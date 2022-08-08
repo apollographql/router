@@ -25,8 +25,8 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::router::ApolloRouter;
 use crate::router::ConfigurationSource;
+use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
@@ -159,12 +159,12 @@ impl Executable {
     /// You may optionally supply a `router_builder_fn` to override building of the router.
     ///
     /// ```no_run
-    /// use apollo_router::{ApolloRouter, Executable, ShutdownSource};
+    /// use apollo_router::{RouterHttpServer, Executable, ShutdownSource};
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main()->Result<()> {
     /// Executable::builder()
-    ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
+    ///   .router_builder_fn(|configuration, schema| RouterHttpServer::builder()
     ///                 .configuration(configuration)
     ///                 .schema(schema)
     ///                 .shutdown(ShutdownSource::CtrlC)
@@ -176,7 +176,7 @@ impl Executable {
     ///
     #[builder(entry = "builder", exit = "start", visibility = "pub")]
     async fn start(
-        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> ApolloRouter>,
+        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> RouterHttpServer>,
     ) -> Result<()> {
         let opt = Opt::parse();
 
@@ -216,7 +216,7 @@ impl Executable {
     }
 
     async fn inner_start(
-        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> ApolloRouter>,
+        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> RouterHttpServer>,
         opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
@@ -320,7 +320,7 @@ impl Executable {
         };
 
         let router = router_builder_fn.unwrap_or(|configuration, schema| {
-            ApolloRouter::builder()
+            RouterHttpServer::builder()
                 .configuration(configuration)
                 .schema(schema)
                 .shutdown(ShutdownSource::CtrlC)

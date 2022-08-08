@@ -327,13 +327,13 @@ impl ShutdownSource {
 /// # Examples
 ///
 /// ```
-/// use apollo_router::ApolloRouter;
+/// use apollo_router::RouterHttpServer;
 /// use apollo_router::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
-///     let server = ApolloRouter::builder()
+///     let server = RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
 ///             .build();
@@ -343,13 +343,13 @@ impl ShutdownSource {
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::ApolloRouter;
+/// use apollo_router::RouterHttpServer;
 /// use apollo_router::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
-///     let server = ApolloRouter::builder()
+///     let mut server = RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
 ///             .build();
@@ -358,7 +358,7 @@ impl ShutdownSource {
 /// };
 /// ```
 ///
-pub struct ApolloRouter {
+pub struct RouterHttpServer {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     pub(crate) configuration: ConfigurationSource,
 
@@ -372,15 +372,15 @@ pub struct ApolloRouter {
 }
 
 #[buildstructor::buildstructor]
-impl ApolloRouter {
+impl RouterHttpServer {
     /// Build a new Apollo router.
     #[builder(visibility = "pub")]
     fn new(
         configuration: ConfigurationSource,
         schema: SchemaSource,
         shutdown: Option<ShutdownSource>,
-    ) -> ApolloRouter {
-        ApolloRouter {
+    ) -> RouterHttpServer {
+        RouterHttpServer {
             configuration,
             schema,
             shutdown: shutdown.unwrap_or(ShutdownSource::CtrlC),
@@ -444,7 +444,7 @@ impl Future for RouterHandle {
     }
 }
 
-impl ApolloRouter {
+impl RouterHttpServer {
     /// Start the federated server on a separate thread.
     ///
     /// Dropping the server handle will shutdown the server.
@@ -526,7 +526,7 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema = include_str!("testdata/supergraph.graphql");
-        ApolloRouter::builder()
+        RouterHttpServer::builder()
             .configuration(configuration)
             .schema(schema)
             .build()
