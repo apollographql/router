@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
+
+The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
+was changed from `String` to `Arc<String>`.
+This reduces the number of copies of this string we keep in memory, as schemas can get large.
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ## 🐛 Fixes
@@ -37,6 +45,31 @@ Change attribute name `query` to `graphql.document` and `operation_name` to `gra
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
 
+### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
+
+Router config handling now:
+* Allows completely empty configuration without error.
+* Prevents unknown tags at the root of the configuration from being silently ignored.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
+
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+
+
+### CORS: Fix trailing slashes, and display defaults ([PR #1471](https://github.com/apollographql/router/pull/1471))
+
+The CORS documentation now displays a valid `origins` configuration (without trailing slash!), and the full configuration section displays its default settings.
+
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
+
+
+
+### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
+
+Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457

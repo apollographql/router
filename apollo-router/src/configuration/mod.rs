@@ -619,8 +619,15 @@ pub(crate) fn generate_config_schema() -> RootSchema {
         s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
+
+    // Manually patch up the schema
+    // We don't want to allow unknown fields, but serde doesn't work if we put the annotation on Configuration as the struct has a flattened type.
+    // It's fine to just add it here.
     let gen = settings.into_generator();
-    gen.into_root_schema_for::<Configuration>()
+    let mut schema = gen.into_root_schema_for::<Configuration>();
+    let mut root = schema.schema.object.as_mut().expect("schema not generated");
+    root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
+    schema
 }
 
 /// Validate config yaml against the generated json schema.
@@ -628,21 +635,28 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 /// In the case that validation cannot be performed then it will let serde validate as normal. The
 /// goal is to give a good enough experience until more time can be spent making this better,
 ///
-/// THe validation sequence is:
+/// The validation sequence is:
 /// 1. Parse the config into yaml
 /// 2. Create the json schema
 /// 3. Validate the yaml against the json schema.
 /// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
 /// 5. Convert the json paths from the error messages into nice error snippets.
 ///
-/// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
+/// There may still be serde validation issues later.
 ///
 pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
-    let yaml =
-        &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
+    let defaulted_yaml = if raw_yaml.trim().is_empty() {
+        "plugins:".to_string()
+    } else {
+        raw_yaml.to_string()
+    };
+
+    let yaml = &serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+        ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
-        })?;
+        }
+    })?;
     let expanded_yaml = expand_env_variables(yaml);
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
@@ -1071,6 +1085,27 @@ subgraphs:
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
+    }
+
+    #[test]
+    fn unknown_fields_at_root() {
+        let error = validate_configuration(
+            r#"
+unknown:
+  foo: true
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"));
+    }
+
+    #[test]
+    fn empty_config() {
+        validate_configuration(
+            r#"
+  "#,
+        )
+        .expect("should have been ok with an empty config");
     }
 
     #[test]

@@ -639,8 +639,8 @@ jobs:
             docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug .
             # Build release image
             docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-            # NB: GH token expires 30/3/2023
-            echo ${GITHUB_DOCKER_TOKEN} | docker login ghcr.io -u garypen --password-stdin
+            # Note: GH Token owned by apollo-bot2, no expire
+            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
             # Push debug image
             docker push ${ROUTER_TAG}:${VERSION}-debug
             # Push release image
@@ -654,8 +654,8 @@ jobs:
             helm package helm/chart/router
             # Make sure we have the newest chart
             CHART=$(ls -t router*.tgz| head -1)
-            # NB: GH token expires 30/3/2023
-            echo ${GITHUB_DOCKER_TOKEN} | helm registry login -u garypen --password-stdin ghcr.io
+            # Note: GH Token owned by apollo-bot2, no expire
+            echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
