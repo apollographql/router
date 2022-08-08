@@ -356,7 +356,8 @@ impl ShutdownSource {
 ///             .configuration(configuration)
 ///             .schema(schema)
 ///             .start();
-///     drop(server);
+///     // …
+///     server.shutdown().await
 /// };
 /// ```
 ///
@@ -399,8 +400,8 @@ impl RouterHttpServer {
     ///
     /// If the handle is dropped before being awaited as a future,
     /// a graceful shutdown is triggered.
-    /// However there is no way to wait until it finishes
-    /// since the server is running in a separate task.
+    /// In order to wait until shutdown finishes,
+    /// use the [`shutdown`][Self::shutdown] method instead.
     #[builder(visibility = "pub", entry = "builder", exit = "start")]
     fn start(
         schema: SchemaSource,
@@ -453,6 +454,14 @@ impl RouterHttpServer {
             .clone()
             .ok_or(ApolloRouterError::StartupError)
     }
+
+    /// Trigger and wait for graceful shutdown
+    pub async fn shutdown(&mut self) -> Result<(), ApolloRouterError> {
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
+        (&mut self.result).await
+    }
 }
 
 /// Messages that are broadcast across the app.
@@ -476,11 +485,9 @@ pub(crate) enum Event {
 
 impl Drop for RouterHttpServer {
     fn drop(&mut self) {
-        let _ = self
-            .shutdown_sender
-            .take()
-            .expect("shutdown sender must be present")
-            .send(());
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
@@ -540,13 +547,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
-        let router_handle = init_with_server();
+        let mut router_handle = init_with_server();
         let listen_address = router_handle
             .listen_address()
             .await
             .expect("router failed to start");
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
-        drop(router_handle);
+        router_handle.shutdown().await.unwrap();
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {

@@ -189,6 +189,25 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
+### Explicit `shutdown` for `RouterHttpServer` handle ([PR #FIXME])
+
+If you explicitly create a `RouterHttpServer` handle,
+dropping it while the server is running instructs the server shut down gracefuly.
+However with the handle dropped, there is no way to wait for shutdown to end
+or check that it went without error.
+Instead, the new `shutdown` async method can be called explicitly
+to obtain a `Result`:
+
+```diff
+ use RouterHttpServer;
+ let server = RouterHttpServer::builder().schema("schema").start();
+ // …
+-drop(server);
++server.shutdown().await.unwrap(); 
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🐛 Fixes
 
 ## 🛠 Maintenance
