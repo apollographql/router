@@ -45,6 +45,12 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper)
 
 ## 🐛 Fixes
 
+### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
+
+Change attribute name `query` to `graphql.document` and `operation_name` to `graphql.operation.name` in spans.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
+
 ### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
 
 Router config handling now:

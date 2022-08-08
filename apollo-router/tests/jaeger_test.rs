@@ -102,13 +102,13 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
     // We can't actually assert the values on a span. Only that a field has been set.
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'query')].value")?
+            .select_path("$.tags[?(@.key == 'graphql.document')].value")?
             .get(0),
         Some(&&Value::String("{topProducts{name}}".to_string()))
     );
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'operation_name')].value")?
+            .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
             .get(0),
         Some(&&Value::String("".to_string()))
     );
