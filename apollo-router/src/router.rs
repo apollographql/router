@@ -199,7 +199,10 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 #[derivative(Debug)]
 pub enum ConfigurationSource {
     /// A static configuration.
-    #[display(fmt = "Instance")]
+    ///
+    /// Can be created through `serde::Deserialize` from various formats,
+    /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
+    #[display(fmt = "Static")]
     #[from(types(Configuration))]
     Static(Box<Configuration>),
 
@@ -322,7 +325,7 @@ impl ShutdownSource {
     }
 }
 
-/// Federated server takes requests and federates a response based on calls to subgraphs.
+/// The entry point for running the Router’s HTTP server.
 ///
 /// # Examples
 ///
@@ -333,11 +336,11 @@ impl ShutdownSource {
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
-///     let server = RouterHttpServer::builder()
+///     RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
-///             .build();
-///     server.serve().await;
+///             .start()
+///             .await;
 /// };
 /// ```
 ///
@@ -352,40 +355,103 @@ impl ShutdownSource {
 ///     let mut server = RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
-///             .build();
-///     let handle = server.serve();
-///     drop(handle);
+///             .start();
+///     drop(server);
 /// };
 /// ```
 ///
 pub struct RouterHttpServer {
-    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) configuration: ConfigurationSource,
-
-    /// The Schema that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) schema: SchemaSource,
-
-    /// A future that when resolved will shut down the server.
-    pub(crate) shutdown: ShutdownSource,
-
-    pub(crate) router_factory: YamlRouterServiceFactory,
+    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
+    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
 #[buildstructor::buildstructor]
 impl RouterHttpServer {
-    /// Build a new Apollo router.
-    #[builder(visibility = "pub")]
-    fn new(
-        configuration: ConfigurationSource,
+    /// Returns a builder to start an HTTP server in a separate Tokio task.
+    ///
+    /// Builder methods:
+    ///
+    /// * `.schema(impl Into<`[`SchemaSource`]`>)`
+    ///   Required.
+    ///   Specifies where to find the supergraph schema definition.
+    ///   Some sources support hot-reloading.
+    ///
+    /// * `.configuration(impl Into<`[`ConfigurationSource`]`>)`
+    ///   Optional.
+    ///   Specifies where to find the router configuration.
+    ///   If not provided, the default configuration as with an empty YAML file.
+    ///
+    /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
+    ///   Optional.
+    ///   Specifies when the server should gracefully shut down.
+    ///   If not provided, the default is [`ShutdownSource::CtrlC`].
+    ///
+    /// * `.start()`
+    ///   Finishes the builder,
+    ///   starts an HTTP server in a separate Tokio task,
+    ///   and returns a `RouterHttpServer` handle.
+    ///
+    /// The server handle can be used in multiple ways.
+    /// As a [`Future`], it resolves to `Result<(), `[`ApolloRouterError`]`>`
+    /// either when the server has finished gracefully shutting down
+    /// or when it encounters a fatal error that prevents it from starting.
+    ///
+    /// If the handle is dropped before being awaited as a future,
+    /// a graceful shutdown is triggered.
+    /// However there is no way to wait until it finishes
+    /// since the server is running in a separate task.
+    #[builder(visibility = "pub", entry = "builder", exit = "start")]
+    fn start(
         schema: SchemaSource,
+        configuration: Option<ConfigurationSource>,
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
-        RouterHttpServer {
-            configuration,
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+        let event_stream = generate_event_stream(
+            shutdown.unwrap_or(ShutdownSource::CtrlC),
+            configuration.unwrap_or_else(|| ConfigurationSource::Static(Default::default())),
             schema,
-            shutdown: shutdown.unwrap_or(ShutdownSource::CtrlC),
-            router_factory: YamlRouterServiceFactory::default(),
+            shutdown_receiver,
+        );
+        let server_factory = AxumHttpServerFactory::new();
+        let router_factory = YamlRouterServiceFactory::default();
+        let state_machine = StateMachine::new(server_factory, router_factory);
+        let listen_address = state_machine.listen_address.clone();
+        let result = spawn(
+            async move { state_machine.process_events(event_stream).await }
+                .with_current_subscriber(),
+        )
+        .map(|r| match r {
+            Ok(Ok(ok)) => Ok(ok),
+            Ok(Err(err)) => Err(err),
+            Err(err) => {
+                tracing::error!("{}", err);
+                Err(ApolloRouterError::StartupError)
+            }
+        })
+        .with_current_subscriber()
+        .boxed();
+
+        RouterHttpServer {
+            result,
+            shutdown_sender: Some(shutdown_sender),
+            listen_address,
         }
+    }
+
+    /// Returns the listen address when the router is ready to receive requests.
+    ///
+    /// This can be useful when the `server.listen` configuration specifies TCP port 0,
+    /// which instructs the operating system to pick an available port number.
+    ///
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
+        self.listen_address
+            .read()
+            .await
+            .clone()
+            .ok_or(ApolloRouterError::StartupError)
     }
 }
 
@@ -408,25 +474,7 @@ pub(crate) enum Event {
     Shutdown,
 }
 
-/// A handle that allows the client to await for various server events.
-pub struct RouterHandle {
-    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    shutdown_sender: Option<oneshot::Sender<()>>,
-}
-
-impl RouterHandle {
-    /// Returns the listen address when the router is ready to receive requests.
-    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
-        self.listen_address
-            .read()
-            .await
-            .clone()
-            .ok_or(ApolloRouterError::StartupError)
-    }
-}
-
-impl Drop for RouterHandle {
+impl Drop for RouterHttpServer {
     fn drop(&mut self) {
         let _ = self
             .shutdown_sender
@@ -436,7 +484,7 @@ impl Drop for RouterHandle {
     }
 }
 
-impl Future for RouterHandle {
+impl Future for RouterHttpServer {
     type Output = Result<(), ApolloRouterError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -444,68 +492,26 @@ impl Future for RouterHandle {
     }
 }
 
-impl RouterHttpServer {
-    /// Start the federated server on a separate thread.
-    ///
-    /// Dropping the server handle will shutdown the server.
-    ///
-    /// returns: RouterHandle
-    ///
-    pub fn serve(self) -> RouterHandle {
-        let server_factory = AxumHttpServerFactory::new();
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let event_stream = Self::generate_event_stream(
-            self.shutdown,
-            self.configuration,
-            self.schema,
-            shutdown_receiver,
-        );
-
-        let state_machine = StateMachine::new(server_factory, self.router_factory);
-        let listen_address = state_machine.listen_address.clone();
-        let result = spawn(
-            async move { state_machine.process_events(event_stream).await }
-                .with_current_subscriber(),
-        )
-        .map(|r| match r {
-            Ok(Ok(ok)) => Ok(ok),
-            Ok(Err(err)) => Err(err),
-            Err(err) => {
-                tracing::error!("{}", err);
-                Err(ApolloRouterError::StartupError)
-            }
-        })
-        .with_current_subscriber()
-        .boxed();
-
-        RouterHandle {
-            result,
-            shutdown_sender: Some(shutdown_sender),
-            listen_address,
-        }
-    }
-
-    /// Create the unified event stream.
-    /// This merges all contributing streams and sets up shutdown handling.
-    /// When a shutdown message is received no more events are emitted.
-    fn generate_event_stream(
-        shutdown: ShutdownSource,
-        configuration: ConfigurationSource,
-        schema: SchemaSource,
-        shutdown_receiver: oneshot::Receiver<()>,
-    ) -> impl Stream<Item = Event> {
-        // Chain is required so that the final shutdown message is sent.
-        let messages = stream::select_all(vec![
-            shutdown.into_stream().boxed(),
-            configuration.into_stream().boxed(),
-            schema.into_stream().boxed(),
-            shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
-        ])
-        .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
-        .chain(stream::iter(vec![Shutdown]))
-        .boxed();
-        messages
-    }
+/// Create the unified event stream.
+/// This merges all contributing streams and sets up shutdown handling.
+/// When a shutdown message is received no more events are emitted.
+fn generate_event_stream(
+    shutdown: ShutdownSource,
+    configuration: ConfigurationSource,
+    schema: SchemaSource,
+    shutdown_receiver: oneshot::Receiver<()>,
+) -> impl Stream<Item = Event> {
+    // Chain is required so that the final shutdown message is sent.
+    let messages = stream::select_all(vec![
+        shutdown.into_stream().boxed(),
+        configuration.into_stream().boxed(),
+        schema.into_stream().boxed(),
+        shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
+    ])
+    .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
+    .chain(stream::iter(vec![Shutdown]))
+    .boxed();
+    messages
 }
 
 #[cfg(test)]
@@ -521,7 +527,7 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
 
-    fn init_with_server() -> RouterHandle {
+    fn init_with_server() -> RouterHttpServer {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
@@ -529,8 +535,7 @@ mod tests {
         RouterHttpServer::builder()
             .configuration(configuration)
             .schema(schema)
-            .build()
-            .serve()
+            .start()
     }
 
     #[tokio::test(flavor = "multi_thread")]

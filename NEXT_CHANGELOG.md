@@ -94,6 +94,25 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Router startup API changes ([PR #FIXME])
+
+The `RouterHttpServer::serve` method and its return type `RouterHandle` were removed,
+their functionality merged into `RouterHttpServer` (formerly `ApolloRouter`).
+The builder for `RouterHttpServer` now ends with a `start` method instead of `build`.
+This method immediatly starts the server in a new Tokio task.
+
+```diff
+ RouterHttpServer::builder()
+     .configuration(configuration)
+     .schema(schema)
+-    .build()
+-    .serve()
++    .start()
+     .await
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Removed constructors when there is a public builder ([PR #FIXME])
 
 Many types in the Router API can be constructed with the builder pattern.

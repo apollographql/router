@@ -168,7 +168,7 @@ impl Executable {
     ///                 .configuration(configuration)
     ///                 .schema(schema)
     ///                 .shutdown(ShutdownSource::CtrlC)
-    ///                 .build())
+    ///                 .start())
     ///   .start().await
     /// # }
     /// ```
@@ -324,9 +324,9 @@ impl Executable {
                 .configuration(configuration)
                 .schema(schema)
                 .shutdown(ShutdownSource::CtrlC)
-                .build()
+                .start()
         })(configuration, schema);
-        if let Err(err) = router.serve().await {
+        if let Err(err) = router.await {
             tracing::error!("{}", err);
             return Err(err.into());
         }
