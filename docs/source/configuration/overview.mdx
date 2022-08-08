@@ -333,7 +333,9 @@ plugins:
 
 ### Development mode
 
-You can pass the `--dev` flag when starting up the Apollo Router to enable plugins that make developing easier. For now, this flag enables [subgraph error inclusion](/subgraph-error-inclusion), but in the future it may enable other plugins or modify other behavior. You should never run a production router with this flag enabled.
+You can pass the `--dev` flag to the `router` executable to enable plugins that assist with development. Currently, this flag enables [subgraph error inclusion](/subgraph-error-inclusion), and it might enable other plugins or modify other behavior in the future.
+
+**Do not pass this flag when running the Apollo Router in production.**
 
 ### Environment variable expansion
 
