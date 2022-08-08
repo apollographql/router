@@ -246,6 +246,16 @@ to obtain a `Result`:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Added `apollo_router::TestHarness` ([PR #FIXME])
+
+This is a builder for the part of an Apollo Router that handles GraphQL requests,
+as a `tower::Service`.
+This allows tests, benchmarks, etc
+to manipulate request and response objects in memory without going over the network.
+See the API documentation for an example. (It can be built with `cargo doc --open`.)
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🐛 Fixes
 
 ## 🛠 Maintenance

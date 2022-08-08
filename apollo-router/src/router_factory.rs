@@ -52,6 +52,7 @@ pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
         previous_router: Option<&'a Self::RouterServiceFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterServiceFactory, BoxError>;
 }
 
@@ -68,9 +69,13 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterServiceFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
+        let mut plugins = create_plugins(&configuration, &schema).await?;
+        if let Some(extra) = extra_plugins {
+            plugins.extend(extra);
+        }
 
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
@@ -108,7 +113,7 @@ pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
     let service = YamlRouterServiceFactory::default()
-        .create(Arc::new(config), Arc::new(schema), None)
+        .create(Arc::new(config), Arc::new(schema), None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -395,7 +400,7 @@ mod test {
         let schema = Schema::parse(schema, &config).unwrap();
 
         let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
+            .create(Arc::new(config), Arc::new(schema), None, None)
             .await;
         service.map(|_| ())
     }

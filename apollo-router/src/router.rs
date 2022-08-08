@@ -17,6 +17,7 @@ use futures::FutureExt;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
+use tower::BoxError;
 use tracing::subscriber::SetGlobalDefaultError;
 use tracing_futures::WithSubscriber;
 use url::Url;
@@ -63,7 +64,7 @@ pub enum ApolloRouterError {
     ReadSchemaError(crate::error::SchemaError),
 
     /// could not create the HTTP pipeline: {0}
-    ServiceCreationError(tower::BoxError),
+    ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
@@ -223,6 +224,12 @@ pub enum ConfigurationSource {
         /// When watching, the delay to wait before applying the new configuration.
         delay: Option<Duration>,
     },
+}
+
+impl Default for ConfigurationSource {
+    fn default() -> Self {
+        ConfigurationSource::Static(Default::default())
+    }
 }
 
 impl ConfigurationSource {
@@ -411,7 +418,7 @@ impl RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
-            configuration.unwrap_or_else(|| ConfigurationSource::Static(Default::default())),
+            configuration.unwrap_or_default(),
             schema,
             shutdown_receiver,
         );

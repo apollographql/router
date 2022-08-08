@@ -424,7 +424,7 @@ impl RouterServiceFactory for RouterCreator {
 }
 
 impl RouterCreator {
-    fn make(
+    pub(crate) fn make(
         &self,
     ) -> impl Service<
         RouterRequest,

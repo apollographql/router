@@ -300,7 +300,7 @@ where
 
             let router_factory = self
                 .router_configurator
-                .create(configuration.clone(), schema.clone(), None)
+                .create(configuration.clone(), schema.clone(), None, None)
                 .await
                 .map_err(|err| {
                     tracing::error!("cannot create the router: {}", err);
@@ -355,6 +355,7 @@ where
                 new_configuration.clone(),
                 new_schema.clone(),
                 Some(&router_service),
+                None,
             )
             .await
         {
@@ -434,6 +435,7 @@ mod tests {
     use crate::http_ext::Request;
     use crate::http_ext::Response;
     use crate::http_server_factory::Listener;
+    use crate::plugin::DynPlugin;
     use crate::plugin::Handler;
     use crate::router_factory::RouterServiceConfigurator;
     use crate::router_factory::RouterServiceFactory;
@@ -574,7 +576,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -601,7 +603,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _| {
+            .returning(|_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_custom_endpoints().returning(HashMap::new);
@@ -611,7 +613,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -645,6 +647,7 @@ mod tests {
                 configuration: Arc<Configuration>,
                 schema: Arc<crate::Schema>,
                 previous_router: Option<&'a MockMyRouterFactory>,
+                extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
@@ -780,7 +783,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(move |_, _, _| {
+            .returning(move |_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_custom_endpoints().returning(HashMap::new);

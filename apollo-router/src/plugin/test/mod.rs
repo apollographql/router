@@ -19,6 +19,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+pub(crate) use self::mock::canned;
 use super::DynPlugin;
 use crate::cache::DeduplicatingCache;
 use crate::introspection::Introspection;
