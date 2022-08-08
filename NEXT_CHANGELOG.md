@@ -179,6 +179,23 @@ This can help disambiguate when multiple types share a name.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #FIXME])
+
+`apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
+When no `Content-Type` header is specified, this builder will now default to `application/json`.
+This will help tests where a request goes through mandatory plugins including CSRF protection.
+which makes the request be accepted by CSRF protection.
+
+If a test requires a request specifically *without* a `Content-Type` header,
+this default can be removed from a `RouterRequest` after building it:
+
+```rust
+let mut router_request = RouterRequesT::fake_builder().build();
+router_request.originating_request.headers_mut().remove("content-type");
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))

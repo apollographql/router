@@ -240,21 +240,13 @@ mod csrf_tests {
     async fn it_lets_preflighted_request_pass_through() {
         let config = CSRFConfig::default();
         let with_preflight_content_type = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "application/json".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "application/json")
             .build()
             .unwrap();
         assert_accepted(config.clone(), with_preflight_content_type).await;
 
         let with_preflight_header = RouterRequest::fake_builder()
-            .headers(
-                [("apollo-require-preflight".into(), "this-is-a-test".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("apollo-require-preflight", "this-is-a-test")
             .build()
             .unwrap();
         assert_accepted(config, with_preflight_header).await;
@@ -263,7 +255,13 @@ mod csrf_tests {
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let config = CSRFConfig::default();
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        let mut non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        // fake_builder defaults to `Content-Type: application/json`,
+        // specifically to avoid the case we’re testing here.
+        non_preflighted_request
+            .originating_request
+            .headers_mut()
+            .remove("content-type");
         assert_rejected(config, non_preflighted_request).await
     }
 
@@ -271,21 +269,13 @@ mod csrf_tests {
     async fn it_rejects_non_preflighted_content_type_request() {
         let config = CSRFConfig::default();
         let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "text/plain")
             .build()
             .unwrap();
         assert_rejected(config.clone(), non_preflighted_request).await;
 
         let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain; charset=utf8".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "text/plain; charset=utf8")
             .build()
             .unwrap();
         assert_rejected(config, non_preflighted_request).await;
@@ -322,6 +312,7 @@ mod csrf_tests {
             .await
             .unwrap();
 
+        assert_eq!(res.errors, []);
         assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
     }
 
