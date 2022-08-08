@@ -170,7 +170,7 @@ where
 }
 
 #[cfg(test)]
-#[allow(unreachable_pub)]
+#[allow(dead_code, unreachable_pub)]
 mod test {
     use std::time::Duration;
 
@@ -226,9 +226,7 @@ mod test {
             })
         });
 
-        mock_service
-            .expect_clone()
-            .return_once(move || MockABService::new());
+        mock_service.expect_clone().return_once(MockABService::new);
 
         let mut service = create_service(mock_service);
 
@@ -267,9 +265,7 @@ mod test {
             .expect_call()
             .times(1)
             .returning(move |a| Err(BoxError::from(format!("{} err", a.key))));
-        mock_service
-            .expect_clone()
-            .return_once(move || MockABService::new());
+        mock_service.expect_clone().return_once(MockABService::new);
 
         let mut service = create_service(mock_service);
 
@@ -329,9 +325,7 @@ mod test {
                         value: "there".into(),
                     })
                 });
-            mock_service
-                .expect_clone()
-                .return_once(move || MockABService::new());
+            mock_service.expect_clone().return_once(MockABService::new);
 
             mock_service
         });
@@ -369,9 +363,7 @@ mod test {
                     value: "there".into(),
                 })
             });
-        mock_service
-            .expect_clone()
-            .return_once(move || MockABService::new());
+        mock_service.expect_clone().return_once(MockABService::new);
 
         let mut service = create_service(mock_service);
 

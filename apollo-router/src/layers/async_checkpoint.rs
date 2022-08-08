@@ -230,7 +230,7 @@ mod async_checkpoint_tests {
         let mut router_service = MockExecutionService::new();
         router_service
             .expect_clone()
-            .return_once(move || MockExecutionService::new());
+            .return_once(MockExecutionService::new);
 
         let service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -262,7 +262,7 @@ mod async_checkpoint_tests {
         let mut router_service = MockExecutionService::new();
         router_service
             .expect_clone()
-            .return_once(move || MockExecutionService::new());
+            .return_once(MockExecutionService::new);
 
         let service_stack =
             AsyncCheckpointLayer::new(
