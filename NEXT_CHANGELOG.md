@@ -113,6 +113,33 @@ This method immediatly starts the server in a new Tokio task.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #FIXME])
+
+The builder for `apollo_router::Executable` had a `router_builder_fn` method
+allowing to specify how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
+with a provided configuration and schema.
+The only possible variation there was specifying when the server should shut down
+with a `ShutdownSource` parameter,
+so `router_builder_fn` was replaced with a new `shutdown` method that takes that.
+
+```diff
+ use apollo_router::Executable;
+-use apollo_router::RouterHttpServer;
+ use apollo_router::ShutdownSource;
+
+ Executable::builder()
+-    .router_builder_fn(|configuration, schema| RouterHttpServer::builder()
+-        .configuration(configuration)
+-        .schema(schema)
+-        .shutdown(ShutdownSource::None)
+-        .start())
++    .shutdown(ShutdownSource::None)
+     .start()
+     .await
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Removed constructors when there is a public builder ([PR #FIXME])
 
 Many types in the Router API can be constructed with the builder pattern.
