@@ -82,6 +82,25 @@ This rewrites the mocked services API to remove the `build()` method, and make t
 using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
+
+### Removed constructors when there is a public builder ([PR #FIXME])
+
+Many types in the Router API can be constructed with the builder pattern.
+We use the [`buildstructor`](https://crates.io/crates/buildstructor) crate
+to auto-generate builder boilerplate based on the parameters of a constructor.
+These constructors have been made private so that users must go through the builder instead,
+which will allow us to add parameters in the future without a breaking API change.
+If you were using one of these constructors, the migration generally looks like this:
+
+```diff
+-apollo_router::graphql::Error::new(m, vec![l], Some(p), Default::default())
++apollo_router::graphql::Error::build()
++    .message(m)
++    .location(l)
++    .path(p)
++    .build()
+```
+
 ## 🚀 Features
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))

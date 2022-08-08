@@ -174,8 +174,8 @@ impl Executable {
     /// ```
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
-    #[builder(entry = "builder", exit = "start")]
-    pub async fn start(
+    #[builder(entry = "builder", exit = "start", visibility = "pub")]
+    async fn start(
         router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
     ) -> Result<()> {
         let opt = Opt::parse();

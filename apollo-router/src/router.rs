@@ -372,8 +372,8 @@ pub struct ApolloRouter {
 #[buildstructor::buildstructor]
 impl ApolloRouter {
     /// Build a new Apollo router.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         configuration: ConfigurationKind,
         schema: SchemaKind,
         shutdown: Option<ShutdownKind>,

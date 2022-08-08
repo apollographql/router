@@ -89,8 +89,8 @@ impl PluginTestHarness {
     ///
     /// returns: Result<PluginTestHarness, Box<dyn Error+Send+Sync, Global>>
     ///
-    #[builder]
-    pub async fn new<P: Plugin>(
+    #[builder(visibility = "pub")]
+    async fn new<P: Plugin>(
         plugin: P,
         schema: IntoSchema,
         mock_router_service: Option<MockRouterService>,

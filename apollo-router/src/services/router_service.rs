@@ -64,8 +64,8 @@ pub struct RouterService<QueryPlannerService, ExecutionFactory> {
 
 #[buildstructor::buildstructor]
 impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, ExecutionFactory> {
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         query_planner_service: QueryPlannerService,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
