@@ -141,8 +141,6 @@ mod tests {
                 .build())
         });
 
-        let mock_service = mock_service.build();
-
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
@@ -175,8 +173,6 @@ mod tests {
                 .status_code(StatusCode::OK)
                 .build())
         });
-
-        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
@@ -222,8 +218,6 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_service = mock_service.build();
-
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
@@ -261,8 +255,6 @@ mod tests {
                     .build()
                     .unwrap())
             });
-
-        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {

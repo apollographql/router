@@ -416,7 +416,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
@@ -450,7 +450,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
@@ -485,7 +485,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
@@ -520,7 +520,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
@@ -556,13 +556,14 @@ mod tests {
     #[tokio::test]
     async fn test_hmac_jwtauth_accepts_valid_tokens() {
         // create a mock service we will use to test our plugin
-        let mut mock = test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
-        mock.expect_call()
+        mock_service
+            .expect_call()
             .once()
             .returning(move |req: RouterRequest| {
                 // Let's make sure our request contains (some of) our JWTClaims
@@ -580,9 +581,6 @@ mod tests {
                     .build()
                     .expect("expecting valid request"))
             });
-
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -639,7 +637,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -691,7 +689,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";

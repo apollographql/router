@@ -126,7 +126,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -161,7 +161,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -196,13 +196,14 @@ mod tests {
         let operation_name = "validOperationName";
 
         // create a mock service we will use to test our plugin
-        let mut mock = test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once, with the expected operation_name
-        mock.expect_call()
+        mock_service
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 assert_eq!(
@@ -221,9 +222,6 @@ mod tests {
                     .build()
                     .unwrap())
             });
-
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
