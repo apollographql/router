@@ -46,7 +46,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
-                    schema.as_str().to_string(),
+                    schema.as_string().to_string(),
                     QueryPlannerConfig {
                         defer_stream_support: Some(DeferStreamSupport {
                             enable_defer: Some(configuration.server.experimental_defer_support),
@@ -80,7 +80,7 @@ impl BridgeQueryPlanner {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
-                    .execute(self.schema.as_str(), query)
+                    .execute(self.schema.as_string(), query)
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 

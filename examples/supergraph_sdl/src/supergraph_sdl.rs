@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_compiler::ApolloCompiler;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -13,7 +15,7 @@ use tower::ServiceExt;
 // Global state for our plugin would live here.
 // We keep our supergraph sdl here as a string.
 struct SupergraphSDL {
-    supergraph_sdl: String,
+    supergraph_sdl: Arc<String>,
 }
 
 #[async_trait::async_trait]
