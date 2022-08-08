@@ -83,6 +83,16 @@ using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
 
+### Some items were renamed ([PR #FIXME])
+
+* `SchemaKind` → `SchemaSource`
+* `SchemaKind::String(String)` → `SchemaSource::Static { schema_sdl: String }`
+* `ConfigurationKind` → `ConfigurationSource`
+* `ConfigurationKind::Instance` → `ConfigurationSource::Static`
+* `ShutdownKind` → `ShutdownSource`
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Removed constructors when there is a public builder ([PR #FIXME])
 
 Many types in the Router API can be constructed with the builder pattern.

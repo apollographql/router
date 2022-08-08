@@ -26,9 +26,9 @@ use crate::configuration::generate_config_schema;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ApolloRouter;
-use crate::router::ConfigurationKind;
-use crate::router::SchemaKind;
-use crate::router::ShutdownKind;
+use crate::router::ConfigurationSource;
+use crate::router::SchemaSource;
+use crate::router::ShutdownSource;
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
@@ -159,7 +159,7 @@ impl Executable {
     /// You may optionally supply a `router_builder_fn` to override building of the router.
     ///
     /// ```no_run
-    /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
+    /// use apollo_router::{ApolloRouter, Executable, ShutdownSource};
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main()->Result<()> {
@@ -167,7 +167,7 @@ impl Executable {
     ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
     ///                 .configuration(configuration)
     ///                 .schema(schema)
-    ///                 .shutdown(ShutdownKind::CtrlC)
+    ///                 .shutdown(ShutdownSource::CtrlC)
     ///                 .build())
     ///   .start().await
     /// # }
@@ -176,7 +176,7 @@ impl Executable {
     ///
     #[builder(entry = "builder", exit = "start", visibility = "pub")]
     async fn start(
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> ApolloRouter>,
     ) -> Result<()> {
         let opt = Opt::parse();
 
@@ -216,7 +216,7 @@ impl Executable {
     }
 
     async fn inner_start(
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+        router_builder_fn: Option<fn(ConfigurationSource, SchemaSource) -> ApolloRouter>,
         opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
@@ -232,7 +232,7 @@ impl Executable {
                     path.to_path_buf()
                 };
 
-                ConfigurationKind::File {
+                ConfigurationSource::File {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
@@ -251,7 +251,7 @@ impl Executable {
                 } else {
                     supergraph_path
                 };
-                SchemaKind::File {
+                SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
                     delay: None,
@@ -277,7 +277,7 @@ impl Executable {
                         error: err.to_string(),
                     })?;
 
-                SchemaKind::Registry {
+                SchemaSource::Registry {
                     apollo_key,
                     apollo_graph_ref,
                     urls: uplink_endpoints,
@@ -323,7 +323,7 @@ impl Executable {
             ApolloRouter::builder()
                 .configuration(configuration)
                 .schema(schema)
-                .shutdown(ShutdownKind::CtrlC)
+                .shutdown(ShutdownSource::CtrlC)
                 .build()
         })(configuration, schema);
         if let Err(err) = router.serve().await {
