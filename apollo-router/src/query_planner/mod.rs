@@ -1639,10 +1639,15 @@ mod tests {
         };
 
         let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_a_service.expect_clone().returning(|| {
+            let mut mock_a_service = plugin::test::MockSubgraphService::new();
+            mock_a_service
+                .expect_call()
+                .times(1)
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+            mock_a_service
+        });
 
         // the first fetch returned null, so there should never be a call to B
         let mut mock_b_service = plugin::test::MockSubgraphService::new();
@@ -1652,15 +1657,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "A".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_a_service.build().boxed()),
+                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "B".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_b_service.build().boxed()),
+                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),

@@ -1358,7 +1358,7 @@ mod tests {
         // Another subgraph
         let mut subgraph_service = dyn_plugin.subgraph_service(
             "my_subgraph_name_error",
-            BoxService::new(mock_subgraph_service_in_error.build()),
+            BoxService::new(mock_subgraph_service_in_error),
         );
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
