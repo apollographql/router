@@ -35,6 +35,15 @@ This generic type complicates the API with limited benefit because we use BoxStr
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1420
 
+### Remove Buffer from Mock*Service ([PR #1440](https://github.com/apollographql/router/pull/1440)
+
+This removes the usage of `tower_test::mock::Mock` in mocked services because it isolated the service in a task
+so panics triggered by mockall were not transmitted up to the unit test that should catch it.
+This rewrites the mocked services API to remove the `build()` method, and make them clonable if needed,
+using an `expect_clone` call with mockall.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
+
 ## 🚀 Features
 
 ### Experimental support for the `@defer` directive ([PR #1182](https://github.com/apollographql/router/pull/1182)
