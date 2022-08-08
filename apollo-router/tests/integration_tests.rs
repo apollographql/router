@@ -9,12 +9,10 @@ use std::sync::Mutex;
 
 use apollo_router::graphql;
 use apollo_router::graphql::Request;
-use apollo_router::http_ext;
-use apollo_router::json_ext::Object;
-use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugins::telemetry::Telemetry;
+use apollo_router::services::http_ext;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
@@ -24,12 +22,17 @@ use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+
+type Object = Map<ByteString, Value>;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -770,5 +773,51 @@ impl Plugin for CountingServiceRegistry {
                 request
             })
             .boxed()
+    }
+}
+
+trait ValueExt {
+    fn eq_and_ordered(&self, other: &Self) -> bool;
+}
+
+impl ValueExt for Value {
+    fn eq_and_ordered(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Object(a), Value::Object(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some((field_a, value_a)), Some((field_b, value_b)))
+                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some(value_a), Some(value_b))
+                            if ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (a, b) => a == b,
+        }
     }
 }

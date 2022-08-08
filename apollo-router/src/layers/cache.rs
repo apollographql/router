@@ -182,7 +182,6 @@ mod test {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::mock_service;
 
     #[derive(Default, Clone)]
     struct Slow;

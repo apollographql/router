@@ -26,20 +26,9 @@ use crate::Schema;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
-pub struct ExecutionService<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionService<SF: SubgraphServiceFactory> {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_creator: Arc<SF>,
-}
-
-//#[buildstructor::buildstructor]
-impl<SF: SubgraphServiceFactory> ExecutionService<SF> {
-    //#[builder]
-    pub fn new(schema: Arc<Schema>, subgraph_creator: Arc<SF>) -> Self {
-        Self {
-            schema,
-            subgraph_creator,
-        }
-    }
 }
 
 impl<SF> Service<ExecutionRequest> for ExecutionService<SF>

@@ -19,9 +19,9 @@ use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-pub use self::execution_service::*;
-pub use self::router_service::*;
-pub use self::subgraph_service::*;
+pub(crate) use self::execution_service::*;
+pub(crate) use self::router_service::*;
+pub(crate) use self::subgraph_service::*;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;

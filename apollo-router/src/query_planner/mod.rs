@@ -258,7 +258,7 @@ impl PlanNode {
 
 impl QueryPlan {
     /// Execute the plan and return a [`Response`].
-    pub async fn execute<'a, SF>(
+    pub(crate) async fn execute<'a, SF>(
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,

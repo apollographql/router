@@ -85,12 +85,43 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Some items were renamed ([PR #FIXME])
 
+At the crate root:
+
 * `SchemaKind` → `SchemaSource`
 * `SchemaKind::String(String)` → `SchemaSource::Static { schema_sdl: String }`
 * `ConfigurationKind` → `ConfigurationSource`
 * `ConfigurationKind::Instance` → `ConfigurationSource::Static`
 * `ShutdownKind` → `ShutdownSource`
 * `ApolloRouter` → `RouterHttpServer`
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Some items were removed from the public API ([PR #FIXME])
+
+If you used some of them and don’t find a replacement,
+please [file an issue](https://github.com/apollographql/router/issues/)
+with details about the use case.
+
+```
+apollo_router::errors::CacheResolverError
+apollo_router::errors::JsonExtError
+apollo_router::errors::PlanError
+apollo_router::errors::PlannerError
+apollo_router::errors::PlannerErrors
+apollo_router::errors::QueryPlannerError
+apollo_router::errors::ServiceBuildError
+apollo_router::json_ext
+apollo_router::mock_service!
+apollo_router::query_planner::QueryPlan::execute
+apollo_router::services::ExecutionService
+apollo_router::services::MakeSubgraphService
+apollo_router::services::PluggableRouterServiceBuilder
+apollo_router::services::RouterService
+apollo_router::services::RouterCreator
+apollo_router::services::SubgraphService
+apollo_router::services::SubgraphServiceFactory
+apollo_router::Schema
+```
 
 By [@SimonSapin](https://github.com/SimonSapin)
 

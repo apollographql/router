@@ -46,7 +46,9 @@ macro_rules! failfast_error {
 }
 
 #[macro_use]
-pub mod json_ext;
+mod json_ext;
+#[macro_use]
+pub mod plugin;
 
 mod axum_http_server_factory;
 mod cache;
@@ -59,7 +61,6 @@ pub mod graphql;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
-pub mod plugin;
 pub mod plugins;
 pub mod query_planner;
 mod request;
@@ -83,7 +84,6 @@ pub use router::ShutdownSource;
 #[doc(hidden)]
 pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
-pub use spec::Schema;
 pub use test_harness::TestHarness;
 
 /// Reexports for macros

@@ -15,6 +15,7 @@
 //! mechanism for interacting with the request and response.
 
 pub mod serde;
+#[macro_use]
 pub mod test;
 
 use std::collections::HashMap;

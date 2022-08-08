@@ -1,6 +1,7 @@
 //! Utilities which make it easy to test with [`crate::plugin`].
 
 mod mock;
+#[macro_use]
 mod service;
 
 use std::collections::HashMap;
