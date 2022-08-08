@@ -466,7 +466,7 @@ mod test {
             test:
                 global_rate_limit:
                     capacity: 1
-                    interval: 1sec
+                    interval: 300ms
                 timeout: 500ms
         "#,
         )
@@ -491,7 +491,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
@@ -506,7 +506,7 @@ mod test {
         router:
             global_rate_limit:
                 capacity: 1
-                interval: 1sec
+                interval: 300ms
             timeout: 500ms
         "#,
         )
@@ -536,7 +536,7 @@ mod test {
             .oneshot(RouterRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .router_service(mock_service.clone().boxed())
             .oneshot(RouterRequest::fake_builder().build().unwrap())
