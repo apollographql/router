@@ -1,12 +1,14 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use futures::ready;
-use tokio::time::Instant;
 use tower::Service;
 
 use super::future::ResponseFuture;
@@ -17,7 +19,10 @@ use crate::plugins::traffic_shaping::rate::error::RateLimited;
 pub(crate) struct RateLimit<T> {
     pub(crate) inner: T,
     pub(crate) rate: Rate,
-    pub(crate) window_start: Arc<RwLock<Instant>>,
+    /// We're using an atomic u64 because it's basically a timestamp in milliseconds for the start of the window
+    /// Instead of using an Instant which is not thread safe we're using an atomic u64
+    /// It's ok to have an u64 because we just care about milliseconds for this use case
+    pub(crate) window_start: Arc<AtomicU64>,
     pub(crate) previous_nb_requests: Arc<AtomicUsize>,
     pub(crate) current_nb_requests: Arc<AtomicUsize>,
 }
@@ -32,25 +37,43 @@ where
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut window_start = self.window_start.read().unwrap().elapsed();
-        let time_unit = self.rate.per();
+        let time_unit = self.rate.per().as_millis() as u64;
 
-        if window_start > time_unit {
-            let new_window_start = Instant::now();
-            *self.window_start.write().unwrap() = new_window_start;
-            window_start = new_window_start.elapsed();
+        let updated =
+            self.window_start
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |window_start| {
+                    let duration_start = Duration::from_millis(window_start);
+                    let duration_now = Duration::from_millis(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("system time must be after EPOCH")
+                            .as_millis() as u64,
+                    );
+                    if duration_now.saturating_sub(duration_start) > self.rate.per() {
+                        Some(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("system time must be after EPOCH")
+                                .as_millis() as u64,
+                        )
+                    } else {
+                        None
+                    }
+                });
+        // If it has been updated
+        if let Ok(_updated_window_start) = updated {
             self.previous_nb_requests.swap(
                 self.current_nb_requests.load(Ordering::SeqCst),
                 Ordering::SeqCst,
             );
             self.current_nb_requests.swap(1, Ordering::SeqCst);
         }
+
         let estimated_cap = (self.previous_nb_requests.load(Ordering::SeqCst)
             * (time_unit
-                .checked_sub(window_start)
+                .checked_sub(self.window_start.load(Ordering::SeqCst))
                 .unwrap_or_default()
-                .as_millis()
-                / time_unit.as_millis()) as usize)
+                / time_unit) as usize)
             + self.current_nb_requests.load(Ordering::SeqCst);
 
         if estimated_cap as u64 > self.rate.num() {
