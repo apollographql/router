@@ -84,17 +84,6 @@ pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
 pub use spec::Schema;
 
-#[deprecated(note = "use apollo_router::graphql::Request instead")]
-pub type Request = graphql::Request;
-#[deprecated(note = "use apollo_router::graphql::Response instead")]
-pub type Response = graphql::Response;
-#[deprecated(note = "use apollo_router::graphql::Error instead")]
-pub type Error = graphql::Error;
-
-// TODO: clean these up and import from relevant modules instead
-pub(crate) use services::*;
-pub(crate) use spec::*;
-
 /// Reexports for macros
 #[doc(hidden)]
 pub mod _private {
@@ -102,3 +91,7 @@ pub mod _private {
     pub use serde_json;
     pub use startup;
 }
+
+// TODO: clean these up and import from relevant modules instead
+pub(crate) use services::*;
+pub(crate) use spec::*;

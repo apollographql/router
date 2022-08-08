@@ -158,6 +158,27 @@ If you were using one of these constructors, the migration generally looks like 
 +    .build()
 ```
 
+### Removed deprecated type aliases ([PR #FIXME])
+
+A few versions ago, some types were moved from the crate root to a new `graphql` module.
+To help the transition, type aliases were left at the old location with a deprecation warning.
+These aliases are now removed, remaining imports must be changed to the new location:
+
+```diff
+-use apollo_router::Error;
+-use apollo_router::Request;
+-use apollo_router::Response;
++use apollo_router::graphql::Error;
++use apollo_router::graphql::Request;
++use apollo_router::graphql::Response;
+```
+
+Alternatively, import the module with `use apollo_router::graphql` 
+then use qualified paths such as `graphql::Request`.
+This can help disambiguate when multiple types share a name.
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
