@@ -14,25 +14,19 @@ use apollo_router::json_ext::Object;
 use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::plugins::csrf;
-use apollo_router::plugins::telemetry::apollo;
-use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::Telemetry;
-use apollo_router::plugins::telemetry::{self};
-use apollo_router::services::PluggableRouterServiceBuilder;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::RouterResponse;
 use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphService;
-use apollo_router::Configuration;
+use apollo_router::services::SubgraphResponse;
 use apollo_router::Context;
-use apollo_router::Schema;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
+use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
@@ -433,7 +427,7 @@ async fn mutation_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
-    let (router, registry) = setup_router_and_registry(Default::default()).await;
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
     let mut extensions: Object = Default::default();
     extensions.insert("code", "PERSISTED_QUERY_NOT_FOUND".into());
@@ -594,10 +588,9 @@ async fn missing_variables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
-    let config = json!({
+    let config = serde_json::json!({
         "server": {"experimental_parser_recursion_limit": 12_usize}
     });
-    let config = serde_json_bytes::from_value(config).unwrap();
     let request = Request::builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
         .build();
@@ -621,10 +614,9 @@ async fn query_just_under_recursion_limit() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
-    let config = json!({
+    let config = serde_json::json!({
         "server": {"experimental_parser_recursion_limit": 11_usize}
     });
-    let config = serde_json_bytes::from_value(config).unwrap();
     let request = Request::builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
         .build();
@@ -673,63 +665,45 @@ async fn query_node(
 async fn query_rust(
     request: RouterRequest,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
-    query_rust_with_config(request, Default::default()).await
+    query_rust_with_config(request, serde_json::json!({})).await
 }
 
 async fn query_rust_with_config(
     request: RouterRequest,
-    config: Arc<Configuration>,
+    config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
     (query_with_router(router, request).await, counting_registry)
 }
 
 async fn setup_router_and_registry(
-    config: Arc<Configuration>,
+    config: serde_json::Value,
 ) -> (
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
-    let schema = include_str!("fixtures/supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
+    let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let subgraphs = schema.subgraphs();
-    let mut builder = PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(config);
-    let telemetry_plugin = Telemetry::new_with_subscriber(
-        PluginInit::new(
-            telemetry::config::Conf {
-                metrics: Option::default(),
-                tracing: Some(Tracing::default()),
-                apollo: Some(apollo::Config::default()),
-            },
-            Default::default(),
-        ),
-        Some(tracing_subscriber::registry().with(test_span::Layer {})),
+    let telemetry = Telemetry::new_with_subscriber(
+        serde_json::json!({
+            "tracing": {},
+            "apollo": {
+                "schema_id": ""
+            }
+        }),
+        tracing_subscriber::registry().with(test_span::Layer {}),
     )
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))
+    let router = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration(config)
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(telemetry)
+        .build()
         .await
         .unwrap();
-    builder = builder
-        .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
-        .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
-    for (name, _url) in subgraphs {
-        let cloned_counter = counting_registry.clone();
-        let cloned_name = name.clone();
-
-        let service =
-            SubgraphService::new(name.to_owned()).map_request(move |request: SubgraphRequest| {
-                let cloned_counter = cloned_counter.clone();
-                cloned_counter.increment(cloned_name.as_str());
-
-                request
-            });
-        builder = builder.with_subgraph_service(name, service);
-    }
-
-    let router = builder.build().await.unwrap().test_service();
-
     (router, counting_registry)
 }
 
@@ -772,5 +746,29 @@ impl CountingServiceRegistry {
 
     fn totals(&self) -> HashMap<String, usize> {
         self.counts.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for CountingServiceRegistry {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        let name = subgraph_name.to_owned();
+        let counters = self.clone();
+        service
+            .map_request(move |request| {
+                counters.increment(&name);
+                request
+            })
+            .boxed()
     }
 }

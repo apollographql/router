@@ -161,7 +161,7 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Self::new_with_subscriber::<Registry>(init, None).await
+        Self::new_common::<Registry>(init.config, None).await
     }
 
     fn router_service(
@@ -533,14 +533,24 @@ impl Plugin for Telemetry {
 impl Telemetry {
     /// This method can be used instead of `Plugin::new` to override the subscriber
     pub async fn new_with_subscriber<S>(
-        init: PluginInit<<Self as Plugin>::Config>,
+        config: serde_json::Value,
+        subscriber: S,
+    ) -> Result<Self, BoxError>
+    where
+        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
+    {
+        Self::new_common(serde_json::from_value(config)?, Some(subscriber)).await
+    }
+
+    /// This method can be used instead of `Plugin::new` to override the subscriber
+    pub async fn new_common<S>(
+        mut config: <Self as Plugin>::Config,
         subscriber: Option<S>,
     ) -> Result<Self, BoxError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let mut config = init.config;
         let apollo = config
             .apollo
             .as_mut()
