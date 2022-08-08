@@ -62,7 +62,7 @@ pub(crate) struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(long, env = "APOLLO_ROUTER_DEV_MODE")]
+    #[clap(env = "APOLLO_ROUTER_DEV_MODE", hidden = true)]
     dev: bool,
 
     /// Schema location relative to the project directory.
