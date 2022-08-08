@@ -1,15 +1,20 @@
 // this file is shared between the tests and benchmarks, using
 // include!() instead of as a pub module, so it is only compiled
 // in dev mode
+use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::{ RouterRequest, RouterResponse};
-use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::Schema;
+use apollo_router::services::RouterRequest;
+use apollo_router::services::RouterResponse;
+use apollo_router::services::SubgraphRequest;
+use apollo_router::services::SubgraphResponse;
+use apollo_router::TestHarness;
 use apollo_router::graphql::Response;
 use once_cell::sync::Lazy;
 use serde_json::json;
-use std::sync::Arc;
-use tower::{util::BoxCloneService, BoxError, Service, ServiceExt};
+use std::collections::HashMap;
+use tower::util::{BoxCloneService, BoxService};
+use tower::{BoxError, Service, ServiceExt};
 
 static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
     serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
@@ -39,7 +44,7 @@ pub async fn basic_composition_benchmark(
     assert_eq!(response, *EXPECTED_RESPONSE);
 }
 
-pub fn setup() -> PluggableRouterServiceBuilder {
+pub fn setup() -> TestHarness<'static> {
     let account_mocks = vec![
             (
                 json!{{
@@ -217,13 +222,33 @@ pub fn setup() -> PluggableRouterServiceBuilder {
             ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     let product_service = MockSubgraph::new(product_mocks);
 
+    let mut mocks = HashMap::new();
+    mocks.insert("accounts", account_service);
+    mocks.insert("reviews", review_service);
+    mocks.insert("products", product_service);
+
     let schema = include_str!("../benches/fixtures/supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    TestHarness::builder().schema(schema).extra_plugin(MockedSubgraphs(mocks))
+}
 
-    let builder = PluggableRouterServiceBuilder::new(schema);
+struct MockedSubgraphs(HashMap<&'static str, MockSubgraph>);
 
-    builder
-        .with_subgraph_service("accounts", account_service)
-        .with_subgraph_service("reviews", review_service)
-        .with_subgraph_service("products", product_service)
+#[async_trait::async_trait]
+impl Plugin for MockedSubgraphs {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        default: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        self.0
+            .get(subgraph_name)
+            .map(|service| service.clone().boxed())
+            .unwrap_or(default)
+    }
 }
