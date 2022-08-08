@@ -1,0 +1,43 @@
+{{- if .Values.virtualservice.enabled -}}
+{{- $fullName := include "router.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- $hostName := printf "%s.%s.svc.cluster.local" $fullName .Release.Namespace }}
+
+{{ if .Values.virtualservice.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Values.virtualservice.namespace }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - {{ .Values.virtualservice.gatewayName }}
+    {{- if .Values.virtualservice.http }}
+  http:
+  {{- if .Values.virtualservice.http.main.enabled }}
+    - name: "router-graphql-routes"
+      match:
+        - uri:
+            prefix: "/graphql"
+        - uri:
+            exact: "/"
+      route:
+        - destination:
+            host: {{ $hostName }}
+            port:
+              number: 80
+  {{- end }}
+  {{- if .Values.virtualservice.http.additionals }}
+    {{- toYaml .Values.virtualservice.http.additionals | nindent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
