@@ -15,7 +15,7 @@ impl Rate {
     ///
     /// This function panics if `num` or `per` is 0.
     pub(crate) fn new(num: NonZeroU64, per: Duration) -> Self {
-        assert!(per > Duration::from_millis(0));
+        assert!(per > Duration::default());
 
         Rate {
             num: num.into(),
