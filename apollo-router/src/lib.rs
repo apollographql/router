@@ -70,10 +70,15 @@ pub mod services;
 mod spec;
 mod state_machine;
 
-pub use configuration::*;
+pub use configuration::Configuration;
+pub use configuration::ListenAddr;
 pub use context::Context;
-pub use executable::*;
-pub use router::*;
+pub use executable::main;
+pub use executable::Executable;
+pub use router::ConfigurationSource;
+pub use router::RouterHttpServer;
+pub use router::SchemaSource;
+pub use router::ShutdownSource;
 #[doc(hidden)]
 pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
