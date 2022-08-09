@@ -102,10 +102,16 @@ mod tests {
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.hello_world")
-            .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"name" : "Bob"}), Default::default())
+        let config = serde_json::json!({
+            "plugins": {
+                "example.hello_world": {
+                    "name": "Bob"
+                }
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration(serde_json::from_value(config).unwrap())
+            .build()
             .await
             .unwrap();
     }

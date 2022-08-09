@@ -89,20 +89,20 @@ where
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
-pub struct PluginFactory {
+pub(crate) struct PluginFactory {
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
 }
 
 impl PluginFactory {
-    pub fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
+    pub(crate) fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
         Self {
             instance_factory,
             schema_factory,
         }
     }
 
-    pub async fn create_instance(
+    pub(crate) async fn create_instance(
         &self,
         configuration: &serde_json::Value,
         supergraph_sdl: Arc<String>,
@@ -118,7 +118,7 @@ impl PluginFactory {
         (self.instance_factory)(configuration, Default::default()).await
     }
 
-    pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+    pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
         (self.schema_factory)(gen)
     }
 }
@@ -129,7 +129,17 @@ static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(
 });
 
 /// Register a plugin factory.
-pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
+pub fn register_plugin<P: Plugin>(name: String) {
+    let plugin_factory = PluginFactory::new(
+        |configuration, schema| {
+            Box::pin(async move {
+                let init = PluginInit::try_new(configuration.clone(), schema)?;
+                let plugin = P::new(init).await?;
+                Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+            })
+        },
+        |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+    );
     PLUGIN_REGISTRY
         .lock()
         .expect("Lock poisoned")
@@ -137,7 +147,7 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
 }
 
 /// Get a copy of the registered plugin factories.
-pub fn plugins() -> HashMap<String, PluginFactory> {
+pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
@@ -148,7 +158,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
-    type Config: JsonSchema + DeserializeOwned;
+    type Config: JsonSchema + DeserializeOwned + Send;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -217,7 +227,7 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
-pub trait DynPlugin: Send + Sync + 'static {
+pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
     fn activate(&mut self);
@@ -304,7 +314,7 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
-    ($group: literal, $name: literal, $value: ident) => {
+    ($group: literal, $name: literal, $plugin_type: ident) => {
         $crate::_private::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
@@ -313,17 +323,7 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::plugin::register_plugin(
-                qualified_name,
-                $crate::plugin::PluginFactory::new(
-                    |configuration, schema| Box::pin(async move {
-                        let init = $crate::plugin::PluginInit::try_new(configuration.clone(), schema)?;
-                        let plugin = $value::new(init).await?;
-                        Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
-                    }),
-                    |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()
-                )
-            );
+            $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
         }
     };
 }

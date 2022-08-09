@@ -173,6 +173,10 @@ apollo_router::errors::QueryPlannerError
 apollo_router::errors::ServiceBuildError
 apollo_router::json_ext
 apollo_router::mock_service!
+apollo_router::plugin::plugins
+apollo_router::plugin::PluginFactory
+apollo_router::plugin::DynPlugin
+apollo_router::plugin::test::MockSubgraphFactory
 apollo_router::query_planner::QueryPlan::execute
 apollo_router::services
 apollo_router::Schema

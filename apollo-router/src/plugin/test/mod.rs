@@ -190,7 +190,7 @@ impl PluginTestHarness {
 }
 
 #[derive(Clone)]
-pub struct MockSubgraphFactory {
+pub(crate) struct MockSubgraphFactory {
     pub(crate) subgraphs: HashMap<String, Arc<dyn MakeSubgraphService>>,
     pub(crate) plugins: Arc<Plugins>,
 }

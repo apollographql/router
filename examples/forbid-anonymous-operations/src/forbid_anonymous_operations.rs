@@ -96,7 +96,7 @@ mod tests {
     use apollo_router::plugin::Plugin;
     use apollo_router::stages::router;
     use http::StatusCode;
-    use serde_json::Value;
+    use serde_json::json;
     use tower::ServiceExt;
 
     use super::ForbidAnonymousOperations;
@@ -107,10 +107,14 @@ mod tests {
     // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.forbid_anonymous_operations")
-            .expect("Plugin not found")
-            .create_instance(&Value::Null, Default::default())
+        let config = json!({
+            "plugins": {
+                "example.forbid_anonymous_operations": null
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration(serde_json::from_value(config).unwrap())
+            .build()
             .await
             .unwrap();
     }

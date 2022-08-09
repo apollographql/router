@@ -398,10 +398,17 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.jwt")
-            .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}), Default::default())
+        let config = serde_json::json!({
+            "plugins": {
+                "example.jwt": {
+                    "algorithm": "HS256" ,
+                    "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"
+                }
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration(serde_json::from_value(config).unwrap())
+            .build()
             .await
             .unwrap();
     }

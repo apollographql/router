@@ -106,13 +106,16 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.propagate_status_code")
-            .expect("Plugin not found")
-            .create_instance(
-                &json!({ "status_codes" : [500, 403, 401] }),
-                Default::default(),
-            )
+        let config = serde_json::json!({
+            "plugins": {
+                "example.propagate_status_code": {
+                    "status_codes" : [500, 403, 401]
+                }
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration(serde_json::from_value(config).unwrap())
+            .build()
             .await
             .unwrap();
     }

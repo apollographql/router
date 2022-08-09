@@ -176,6 +176,7 @@ mod tests {
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
     use apollo_router::stages::router;
+    use apollo_router::TestHarness;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -189,13 +190,17 @@ mod tests {
     // see router.yaml for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.allow_client_id_from_file")
-            .expect("Plugin not found")
-            .create_instance(
-                &json!({"header": "x-client-id","path": "allowedClientIds.json"}),
-                Default::default(),
-            )
+        let config = json!({
+            "plugins": {
+                "example.allow_client_id_from_file": {
+                    "header": "x-client-id",
+                    "path": "allowedClientIds.json",
+                }
+            }
+        });
+        TestHarness::builder()
+            .configuration(serde_json::from_value(config).unwrap())
+            .build()
             .await
             .unwrap();
     }
