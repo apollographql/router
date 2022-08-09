@@ -40,6 +40,7 @@ use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
+use crate::ConfigurationError;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::SubgraphRequest;
@@ -150,11 +151,22 @@ impl Plugin for TrafficShaping {
             .as_ref()
             .and_then(|r| r.global_rate_limit.as_ref())
             .map(|router_rate_limit_conf| {
-                RateLimitLayer::new(
-                    router_rate_limit_conf.capacity,
-                    router_rate_limit_conf.interval,
-                )
-            });
+                if router_rate_limit_conf.interval.as_millis() > u64::MAX as u128 {
+                    Err(ConfigurationError::InvalidConfiguration {
+                        message: "bad configuration for traffic_shaping plugin",
+                        error: format!(
+                            "cannot set an interval for the rate limit greater than {} ms",
+                            u64::MAX
+                        ),
+                    })
+                } else {
+                    Ok(RateLimitLayer::new(
+                        router_rate_limit_conf.capacity,
+                        router_rate_limit_conf.interval,
+                    ))
+                }
+            })
+            .transpose()?;
 
         Ok(Self {
             config: init.config,

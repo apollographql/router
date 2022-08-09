@@ -42,20 +42,12 @@ where
         let updated =
             self.window_start
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |window_start| {
-                    let duration_start = Duration::from_millis(window_start);
-                    let duration_now = Duration::from_millis(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("system time must be after EPOCH")
-                            .as_millis() as u64,
-                    );
-                    if duration_now.saturating_sub(duration_start) > self.rate.per() {
-                        Some(
-                            SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .expect("system time must be after EPOCH")
-                                .as_millis() as u64,
-                        )
+                    let duration_now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("system time must be after EPOCH")
+                        .as_millis() as u64;
+                    if duration_now - window_start > self.rate.per().as_millis() as u64 {
+                        Some(duration_now)
                     } else {
                         None
                     }
