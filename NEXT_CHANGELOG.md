@@ -33,7 +33,7 @@ The router now mirrors client's `Access-Control-Request-Headers` by default.
 
 #### What has changed?
 The latest release (0.14.0) introduced an `allow_any_header` setting, which is now removed.
-#### How to I `allow_any_header` in the latest release?
+#### How do I `allow_any_header` in the latest release?
 This is the default behavior, you can remove `allow_any_header` from your configuration.
 
 ### How do I *not* `allow_any_header` in the latest release?
