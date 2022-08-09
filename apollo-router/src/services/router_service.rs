@@ -25,7 +25,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
-use super::QueryPlannerContent;
+use super::QueryPlannerContentInner;
 use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -38,7 +38,6 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::query_planner::QueryPlanOptions;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
@@ -125,17 +124,16 @@ where
                                 .expect("the query presence was already checked by a plugin"),
                         )
                         .and_operation_name(body.operation_name.clone())
-                        .query_plan_options(QueryPlanOptions::default())
                         .context(context)
                         .build(),
                 )
                 .await?;
 
-            match content {
-                QueryPlannerContent::Introspection { response } => Ok(
+            match content.0 {
+                QueryPlannerContentInner::Introspection { response } => Ok(
                     RouterResponse::new_from_graphql_response(*response, context),
                 ),
-                QueryPlannerContent::IntrospectionDisabled => {
+                QueryPlannerContentInner::IntrospectionDisabled => {
                     let mut resp = http::Response::new(
                         once(ready(
                             graphql::Response::builder()
@@ -153,7 +151,7 @@ where
                         context,
                     })
                 }
-                QueryPlannerContent::Plan { query, plan } => {
+                QueryPlannerContentInner::Plan { query, plan } => {
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {

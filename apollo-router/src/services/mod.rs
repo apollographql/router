@@ -288,7 +288,7 @@ pub struct QueryPlannerRequest {
     pub query: String,
     pub operation_name: Option<String>,
     /// Query plan options
-    pub query_plan_options: QueryPlanOptions,
+    pub(crate) query_plan_options: QueryPlanOptions,
 
     pub context: Context,
 }
@@ -302,28 +302,45 @@ impl QueryPlannerRequest {
     pub fn new(
         query: String,
         operation_name: Option<String>,
-        query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
             query,
             operation_name,
-            query_plan_options,
+            query_plan_options: QueryPlanOptions::default(),
             context,
         }
     }
 }
 
 assert_impl_all!(QueryPlannerResponse: Send);
-/// [`Context`] and [`QueryPlan`] for the response..
+/// [`Context`] and [`QueryPlan`] for the response.
 pub struct QueryPlannerResponse {
     pub content: QueryPlannerContent,
     pub context: Context,
 }
 
+/// Query, QueryPlan and Introspection data in an opaque type.
+#[derive(Debug, Clone)]
+pub struct QueryPlannerContent(pub(crate) QueryPlannerContentInner);
+
+impl std::ops::Deref for QueryPlannerContent {
+    type Target = QueryPlannerContentInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<QueryPlannerContentInner> for QueryPlannerContent {
+    fn from(inner: QueryPlannerContentInner) -> Self {
+        Self(inner)
+    }
+}
+
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
-pub enum QueryPlannerContent {
+pub enum QueryPlannerContentInner {
     Plan {
         query: Arc<Query>,
         plan: Arc<QueryPlan>,
@@ -332,6 +349,11 @@ pub enum QueryPlannerContent {
         response: Box<Response>,
     },
     IntrospectionDisabled,
+}
+impl From<QueryPlannerContent> for QueryPlannerContentInner {
+    fn from(global: QueryPlannerContent) -> Self {
+        global.0
+    }
 }
 
 #[buildstructor::buildstructor]
@@ -357,10 +379,11 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            QueryPlannerContent::Plan {
+            QueryPlannerContentInner::Plan {
                 plan: Arc::new(QueryPlan::fake_builder().build()),
                 query: Arc::new(Query::default()),
-            },
+            }
+            .into(),
             context,
         ))
     }

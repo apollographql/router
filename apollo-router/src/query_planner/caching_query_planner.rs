@@ -101,7 +101,7 @@ where
             qp.get(key)
                 .await
                 .map(|query_planner_content| {
-                    if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
+                    if let QueryPlannerContentInner::Plan { plan, .. } = &query_planner_content.0 {
                         match (&plan.usage_reporting).serialize(Serializer) {
                             Ok(v) => {
                                 request.context.insert_json_value(USAGE_REPORTING, v);
