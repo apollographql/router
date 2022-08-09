@@ -173,6 +173,20 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
+        let builder = if builder.subgraph_network_requests {
+            builder
+        } else {
+            builder.extra_subgraph_plugin(|_name, _default| {
+                tower::service_fn(|request: subgraph::Request| {
+                    let empty_response = subgraph::Response::builder()
+                        .extensions(crate::json_ext::Object::new())
+                        .context(request.context)
+                        .build();
+                    std::future::ready(Ok(empty_response))
+                })
+                .boxed()
+            })
+        };
         let config = builder.configuration.unwrap_or_default();
         let canned_schema = include_str!("../../examples/graphql/local.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
