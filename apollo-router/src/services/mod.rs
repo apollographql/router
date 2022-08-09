@@ -143,8 +143,14 @@ impl RouterRequest {
         )
     }
 
-    /// Create an example request for tests
-    pub fn canned() -> Self {
+    /// Create a request with an example query, for tests
+    #[builder(visibility = "pub")]
+    fn canned_new(
+        operation_name: Option<String>,
+        extensions: HashMap<String, Value>,
+        context: Option<Context>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+    ) -> Result<RouterRequest, BoxError> {
         let query = "
             query TopProducts($first: Int) { 
                 topProducts(first: $first) { 
@@ -158,11 +164,16 @@ impl RouterRequest {
                 } 
             }
         ";
-        Self::fake_builder()
-            .query(query)
-            .variable("first", 2usize)
-            .build()
-            .unwrap()
+        let mut variables = HashMap::new();
+        variables.insert("first".to_owned(), 2_usize.into());
+        Self::fake_new(
+            Some(query.to_owned()),
+            operation_name,
+            variables,
+            extensions,
+            context,
+            headers,
+        )
     }
 }
 

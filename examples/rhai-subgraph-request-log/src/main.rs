@@ -12,37 +12,25 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test::IntoSchema::Canned;
-    use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
-    use apollo_router::plugins::rhai::Conf;
-    use apollo_router::plugins::rhai::Rhai;
     use apollo_router::stages::router;
     use apollo_router::Context;
     use http::StatusCode;
+    use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_logs_data() {
-        // Define a configuration to use with our plugin
-        let conf: Conf = serde_json::from_value(serde_json::json!({
-            "scripts": "src",
-            "main": "rhai_subgraph_request_log.rhai",
-        }))
-        .expect("valid conf supplied");
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = Rhai::new(PluginInit::new(conf, Default::default()))
-            .await
-            .expect("created plugin");
-
-        // Build a test harness.
-        let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+        let config = serde_json::json!({
+            "rhai": {
+                "scripts": "src",
+                "main": "rhai_subgraph_request_log.rhai",
+            }
+        });
+        let test_harness = apollo_router::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
             .build()
             .await
-            .expect("building harness");
+            .unwrap();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let _expected_mock_response_data = "response created within the mock";
@@ -52,7 +40,7 @@ mod tests {
         let operation_name: Option<&str> = None;
         let context: Option<Context> = None;
         let mut service_response = test_harness
-            .call(
+            .oneshot(
                 router::Request::fake_builder()
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")

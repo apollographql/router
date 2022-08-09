@@ -173,7 +173,7 @@ mod tests {
             .build()
             .await
             .unwrap();
-        let request = router::Request::canned();
+        let request = router::Request::canned_builder().build().unwrap();
         let mut streamed_response = test_harness.oneshot(request).await?;
 
         let first_response = streamed_response

@@ -92,16 +92,10 @@ register_plugin!("example", "hello_world", HelloWorld);
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test::IntoSchema::Canned;
-    use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
-
-    use super::Conf;
-    use super::HelloWorld;
-
+    // If we run this test as follows: cargo test -- --nocapture
+    // we will see the message "Hello Bob" printed to standard out
     #[tokio::test]
-    async fn plugin_registered() {
+    async fn display_message() {
         let config = serde_json::json!({
             "plugins": {
                 "example.hello_world": {
@@ -109,36 +103,14 @@ mod tests {
                 }
             }
         });
-        apollo_router::TestHarness::builder()
+        // Build a test harness. Usually we'd use this and send requests to
+        // it, but in this case it's enough to build the harness to see our
+        // output when our service registers.
+        let _test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
             .build()
             .await
             .unwrap();
-    }
-
-    // If we run this test as follows: cargo test -- --nocapture
-    // we will see the message "Hello Bob" printed to standard out
-    #[tokio::test]
-    async fn display_message() {
-        // Define a configuration to use with our plugin
-        let conf = Conf {
-            name: "Bob".to_string(),
-        };
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = HelloWorld::new(PluginInit::new(conf, Default::default()))
-            .await
-            .expect("created plugin");
-
-        // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
-        let _test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
-            .build()
-            .await
-            .expect("building harness");
     }
 }

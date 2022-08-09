@@ -179,7 +179,7 @@ impl PluginTestHarness {
         self.router_service
             .ready()
             .await?
-            .call(RouterRequest::canned())
+            .call(RouterRequest::canned_builder().build().unwrap())
             .await
     }
 }
