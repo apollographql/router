@@ -154,7 +154,6 @@ Migration example:
  }
 ```
 
-
 By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Some items were removed from the public API ([PR #FIXME])
@@ -176,7 +175,9 @@ apollo_router::mock_service!
 apollo_router::plugin::plugins
 apollo_router::plugin::PluginFactory
 apollo_router::plugin::DynPlugin
+apollo_router::plugin::test::IntoSchema
 apollo_router::plugin::test::MockSubgraphFactory
+apollo_router::plugin::test::PluginTestHarness
 apollo_router::query_planner::QueryPlan::execute
 apollo_router::services
 apollo_router::Schema
@@ -247,6 +248,8 @@ If you were using one of these constructors, the migration generally looks like 
 +    .path(p)
 +    .build()
 ```
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Removed deprecated type aliases ([PR #FIXME])
 

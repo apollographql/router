@@ -301,7 +301,7 @@ impl SubgraphCreator {
 /// make new instances of the subgraph service
 ///
 /// there can be multiple instances of that service executing at any given time
-pub trait MakeSubgraphService: Send + Sync + 'static {
+pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
     fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
 }
 
