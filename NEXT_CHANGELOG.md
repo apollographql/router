@@ -36,7 +36,7 @@ The latest release (0.14.0) introduced an `allow_any_header` setting, which is n
 #### How do I `allow_any_header` in the latest release?
 This is the default behavior, you can remove `allow_any_header` from your configuration.
 
-### How do I *not* `allow_any_header` in the latest release?
+#### How do I *not* `allow_any_header` in the latest release?
 You can provide a list of headers to allow by filling the `allow_headers` key:
 ```yaml title="router.yaml"
 server:
