@@ -27,6 +27,29 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### CORS: Mirror client's requested headers by default ([PR #1480](https://github.com/apollographql/router/pull/1480))
+
+The router now mirrors client's `Access-Control-Request-Headers` by default.
+
+#### What has changed?
+The latest release (0.14.0) introduced an `allow_any_header` setting, which is now removed.
+#### How to I `allow_any_header` in the latest release?
+This is the default behavior, you can remove `allow_any_header` from your configuration.
+
+### How do I *not* `allow_any_header` in the latest release?
+You can provide a list of headers to allow by filling the `allow_headers` key:
+```yaml title="router.yaml"
+server:
+  cors:
+    allow_any_origin: true
+    allow_headers:
+      - Content-Type
+      - Authorization
+      - x-my-custom-header
+```
+
+By [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/1480
+
 ### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
 
 The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
