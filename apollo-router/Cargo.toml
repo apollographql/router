@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -107,7 +107,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", branch = "geal/defer" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha1" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
 serde = { version = "1.0.139", features = ["derive", "rc"] }
