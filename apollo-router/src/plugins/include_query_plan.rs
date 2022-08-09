@@ -24,7 +24,7 @@ const ENABLED_CONTEXT_KEY: &str = "experimental::include_query_plan.enabled";
 
 #[derive(Debug, Clone)]
 struct IncludeQueryPlan {
-    enabled: bool
+    enabled: bool,
 }
 
 #[async_trait::async_trait]
@@ -81,7 +81,7 @@ impl Plugin for IncludeQueryPlan {
                         if is_enabled {
                             let (parts, stream) = http::Response::from(res.response).into_parts();
                             let (mut first, rest) = stream.into_future().await;
-    
+
                             if let Some(first) = &mut first {
                                 if let Some(plan) =
                                     res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
