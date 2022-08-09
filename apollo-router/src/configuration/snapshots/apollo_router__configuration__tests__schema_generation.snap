@@ -272,9 +272,6 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "include_query_plan": {
-      "type": "boolean"
-    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
@@ -286,6 +283,9 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.include_query_plan": {
+          "type": "boolean"
+        },
         "experimental.include_subgraph_errors": {
           "type": "object",
           "properties": {
