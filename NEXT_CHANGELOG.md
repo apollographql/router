@@ -27,21 +27,20 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### CORS: Mirror client's requested headers by default ([PR #1480](https://github.com/apollographql/router/pull/1480))
+### CORS: Deprecate newly-added `allow_any_header` option and return to previous behavior ([PR #1480](https://github.com/apollographql/router/pull/1480))
 
-The router now mirrors client's `Access-Control-Request-Headers` by default.
+We've re-considered and reverted changes we shipped in the last release with regards to how we handle the [`Access-Control-Request-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Request-Headers) *request* header and its corresponding [`Access-Control-Allow-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Headers) response header.  We've reverted to the previous releases' behavior, including the removal of the recently-added `allow_any_header` option.
 
-#### What has changed?
-The latest release (0.14.0) introduced an `allow_any_header` setting, which is now removed.
-#### How do I `allow_any_header` in the latest release?
-This is the default behavior, you can remove `allow_any_header` from your configuration.
+The previous default behavior was to **reflect** the client's `Access-Control-Request-Headers` request header values back in the `Access-Control-Allow-Headers` response header.  This previous behavior is in fact a common default behavior in other CORS libraries as well, including the [`cors`](https://npm.im/cors) Node.js package and we think it's worth keeping as it was previously, rather than requiring users to specify `allow_any_header` for the _majority_ of use cases.  We believe this to be a safe and secure default that is also more user-friendly.
 
-#### How do I *not* `allow_any_header` in the latest release?
-You can provide a list of headers to allow by filling the `allow_headers` key:
+It is not typically necessary to change this default behavior, but if you wish to allow a more specific set of headers, you can disable the default header reflection and specify a list of headers using the `allow_headers` option, which will allow only those headers in negotiating a response:
+
 ```yaml title="router.yaml"
 server:
   cors:
     allow_any_origin: true
+    # Including this `allow_headers` isn't typically necessary (can be removed) but
+    # will *restrict* the permitted Access-Control-Allow-Headers response values.
     allow_headers:
       - Content-Type
       - Authorization
