@@ -35,7 +35,6 @@ use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
 use tower::service_fn;
 use tower::steer::Steer;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -68,11 +67,13 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::stages::execution;
+use crate::stages::query_planner;
+use crate::stages::router;
+use crate::stages::subgraph;
 use crate::Context;
 use crate::ExecutionRequest;
-use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::SubgraphRequest;
@@ -164,10 +165,7 @@ impl Plugin for Telemetry {
         Self::new_common::<Registry>(init.config, None).await
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
@@ -261,8 +259,8 @@ impl Plugin for Telemetry {
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &QueryPlannerRequest| {
                 let query = req.query.clone();
@@ -278,10 +276,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let query = req
@@ -306,11 +301,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();

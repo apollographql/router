@@ -68,8 +68,7 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
+use apollo_router::stages::router;
 use apollo_router::Context;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -79,7 +78,6 @@ use schemars::JsonSchema;
 use serde::de;
 use serde::Deserialize;
 use strum_macros::EnumString;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -211,10 +209,7 @@ impl Plugin for JwtAuth {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // We are going to use the `jwt-simple` crate for our JWT verification.
         // The crate provides straightforward support for the popular JWT algorithms.
 
@@ -232,15 +227,15 @@ impl Plugin for JwtAuth {
         let max_token_life = self.max_token_life;
 
         ServiceBuilder::new()
-            .checkpoint(move |req: RouterRequest| {
+            .checkpoint(move |req: router::Request| {
                 // We are going to do a lot of similar checking so let's define a local function
                 // to help reduce repetition
                 fn failure_message(
                     context: Context,
                     msg: String,
                     status: StatusCode,
-                ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
-                    let res = RouterResponse::error_builder()
+                ) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+                    let res = router::Response::error_builder()
                         .errors(vec![graphql::Error {
                             message: msg,
                             ..Default::default()
@@ -251,7 +246,7 @@ impl Plugin for JwtAuth {
                     Ok(ControlFlow::Break(res))
                 }
 
-                // The http_request is stored in a `RouterRequest` context.
+                // The http_request is stored in a `Router::Request` context.
                 // We are going to check the headers for the presence of the header we're looking for
                 // We are implementing: https://www.rfc-editor.org/rfc/rfc6750
                 // so check for our AUTHORIZATION header.
@@ -393,8 +388,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
+    use apollo_router::stages::router;
 
     use super::*;
 
@@ -424,7 +418,7 @@ mod tests {
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request without an authorization header
-        let request_without_any_authorization_header = RouterRequest::fake_builder()
+        let request_without_any_authorization_header = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -458,7 +452,7 @@ mod tests {
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_no_bearer_in_auth = RouterRequest::fake_builder()
+        let request_with_no_bearer_in_auth = router::Request::fake_builder()
             .header("authorization", "should start with Bearer")
             .build()
             .expect("expecting valid request");
@@ -493,7 +487,7 @@ mod tests {
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
+        let request_with_too_many_spaces_in_auth = router::Request::fake_builder()
             .header("authorization", "Bearer  ")
             .build()
             .expect("expecting valid request");
@@ -529,7 +523,7 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         // Note: (The token isn't valid, but the format is...)
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", "Bearer atoken")
             .build()
             .expect("expecting valid request");
@@ -567,7 +561,7 @@ mod tests {
         mock_service
             .expect_call()
             .once()
-            .returning(move |req: RouterRequest| {
+            .returning(move |req: router::Request| {
                 // Let's make sure our request contains (some of) our JWTClaims
                 let claims: JWTClaims<NoCustomClaims> = req
                     .context
@@ -578,7 +572,7 @@ mod tests {
                 assert_eq!(claims.subject, Some("subject".to_string()));
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
                     .expect("expecting valid request"))
@@ -612,7 +606,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", &format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");
@@ -662,7 +656,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");
@@ -717,7 +711,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");

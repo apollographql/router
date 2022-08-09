@@ -1,4 +1,4 @@
-use apollo_router::services::RouterRequest;
+use apollo_router::stages::router;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
 
@@ -25,7 +25,7 @@ async fn all_rhai_callbacks_are_invoked() {
         .build()
         .await
         .unwrap();
-    let request = RouterRequest::fake_builder()
+    let request = router::Request::fake_builder()
         .query("{ topProducts { name } }")
         .build()
         .unwrap();

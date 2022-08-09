@@ -41,14 +41,10 @@ use tower::ServiceBuilder;
 
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::stages::execution;
+use crate::stages::query_planner;
+use crate::stages::router;
+use crate::stages::subgraph;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -165,10 +161,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
@@ -180,17 +173,14 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         service
     }
 
@@ -200,8 +190,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         service
     }
 
@@ -236,10 +226,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError>;
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
@@ -249,15 +236,12 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>;
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -265,8 +249,8 @@ pub trait DynPlugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService;
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
@@ -287,32 +271,22 @@ where
         self.activate()
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
     }
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         self.query_planning_service(service)
     }
 
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
     }
 

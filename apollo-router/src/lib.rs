@@ -3,19 +3,20 @@
 //! Most of these modules are of varying interest to different audiences.
 //!
 //! If your interests are confined to developing plugins, then the following modules
-//! are likely to be of most interest to you: [`self`] [`error`] [`graphql`] [`layers`] [`plugin`] [`services`]
+//! are likely to be of most interest to you:
 //!
-//! self - this module (apollo_router) contains high level building blocks for a federated GraphQL router
+//! * [`self`] - this module (apollo_router) contains high level building blocks for a federated GraphQL router
 //!
-//! error - the various errors that the router is expected to handle
+//! * [`error`] - the various errors that the router is expected to handle
 //!
-//! graphql - graphql specific functionality for requests, responses, errors
+//! * [`graphql`] - graphql specific functionality for requests, responses, errors
 //!
-//! layers - examples of tower layers used to implement plugins
+//! * [`layers`] - examples of tower layers used to implement plugins
 //!
-//! plugin - various APIs for implementing a plugin
+//! * [`plugin`] - various APIs for implementing a plugin
 //!
-//! services - definition of the various services a plugin may process
+//! * [`stages`] - the various stages of handling a GraphQL requests,
+//!   and APIs for plugins to intercept them
 //!
 //! Ultimately, you might want to be interested in all aspects of the implementation, in which case
 //! you'll want to become familiar with all of the code.
@@ -67,8 +68,9 @@ mod request;
 mod response;
 mod router;
 mod router_factory;
-pub mod services;
+mod services;
 mod spec;
+pub mod stages;
 mod state_machine;
 mod test_harness;
 

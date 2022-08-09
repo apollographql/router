@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use tower::util::BoxCloneService;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -14,8 +13,7 @@ use crate::router_factory::RouterServiceConfigurator;
 use crate::router_factory::YamlRouterServiceFactory;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
+use crate::stages::subgraph;
 use crate::Schema;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
@@ -38,13 +36,13 @@ use crate::Schema;
 /// Example making a single request:
 ///
 /// ```
-/// use apollo_router::services::RouterRequest;
+/// use apollo_router::stages::router;
 /// use apollo_router::TestHarness;
 /// use tower::util::ServiceExt;
 ///
 /// # #[tokio::main] async fn main() -> Result<(), tower::BoxError> {
 /// let config = serde_json::json!({"server": {"introspection": false}});
-/// let request = RouterRequest::fake_builder()
+/// let request = router::Request::fake_builder()
 ///     // Request building here
 ///     .build()
 ///     .unwrap();
@@ -165,8 +163,8 @@ impl Plugin for CannedSubgraphResponses {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        default: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         match subgraph_name {
             "products" => canned::products_subgraph().boxed(),
             "accounts" => canned::accounts_subgraph().boxed(),

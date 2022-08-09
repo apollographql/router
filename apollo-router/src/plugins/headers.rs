@@ -18,7 +18,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -33,8 +32,8 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::stages::subgraph;
 use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -121,11 +120,7 @@ impl Plugin for Headers {
             config: init.config,
         })
     }
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let mut operations = self.config.all.clone();
         if let Some(subgraph_operations) = self.config.subgraphs.get(name) {
             operations.append(&mut subgraph_operations.clone())

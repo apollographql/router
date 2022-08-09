@@ -1,17 +1,12 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::ExecutionRequest;
-use apollo_router::services::ExecutionResponse;
-use apollo_router::services::QueryPlannerRequest;
-use apollo_router::services::QueryPlannerResponse;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphResponse;
+use apollo_router::stages::execution;
+use apollo_router::stages::query_planner;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -39,10 +34,7 @@ impl Plugin for HelloWorld {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -63,28 +55,21 @@ impl Plugin for HelloWorld {
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         // This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
     }
 
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
     }
 
     // Called for each subgraph
-    fn subgraph_service(
-        &self,
-        _name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         ServiceBuilder::new()

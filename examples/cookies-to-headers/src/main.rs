@@ -32,14 +32,13 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::http_ext;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
     use apollo_router::plugins::rhai::Conf;
     use apollo_router::plugins::rhai::Rhai;
-    use apollo_router::services::http_ext;
-    use apollo_router::services::SubgraphRequest;
-    use apollo_router::services::SubgraphResponse;
+    use apollo_router::stages::subgraph;
     use http::header::HeaderName;
     use http::HeaderValue;
     use http::StatusCode;
@@ -57,7 +56,7 @@ mod tests {
         mock_service
             .expect_call()
             .once()
-            .returning(move |req: SubgraphRequest| {
+            .returning(move |req: subgraph::Request| {
                 // Let's make sure our request contains our new headers
                 assert_eq!(
                     req.subgraph_request
@@ -73,7 +72,7 @@ mod tests {
                         .expect("tasty_cookie is present"),
                     "strawberry"
                 );
-                Ok(SubgraphResponse::fake_builder()
+                Ok(subgraph::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build())
             });
@@ -115,7 +114,7 @@ mod tests {
         }
 
         // Let's create a request with our cookies
-        let request_with_appropriate_cookies = SubgraphRequest::fake_builder()
+        let request_with_appropriate_cookies = subgraph::Request::fake_builder()
             .originating_request(std::sync::Arc::new(originating_request))
             .subgraph_request(sub_request)
             .build();

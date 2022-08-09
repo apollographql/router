@@ -31,7 +31,7 @@ use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
 use crate::query_planner::QueryPlanOptions;
-pub use crate::spec::Query;
+use crate::spec::Query;
 use crate::Context;
 
 mod execution_service;

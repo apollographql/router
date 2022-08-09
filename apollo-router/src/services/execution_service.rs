@@ -8,7 +8,6 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -20,6 +19,7 @@ use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::Response;
+use crate::stages::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::Schema;
@@ -105,7 +105,7 @@ impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
 where
     SF: SubgraphServiceFactory,
 {
-    type Service = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    type Service = execution::BoxService;
 
     fn new_service(&self) -> Self::Service {
         ServiceBuilder::new()
@@ -125,7 +125,7 @@ where
 }
 
 impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
-    type ExecutionService = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    type ExecutionService = execution::BoxService;
     type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
         ExecutionRequest,
     >>::Future;

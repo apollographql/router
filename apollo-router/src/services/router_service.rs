@@ -40,6 +40,7 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::stages::query_planner;
 use crate::Configuration;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -362,12 +363,8 @@ impl PluggableRouterServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    query_planner_service: CachingQueryPlanner<
-        Buffer<
-            BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-            QueryPlannerRequest,
-        >,
-    >,
+    query_planner_service:
+        CachingQueryPlanner<Buffer<query_planner::BoxService, QueryPlannerRequest>>,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,

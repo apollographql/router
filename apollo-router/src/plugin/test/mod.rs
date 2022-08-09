@@ -37,12 +37,13 @@ use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
+use crate::stages::router;
 use crate::Configuration;
 use crate::RouterService;
 use crate::Schema;
 
 pub struct PluginTestHarness {
-    router_service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    router_service: router::BoxService,
 }
 pub enum IntoSchema {
     String(String),

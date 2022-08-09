@@ -5,10 +5,8 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
+use apollo_router::stages::router;
 use http::StatusCode;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -33,16 +31,13 @@ impl Plugin for ForbidAnonymousOperations {
 
     // Forbidding anonymous operations can happen at the very beginning of our GraphQL request lifecycle.
     // We will thus put the logic it in the `router_service` section of our plugin.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
         // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .checkpoint(|req: RouterRequest| {
+            .checkpoint(|req: router::Request| {
                 // The http_request is stored in a `RouterRequest` context.
                 // Its `body()` is an `apollo_router::Request`, that contains:
                 // - Zero or one query
@@ -59,7 +54,7 @@ impl Plugin for ForbidAnonymousOperations {
                     tracing::error!("Operation is not allowed!");
 
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    let res = RouterResponse::error_builder()
+                    let res = router::Response::error_builder()
                         .error(graphql::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
@@ -99,8 +94,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
+    use apollo_router::stages::router;
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -134,7 +128,7 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request without an operation name...
-        let request_without_any_operation_name = RouterRequest::fake_builder()
+        let request_without_any_operation_name = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -169,7 +163,7 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an empty operation name...
-        let request_with_empty_operation_name = RouterRequest::fake_builder()
+        let request_with_empty_operation_name = router::Request::fake_builder()
             .operation_name("".to_string())
             .build()
             .expect("expecting valid request");
@@ -206,7 +200,7 @@ mod tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
+            .returning(move |req: router::Request| {
                 assert_eq!(
                     operation_name,
                     // we're ok with unwrap's here because we're running a test
@@ -218,7 +212,7 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
                     .unwrap())
@@ -229,7 +223,7 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an valid operation name...
-        let request_with_operation_name = RouterRequest::fake_builder()
+        let request_with_operation_name = router::Request::fake_builder()
             .operation_name(operation_name)
             .build()
             .expect("expecting valid request");

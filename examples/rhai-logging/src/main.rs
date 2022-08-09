@@ -18,8 +18,7 @@ mod tests {
     use apollo_router::plugin::PluginInit;
     use apollo_router::plugins::rhai::Conf;
     use apollo_router::plugins::rhai::Rhai;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
+    use apollo_router::stages::router;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -35,8 +34,8 @@ mod tests {
         mock_service
             .expect_call()
             .once()
-            .returning(move |_req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
+            .returning(move |_req: router::Request| {
+                Ok(router::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
                     .unwrap())
@@ -56,7 +55,7 @@ mod tests {
         let service_stack = rhai.router_service(mock_service.boxed());
 
         // Let's create a request with our operation name
-        let request_with_appropriate_name = RouterRequest::fake_builder()
+        let request_with_appropriate_name = router::Request::fake_builder()
             .operation_name("me".to_string())
             .build()
             .unwrap();

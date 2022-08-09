@@ -18,7 +18,7 @@ mod tests {
     use apollo_router::plugin::PluginInit;
     use apollo_router::plugins::rhai::Conf;
     use apollo_router::plugins::rhai::Rhai;
-    use apollo_router::services::RouterRequest;
+    use apollo_router::stages::router;
     use apollo_router::Context;
     use http::StatusCode;
 
@@ -53,7 +53,7 @@ mod tests {
         let context: Option<Context> = None;
         let mut service_response = test_harness
             .call(
-                RouterRequest::fake_builder()
+                router::Request::fake_builder()
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")
                     .query(query)

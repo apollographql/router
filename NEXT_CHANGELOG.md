@@ -83,7 +83,7 @@ using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
 
-### Some items were renamed ([PR #FIXME])
+### Some items were renamed or moved ([PR #FIXME])
 
 At the crate root:
 
@@ -93,6 +93,67 @@ At the crate root:
 * `ConfigurationKind::Instance` → `ConfigurationSource::Static`
 * `ShutdownKind` → `ShutdownSource`
 * `ApolloRouter` → `RouterHttpServer`
+
+A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
+reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
+In pseudo-syntax:
+
+```rust
+mod router {
+    use apollo_router::services::RouterRequest as Request;
+    use apollo_router::services::RouterResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+}
+
+mod query_planner {
+    use apollo_router::services::QueryPlannerRequest as Request;
+    use apollo_router::services::QueryPlannerResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+
+    // Reachable from Request or Response:
+    use apollo_router::query_planner::QueryPlan;
+    use apollo_router::query_planner::QueryPlanOptions;
+    use apollo_router::services::QueryPlannerContent;
+    use apollo_router::spec::Query;
+}
+
+mod execution {
+    use apollo_router::services::ExecutionRequest as Request;
+    use apollo_router::services::ExecutionResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+}
+
+mod subgraph {
+    use super::*;
+    use apollo_router::services::SubgraphRequest as Request;
+    use apollo_router::services::SubgraphResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+
+    // Reachable from Request or Response:
+    use apollo_router::query_planner::OperationKind;
+}
+```
+
+Migration example:
+
+```diff
+-use tower::util::BoxService;
+-use tower::BoxError;
+-use apollo_router::services::{RouterRequest, RouterResponse};
++use apollo_router::stages::router;
+ 
+-async fn example(service: BoxService<RouterRequest, RouterResponse, BoxError>) -> RouterResponse {
++async fn example(service: router::BoxService) -> router::Response {
+-    let request = RouterRequest::builder()/*…*/.build();
++    let request = router::Request::builder()/*…*/.build();
+     service.oneshot(request).await
+ }
+```
+
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
@@ -113,13 +174,7 @@ apollo_router::errors::ServiceBuildError
 apollo_router::json_ext
 apollo_router::mock_service!
 apollo_router::query_planner::QueryPlan::execute
-apollo_router::services::ExecutionService
-apollo_router::services::MakeSubgraphService
-apollo_router::services::PluggableRouterServiceBuilder
-apollo_router::services::RouterService
-apollo_router::services::RouterCreator
-apollo_router::services::SubgraphService
-apollo_router::services::SubgraphServiceFactory
+apollo_router::services
 apollo_router::Schema
 ```
 

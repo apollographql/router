@@ -23,7 +23,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -39,12 +38,11 @@ use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
+use crate::stages::query_planner;
+use crate::stages::router;
+use crate::stages::subgraph;
 use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
 use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 trait Merge {
@@ -175,10 +173,7 @@ impl Plugin for TrafficShaping {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .layer(TimeoutLayer::new(
                 self.config
@@ -192,11 +187,7 @@ impl Plugin for TrafficShaping {
             .boxed()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -244,8 +235,8 @@ impl Plugin for TrafficShaping {
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         if matches!(self.config.variables_deduplication, Some(true)) {
             service
                 .map_request(|mut req: QueryPlannerRequest| {

@@ -9,14 +9,12 @@ use std::sync::Mutex;
 
 use apollo_router::graphql;
 use apollo_router::graphql::Request;
+use apollo_router::http_ext;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugins::telemetry::Telemetry;
-use apollo_router::services::http_ext;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphResponse;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use apollo_router::Context;
 use http::Method;
 use maplit::hashmap;
@@ -26,8 +24,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use test_span::prelude::*;
-use tower::util::BoxCloneService;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
@@ -271,7 +267,7 @@ async fn queries_should_work_with_compression() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -305,7 +301,7 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -417,7 +413,7 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -666,13 +662,13 @@ async fn query_node(
 }
 
 async fn query_rust(
-    request: RouterRequest,
+    request: router::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     query_rust_with_config(request, serde_json::json!({})).await
 }
 
 async fn query_rust_with_config(
-    request: RouterRequest,
+    request: router::Request,
     config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
@@ -681,10 +677,7 @@ async fn query_rust_with_config(
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (
-    BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-    CountingServiceRegistry,
-) {
+) -> (router::BoxCloneService, CountingServiceRegistry) {
     let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = Telemetry::new_with_subscriber(
@@ -711,8 +704,8 @@ async fn setup_router_and_registry(
 }
 
 async fn query_with_router(
-    router: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-    request: RouterRequest,
+    router: router::BoxCloneService,
+    request: router::Request,
 ) -> graphql::Response {
     router
         .oneshot(request)
@@ -763,8 +756,8 @@ impl Plugin for CountingServiceRegistry {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         let name = subgraph_name.to_owned();
         let counters = self.clone();
         service

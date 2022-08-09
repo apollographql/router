@@ -6,13 +6,11 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
+use apollo_router::stages::router;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -48,10 +46,7 @@ impl Plugin for AllowClientIdFromFile {
     // While this is not the most performant and efficient usecase,
     // We could easily change the place where the file list is stored,
     // switching the async file read with an async http request
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
@@ -63,14 +58,14 @@ impl Plugin for AllowClientIdFromFile {
         // see https://rust-lang.github.io/async-book/03_async_await/01_chapter.html#async-lifetimes for more information
         let allowed_ids_path = self.allowed_ids_path.clone();
 
-        let handler = move |req: RouterRequest| {
+        let handler = move |req: router::Request| {
             // If we set a res, then we are going to break execution
             // If not, we are continuing
             let mut res = None;
             if !req.originating_request.headers().contains_key(&header_key) {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
-                    RouterResponse::error_builder()
+                    router::Response::error_builder()
                         .error(graphql::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
@@ -103,7 +98,7 @@ impl Plugin for AllowClientIdFromFile {
                         if !allowed_clients.contains(&client_id.to_string()) {
                             // Prepare an HTTP 403 response with a GraphQL error message
                             res = Some(
-                                RouterResponse::builder()
+                                router::Response::builder()
                                     .data(Value::default())
                                     .error(graphql::Error {
                                         message: "client-id is not allowed".to_string(),
@@ -119,7 +114,7 @@ impl Plugin for AllowClientIdFromFile {
                     Err(_not_a_string_error) => {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
-                            RouterResponse::error_builder()
+                            router::Response::error_builder()
                                 .error(graphql::Error {
                                     message: format!("'{header_key}' value is not a string"),
                                     ..Default::default()
@@ -180,8 +175,7 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
+    use apollo_router::stages::router;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -228,7 +222,7 @@ mod tests {
             .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
-        let request_without_client_id = RouterRequest::fake_builder()
+        let request_without_client_id = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -272,7 +266,7 @@ mod tests {
             .router_service(mock_service.boxed());
 
         // Let's create a request with a not allowed client id...
-        let request_with_unauthorized_client_id = RouterRequest::fake_builder()
+        let request_with_unauthorized_client_id = router::Request::fake_builder()
             .header("x-client-id", "invalid_client_id")
             .build()
             .expect("expecting valid request");
@@ -309,7 +303,7 @@ mod tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
+            .returning(move |req: router::Request| {
                 assert_eq!(
                     valid_client_id,
                     // we're ok with unwrap's here because we're running a test
@@ -322,7 +316,7 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
                     .unwrap())
@@ -342,7 +336,7 @@ mod tests {
             .router_service(mock_service.boxed());
 
         // Let's create a request with an valid client id...
-        let request_with_valid_client_id = RouterRequest::fake_builder()
+        let request_with_valid_client_id = router::Request::fake_builder()
             .header("x-client-id", valid_client_id)
             .build()
             .expect("expecting valid request");

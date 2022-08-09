@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
-pub use fetch::OperationKind;
 use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
@@ -16,6 +15,7 @@ use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
+pub use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;

@@ -51,12 +51,8 @@ use crate::register_plugin;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -92,35 +88,21 @@ impl<T> OptionDance<T> for SharedMut<T> {
 }
 
 mod router {
-    use super::*;
-
-    pub(crate) type Request = RouterRequest;
-    pub(crate) type Response = RhaiRouterResponse;
-    pub(crate) type Service = BoxService<Request, RouterResponse, BoxError>;
+    pub(crate) use crate::stages::router::*;
+    pub(crate) type Response = super::RhaiRouterResponse;
 }
 
 mod query_planner {
-    use super::*;
-
-    pub(crate) type Request = QueryPlannerRequest;
-    pub(crate) type Response = QueryPlannerResponse;
-    pub(crate) type Service = BoxService<Request, Response, BoxError>;
+    pub(crate) use crate::stages::query_planner::*;
 }
 
 mod execution {
-    use super::*;
-
-    pub(crate) type Request = ExecutionRequest;
-    pub(crate) type Response = RhaiExecutionResponse;
-    pub(crate) type Service = BoxService<Request, ExecutionResponse, BoxError>;
+    pub(crate) use crate::stages::execution::*;
+    pub(crate) type Response = super::RhaiExecutionResponse;
 }
 
 mod subgraph {
-    use super::*;
-
-    pub(crate) type Request = SubgraphRequest;
-    pub(crate) type Response = SubgraphResponse;
-    pub(crate) type Service = BoxService<Request, Response, BoxError>;
+    pub(crate) use crate::stages::subgraph::*;
 }
 
 #[export_module]
@@ -345,10 +327,7 @@ impl Plugin for Rhai {
         Ok(Self { ast, engine })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -367,8 +346,8 @@ impl Plugin for Rhai {
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -385,10 +364,7 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -405,11 +381,7 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -429,10 +401,10 @@ impl Plugin for Rhai {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
-    Router(SharedMut<router::Service>),
-    QueryPlanner(SharedMut<query_planner::Service>),
-    Execution(SharedMut<execution::Service>),
-    Subgraph(SharedMut<subgraph::Service>),
+    Router(SharedMut<router::BoxService>),
+    QueryPlanner(SharedMut<query_planner::BoxService>),
+    Execution(SharedMut<execution::BoxService>),
+    Subgraph(SharedMut<subgraph::BoxService>),
 }
 
 // Actually use the checkpoint function so that we can shortcut requests which fail

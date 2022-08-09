@@ -6,7 +6,6 @@ use http::HeaderMap;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -15,6 +14,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::stages::router;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
@@ -101,10 +101,7 @@ impl Plugin for Csrf {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()

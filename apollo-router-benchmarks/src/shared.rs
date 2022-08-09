@@ -4,16 +4,14 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphResponse;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use apollo_router::TestHarness;
 use apollo_router::graphql::Response;
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::collections::HashMap;
-use tower::util::{BoxCloneService, BoxService};
+
 use tower::{BoxError, Service, ServiceExt};
 
 static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
@@ -23,9 +21,9 @@ static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
 static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
 pub async fn basic_composition_benchmark(
-    mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+    mut router_service: router::BoxCloneService,
 ) {
-    let request = RouterRequest::fake_builder()
+    let request = router::Request::fake_builder()
         .query(QUERY.to_string())
         .variable("first", 2usize)
         .build().expect("expecting valid request");
@@ -244,8 +242,8 @@ impl Plugin for MockedSubgraphs {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        default: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         self.0
             .get(subgraph_name)
             .map(|service| service.clone().boxed())
