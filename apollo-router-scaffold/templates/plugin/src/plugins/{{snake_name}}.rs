@@ -154,53 +154,37 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 
 #[cfg(test)]
 mod tests {
-    use super::{Conf, {{pascal_name}}};
-
-    use apollo_router::plugin::test::IntoSchema::Canned;
-    use apollo_router::plugin::test::PluginTestHarness;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
+    use apollo_router::TestHarness;
+    use apollo_router::stages::router;
     use tower::BoxError;
-
-    #[tokio::test]
-    async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("{{project_name}}.{{snake_name}}")
-            .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"message" : "Starting my plugin"}), Default::default())
-            .await
-            .unwrap();
-    }
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn basic_test() -> Result<(), BoxError> {
-        // Define a configuration to use with our plugin
-        let conf = Conf {
-            message: "Starting my plugin".to_string(),
-        };
-
-        // Build an instance of our plugin to use in the test harness
-        let plugin = {{pascal_name}}::new(PluginInit::new(conf, Default::default())).await.expect("created plugin");
-
-        // Create the test harness. You can add mocks for individual services, or use prebuilt canned services.
-        let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+        let test_harness = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "plugins": {
+                    "{{project_name}}.{{snake_name}}": {
+                        "message" : "Starting my plugin"
+                    }
+                }
+            }))
+            .unwrap()
             .build()
-            .await?;
+            .await
+            .unwrap();
+        let request = router::Request::canned();
+        let mut streamed_response = test_harness.oneshot(request).await?;
 
-        // Send a request
-        let mut result = test_harness.call_canned().await?;
-
-        let first_response = result
+        let first_response = streamed_response
             .next_response()
             .await
             .expect("couldn't get primary response");
 
         assert!(first_response.data.is_some());
 
-        // You could keep calling result.next_response() until it yields None if you're expexting more parts.
-        assert!(result.next_response().await.is_none());
+        // You could keep calling .next_response() until it yields None if you're expexting more parts.
+        assert!(streamed_response.next_response().await.is_none());
         Ok(())
     }
 }

@@ -142,6 +142,28 @@ impl RouterRequest {
             Method::GET,
         )
     }
+
+    /// Create an example request for tests
+    pub fn canned() -> Self {
+        let query = "
+            query TopProducts($first: Int) { 
+                topProducts(first: $first) { 
+                    upc 
+                    name 
+                    reviews { 
+                        id 
+                        product { name } 
+                        author { id name } 
+                    } 
+                } 
+            }
+        ";
+        Self::fake_builder()
+            .query(query)
+            .variable("first", 2usize)
+            .build()
+            .unwrap()
+    }
 }
 
 assert_impl_all!(RouterResponse: Send);

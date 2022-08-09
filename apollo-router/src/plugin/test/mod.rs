@@ -179,12 +179,7 @@ impl PluginTestHarness {
         self.router_service
             .ready()
             .await?
-            .call(
-                RouterRequest::fake_builder()
-                    .query("query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }")
-                    .variable("first", 2usize)
-                    .build()?,
-            )
+            .call(RouterRequest::canned())
             .await
     }
 }
