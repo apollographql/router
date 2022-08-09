@@ -72,10 +72,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterServiceFactory, BoxError> {
         // Process the plugins.
-        let mut plugins = create_plugins(&configuration, &schema).await?;
-        if let Some(extra) = extra_plugins {
-            plugins.extend(extra);
-        }
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
@@ -130,6 +127,7 @@ caused by
 async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
     let mandatory_plugins = vec![
@@ -141,9 +139,13 @@ async fn create_plugins(
     let mut errors = Vec::new();
     let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
+    let extra = extra_plugins.unwrap_or_default();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
-        let name = name.clone();
+        if extra.iter().any(|(n, _)| *n == name) {
+            // An instance of this plugin was already added through TestHarness::extra_plugin
+            continue;
+        }
 
         match plugin_registry.get(name.as_str()) {
             Some(factory) => {
@@ -172,6 +174,7 @@ async fn create_plugins(
             None => errors.push(ConfigurationError::PluginUnknown(name)),
         }
     }
+    plugin_instances.extend(extra);
 
     // At this point we've processed all of the plugins that were provided in configuration.
     // We now need to do process our list of mandatory plugins:

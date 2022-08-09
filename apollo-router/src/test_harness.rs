@@ -111,15 +111,20 @@ impl<'a> TestHarness<'a> {
     ///
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
-    pub fn extra_plugin(mut self, plugin: impl Plugin) -> Self {
-        fn type_name_of<T>(_: &T) -> &'static str {
-            std::any::type_name::<T>()
-        }
-        let name = format!(
-            "extra_plugins.{}.{}",
-            self.extra_plugins.len(),
-            type_name_of(&plugin)
-        );
+    pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
+        let type_id = std::any::TypeId::of::<P>();
+        let name = match crate::plugin::plugins()
+            .iter()
+            .find(|(_name, factory)| factory.type_id == type_id)
+        {
+            Some((name, _factory)) => name.clone(),
+            None => format!(
+                "extra_plugins.{}.{}",
+                self.extra_plugins.len(),
+                std::any::type_name::<P>(),
+            ),
+        };
+
         self.extra_plugins.push((name, Box::new(plugin)));
         self
     }

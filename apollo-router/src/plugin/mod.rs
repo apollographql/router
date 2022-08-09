@@ -18,6 +18,7 @@ pub mod serde;
 #[macro_use]
 pub mod test;
 
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -92,16 +93,10 @@ where
 pub(crate) struct PluginFactory {
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
+    pub(crate) type_id: TypeId,
 }
 
 impl PluginFactory {
-    pub(crate) fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
-        Self {
-            instance_factory,
-            schema_factory,
-        }
-    }
-
     pub(crate) async fn create_instance(
         &self,
         configuration: &serde_json::Value,
@@ -130,16 +125,17 @@ static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(
 
 /// Register a plugin factory.
 pub fn register_plugin<P: Plugin>(name: String) {
-    let plugin_factory = PluginFactory::new(
-        |configuration, schema| {
+    let plugin_factory = PluginFactory {
+        instance_factory: |configuration, schema| {
             Box::pin(async move {
                 let init = PluginInit::try_new(configuration.clone(), schema)?;
                 let plugin = P::new(init).await?;
                 Ok(Box::new(plugin) as Box<dyn DynPlugin>)
             })
         },
-        |gen| gen.subschema_for::<<P as Plugin>::Config>(),
-    );
+        schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+        type_id: TypeId::of::<P>(),
+    };
     PLUGIN_REGISTRY
         .lock()
         .expect("Lock poisoned")
