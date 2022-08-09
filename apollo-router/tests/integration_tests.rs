@@ -693,7 +693,8 @@ async fn setup_router_and_registry(
     .unwrap();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
-        .configuration(config)
+        .configuration_json(config)
+        .unwrap()
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .extra_plugin(telemetry)

@@ -110,7 +110,8 @@ mod tests {
             }
         });
         apollo_router::TestHarness::builder()
-            .configuration(serde_json::from_value(config).unwrap())
+            .configuration_json(config)
+            .unwrap()
             .build()
             .await
             .unwrap();

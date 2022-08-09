@@ -47,7 +47,7 @@ use crate::Schema;
 ///     .build()
 ///     .unwrap();
 /// let response = TestHarness::builder()
-///     .configuration(serde_json::from_value(config)?)
+///     .configuration_json(config)?
 ///     .build()
 ///     .await?
 ///     .oneshot(request)
@@ -96,6 +96,15 @@ impl<'a> TestHarness<'a> {
         );
         self.configuration = Some(configuration);
         self
+    }
+
+    /// Specifies the (static) router configuration as a JSON value,
+    /// such as from the `serde_json::json!` macro.
+    pub fn configuration_json(
+        self,
+        configuration: serde_json::Value,
+    ) -> Result<Self, serde_json::Error> {
+        Ok(self.configuration(serde_json::from_value(configuration)?))
     }
 
     /// Adds an extra, already instanciated plugin.

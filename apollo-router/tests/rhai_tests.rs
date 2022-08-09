@@ -20,7 +20,8 @@ async fn all_rhai_callbacks_are_invoked() {
         }
     });
     let router = TestHarness::builder()
-        .configuration(serde_json::from_value(config).unwrap())
+        .configuration_json(config)
+        .unwrap()
         .schema(include_str!("./fixtures/supergraph.graphql"))
         .build()
         .await
