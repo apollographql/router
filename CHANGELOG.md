@@ -38,8 +38,6 @@ This reduces the number of copies of this string we keep in memory, as schemas c
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-## 🚀 Features
-
 ## 🐛 Fixes
 
 ### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
@@ -56,9 +54,6 @@ Router config handling now:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
 
-
-## 🛠 Maintenance
-
 ## 📚 Documentation
 
 
@@ -68,7 +63,6 @@ The CORS documentation now displays a valid `origins` configuration (without tra
 
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
-
 
 
 ### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
