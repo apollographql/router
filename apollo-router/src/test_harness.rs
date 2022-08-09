@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -11,8 +10,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::RouterServiceConfigurator;
 use crate::router_factory::YamlRouterServiceFactory;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
+use crate::stages::execution;
+use crate::stages::query_planner;
+use crate::stages::router;
 use crate::stages::subgraph;
 use crate::Schema;
 
@@ -115,6 +115,41 @@ impl<'a> TestHarness<'a> {
         self
     }
 
+    /// Adds an ad-hoc plugin that has [`Plugin::router_service`] implemented with `callback`.
+    pub fn extra_router_plugin(
+        self,
+        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(RouterServicePlugin(callback))
+    }
+
+    /// Adds an ad-hoc plugin that has [`Plugin::query_planning_service`] implemented with `callback`.
+    pub fn extra_query_planner_plugin(
+        self,
+        callback: impl Fn(query_planner::BoxService) -> query_planner::BoxService
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.extra_plugin(QueryPlannerServicePlugin(callback))
+    }
+
+    /// Adds an ad-hoc plugin that has [`Plugin::execution_service`] implemented with `callback`.
+    pub fn extra_execution_plugin(
+        self,
+        callback: impl Fn(execution::BoxService) -> execution::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(ExecutionServicePlugin(callback))
+    }
+
+    /// Adds an ad-hoc plugin that has [`Plugin::subgraph_service`] implemented with `callback`.
+    pub fn extra_subgraph_plugin(
+        self,
+        callback: impl Fn(&str, subgraph::BoxService) -> subgraph::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(SubgraphServicePlugin(callback))
+    }
+
     /// Enables this test harness to make network requests to subgraphs.
     ///
     /// If this is not called, all subgraph requests get an empty response by default
@@ -127,11 +162,14 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the GraphQL service
-    pub async fn build(
-        self,
-    ) -> Result<BoxCloneService<RouterRequest, RouterResponse, BoxError>, BoxError> {
+    pub async fn build(self) -> Result<router::BoxCloneService, BoxError> {
         let builder = if self.schema.is_none() {
-            self.extra_plugin(CannedSubgraphResponses)
+            self.extra_subgraph_plugin(|subgraph_name, default| match subgraph_name {
+                "products" => canned::products_subgraph().boxed(),
+                "accounts" => canned::accounts_subgraph().boxed(),
+                "reviews" => canned::reviews_subgraph().boxed(),
+                _ => default,
+            })
         } else {
             self
         };
@@ -150,26 +188,78 @@ impl<'a> TestHarness<'a> {
     }
 }
 
-struct CannedSubgraphResponses;
+struct RouterServicePlugin<F>(F);
+struct QueryPlannerServicePlugin<F>(F);
+struct ExecutionServicePlugin<F>(F);
+struct SubgraphServicePlugin<F>(F);
 
 #[async_trait::async_trait]
-impl Plugin for CannedSubgraphResponses {
+impl<F> Plugin for RouterServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+{
     type Config = ();
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(Self)
+        unreachable!()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        (self.0)(service)
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> Plugin for QueryPlannerServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(query_planner::BoxService) -> query_planner::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn query_planning_service(
+        &self,
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
+        (self.0)(service)
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> Plugin for ExecutionServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(execution::BoxService) -> execution::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        (self.0)(service)
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> Plugin for SubgraphServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(&str, subgraph::BoxService) -> subgraph::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: subgraph::BoxService,
+        service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        match subgraph_name {
-            "products" => canned::products_subgraph().boxed(),
-            "accounts" => canned::accounts_subgraph().boxed(),
-            "reviews" => canned::reviews_subgraph().boxed(),
-            _ => default,
-        }
+        (self.0)(subgraph_name, service)
     }
 }
