@@ -15,10 +15,10 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub(crate) struct Config {
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]
-    pub endpoint: AgentEndpoint,
+    pub(crate) endpoint: AgentEndpoint,
 }
 
 fn default_agent_endpoint() -> &'static str {

@@ -21,7 +21,7 @@ use crate::RouterResponse;
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CSRFConfig {
+pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
     /// Note that setting this to true is deemed unsafe.
@@ -87,7 +87,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 /// won't execute operations at the request of origins who our CORS policy will
 /// block.
 #[derive(Debug, Clone)]
-pub struct Csrf {
+pub(crate) struct Csrf {
     config: CSRFConfig,
 }
 

@@ -293,7 +293,7 @@ mod router_plugin_mod {
 
 /// Plugin which implements Rhai functionality
 #[derive(Default, Clone)]
-pub struct Rhai {
+pub(crate) struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
 }
@@ -301,7 +301,7 @@ pub struct Rhai {
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Conf {
+pub(crate) struct Conf {
     scripts: Option<PathBuf>,
     main: Option<String>,
 }

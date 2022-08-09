@@ -24,21 +24,21 @@ use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub(crate) struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
     #[schemars(with = "String")]
-    pub endpoint: Endpoint,
-    pub protocol: Option<Protocol>,
+    pub(crate) endpoint: Endpoint,
+    pub(crate) protocol: Option<Protocol>,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
-    pub timeout: Option<Duration>,
-    pub grpc: Option<GrpcExporter>,
-    pub http: Option<HttpExporter>,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) grpc: Option<GrpcExporter>,
+    pub(crate) http: Option<HttpExporter>,
 }
 
 impl Config {
-    pub fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
+    pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
     ) -> Result<T, BoxError> {
         let endpoint = match &self.endpoint {
@@ -79,7 +79,7 @@ impl Config {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub enum Endpoint {
+pub(crate) enum Endpoint {
     Default(EndpointDefault),
     Url(Url),
 }
@@ -100,28 +100,28 @@ where
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum EndpointDefault {
+pub(crate) enum EndpointDefault {
     Default,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HttpExporter {
-    pub headers: Option<HashMap<String, String>>,
+pub(crate) struct HttpExporter {
+    pub(crate) headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct GrpcExporter {
+pub(crate) struct GrpcExporter {
     #[serde(flatten)]
-    pub tls_config: Option<TlsConfig>,
+    pub(crate) tls_config: Option<TlsConfig>,
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
         serialize_with = "metadata_map_serde::serialize",
         default
     )]
     #[schemars(schema_with = "option_metadata_map", default)]
-    pub metadata: Option<MetadataMap>,
+    pub(crate) metadata: Option<MetadataMap>,
 }
 
 fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -178,7 +178,7 @@ impl Secret {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Protocol {
+pub(crate) enum Protocol {
     Grpc,
     Http,
 }

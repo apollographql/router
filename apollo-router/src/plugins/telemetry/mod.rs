@@ -79,8 +79,8 @@ use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
-pub mod apollo;
-pub mod config;
+pub(crate) mod apollo;
+pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -534,7 +534,7 @@ impl Telemetry {
     }
 
     /// This method can be used instead of `Plugin::new` to override the subscriber
-    pub async fn new_common<S>(
+    async fn new_common<S>(
         mut config: <Self as Plugin>::Config,
         subscriber: Option<S>,
     ) -> Result<Self, BoxError>

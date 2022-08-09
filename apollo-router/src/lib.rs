@@ -62,7 +62,7 @@ pub mod graphql;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
-pub mod plugins;
+mod plugins;
 pub mod query_planner;
 mod request;
 mod response;
@@ -74,26 +74,29 @@ pub mod stages;
 mod state_machine;
 mod test_harness;
 
-pub use configuration::Configuration;
-pub use configuration::ListenAddr;
-pub use context::Context;
-pub use executable::main;
-pub use executable::Executable;
-pub use router::ConfigurationSource;
-pub use router::RouterHttpServer;
-pub use router::SchemaSource;
-pub use router::ShutdownSource;
-#[doc(hidden)]
-pub use router_factory::__create_test_service_factory_from_yaml;
-pub use services::http_ext;
-pub use test_harness::TestHarness;
+pub use crate::configuration::Configuration;
+pub use crate::configuration::ListenAddr;
+pub use crate::context::Context;
+pub use crate::executable::main;
+pub use crate::executable::Executable;
+pub use crate::router::ConfigurationSource;
+pub use crate::router::RouterHttpServer;
+pub use crate::router::SchemaSource;
+pub use crate::router::ShutdownSource;
+pub use crate::services::http_ext;
+pub use crate::test_harness::TestHarness;
 
-/// Reexports for macros
+/// Not part of the public API
 #[doc(hidden)]
 pub mod _private {
+    // Reexports for macros
     pub use router_bridge;
     pub use serde_json;
     pub use startup;
+
+    // For tests
+    pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
+    pub use crate::router_factory::create_test_service_factory_from_yaml;
 }
 
 // TODO: clean these up and import from relevant modules instead

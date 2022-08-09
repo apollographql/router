@@ -12,10 +12,10 @@ use apollo_router::graphql::Request;
 use apollo_router::http_ext;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::plugins::telemetry::Telemetry;
 use apollo_router::stages::router;
 use apollo_router::stages::subgraph;
 use apollo_router::Context;
+use apollo_router::_private::TelemetryPlugin;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -680,7 +680,7 @@ async fn setup_router_and_registry(
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let telemetry = Telemetry::new_with_subscriber(
+    let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
             "tracing": {},
             "apollo": {

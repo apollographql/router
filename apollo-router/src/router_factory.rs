@@ -104,7 +104,7 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 /// test only helper method to create a router factory in integration tests
 ///
 /// not meant to be used directly
-pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
+pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
