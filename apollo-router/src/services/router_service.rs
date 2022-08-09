@@ -34,6 +34,7 @@ use crate::graphql::Response;
 use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
@@ -337,12 +338,25 @@ impl PluggableRouterServiceBuilder {
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service = ServiceBuilder::new().buffered().service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
-                    .await
-                    .boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ),
+            CachingQueryPlanner::new(
+                Buffer::new(
+                    self.plugins
+                        .iter_mut()
+                        .rev()
+                        .fold(bridge_query_planner.boxed(), |acc, (_, e)| {
+                            e.query_planning_service(acc)
+                        }),
+                    DEFAULT_BUFFER_SIZE,
+                ),
+                plan_cache_limit,
+            )
+            .await
+            .boxed(), /*self.plugins.iter_mut().rev().fold(
+                          CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
+                              .await
+                              .boxed(),
+                          |acc, (_, e)| e.query_planning_service(acc),
+                      ),*/
         );
 
         let plugins = Arc::new(self.plugins);

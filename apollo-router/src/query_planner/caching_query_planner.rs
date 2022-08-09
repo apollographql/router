@@ -3,20 +3,18 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 use serde_json_bytes::value::Serializer;
+use tower::BoxError;
 
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
-use crate::traits::CacheResolver;
 use crate::traits::QueryKey;
-use crate::traits::QueryPlanner;
 use crate::*;
 
 type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
@@ -25,28 +23,61 @@ type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 ///
 /// The query planner performs LRU caching.
 #[derive(Clone)]
-pub(crate) struct CachingQueryPlanner<T: QueryPlanner + Clone> {
+pub(crate) struct CachingQueryPlanner<T: Clone> {
     cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
-    delegate: Arc<T>,
-}
-
-/// A resolver for cache misses
-struct CachingQueryPlannerResolver<T: QueryPlanner> {
     delegate: T,
 }
 
-impl<T: QueryPlanner + Clone + 'static> CachingQueryPlanner<T> {
+/// A resolver for cache misses
+struct CachingQueryPlannerResolver<T> {
+    delegate: T,
+}
+
+impl<T: Clone + 'static> CachingQueryPlanner<T>
+where
+    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
+{
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
         let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
-        Self {
-            cache,
-            delegate: Arc::new(delegate),
+        Self { cache, delegate }
+    }
+
+    async fn get(
+        &mut self,
+        request: QueryPlannerRequest,
+    ) -> Result<QueryPlannerResponse, BoxError> {
+        let key = (
+            request.query.clone(),
+            request.operation_name.to_owned(),
+            request.query_plan_options.clone(),
+        );
+        let context = request.context.clone();
+        let entry = self.cache.get(&key).await;
+        if entry.is_first() {
+            let res = self.delegate.call(request).await;
+            match res {
+                Ok(QueryPlannerResponse { content, context }) => {
+                    entry.insert(Ok(content.clone())).await;
+                    Ok(QueryPlannerResponse { content, context })
+                }
+                Err(_) => todo!(),
+            }
+        } else {
+            let res = entry
+                .get()
+                .await
+                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
+
+            match res {
+                Ok(content) => Ok(QueryPlannerResponse { content, context }),
+                Err(error) => todo!(),
+            }
         }
     }
 }
 
-#[async_trait]
+/*#[async_trait]
 impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
     for CachingQueryPlannerResolver<T>
 {
@@ -70,16 +101,16 @@ impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
                 .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
         }
     }
-}
+}*/
 
-impl<T: QueryPlanner + Clone + 'static> tower::Service<QueryPlannerRequest>
-    for CachingQueryPlanner<T>
+impl<T: Clone + Send + 'static> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
     T: tower::Service<
         QueryPlannerRequest,
         Response = QueryPlannerResponse,
         Error = tower::BoxError,
     >,
+    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
     type Response = QueryPlannerResponse;
     // TODO I don't think we can serialize this error back to the router response's payload
@@ -91,14 +122,86 @@ where
     }
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let key = (
-            request.query.clone(),
-            request.operation_name.to_owned(),
-            request.query_plan_options,
-        );
-        let qp = self.clone();
+        let mut qp = self.clone();
         Box::pin(async move {
-            qp.get(key)
+            let key = (
+                request.query.clone(),
+                request.operation_name.to_owned(),
+                request.query_plan_options.clone(),
+            );
+            let context = request.context.clone();
+            let entry = qp.cache.get(&key).await;
+            return if entry.is_first() {
+                let res = qp.delegate.call(request).await;
+                match res {
+                    Ok(QueryPlannerResponse {
+                        content,
+                        mut context,
+                    }) => {
+                        entry.insert(Ok(content.clone())).await;
+
+                        if let QueryPlannerContent::Plan { plan, .. } = &content {
+                            match (&plan.usage_reporting).serialize(Serializer) {
+                                Ok(v) => {
+                                    context.insert_json_value(USAGE_REPORTING, v);
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        Ok(QueryPlannerResponse { content, context })
+                    }
+                    Err(error) => todo!(),
+                }
+            } else {
+                let res = entry
+                    .get()
+                    .await
+                    .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
+
+                match res {
+                    Ok(content) => Ok(QueryPlannerResponse { content, context }),
+                    Err(error) => {
+                        if let QueryPlannerError::PlanningErrors(pe) = &error {
+                            if let Err(inner_e) = request
+                                .context
+                                .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                            {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        } else if let QueryPlannerError::SpecError(e) = &error {
+                            let error_key = match e {
+                                SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                                _ => "## GraphQLValidationFailure\n",
+                            };
+                            if let Err(inner_e) = request.context.insert(
+                                USAGE_REPORTING,
+                                UsageReporting {
+                                    stats_report_key: error_key.to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                },
+                            ) {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        }
+
+                        Err(error.into())
+                    }
+                }
+            };
+
+            /*
+            qp.get(request)
                 .await
                 .map(|query_planner_content| {
                     if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
@@ -152,6 +255,7 @@ where
                     e.into()
                 })
                 .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
+                */
         })
     }
 }
