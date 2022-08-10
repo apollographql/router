@@ -4,6 +4,18 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.15.1] - 2022-08-10
+
+## ⚠️ **SECURITY** ⚠️
+
+### Landing page: Remove unsanitized example input
+
+The default landing page contained HTML to display a sample `curl` command which is made visible if the full landing page bundle could not be fetched from Apollo's CDN. The server's URL is directly interpolated into this command inside the browser from `window.location.href`. On some older browsers such as IE11, this value is not URI-encoded. On such browsers, opening a malicious URL pointing at an Apollo Router could cause execution of attacker-controlled JavaScript. In this release, the fallback page does not display a `curl` command.
+
+More details are available at the [security advisory](https://github.com/apollographql/router/security/advisories/GHSA-p5q6-hhww-f999).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 # [0.15.0] - 2022-08-09
 
 ## ❗ BREAKING ❗
