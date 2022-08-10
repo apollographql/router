@@ -282,7 +282,7 @@ impl RouterResponse {
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
-/// [`Context`] and [`QueryPlanOptions`] for the request.
+/// [`Context`] for the request.
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     pub query: String,
