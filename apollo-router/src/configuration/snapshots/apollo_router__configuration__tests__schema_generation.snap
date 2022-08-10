@@ -283,7 +283,7 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
-        "experimental.include_query_plan": {
+        "experimental.expose_query_plan": {
           "type": "boolean"
         },
         "experimental.include_subgraph_errors": {

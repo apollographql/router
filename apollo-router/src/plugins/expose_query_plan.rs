@@ -17,22 +17,22 @@ use crate::services::QueryPlannerResponse;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 
-const INCLUDE_QUERY_PLAN_HEADER_NAME: &str = "X-Apollo-Query-Plan";
-const INCLUDE_QUERY_PLAN_ENV: &str = "APOLLO_INCLUDE_QUERY_PLAN";
-const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::include_query_plan.plan";
-const ENABLED_CONTEXT_KEY: &str = "experimental::include_query_plan.enabled";
+const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
+const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
+const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
+const ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
 
 #[derive(Debug, Clone)]
-struct IncludeQueryPlan {
+struct ExposeQueryPlan {
     enabled: bool,
 }
 
 #[async_trait::async_trait]
-impl Plugin for IncludeQueryPlan {
+impl Plugin for ExposeQueryPlan {
     type Config = bool;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(IncludeQueryPlan {
+        Ok(ExposeQueryPlan {
             enabled: init.config,
         })
     }
@@ -69,7 +69,7 @@ impl Plugin for IncludeQueryPlan {
         let conf_enabled = self.enabled;
         service
             .map_future_with_context(move |req: &RouterRequest| {
-                let is_enabled = (conf_enabled || std::env::var(INCLUDE_QUERY_PLAN_ENV).as_deref() == Ok("true")) && req.originating_request.headers().get(INCLUDE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
+                let is_enabled = (conf_enabled || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true")) && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
@@ -109,7 +109,7 @@ impl Plugin for IncludeQueryPlan {
     }
 }
 
-register_plugin!("experimental", "include_query_plan", IncludeQueryPlan);
+register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
@@ -180,7 +180,7 @@ mod tests {
 
         let builder = PluggableRouterServiceBuilder::new(schema.clone());
         let builder = builder
-            .with_dyn_plugin("experimental.include_query_plan".to_string(), plugin)
+            .with_dyn_plugin("experimental.expose_query_plan".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -192,7 +192,7 @@ mod tests {
 
     async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         crate::plugin::plugins()
-            .get("experimental.include_query_plan")
+            .get("experimental.expose_query_plan")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -207,7 +207,7 @@ mod tests {
         let request = RouterRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
-            .header(INCLUDE_QUERY_PLAN_HEADER_NAME, "true")
+            .header(EXPOSE_QUERY_PLAN_HEADER_NAME, "true")
             .build()
             .expect("expecting valid request");
 
@@ -226,14 +226,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_include_query_plan() {
+    async fn it_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(true)).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, router).await;
     }
 
     #[tokio::test]
-    async fn it_doesnt_include_query_plan() {
+    async fn it_doesnt_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(false)).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN, router).await;
