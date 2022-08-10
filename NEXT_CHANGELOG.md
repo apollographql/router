@@ -37,6 +37,12 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
+### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
+
+Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
+
+By [@garypen](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
+
 ## 🐛 Fixes
 
 ### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
