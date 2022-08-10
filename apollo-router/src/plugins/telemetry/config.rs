@@ -62,6 +62,10 @@ pub struct MetricsCommon {
     pub delay_interval: Option<Duration>,
     /// Configuration to add custom labels/attributes to metrics
     pub attributes: Option<MetricsAttributesConf>,
+    /// Set a service.name resource in your metrics
+    pub service_name: Option<String>,
+    /// Set a service.namespace attribute in your metrics
+    pub service_namespace: Option<String>,
     #[serde(default)]
     /// Resources
     pub resources: HashMap<String, String>,

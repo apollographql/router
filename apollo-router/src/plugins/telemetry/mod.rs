@@ -685,7 +685,20 @@ impl Telemetry {
         {
             metrics_common_config.resources.insert(
                 String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(DEFAULT_SERVICE_NAME),
+                String::from(
+                    metrics_common_config
+                        .service_name
+                        .as_deref()
+                        .unwrap_or(DEFAULT_SERVICE_NAME),
+                ),
+            );
+        }
+        if let Some(service_namespace) = &metrics_common_config.service_namespace {
+            metrics_common_config.resources.insert(
+                String::from(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
+                ),
+                service_namespace.clone(),
             );
         }
 
@@ -1230,9 +1243,7 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "resources": {
-                            "service.name": "apollo-router"
-                        },
+                        "service_name": "apollo-router",
                         "attributes": {
                             "router": {
                                 "static": [
