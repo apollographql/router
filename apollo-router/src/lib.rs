@@ -71,14 +71,11 @@ mod spec;
 mod state_machine;
 mod traits;
 
-pub use configuration::Configuration;
+pub use configuration::*;
 pub use context::Context;
-pub use executable::main;
-pub use executable::Executable;
-pub use router::ApolloRouter;
-pub use router::ConfigurationKind;
-pub use router::SchemaKind;
-pub use router::ShutdownKind;
+pub use executable::*;
+pub use router::*;
+#[doc(hidden)]
 pub use router_factory::__create_test_service_factory_from_yaml;
 pub use services::http_ext;
 pub use spec::Schema;

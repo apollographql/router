@@ -23,11 +23,11 @@ expression: get_spans()
       "record": {
         "entries": [
           [
-            "query",
+            "graphql.document",
             "{ topProducts { name name2:name } }"
           ],
           [
-            "operation_name",
+            "graphql.operation.name",
             ""
           ],
           [
@@ -50,8 +50,8 @@ expression: get_spans()
           "module_path": "apollo_router::plugins::telemetry",
           "fields": {
             "names": [
-              "query",
-              "operation_name",
+              "graphql.document",
+              "graphql.operation.name",
               "client_name",
               "client_version",
               "otel.kind"
@@ -65,6 +65,14 @@ expression: get_spans()
           "record": {
             "entries": [
               [
+                "graphql.document",
+                "{ topProducts { name name2:name } }"
+              ],
+              [
+                "graphql.operation.name",
+                ""
+              ],
+              [
                 "otel.kind",
                 "internal"
               ]
@@ -76,6 +84,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -112,6 +122,14 @@ expression: get_spans()
           "record": {
             "entries": [
               [
+                "graphql.document",
+                "{ topProducts { name name2:name } }"
+              ],
+              [
+                "graphql.operation.name",
+                ""
+              ],
+              [
                 "otel.kind",
                 "internal"
               ]
@@ -123,6 +141,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -176,6 +196,14 @@ expression: get_spans()
                         "products"
                       ],
                       [
+                        "graphql.document",
+                        "{topProducts{name name2:name}}"
+                      ],
+                      [
+                        "graphql.operation.name",
+                        ""
+                      ],
+                      [
                         "otel.kind",
                         "internal"
                       ]
@@ -188,6 +216,8 @@ expression: get_spans()
                       "fields": {
                         "names": [
                           "name",
+                          "graphql.document",
+                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }
