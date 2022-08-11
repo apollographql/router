@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use derive_more::From;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
@@ -321,22 +322,8 @@ pub struct QueryPlannerResponse {
 }
 
 /// Query, QueryPlan and Introspection data in an opaque type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, From)]
 pub struct QueryPlannerContent(pub(crate) QueryPlannerContentInner);
-
-impl std::ops::Deref for QueryPlannerContent {
-    type Target = QueryPlannerContentInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<QueryPlannerContentInner> for QueryPlannerContent {
-    fn from(inner: QueryPlannerContentInner) -> Self {
-        Self(inner)
-    }
-}
 
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
@@ -349,11 +336,6 @@ pub enum QueryPlannerContentInner {
         response: Box<Response>,
     },
     IntrospectionDisabled,
-}
-impl From<QueryPlannerContent> for QueryPlannerContentInner {
-    fn from(global: QueryPlannerContent) -> Self {
-        global.0
-    }
 }
 
 #[buildstructor::buildstructor]
