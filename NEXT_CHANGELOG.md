@@ -177,6 +177,7 @@ apollo_router::errors::PlannerErrors
 apollo_router::errors::QueryPlannerError
 apollo_router::errors::ServiceBuildError
 apollo_router::json_ext
+apollo_router::layers::ServiceBuilderExt::cache
 apollo_router::mock_service!
 apollo_router::plugins
 apollo_router::plugin::plugins

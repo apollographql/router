@@ -2,10 +2,7 @@
 //! Layers that are specific to one plugin should not be placed in this module.
 use std::future::Future;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
-use moka::sync::Cache;
-use tokio::sync::RwLock;
 use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::BoxError;
@@ -14,7 +11,6 @@ use tower_service::Service;
 use tracing::Span;
 
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::layers::cache::CachingLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextLayer;
 use crate::layers::map_future_with_context::MapFutureWithContextService;
@@ -23,7 +19,6 @@ use crate::layers::sync_checkpoint::CheckpointLayer;
 pub mod map_future_with_context;
 
 pub mod async_checkpoint;
-pub mod cache;
 pub mod instrument;
 pub mod sync_checkpoint;
 
@@ -33,55 +28,6 @@ pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 /// (e.g.: checkpoints) to a [`Service`].
 #[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L>: Sized {
-    /// Add a caching layer to the service stack.
-    /// Given a request and response extract a cacheable key and value that may be used later to return a cached result.
-    ///
-    /// # Arguments
-    ///
-    /// * `cache`: The Moka cache that backs this layer.
-    /// * `key_fn`: The callback to extract a key from the request.
-    /// * `value_fn`: The callback to extract a value from the response.
-    /// * `response_fn`: The callback to construct a response given a request and a cached value.
-    ///
-    /// returns: ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use std::time::Duration;
-    /// # use moka::sync::Cache;
-    /// # use tower::ServiceBuilder;
-    /// # use tower_service::Service;
-    /// # use tracing::info_span;
-    /// # use apollo_router::graphql::Response;
-    /// # use apollo_router::stages::supergraph;
-    /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
-    /// //TODO This doc has highlighted a couple of issues that need to be resolved
-    /// //let _ = ServiceBuilder::new()
-    /// //            .cache(Cache::builder().time_to_live(Duration::from_secs(1)).max_capacity(100).build(),
-    /// //                |req: &SupergraphRequest| req.originating_request.headers().get("cache_key"),
-    /// //                |resp: &SupergraphResponse| &resp.response.body(),
-    /// //                |req: SupergraphRequest, cached: &ResponseBody| SupergraphResponse::builder()
-    /// //                    .context(req.context)
-    /// //                    .data(cached.clone()) //TODO builder should take ResponseBody
-    /// //                    .build().unwrap()) //TODO make response function fallible
-    /// //            .service(service);
-    /// # }
-    /// ```
-    fn cache<Request, Response, Key, Value>(
-        self,
-        cache: Cache<Key, Arc<RwLock<Option<Result<Value, String>>>>>,
-        key_fn: fn(&Request) -> Option<&Key>,
-        value_fn: fn(&Response) -> &Value,
-        response_fn: fn(Request, Value) -> Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
-    where
-        Request: Send,
-    {
-        self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
-    }
-
     /// Decide if processing should continue or not, and if not allow returning of a response.
     ///
     /// This is useful for validation functionality where you want to abort processing but return a
