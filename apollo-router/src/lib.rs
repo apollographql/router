@@ -71,7 +71,6 @@ pub mod services;
 mod spec;
 mod state_machine;
 pub mod subscriber;
-mod traits;
 
 pub use configuration::*;
 pub use context::Context;

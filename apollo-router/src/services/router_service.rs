@@ -215,9 +215,9 @@ where
             let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
                 Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
                     if matches!(
-                        retrieval_error.deref(),
-                        QueryPlannerError::SpecError(_)
-                            | QueryPlannerError::SchemaValidationErrors(_)
+                        retrieval_error.deref().downcast_ref::<QueryPlannerError>(),
+                        Some(QueryPlannerError::SpecError(_))
+                            | Some(QueryPlannerError::SchemaValidationErrors(_))
                     ) =>
                 {
                     StatusCode::BAD_REQUEST

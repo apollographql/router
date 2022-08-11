@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -8,28 +7,22 @@ use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 use serde_json_bytes::value::Serializer;
 use tower::BoxError;
+use tower::ServiceExt;
 
+use super::QueryKey;
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
-use crate::traits::QueryKey;
 use crate::*;
-
-type PlanResult = Result<QueryPlannerContent, QueryPlannerError>;
 
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: Clone> {
-    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, QueryPlannerError>>>,
-    delegate: T,
-}
-
-/// A resolver for cache misses
-struct CachingQueryPlannerResolver<T> {
+    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, Arc<BoxError>>>>,
     delegate: T,
 }
 
@@ -42,79 +35,15 @@ where
         let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
         Self { cache, delegate }
     }
-
-    async fn get(
-        &mut self,
-        request: QueryPlannerRequest,
-    ) -> Result<QueryPlannerResponse, BoxError> {
-        let key = (
-            request.query.clone(),
-            request.operation_name.to_owned(),
-            request.query_plan_options.clone(),
-        );
-        let context = request.context.clone();
-        let entry = self.cache.get(&key).await;
-        if entry.is_first() {
-            let res = self.delegate.call(request).await;
-            match res {
-                Ok(QueryPlannerResponse { content, context }) => {
-                    entry.insert(Ok(content.clone())).await;
-                    Ok(QueryPlannerResponse { content, context })
-                }
-                Err(_) => todo!(),
-            }
-        } else {
-            let res = entry
-                .get()
-                .await
-                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
-
-            match res {
-                Ok(content) => Ok(QueryPlannerResponse { content, context }),
-                Err(error) => todo!(),
-            }
-        }
-    }
 }
-
-/*#[async_trait]
-impl<T: QueryPlanner> CacheResolver<QueryKey, QueryPlannerContent>
-    for CachingQueryPlannerResolver<T>
-{
-    async fn retrieve(&self, key: QueryKey) -> Result<QueryPlannerContent, CacheResolverError> {
-        self.delegate.get(key).await.map_err(|err| err.into())
-    }
-}
-
-#[async_trait]
-impl<T: QueryPlanner + Clone> QueryPlanner for CachingQueryPlanner<T> {
-    async fn get(&self, key: QueryKey) -> PlanResult {
-        let entry = self.cache.get(&key).await;
-        if entry.is_first() {
-            let res = self.delegate.get(key).await;
-            entry.insert(res.clone()).await;
-            res
-        } else {
-            entry
-                .get()
-                .await
-                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?
-        }
-    }
-}*/
 
 impl<T: Clone + Send + 'static> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
-    T: tower::Service<
-        QueryPlannerRequest,
-        Response = QueryPlannerResponse,
-        Error = tower::BoxError,
-    >,
+    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>,
     <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
     type Response = QueryPlannerResponse;
-    // TODO I don't think we can serialize this error back to the router response's payload
-    type Error = tower::BoxError;
+    type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
@@ -132,12 +61,9 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&key).await;
             return if entry.is_first() {
-                let res = qp.delegate.call(request).await;
+                let res = qp.delegate.ready().await?.call(request).await;
                 match res {
-                    Ok(QueryPlannerResponse {
-                        content,
-                        mut context,
-                    }) => {
+                    Ok(QueryPlannerResponse { content, context }) => {
                         entry.insert(Ok(content.clone())).await;
 
                         if let QueryPlannerContent::Plan { plan, .. } = &content {
@@ -155,7 +81,40 @@ where
                         }
                         Ok(QueryPlannerResponse { content, context })
                     }
-                    Err(error) => todo!(),
+                    Err(error) => {
+                        if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
+                            if let QueryPlannerError::PlanningErrors(pe) = &error {
+                                if let Err(inner_e) =
+                                    context.insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                                {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        inner_e
+                                    );
+                                }
+                            } else if let QueryPlannerError::SpecError(e) = &error {
+                                let error_key = match e {
+                                    SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                                    _ => "## GraphQLValidationFailure\n",
+                                };
+                                if let Err(inner_e) = context.insert(
+                                    USAGE_REPORTING,
+                                    UsageReporting {
+                                        stats_report_key: error_key.to_string(),
+                                        referenced_fields_by_type: HashMap::new(),
+                                    },
+                                ) {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        inner_e
+                                    );
+                                }
+                            }
+                        }
+                        let e = Arc::new(error);
+                        entry.insert(Err(e.clone())).await;
+                        Err(CacheResolverError::RetrievalError(e).into())
+                    }
                 }
             } else {
                 let res = entry
@@ -166,96 +125,41 @@ where
                 match res {
                     Ok(content) => Ok(QueryPlannerResponse { content, context }),
                     Err(error) => {
-                        if let QueryPlannerError::PlanningErrors(pe) = &error {
-                            if let Err(inner_e) = request
-                                .context
-                                .insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                            {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    inner_e
-                                );
-                            }
-                        } else if let QueryPlannerError::SpecError(e) = &error {
-                            let error_key = match e {
-                                SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                                _ => "## GraphQLValidationFailure\n",
-                            };
-                            if let Err(inner_e) = request.context.insert(
-                                USAGE_REPORTING,
-                                UsageReporting {
-                                    stats_report_key: error_key.to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                },
-                            ) {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    inner_e
-                                );
+                        if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
+                            if let QueryPlannerError::PlanningErrors(pe) = &error {
+                                if let Err(inner_e) = request
+                                    .context
+                                    .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                                {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        inner_e
+                                    );
+                                }
+                            } else if let QueryPlannerError::SpecError(e) = &error {
+                                let error_key = match e {
+                                    SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                                    _ => "## GraphQLValidationFailure\n",
+                                };
+                                if let Err(inner_e) = request.context.insert(
+                                    USAGE_REPORTING,
+                                    UsageReporting {
+                                        stats_report_key: error_key.to_string(),
+                                        referenced_fields_by_type: HashMap::new(),
+                                    },
+                                ) {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        inner_e
+                                    );
+                                }
                             }
                         }
 
-                        Err(error.into())
+                        Err(CacheResolverError::RetrievalError(error).into())
                     }
                 }
             };
-
-            /*
-            qp.get(request)
-                .await
-                .map(|query_planner_content| {
-                    if let QueryPlannerContent::Plan { plan, .. } = &query_planner_content {
-                        match (&plan.usage_reporting).serialize(Serializer) {
-                            Ok(v) => {
-                                request.context.insert_json_value(USAGE_REPORTING, v);
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                    query_planner_content
-                })
-                .map_err(|e| {
-                    let e = e.into();
-
-                    let CacheResolverError::RetrievalError(re) = &e;
-                    if let QueryPlannerError::PlanningErrors(pe) = re.deref() {
-                        if let Err(inner_e) = request
-                            .context
-                            .insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                        {
-                            tracing::error!(
-                                "usage reporting was not serializable to context, {}",
-                                inner_e
-                            );
-                        }
-                    } else if let QueryPlannerError::SpecError(e) = re.deref() {
-                        let error_key = match e {
-                            SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                            _ => "## GraphQLValidationFailure\n",
-                        };
-                        if let Err(inner_e) = request.context.insert(
-                            USAGE_REPORTING,
-                            UsageReporting {
-                                stats_report_key: error_key.to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            },
-                        ) {
-                            tracing::error!(
-                                "usage reporting was not serializable to context, {}",
-                                inner_e
-                            );
-                        }
-                    }
-
-                    e.into()
-                })
-                .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
-                */
         })
     }
 }
@@ -267,6 +171,7 @@ mod tests {
     use router_bridge::planner::PlanErrors;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
+    use tower::Service;
 
     use super::*;
     use crate::query_planner::QueryPlanOptions;
@@ -274,10 +179,10 @@ mod tests {
     mock! {
         #[derive(Debug)]
         MyQueryPlanner {
-            fn sync_get(
+            fn sync_call(
                 &self,
-                key: QueryKey,
-            ) -> PlanResult;
+                key: QueryPlannerRequest,
+            ) -> Result<QueryPlannerResponse, BoxError>;
         }
 
         impl Clone for MyQueryPlanner {
@@ -285,44 +190,66 @@ mod tests {
         }
     }
 
-    #[async_trait]
-    impl QueryPlanner for MockMyQueryPlanner {
-        async fn get(&self, key: QueryKey) -> PlanResult {
-            self.sync_get(key)
+    impl Service<QueryPlannerRequest> for MockMyQueryPlanner {
+        type Response = QueryPlannerResponse;
+
+        type Error = BoxError;
+
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut task::Context<'_>,
+        ) -> task::Poll<Result<(), Self::Error>> {
+            task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
+            let res = self.sync_call(req);
+            Box::pin(async move { res })
         }
     }
 
     #[test(tokio::test)]
     async fn test_plan() {
         let mut delegate = MockMyQueryPlanner::new();
-        delegate
-            .expect_sync_get()
-            .times(2)
-            .return_const(Err(QueryPlannerError::from(PlanErrors {
-                errors: Default::default(),
-                usage_reporting: UsageReporting {
-                    stats_report_key: "this is a test key".to_string(),
-                    referenced_fields_by_type: Default::default(),
-                },
-            })));
+        delegate.expect_clone().returning(|| {
+            println!("cloning query planner");
+            let mut planner = MockMyQueryPlanner::new();
+            planner.expect_sync_call().times(0..2).returning(|_| {
+                println!("calling query planner");
 
-        let planner = CachingQueryPlanner::new(delegate, 10).await;
+                Err(QueryPlannerError::from(PlanErrors {
+                    errors: Default::default(),
+                    usage_reporting: UsageReporting {
+                        stats_report_key: "this is a test key".to_string(),
+                        referenced_fields_by_type: Default::default(),
+                    },
+                })
+                .into())
+            });
+            planner
+        });
+
+        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
 
         for _ in 0..5 {
             assert!(planner
-                .get((
+                .call(QueryPlannerRequest::new(
                     "query1".into(),
                     Some("".into()),
-                    QueryPlanOptions::default()
+                    QueryPlanOptions::default(),
+                    Context::new()
                 ))
                 .await
                 .is_err());
         }
         assert!(planner
-            .get((
+            .call(QueryPlannerRequest::new(
                 "query2".into(),
                 Some("".into()),
-                QueryPlanOptions::default()
+                QueryPlanOptions::default(),
+                Context::new()
             ))
             .await
             .is_err());

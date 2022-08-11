@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 pub use crate::configuration::ConfigurationError;
@@ -158,11 +159,11 @@ impl From<QueryPlannerError> for FetchError {
 #[derive(Error, Debug, Display, Clone)]
 pub enum CacheResolverError {
     /// value retrieval failed: {0}
-    RetrievalError(Arc<QueryPlannerError>),
+    RetrievalError(Arc<BoxError>),
 }
 
-impl From<QueryPlannerError> for CacheResolverError {
-    fn from(err: QueryPlannerError) -> Self {
+impl From<BoxError> for CacheResolverError {
+    fn from(err: BoxError) -> Self {
         CacheResolverError::RetrievalError(Arc::new(err))
     }
 }
