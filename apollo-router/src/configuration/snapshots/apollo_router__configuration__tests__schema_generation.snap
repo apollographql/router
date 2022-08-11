@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 914
 expression: "&schema"
 ---
 {
@@ -1273,26 +1272,6 @@ expression: "&schema"
                     }
                   },
                   "additionalProperties": false,
-                  "nullable": true
-                },
-                "delay_interval": {
-                  "type": "object",
-                  "required": [
-                    "nanos",
-                    "secs"
-                  ],
-                  "properties": {
-                    "nanos": {
-                      "type": "integer",
-                      "format": "uint32",
-                      "minimum": 0.0
-                    },
-                    "secs": {
-                      "type": "integer",
-                      "format": "uint64",
-                      "minimum": 0.0
-                    }
-                  },
                   "nullable": true
                 },
                 "resources": {

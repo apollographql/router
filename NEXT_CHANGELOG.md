@@ -23,9 +23,25 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.15.1] (unreleased) - 2022-mm-dd
+# [0.16] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
+
+It was doing nothing.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      # Removed, will now cause an error on Router startup:
+      delay_interval:
+        secs: 9
+        nanos: 500000000
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
