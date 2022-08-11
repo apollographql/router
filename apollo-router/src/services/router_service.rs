@@ -33,7 +33,6 @@ use crate::graphql;
 use crate::graphql::Response;
 use crate::http_ext::Request;
 use crate::introspection::Introspection;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
@@ -350,8 +349,7 @@ impl PluggableRouterServiceBuilder {
                 ),
                 plan_cache_limit,
             )
-            .await
-            .boxed(),
+            .await,
         );
 
         let plugins = Arc::new(self.plugins);
@@ -376,9 +374,11 @@ impl PluggableRouterServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub struct RouterCreator {
-    query_planner_service: Buffer<
-        BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-        QueryPlannerRequest,
+    query_planner_service: CachingQueryPlanner<
+        Buffer<
+            BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+            QueryPlannerRequest,
+        >,
     >,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
