@@ -1612,7 +1612,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Cors::builder().allow_any_header(true).build())
+                    .cors(Cors::builder().build())
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )

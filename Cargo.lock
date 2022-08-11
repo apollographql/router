@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "bytes",
  "clap 3.2.10",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "futures",
  "graphql_client",
@@ -4480,7 +4480,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?branch=geal/defer#72f1fff5e57a80b4ed4fcbf13ef2ac33b0314b80"
+source = "git+https://github.com/apollographql/federation-rs.git?tag=defer-alpha1#72f1fff5e57a80b4ed4fcbf13ef2ac33b0314b80"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6472,7 +6472,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "ansi_term",
  "anyhow",
