@@ -66,10 +66,11 @@ impl Plugin for ExposeQueryPlan {
         &self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let conf_enabled = self.enabled;
+        let conf_enabled =
+            self.enabled || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true");
         service
             .map_future_with_context(move |req: &RouterRequest| {
-                let is_enabled = (conf_enabled || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true")) && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
+                let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
