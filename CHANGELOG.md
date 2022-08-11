@@ -149,12 +149,6 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ## 🚀 Features
 
-### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
-
-Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
-
-By [@garypen](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
-
 ### Publish helm chart to OCI registry ([PR #1447](https://github.com/apollographql/router/pull/1447))
 
 When we make a release, publish our helm chart to the same OCI registry that we use for our docker images.
