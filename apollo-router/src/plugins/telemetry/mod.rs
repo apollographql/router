@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -92,6 +94,7 @@ const SERVICE_NAME_RESOURCE: &str = "service.name";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
+static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
 pub struct Telemetry {
     config: config::Conf,
@@ -143,6 +146,13 @@ impl Drop for Telemetry {
         if let Some(sender) = self.spaceport_shutdown.take() {
             ::tracing::debug!("notifying spaceport to shut down");
             let _ = sender.send(());
+        }
+
+        let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
+        if count < 2 {
+            std::thread::spawn(|| {
+                opentelemetry::global::shutdown_tracer_provider();
+            });
         }
     }
 }
@@ -603,6 +613,7 @@ impl Telemetry {
             });
         }
 
+        let _ = TELEMETRY_REFCOUNT.fetch_add(1, Ordering::Relaxed);
         plugin
     }
 
