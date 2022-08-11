@@ -23,9 +23,15 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.15.1] (unreleased) - 2022-mm-dd
+# [0.16.0] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
+
+`QueryPlanOptions::query_plan_options` is no longer available in public.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
 
 ## 🚀 Features
 
