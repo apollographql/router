@@ -372,8 +372,6 @@ pub struct ApolloRouter {
 #[buildstructor::buildstructor]
 impl ApolloRouter {
     /// Build a new Apollo router.
-    ///
-    /// This must only be called in the context of Executable::builder() because it relies on custom logging setup to support hot reload.
     #[builder]
     pub fn new(
         configuration: ConfigurationKind,

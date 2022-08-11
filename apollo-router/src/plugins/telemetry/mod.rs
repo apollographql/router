@@ -151,8 +151,6 @@ impl Drop for Telemetry {
 impl Plugin for Telemetry {
     type Config = config::Conf;
 
-    fn activate(&mut self) {}
-
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Self::new_with_subscriber::<Registry>(init, None).await
     }
