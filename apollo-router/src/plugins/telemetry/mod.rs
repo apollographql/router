@@ -225,8 +225,6 @@ impl Plugin for Telemetry {
         // The trace provider will not be shut down if drop is not called and it will result in a hang.
         // Don't add anything fallible after the tracer provider has been created.
         let tracer_provider = Self::create_tracer_provider(&config)?;
-        //
-        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
 
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
@@ -236,7 +234,6 @@ impl Plugin for Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
-            // metrics_response_queries,
         });
 
         // We're safe now for shutdown.
