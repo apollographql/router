@@ -84,12 +84,11 @@ impl BridgeQueryPlanner {
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 
-                Ok(QueryPlannerContentInner::Introspection {
+                Ok(QueryPlannerContent::Introspection {
                     response: Box::new(response),
-                }
-                .into())
+                })
             }
-            None => Ok(QueryPlannerContentInner::IntrospectionDisabled.into()),
+            None => Ok(QueryPlannerContent::IntrospectionDisabled),
         }
     }
 
@@ -115,15 +114,14 @@ impl BridgeQueryPlanner {
             } => {
                 let subselections = node.parse_subselections(&*self.schema);
                 selections.subselections = subselections;
-                Ok(QueryPlannerContentInner::Plan {
+                Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
                         root: node,
                         options,
                     }),
                     query: Arc::new(selections),
-                }
-                .into())
+                })
             }
             PlanSuccess {
                 data: QueryPlan { node: None },
@@ -219,7 +217,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        if let QueryPlannerContentInner::Plan { plan, .. } = result.0 {
+        if let QueryPlannerContent::Plan { plan, .. } = result {
             insta::with_settings!({sort_maps => true}, {
                 insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
             });

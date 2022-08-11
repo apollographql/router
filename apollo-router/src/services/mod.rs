@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use derive_more::From;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
@@ -317,17 +316,13 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
 pub struct QueryPlannerResponse {
-    pub content: QueryPlannerContent,
+    pub(crate) content: QueryPlannerContent,
     pub context: Context,
 }
 
-/// Query, QueryPlan and Introspection data in an opaque type.
-#[derive(Debug, Clone, From)]
-pub struct QueryPlannerContent(pub(crate) QueryPlannerContentInner);
-
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
-pub enum QueryPlannerContentInner {
+pub enum QueryPlannerContent {
     Plan {
         query: Arc<Query>,
         plan: Arc<QueryPlan>,
@@ -344,7 +339,7 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+    pub(crate) fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
         Self { content, context }
     }
 
@@ -361,13 +356,17 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            QueryPlannerContentInner::Plan {
+            QueryPlannerContent::Plan {
                 plan: Arc::new(QueryPlan::fake_builder().build()),
                 query: Arc::new(Query::default()),
-            }
-            .into(),
+            },
             context,
         ))
+    }
+
+    /// Get a reference of the query plan
+    pub fn query_plan(&self) -> &QueryPlannerContent {
+        &self.content
     }
 }
 

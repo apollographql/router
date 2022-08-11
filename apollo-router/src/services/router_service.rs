@@ -25,7 +25,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
-use super::QueryPlannerContentInner;
+use super::QueryPlannerContent;
 use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -129,11 +129,11 @@ where
                 )
                 .await?;
 
-            match content.0 {
-                QueryPlannerContentInner::Introspection { response } => Ok(
+            match content {
+                QueryPlannerContent::Introspection { response } => Ok(
                     RouterResponse::new_from_graphql_response(*response, context),
                 ),
-                QueryPlannerContentInner::IntrospectionDisabled => {
+                QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(
                         once(ready(
                             graphql::Response::builder()
@@ -151,7 +151,7 @@ where
                         context,
                     })
                 }
-                QueryPlannerContentInner::Plan { query, plan } => {
+                QueryPlannerContent::Plan { query, plan } => {
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
