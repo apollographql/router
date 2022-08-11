@@ -27,6 +27,18 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+
+### Reorder query planner execution ([PR #1484](https://github.com/apollographql/router/pull/1484))
+
+Query planning is deterministic, it only depends on the query, operation name and query planning
+options. As such, we can cache the result of the entire process.
+
+This changes the pipeline to apply query planner plugins between the cache and the bridge planner,
+so those plugins will only be called once on the same query. If changes must be done per query,
+they should happen in a supergraph service.
+
+By [@SimonSapin](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
+
 ## 🚀 Features
 
 ## 🐛 Fixes
