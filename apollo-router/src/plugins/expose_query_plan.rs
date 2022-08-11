@@ -131,10 +131,16 @@ mod tests {
     use crate::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]},"extensions":{"apolloQueryPlan":{"object":{"kind":"QueryPlan","node":{"kind":"Sequence","nodes":[{"kind":"Fetch","serviceName":"products","variableUsages":["first"],"operation":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","operationKind":"query","id":null},{"kind":"Flatten","path":["topProducts","@"],"node":{"kind":"Fetch","serviceName":"reviews","requires":[{"kind":"InlineFragment","typeCondition":"Product","selections":[{"kind":"Field","name":"__typename"},{"kind":"Field","name":"upc"}]}],"variableUsages":[],"operation":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","operationKind":"query","id":null}},{"kind":"Parallel","nodes":[{"kind":"Flatten","path":["topProducts","@","reviews","@","product"],"node":{"kind":"Fetch","serviceName":"products","requires":[{"kind":"InlineFragment","typeCondition":"Product","selections":[{"kind":"Field","name":"__typename"},{"kind":"Field","name":"upc"}]}],"variableUsages":[],"operation":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","operationKind":"query","id":null}},{"kind":"Flatten","path":["topProducts","@","reviews","@","author"],"node":{"kind":"Fetch","serviceName":"accounts","requires":[{"kind":"InlineFragment","typeCondition":"User","selections":[{"kind":"Field","name":"__typename"},{"kind":"Field","name":"id"}]}],"variableUsages":[],"operation":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","operationKind":"query","id":null}}]}]},"text":"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"}}}}"#).unwrap()
+        serde_json::from_str(include_str!(
+            "../../tests/fixtures/expected_response_with_queryplan.json"
+        ))
+        .unwrap()
     });
     static EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
+        serde_json::from_str(include_str!(
+            "../../tests/fixtures/expected_response_without_queryplan.json"
+        ))
+        .unwrap()
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;

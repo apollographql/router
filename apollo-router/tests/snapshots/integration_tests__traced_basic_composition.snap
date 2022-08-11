@@ -23,11 +23,11 @@ expression: get_spans()
       "record": {
         "entries": [
           [
-            "query",
+            "graphql.document",
             "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
           ],
           [
-            "operation_name",
+            "graphql.operation.name",
             ""
           ],
           [
@@ -50,8 +50,8 @@ expression: get_spans()
           "module_path": "apollo_router::plugins::telemetry",
           "fields": {
             "names": [
-              "query",
-              "operation_name",
+              "graphql.document",
+              "graphql.operation.name",
               "client_name",
               "client_version",
               "otel.kind"
@@ -65,6 +65,14 @@ expression: get_spans()
           "record": {
             "entries": [
               [
+                "graphql.document",
+                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+              ],
+              [
+                "graphql.operation.name",
+                ""
+              ],
+              [
                 "otel.kind",
                 "internal"
               ]
@@ -76,6 +84,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -112,6 +122,14 @@ expression: get_spans()
           "record": {
             "entries": [
               [
+                "graphql.document",
+                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+              ],
+              [
+                "graphql.operation.name",
+                ""
+              ],
+              [
                 "otel.kind",
                 "internal"
               ],
@@ -127,6 +145,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -195,6 +215,14 @@ expression: get_spans()
                             "products"
                           ],
                           [
+                            "graphql.document",
+                            "{topProducts{__typename upc name}}"
+                          ],
+                          [
+                            "graphql.operation.name",
+                            ""
+                          ],
+                          [
                             "otel.kind",
                             "internal"
                           ]
@@ -207,6 +235,8 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
+                              "graphql.document",
+                              "graphql.operation.name",
                               "otel.kind"
                             ]
                           }
@@ -371,6 +401,14 @@ expression: get_spans()
                             "reviews"
                           ],
                           [
+                            "graphql.document",
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}"
+                          ],
+                          [
+                            "graphql.operation.name",
+                            ""
+                          ],
+                          [
                             "otel.kind",
                             "internal"
                           ]
@@ -383,6 +421,8 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "name",
+                              "graphql.document",
+                              "graphql.operation.name",
                               "otel.kind"
                             ]
                           }
@@ -562,6 +602,14 @@ expression: get_spans()
                                 "products"
                               ],
                               [
+                                "graphql.document",
+                                "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}"
+                              ],
+                              [
+                                "graphql.operation.name",
+                                ""
+                              ],
+                              [
                                 "otel.kind",
                                 "internal"
                               ]
@@ -574,6 +622,8 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
+                                  "graphql.document",
+                                  "graphql.operation.name",
                                   "otel.kind"
                                 ]
                               }
@@ -738,6 +788,14 @@ expression: get_spans()
                                 "accounts"
                               ],
                               [
+                                "graphql.document",
+                                "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}"
+                              ],
+                              [
+                                "graphql.operation.name",
+                                ""
+                              ],
+                              [
                                 "otel.kind",
                                 "internal"
                               ]
@@ -750,6 +808,8 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "name",
+                                  "graphql.document",
+                                  "graphql.operation.name",
                                   "otel.kind"
                                 ]
                               }

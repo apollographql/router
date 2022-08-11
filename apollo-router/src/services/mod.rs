@@ -17,11 +17,11 @@ use http_ext::IntoHeaderValue;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
-pub use subgraph_service::SubgraphService;
 use tower::BoxError;
 
 pub use self::execution_service::*;
 pub use self::router_service::*;
+pub use self::subgraph_service::*;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -31,12 +31,13 @@ use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
 use crate::query_planner::QueryPlanOptions;
-use crate::*;
+pub use crate::spec::Query;
+use crate::Context;
 
 mod execution_service;
 pub mod http_ext;
 pub(crate) mod layers;
-pub mod new_service;
+pub(crate) mod new_service;
 mod router_service;
 pub(crate) mod subgraph_service;
 
