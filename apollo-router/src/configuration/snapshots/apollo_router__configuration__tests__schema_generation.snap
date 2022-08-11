@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 914
 expression: "&schema"
 ---
 {
@@ -1887,6 +1888,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
             "compression": {
@@ -1899,16 +1901,79 @@ expression: "&schema"
               ],
               "nullable": true
             },
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "query_deduplication": {
               "description": "Enable query deduplication",
               "type": "boolean",
               "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "router": {
+          "description": "Applied at the router level",
+          "type": "object",
+          "properties": {
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
             }
           },
           "additionalProperties": false,
           "nullable": true
         },
         "subgraphs": {
+          "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -1923,10 +1988,37 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
+              "global_rate_limit": {
+                "description": "Enable global rate limiting",
+                "type": "object",
+                "required": [
+                  "capacity",
+                  "interval"
+                ],
+                "properties": {
+                  "capacity": {
+                    "description": "Number of requests allowed",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 1.0
+                  },
+                  "interval": {
+                    "description": "Per interval",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "nullable": true
+              },
               "query_deduplication": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
                 "nullable": true
+              },
+              "timeout": {
+                "description": "Enable timeout for incoming requests",
+                "default": null,
+                "type": "string"
               }
             },
             "additionalProperties": false

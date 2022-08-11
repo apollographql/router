@@ -5,11 +5,13 @@ title: Traffic shaping in the Apollo Router
 The Apollo Router supports the following types of traffic shaping between itself and your subgraphs:
 
 - **Sub-query deduplication** - Whenever the router is sending multiple identical in-flight query operations to a subgraph, it can consolidate them into a single request.
-    - Mutation operations are never deduplicated.
-    - Only in-flight requests are deduplicated.
+  - Mutation operations are never deduplicated.
+  - Only in-flight requests are deduplicated.
 - **Variable deduplication** - If a request to a subgraph includes multiple GraphQL variables with the same value, the router can replace those with a single variable.
 - **Compression** - The router can compress request bodies to subgraphs (along with response bodies to clients) with a supported algorithm
-    - The router currently supports `gzip`, `br`, and `deflate`.
+  - The router currently supports `gzip`, `br`, and `deflate`.
+- **Global rate limiting** - If you want to rate limit requests to subgraphs or to the router itself.
+- **Timeout**: - Set a timeout to subgraphs and router requests.
 
 Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
 
@@ -20,13 +22,22 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 ```yaml title="router.yaml"
 traffic_shaping:
   variables_deduplication: true # Enable the variable deduplication optimization.
+  router: # Rules applied to requests from clients to the router
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+      capacity: 10
+      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
   all:
     query_deduplication: true # Enable query deduplication for all subgraphs.
     compression: br # Enable brotli compression for all subgraphs.
-  subgraphs:
+  subgraphs: # Rules applied to requests from the router to individual subgraphs
     products:
       query_deduplication: false # Disable query for the products subgraph.
       compression: gzip # Enable gzip compression only for the products subgraph.
+      global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
+        capacity: 10
+        interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+      timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, query deduplication is enabled for all subgraphs _except_ the `products` subgraph.

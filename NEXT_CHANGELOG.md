@@ -41,6 +41,29 @@ By [@SimonSapin](https://github.com/Geal) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 
+### Add support of global rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
+
+Additions to the traffic shaping plugin:
+- **Global rate limit** - If you want to rate limit requests to subgraphs or to the router itself.
+- **Timeout**: - Set a timeout to subgraphs and router requests.
+
+```yaml
+traffic_shaping:
+  router: # Rules applied to requests from clients to the router
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+      capacity: 10
+      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+  subgraphs: # Rules applied to requests from the router to individual subgraphs
+    products:
+      global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
+        capacity: 10
+        interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+      timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
+
 ## 🐛 Fixes
 
 ## 🛠 Maintenance
