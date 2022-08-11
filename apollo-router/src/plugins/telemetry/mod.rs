@@ -579,9 +579,6 @@ impl Telemetry {
             Ok(true)
         })?;
 
-        //
-        // let metrics_response_queries = Self::create_metrics_queries(&config)?;
-
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
             custom_endpoints: builder.custom_endpoints(),
@@ -589,7 +586,6 @@ impl Telemetry {
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
-            // metrics_response_queries,
         });
 
         // We're safe now for shutdown.
