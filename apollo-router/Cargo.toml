@@ -136,7 +136,6 @@ tower-http = { version = "0.3.4", features = [
     "timeout"
 ] }
 tower-service = "0.3.2"
-tower-test = "0.4.0"
 tracing = "=0.1.34"
 tracing-core = "=0.1.26"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }

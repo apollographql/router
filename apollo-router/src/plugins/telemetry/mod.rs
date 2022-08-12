@@ -1337,7 +1337,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
         let router_req = RouterRequest::fake_builder().header("test", "my_value_set");
 
         let _router_response = router_service
@@ -1351,10 +1351,8 @@ mod tests {
             .await
             .unwrap();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service(
-            "my_subgraph_name",
-            BoxService::new(mock_subgraph_service.build()),
-        );
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()
@@ -1378,7 +1376,7 @@ mod tests {
         // Another subgraph
         let mut subgraph_service = dyn_plugin.subgraph_service(
             "my_subgraph_name_error",
-            BoxService::new(mock_subgraph_service_in_error.build()),
+            BoxService::new(mock_subgraph_service_in_error),
         );
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(

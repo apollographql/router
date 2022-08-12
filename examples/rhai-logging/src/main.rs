@@ -26,13 +26,14 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
         // create a mock service we will use to test our plugin
-        let mut mock = test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
-        mock.expect_call()
+        mock_service
+            .expect_call()
             .once()
             .returning(move |_req: RouterRequest| {
                 Ok(RouterResponse::fake_builder()
@@ -40,9 +41,6 @@ mod tests {
                     .build()
                     .unwrap())
             });
-
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
             "scripts": "src",

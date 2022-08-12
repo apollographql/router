@@ -1191,13 +1191,12 @@ mod tests {
     use std::sync::Arc;
 
     use http::Method;
-    use tower::ServiceBuilder;
-    use tower::ServiceExt;
 
     use super::*;
     use crate::json_ext::PathElement;
     use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
+    use crate::services::subgraph_service::MakeSubgraphService;
 
     macro_rules! test_query_plan {
         () => {
@@ -1237,6 +1236,7 @@ mod tests {
     /// The query planner reports the failed subgraph fetch as an error with a reason of "service
     /// closed", which is what this test expects.
     #[tokio::test]
+    #[should_panic(expected = "this panic should be propagated to the test harness")]
     async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
@@ -1251,14 +1251,19 @@ mod tests {
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service.expect_call().times(1).withf(|_| {
+                panic!("this panic should be propagated to the test harness");
+            });
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1301,25 +1306,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.body().operation_name
+                        == Some("topProducts_product_0".into());
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1358,23 +1365,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.method() == Method::POST;
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
+
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1469,32 +1480,41 @@ mod tests {
         };
 
         let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
+        mock_x_service.expect_clone().return_once(|| {
+            let mut mock_x_service = plugin::test::MockSubgraphService::new();
+            mock_x_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "t": {"id": 1234,
+                            "__typename": "T",
+                             "x": "X"
+                            }
+                        }})
+                        .build())
+                });
+            mock_x_service
+        });
+
         let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
+        mock_y_service.expect_clone().return_once(|| {
+            let mut mock_y_service = plugin::test::MockSubgraphService::new();
+            mock_y_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "_entities": [{"y": "Y", "__typename": "T"}]
+                        }})
+                        .build())
+                });
+            mock_y_service
+        });
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
@@ -1504,15 +1524,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "X".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_x_service.build().boxed()),
+                    Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "Y".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_y_service.build().boxed()),
+                    Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),
@@ -1625,10 +1641,15 @@ mod tests {
         };
 
         let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_a_service.expect_clone().returning(|| {
+            let mut mock_a_service = plugin::test::MockSubgraphService::new();
+            mock_a_service
+                .expect_call()
+                .times(1)
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+            mock_a_service
+        });
 
         // the first fetch returned null, so there should never be a call to B
         let mut mock_b_service = plugin::test::MockSubgraphService::new();
@@ -1638,15 +1659,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "A".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_a_service.build().boxed()),
+                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "B".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_b_service.build().boxed()),
+                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),

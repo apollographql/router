@@ -170,6 +170,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(dead_code, unreachable_pub)]
 mod test {
     use std::time::Duration;
 
@@ -225,6 +226,8 @@ mod test {
             })
         });
 
+        mock_service.expect_clone().return_once(MockABService::new);
+
         let mut service = create_service(mock_service);
 
         let expected = Ok(B {
@@ -255,13 +258,14 @@ mod test {
     }
 
     #[tokio::test]
-    async fn is_should_cache_err() {
+    async fn it_should_cache_err() {
         let mut mock_service = MockABService::new();
 
         mock_service
             .expect_call()
             .times(1)
             .returning(move |a| Err(BoxError::from(format!("{} err", a.key))));
+        mock_service.expect_clone().return_once(MockABService::new);
 
         let mut service = create_service(mock_service);
 
@@ -295,7 +299,7 @@ mod test {
 
         mock_service
             .expect_call()
-            .times(2)
+            .times(1)
             .with(eq(A {
                 key: "Not cacheable".into(),
                 value: "Needed".into(),
@@ -306,6 +310,25 @@ mod test {
                     value: "there".into(),
                 })
             });
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = MockABService::new();
+            mock_service
+                .expect_call()
+                .times(1)
+                .with(eq(A {
+                    key: "Not cacheable".into(),
+                    value: "Needed".into(),
+                }))
+                .returning(move |a| {
+                    Ok(B {
+                        key: a.key,
+                        value: "there".into(),
+                    })
+                });
+            mock_service.expect_clone().return_once(MockABService::new);
+
+            mock_service
+        });
 
         let mut service = create_service(mock_service);
 
@@ -324,7 +347,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_should_dedupe_in_flight_calls() {
+    async fn it_should_deduplicate_in_flight_calls() {
         let mut mock_service = MockABService::new();
 
         mock_service
@@ -340,6 +363,7 @@ mod test {
                     value: "there".into(),
                 })
             });
+        mock_service.expect_clone().return_once(MockABService::new);
 
         let mut service = create_service(mock_service);
 
@@ -387,7 +411,7 @@ mod test {
                 },
             ))
             .filter_async(Slow::default())
-            .service(mock_service.build())
+            .service(mock_service)
             .map_err(|e: BoxError| e.to_string())
     }
 }

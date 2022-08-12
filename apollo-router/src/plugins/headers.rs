@@ -387,7 +387,7 @@ mod test {
             name: "c".try_into()?,
             value: "d".try_into()?,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -402,8 +402,7 @@ mod test {
             .returning(example_response);
 
         let mut service =
-            HeadersLayer::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))])
-                .layer(mock.build());
+            HeadersLayer::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]).layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -420,7 +419,7 @@ mod test {
         let mut service = HeadersLayer::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -445,7 +444,7 @@ mod test {
         let mut service = HeadersLayer::new(vec![Operation::Propagate(Propagate::Matching {
             matching: Regex::from_str("d[ab]")?,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -471,7 +470,7 @@ mod test {
             rename: None,
             default: None,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -497,7 +496,7 @@ mod test {
             rename: Some("ea".try_into()?),
             default: None,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -523,7 +522,7 @@ mod test {
             rename: None,
             default: Some("defaulted".try_into()?),
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())

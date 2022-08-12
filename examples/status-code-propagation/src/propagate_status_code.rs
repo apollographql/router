@@ -146,8 +146,6 @@ mod tests {
                 .build())
         });
 
-        let mock_service = mock_service.build();
-
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::new(
             PropagateStatusCodeConfig {
@@ -184,8 +182,6 @@ mod tests {
                 .status_code(StatusCode::OK)
                 .build())
         });
-
-        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::new(
@@ -235,8 +231,6 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_service = mock_service.build();
-
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
         let init = PluginInit::new(
             PropagateStatusCodeConfig {
@@ -278,8 +272,6 @@ mod tests {
                     .build()
                     .unwrap())
             });
-
-        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::new(

@@ -100,7 +100,7 @@ mod tests {
             .await
             .unwrap();
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
+            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
         let subgraph_req = SubgraphRequest::fake_builder().context(context);

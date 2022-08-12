@@ -310,11 +310,10 @@ mod csrf_tests {
                 .unwrap())
         });
 
-        let mock = mock_service.build();
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .router_service(mock_service.boxed());
         let res = service_stack
             .oneshot(request)
             .await
@@ -327,11 +326,10 @@ mod csrf_tests {
     }
 
     async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
-        let mock = MockRouterService::new().build();
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .router_service(MockRouterService::new().boxed());
         let res = service_stack
             .oneshot(request)
             .await
