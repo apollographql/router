@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 909
 expression: "&schema"
 ---
 {
@@ -282,6 +283,9 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.expose_query_plan": {
+          "type": "boolean"
+        },
         "experimental.include_subgraph_errors": {
           "type": "object",
           "properties": {
@@ -324,12 +328,7 @@ expression: "&schema"
         "cors": {
           "allow_any_origin": false,
           "allow_credentials": false,
-          "allow_headers": [
-            "content-type",
-            "apollographql-client-version",
-            "apollographql-client-name"
-          ],
-          "allow_any_header": false,
+          "allow_headers": [],
           "expose_headers": null,
           "origins": [
             "https://studio.apollographql.com"
@@ -355,12 +354,7 @@ expression: "&schema"
           "default": {
             "allow_any_origin": false,
             "allow_credentials": false,
-            "allow_headers": [
-              "content-type",
-              "apollographql-client-version",
-              "apollographql-client-name"
-            ],
-            "allow_any_header": false,
+            "allow_headers": [],
             "expose_headers": null,
             "origins": [
               "https://studio.apollographql.com"
@@ -374,11 +368,6 @@ expression: "&schema"
           },
           "type": "object",
           "properties": {
-            "allow_any_header": {
-              "description": "Set to true to mirror headers sent by clients.\n\nIf this is not set, we will default to the `mirror_request` mode, which mirrors the received `access-control-request-headers` preflight has sent..",
-              "default": false,
-              "type": "boolean"
-            },
             "allow_any_origin": {
               "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
               "default": false,
@@ -390,12 +379,8 @@ expression: "&schema"
               "type": "boolean"
             },
             "allow_headers": {
-              "description": "The headers to allow.\n\nDefaults to `default_headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
-              "default": [
-                "content-type",
-                "apollographql-client-version",
-                "apollographql-client-name"
-              ],
+              "description": "The headers to allow.\n\nIf this value is not set, the router will mirror client's `Access-Control-Request-Headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
+              "default": [],
               "type": "array",
               "items": {
                 "type": "string"
@@ -1293,26 +1278,6 @@ expression: "&schema"
                   "additionalProperties": false,
                   "nullable": true
                 },
-                "delay_interval": {
-                  "type": "object",
-                  "required": [
-                    "nanos",
-                    "secs"
-                  ],
-                  "properties": {
-                    "nanos": {
-                      "type": "integer",
-                      "format": "uint32",
-                      "minimum": 0.0
-                    },
-                    "secs": {
-                      "type": "integer",
-                      "format": "uint64",
-                      "minimum": 0.0
-                    }
-                  },
-                  "nullable": true
-                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
@@ -1906,6 +1871,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
             "compression": {
@@ -1918,16 +1884,79 @@ expression: "&schema"
               ],
               "nullable": true
             },
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "query_deduplication": {
               "description": "Enable query deduplication",
               "type": "boolean",
               "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "router": {
+          "description": "Applied at the router level",
+          "type": "object",
+          "properties": {
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
             }
           },
           "additionalProperties": false,
           "nullable": true
         },
         "subgraphs": {
+          "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -1942,10 +1971,37 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
+              "global_rate_limit": {
+                "description": "Enable global rate limiting",
+                "type": "object",
+                "required": [
+                  "capacity",
+                  "interval"
+                ],
+                "properties": {
+                  "capacity": {
+                    "description": "Number of requests allowed",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 1.0
+                  },
+                  "interval": {
+                    "description": "Per interval",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "nullable": true
+              },
               "query_deduplication": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
                 "nullable": true
+              },
+              "timeout": {
+                "description": "Enable timeout for incoming requests",
+                "default": null,
+                "type": "string"
               }
             },
             "additionalProperties": false

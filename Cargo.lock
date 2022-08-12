@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -180,6 +180,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "paste",
+ "pin-project-lite",
  "prometheus",
  "regex",
  "reqwest",
@@ -223,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -239,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -265,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "bytes",
  "clap 3.2.10",
@@ -286,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "futures",
  "graphql_client",
@@ -1020,7 +1021,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3873,9 +3873,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e280fbe77cc62c91527259e9442153f4688736748d24660126286329742b4c6c"
+checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 
 [[package]]
 name = "pin-utils"
@@ -4479,7 +4479,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?branch=geal/defer#72f1fff5e57a80b4ed4fcbf13ef2ac33b0314b80"
+source = "git+https://github.com/apollographql/federation-rs.git?tag=defer-alpha1#72f1fff5e57a80b4ed4fcbf13ef2ac33b0314b80"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5396,9 +5396,9 @@ dependencies = [
 
 [[package]]
 name = "test-span"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93924e1fa984429f7b8a1b4fc9652a8ceac21fcd4aefcf7f881e247f4118b180"
+checksum = "88c12e1076fc168ae4b9870a29cabf575d318f5399f025c2248a8deae057ed12"
 dependencies = [
  "daggy",
  "derivative",
@@ -5417,9 +5417,9 @@ dependencies = [
 
 [[package]]
 name = "test-span-macro"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2529044a35c9d1000884dc46ea88e50410f33871149b0f649a648a91728dc841"
+checksum = "1f972445f2c781bb6d47ee4a715db3a0e404a79d977f751fd4eb2b0d44c6eb9d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6471,7 +6471,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.14.0"
+version = "0.15.1"
 dependencies = [
  "ansi_term",
  "anyhow",

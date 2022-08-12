@@ -93,6 +93,7 @@ pub struct Configuration {
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+const TELEMETRY_KEY: &str = "telemetry";
 
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -142,6 +143,17 @@ impl Configuration {
         }
 
         plugins
+    }
+
+    // checks that we can reload configuration from the current one to the new one
+    pub fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
+        if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
+            == new.apollo_plugins.plugins.get(TELEMETRY_KEY)
+        {
+            Ok(())
+        } else {
+            Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
+        }
     }
 }
 
@@ -369,7 +381,7 @@ pub(crate) struct Cors {
 
     /// The headers to allow.
     ///
-    /// Defaults to `default_headers`.
+    /// If this value is not set, the router will mirror client's `Access-Control-Request-Headers`.
     ///
     /// Note that if you set headers here,
     /// you also want to have a look at your `CSRF` plugins configuration,
@@ -377,16 +389,8 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default = "default_headers")]
-    pub(crate) allow_headers: Vec<String>,
-
-    /// Set to true to mirror headers sent by clients.
-    ///
-    /// If this is not set, we will default to
-    /// the `mirror_request` mode, which mirrors the received
-    /// `access-control-request-headers` preflight has sent..
     #[serde(default)]
-    pub(crate) allow_any_header: bool,
+    pub(crate) allow_headers: Vec<String>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
@@ -412,14 +416,13 @@ pub(crate) struct Cors {
 impl Default for Cors {
     fn default() -> Self {
         Self {
-            allow_any_origin: Default::default(),
-            allow_any_header: Default::default(),
-            allow_credentials: Default::default(),
-            allow_headers: default_headers(),
-            expose_headers: Default::default(),
-            match_origins: Default::default(),
             origins: default_origins(),
             methods: default_cors_methods(),
+            allow_any_origin: Default::default(),
+            allow_credentials: Default::default(),
+            allow_headers: Default::default(),
+            expose_headers: Default::default(),
+            match_origins: Default::default(),
         }
     }
 }
@@ -430,14 +433,6 @@ fn default_origins() -> Vec<String> {
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
-}
-
-fn default_headers() -> Vec<String> {
-    vec![
-        "content-type".into(),
-        "apollographql-client-version".into(),
-        "apollographql-client-name".into(),
-    ]
 }
 
 fn default_introspection() -> bool {
@@ -480,7 +475,6 @@ impl Cors {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
-        allow_any_header: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
@@ -489,14 +483,13 @@ impl Cors {
         methods: Option<Vec<String>>,
     ) -> Self {
         Self {
-            allow_any_origin: allow_any_origin.unwrap_or_default(),
-            allow_any_header: allow_any_header.unwrap_or_default(),
-            allow_credentials: allow_credentials.unwrap_or_default(),
-            allow_headers: allow_headers.unwrap_or_else(default_headers),
             expose_headers,
             match_origins,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
+            allow_any_origin: allow_any_origin.unwrap_or_default(),
+            allow_credentials: allow_credentials.unwrap_or_default(),
+            allow_headers: allow_headers.unwrap_or_default(),
         }
     }
 }
@@ -507,7 +500,7 @@ impl Cors {
 
         self.ensure_usable_cors_rules()?;
 
-        let allow_headers = if self.allow_any_header {
+        let allow_headers = if self.allow_headers.is_empty() {
             cors::AllowHeaders::mirror_request()
         } else {
             cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
@@ -1029,19 +1022,7 @@ mod tests {
             !cors.allow_any_origin,
             "Allow any origin should be disabled by default"
         );
-        assert!(
-            !cors.allow_any_header,
-            "Allow any header should be disabled by default"
-        );
-
-        assert_eq!(
-            vec![
-                "content-type".to_string(),
-                "apollographql-client-version".to_string(),
-                "apollographql-client-name".to_string(),
-            ],
-            cors.allow_headers,
-        );
+        assert!(cors.allow_headers.is_empty());
 
         assert!(
             cors.match_origins.is_none(),

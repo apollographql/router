@@ -38,7 +38,6 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::query_planner::QueryPlanOptions;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
@@ -125,7 +124,6 @@ where
                                 .expect("the query presence was already checked by a plugin"),
                         )
                         .and_operation_name(body.operation_name.clone())
-                        .query_plan_options(QueryPlanOptions::default())
                         .context(context)
                         .build(),
                 )

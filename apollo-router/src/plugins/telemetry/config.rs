@@ -1,7 +1,6 @@
 //! Configuration for the telemetry plugin.
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
@@ -59,7 +58,6 @@ pub struct Metrics {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct MetricsCommon {
-    pub delay_interval: Option<Duration>,
     /// Configuration to add custom labels/attributes to metrics
     pub attributes: Option<MetricsAttributesConf>,
     #[serde(default)]

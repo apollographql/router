@@ -23,17 +23,45 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.14.1] (unreleased) - 2022-mm-dd
+# [0.16] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
-### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
+### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
 
-The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
-was changed from `String` to `Arc<String>`.
-This reduces the number of copies of this string we keep in memory, as schemas can get large.
+`QueryPlanOptions::query_plan_options` is no longer available in public.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
+
+### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
+
+It was doing nothing.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      # Removed, will now cause an error on Router startup:
+      delay_interval:
+        secs: 9
+        nanos: 500000000
+```
 
 By [@SimonSapin](https://github.com/SimonSapin)
+
+### Remove telemetry configuration hot reloading ([PR #1463](https://github.com/apollographql/router/pull/1463))
+
+Configuration hot reloading is not very useful for telemetry, and is the
+source of regular bugs that are hard to fix.
+
+This removes the support for configuration reloading entirely. Now, the
+router will reject a configuration reload with an error log if the
+telemetry configuration changed.
+
+It is now possible to create a subscriber and pass it explicitely to the telemetry plugin
+when creating it. It will then be modified to integrate the telemetry plugin's layer.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
 
 ### Remove Buffer from Mock*Service ([PR #1440](https://github.com/apollographql/router/pull/1440)
 
@@ -46,39 +74,37 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
+
+Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
+
+### Add support of global rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
+
+Additions to the traffic shaping plugin:
+- **Global rate limit** - If you want to rate limit requests to subgraphs or to the router itself.
+- **Timeout**: - Set a timeout to subgraphs and router requests.
+
+```yaml
+traffic_shaping:
+  router: # Rules applied to requests from clients to the router
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+      capacity: 10
+      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+  subgraphs: # Rules applied to requests from the router to individual subgraphs
+    products:
+      global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
+        capacity: 10
+        interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+      timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
+
 ## 🐛 Fixes
-
-### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
-
-Change attribute name `query` to `graphql.document` and `operation_name` to `graphql.operation.name` in spans.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
-
-### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
-
-Router config handling now:
-* Allows completely empty configuration without error.
-* Prevents unknown tags at the root of the configuration from being silently ignored.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
-
 
 ## 🛠 Maintenance
 
 ## 📚 Documentation
-
-
-### CORS: Fix trailing slashes, and display defaults ([PR #1471](https://github.com/apollographql/router/pull/1471))
-
-The CORS documentation now displays a valid `origins` configuration (without trailing slash!), and the full configuration section displays its default settings.
-
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
-
-
-
-### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
-
-Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457

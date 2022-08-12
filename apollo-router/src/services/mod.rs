@@ -282,13 +282,13 @@ impl RouterResponse {
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
-/// [`Context`] and [`QueryPlanOptions`] for the request.
+/// [`Context`] for the request.
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     pub query: String,
     pub operation_name: Option<String>,
     /// Query plan options
-    pub query_plan_options: QueryPlanOptions,
+    pub(crate) query_plan_options: QueryPlanOptions,
 
     pub context: Context,
 }
@@ -302,22 +302,21 @@ impl QueryPlannerRequest {
     pub fn new(
         query: String,
         operation_name: Option<String>,
-        query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
             query,
             operation_name,
-            query_plan_options,
+            query_plan_options: QueryPlanOptions::default(),
             context,
         }
     }
 }
 
 assert_impl_all!(QueryPlannerResponse: Send);
-/// [`Context`] and [`QueryPlan`] for the response..
+/// [`Context`] and [`QueryPlan`] for the response.
 pub struct QueryPlannerResponse {
-    pub content: QueryPlannerContent,
+    pub(crate) content: QueryPlannerContent,
     pub context: Context,
 }
 
@@ -340,7 +339,7 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+    pub(crate) fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
         Self { content, context }
     }
 
@@ -363,6 +362,11 @@ impl QueryPlannerResponse {
             },
             context,
         ))
+    }
+
+    /// Get a reference of the query plan
+    pub fn query_plan(&self) -> &QueryPlannerContent {
+        &self.content
     }
 }
 

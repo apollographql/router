@@ -5,19 +5,10 @@ use anyhow::Result;
 use apollo_router::services::PluggableRouterServiceBuilder;
 use apollo_router::services::RouterRequest;
 use apollo_router::services::SubgraphService;
-use apollo_router::subscriber::set_global_subscriber;
-use apollo_router::subscriber::RouterSubscriber;
 use tower::ServiceExt;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // set up console logs
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"));
-
-    set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
-
     // get the supergraph from ../../examples/graphql/supergraph.graphql
     let schema = include_str!("../../graphql/supergraph.graphql");
     let schema = Arc::new(apollo_router::Schema::parse(schema, &Default::default())?);
