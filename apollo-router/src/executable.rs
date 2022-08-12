@@ -203,7 +203,9 @@ impl Executable {
             Dispatch::new(builder.json().finish())
         };
 
-        GLOBAL_ENV_FILTER.set(opt.log_level.clone()).unwrap();
+        GLOBAL_ENV_FILTER.set(opt.log_level.clone()).expect(
+            "failed setting the global env filter. THe start() function should only be called once",
+        );
 
         // The dispatcher we created is passed explicitely here to make sure we display the logs
         // in the initialization pahse and in the state machine code, before a global subscriber
