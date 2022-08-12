@@ -1021,7 +1021,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -5397,9 +5396,9 @@ dependencies = [
 
 [[package]]
 name = "test-span"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93924e1fa984429f7b8a1b4fc9652a8ceac21fcd4aefcf7f881e247f4118b180"
+checksum = "88c12e1076fc168ae4b9870a29cabf575d318f5399f025c2248a8deae057ed12"
 dependencies = [
  "daggy",
  "derivative",
@@ -5418,9 +5417,9 @@ dependencies = [
 
 [[package]]
 name = "test-span-macro"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2529044a35c9d1000884dc46ea88e50410f33871149b0f649a648a91728dc841"
+checksum = "1f972445f2c781bb6d47ee4a715db3a0e404a79d977f751fd4eb2b0d44c6eb9d"
 dependencies = [
  "proc-macro2",
  "quote",
