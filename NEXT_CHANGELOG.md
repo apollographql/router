@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
+
+`QueryPlanOptions::query_plan_options` is no longer available in public.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
+
 ### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
 
 It was doing nothing.
@@ -43,6 +49,21 @@ telemetry:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Remove telemetry configuration hot reloading ([PR #1463](https://github.com/apollographql/router/pull/1463))
+
+Configuration hot reloading is not very useful for telemetry, and is the
+source of regular bugs that are hard to fix.
+
+This removes the support for configuration reloading entirely. Now, the
+router will reject a configuration reload with an error log if the
+telemetry configuration changed.
+
+It is now possible to create a subscriber and pass it explicitely to the telemetry plugin
+when creating it. It will then be modified to integrate the telemetry plugin's layer.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
+
+
 ### Reorder query planner execution ([PR #1484](https://github.com/apollographql/router/pull/1484))
 
 Query planning is deterministic, it only depends on the query, operation name and query planning
@@ -52,9 +73,15 @@ This changes the pipeline to apply query planner plugins between the cache and t
 so those plugins will only be called once on the same query. If changes must be done per query,
 they should happen in a supergraph service.
 
-By [@SimonSapin](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
 
 ## 🚀 Features
+
+### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
+
+Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
 
 ### Add support of global rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
 

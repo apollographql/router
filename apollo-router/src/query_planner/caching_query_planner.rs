@@ -174,7 +174,6 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::query_planner::QueryPlanOptions;
 
     mock! {
         #[derive(Debug)]
@@ -238,7 +237,6 @@ mod tests {
                 .call(QueryPlannerRequest::new(
                     "query1".into(),
                     Some("".into()),
-                    QueryPlanOptions::default(),
                     Context::new()
                 ))
                 .await
@@ -248,7 +246,6 @@ mod tests {
             .call(QueryPlannerRequest::new(
                 "query2".into(),
                 Some("".into()),
-                QueryPlanOptions::default(),
                 Context::new()
             ))
             .await

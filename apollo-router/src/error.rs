@@ -23,7 +23,6 @@ pub(crate) use crate::graphql::Error;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-pub use crate::reload::Error as ReloadError;
 pub use crate::spec::SpecError;
 
 /// Error types for execution.

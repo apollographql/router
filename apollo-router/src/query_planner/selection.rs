@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Entry;
 
 use crate::error::FetchError;
@@ -9,7 +10,7 @@ use crate::*;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum Selection {
     /// A field selection.
@@ -20,7 +21,7 @@ pub(crate) enum Selection {
 }
 
 /// The field that is used
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Field {
     /// An optional alias for the field.
@@ -36,7 +37,7 @@ pub(crate) struct Field {
 }
 
 /// An inline fragment.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InlineFragment {
     /// The required fragment type.
