@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 146
+assertion_line: 147
 expression: get_spans()
 ---
 {
@@ -132,10 +132,6 @@ expression: get_spans()
               [
                 "otel.kind",
                 "internal"
-              ],
-              [
-                "message",
-                "flushing telemetry"
               ]
             ],
             "metadata": {

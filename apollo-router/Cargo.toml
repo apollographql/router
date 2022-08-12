@@ -133,6 +133,7 @@ tower-http = { version = "0.3.4", features = [
     "decompression-br",
     "decompression-deflate",
     "decompression-gzip",
+    "timeout"
 ] }
 tower-service = "0.3.2"
 tower-test = "0.4.0"
@@ -144,7 +145,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
-
+pin-project-lite = "0.2.9"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -165,7 +166,7 @@ tempfile = "3.3.0"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.6"
+test-span = "0.7"
 tower-test = "0.4.0"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
