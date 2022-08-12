@@ -8,6 +8,7 @@ pub mod router {
     pub use crate::services::RouterResponse as Response;
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub type Result = std::result::Result<Response, BoxError>;
 }
 
 pub mod query_planner {
@@ -16,6 +17,7 @@ pub mod query_planner {
     pub use crate::services::QueryPlannerResponse as Response;
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub type Result = std::result::Result<Response, BoxError>;
 
     // Reachable from Request or Response:
     pub use crate::query_planner::QueryPlan;
@@ -29,6 +31,7 @@ pub mod execution {
     pub use crate::services::ExecutionResponse as Response;
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub type Result = std::result::Result<Response, BoxError>;
 }
 
 pub mod subgraph {
@@ -37,6 +40,7 @@ pub mod subgraph {
     pub use crate::services::SubgraphResponse as Response;
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub type Result = std::result::Result<Response, BoxError>;
 
     // Reachable from Request or Response:
     pub use crate::query_planner::OperationKind;
