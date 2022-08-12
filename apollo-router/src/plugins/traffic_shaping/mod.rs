@@ -526,13 +526,17 @@ mod test {
 
         let plugin = get_traffic_shaping_plugin(&config).await;
         let mut mock_service = MockRouterService::new();
-        mock_service.expect_call().times(2).returning(move |_| {
-            Ok(RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
-                .unwrap())
+        mock_service.expect_clone().returning(|| {
+            let mut mock_service = MockRouterService::new();
+
+            mock_service.expect_call().times(0..2).returning(move |_| {
+                Ok(RouterResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+                    .unwrap())
+            });
+            mock_service
         });
-        let mock_service = mock_service.build();
 
         let _response = plugin
             .router_service(mock_service.clone().boxed())
