@@ -33,7 +33,8 @@ impl Plugin for ExposeQueryPlan {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ExposeQueryPlan {
-            enabled: init.config,
+            enabled: init.config
+                || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true"),
         })
     }
 
@@ -66,8 +67,7 @@ impl Plugin for ExposeQueryPlan {
         &self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let conf_enabled =
-            self.enabled || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true");
+        let conf_enabled = self.enabled;
         service
             .map_future_with_context(move |req: &RouterRequest| {
                 let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));

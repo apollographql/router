@@ -93,6 +93,7 @@ pub struct Configuration {
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+const TELEMETRY_KEY: &str = "telemetry";
 
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -142,6 +143,17 @@ impl Configuration {
         }
 
         plugins
+    }
+
+    // checks that we can reload configuration from the current one to the new one
+    pub fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
+        if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
+            == new.apollo_plugins.plugins.get(TELEMETRY_KEY)
+        {
+            Ok(())
+        } else {
+            Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
+        }
     }
 }
 
