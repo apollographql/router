@@ -36,6 +36,12 @@ pub(crate) struct QueryPlanOptions {
     pub(crate) enable_variable_deduplication: bool,
 }
 
+/// A planner key.
+///
+/// This type consists of a query string, an optional operation string and the
+/// [`QueryPlanOptions`].
+pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
+
 /// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {

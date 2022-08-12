@@ -69,7 +69,6 @@ mod router_factory;
 pub mod services;
 mod spec;
 mod state_machine;
-mod traits;
 
 pub use configuration::*;
 pub use context::Context;

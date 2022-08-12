@@ -62,7 +62,18 @@ It is now possible to create a subscriber and pass it explicitely to the telemet
 when creating it. It will then be modified to integrate the telemetry plugin's layer.
 
 By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
->>>>>>> be6590826afb60bf3c683315c68f9ed47594a2a3
+
+
+### Reorder query planner execution ([PR #1484](https://github.com/apollographql/router/pull/1484))
+
+Query planning is deterministic, it only depends on the query, operation name and query planning
+options. As such, we can cache the result of the entire process.
+
+This changes the pipeline to apply query planner plugins between the cache and the bridge planner,
+so those plugins will only be called once on the same query. If changes must be done per query,
+they should happen in a supergraph service.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
 
 ## 🚀 Features
 
