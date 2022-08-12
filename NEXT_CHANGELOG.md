@@ -63,6 +63,17 @@ when creating it. It will then be modified to integrate the telemetry plugin's l
 
 By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
 
+### Reorder query planner execution ([PR #1484](https://github.com/apollographql/router/pull/1484))
+
+Query planning is deterministic, it only depends on the query, operation name and query planning
+options. As such, we can cache the result of the entire process.
+
+This changes the pipeline to apply query planner plugins between the cache and the bridge planner,
+so those plugins will only be called once on the same query. If changes must be done per query,
+they should happen in a supergraph service.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
+
 ### Remove Buffer from Mock*Service ([PR #1440](https://github.com/apollographql/router/pull/1440)
 
 This removes the usage of `tower_test::mock::Mock` in mocked services because it isolated the service in a task
@@ -71,7 +82,6 @@ This rewrites the mocked services API to remove the `build()` method, and make t
 using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
-
 ## 🚀 Features
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))

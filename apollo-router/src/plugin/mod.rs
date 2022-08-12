@@ -173,6 +173,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    ///
+    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
+    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
+    /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
@@ -238,6 +242,10 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    ///
+    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
+    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
+    /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
