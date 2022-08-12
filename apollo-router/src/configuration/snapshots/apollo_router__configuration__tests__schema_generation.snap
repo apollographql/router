@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 909
 expression: "&schema"
 ---
 {
@@ -282,6 +283,9 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.expose_query_plan": {
+          "type": "boolean"
+        },
         "experimental.include_subgraph_errors": {
           "type": "object",
           "properties": {

@@ -33,7 +33,7 @@ use crate::graphql;
 use crate::graphql::Response;
 use crate::http_ext::Request;
 use crate::introspection::Introspection;
-use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
@@ -226,9 +226,9 @@ where
             let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
                 Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
                     if matches!(
-                        retrieval_error.deref(),
-                        QueryPlannerError::SpecError(_)
-                            | QueryPlannerError::SchemaValidationErrors(_)
+                        retrieval_error.deref().downcast_ref::<QueryPlannerError>(),
+                        Some(QueryPlannerError::SpecError(_))
+                            | Some(QueryPlannerError::SchemaValidationErrors(_))
                     ) =>
                 {
                     StatusCode::BAD_REQUEST
@@ -348,13 +348,20 @@ impl PluggableRouterServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service = ServiceBuilder::new().buffered().service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit)
-                    .await
-                    .boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ),
+        let query_planner_service = ServiceBuilder::new().service(
+            CachingQueryPlanner::new(
+                Buffer::new(
+                    self.plugins
+                        .iter_mut()
+                        .rev()
+                        .fold(bridge_query_planner.boxed(), |acc, (_, e)| {
+                            e.query_planning_service(acc)
+                        }),
+                    DEFAULT_BUFFER_SIZE,
+                ),
+                plan_cache_limit,
+            )
+            .await,
         );
 
         let plugins = Arc::new(self.plugins);
@@ -379,9 +386,11 @@ impl PluggableRouterServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub struct RouterCreator {
-    query_planner_service: Buffer<
-        BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-        QueryPlannerRequest,
+    query_planner_service: CachingQueryPlanner<
+        Buffer<
+            BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+            QueryPlannerRequest,
+        >,
     >,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,

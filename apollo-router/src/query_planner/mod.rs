@@ -11,6 +11,7 @@ use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
@@ -34,6 +35,12 @@ pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
     pub(crate) enable_variable_deduplication: bool,
 }
+
+/// A planner key.
+///
+/// This type consists of a query string, an optional operation string and the
+/// [`QueryPlanOptions`].
+pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 
 /// A plan for a given GraphQL query
 #[derive(Debug)]
@@ -64,7 +71,7 @@ impl QueryPlan {
 }
 
 /// Query plans are composed of a set of nodes.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum PlanNode {
     /// These nodes must be executed in order.
@@ -719,6 +726,7 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
+    use serde::Serialize;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
@@ -737,7 +745,7 @@ pub(crate) mod fetch {
     use crate::*;
 
     /// GraphQL operation type.
-    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
         Query,
@@ -762,7 +770,7 @@ pub(crate) mod fetch {
     }
 
     /// A fetch node.
-    #[derive(Debug, PartialEq, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
@@ -1078,7 +1086,7 @@ pub(crate) mod fetch {
 }
 
 /// A flatten node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlattenNode {
     /// The path when result should be merged.
@@ -1089,7 +1097,7 @@ pub(crate) struct FlattenNode {
 }
 
 /// A primary query for a Defer node, the non deferred part
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Primary {
     /// Optional path, set if and only if the defer node is a
@@ -1107,7 +1115,7 @@ pub(crate) struct Primary {
 /// The "deferred" parts of the defer (note that it's an array). Each
 /// of those deferred elements will correspond to a different chunk of
 /// the response to the client (after the initial non-deferred one that is).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeferredNode {
     /// References one or more fetch node(s) (by `id`) within
@@ -1138,7 +1146,7 @@ impl DeferredNode {
     }
 }
 /// A deferred node.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     id: String,
