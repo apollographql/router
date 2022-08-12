@@ -66,6 +66,12 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
+
+Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
+
 ### Add support of global rate limit and timeout. [PR #1347](https://github.com/apollographql/router/pull/1347)
 
 Additions to the traffic shaping plugin:
