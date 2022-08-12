@@ -82,6 +82,214 @@ This rewrites the mocked services API to remove the `build()` method, and make t
 using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
+
+### Some items were renamed or moved ([PR #FIXME])
+
+At the crate root:
+
+* `SchemaKind` → `SchemaSource`
+* `SchemaKind::String(String)` → `SchemaSource::Static { schema_sdl: String }`
+* `ConfigurationKind` → `ConfigurationSource`
+* `ConfigurationKind::Instance` → `ConfigurationSource::Static`
+* `ShutdownKind` → `ShutdownSource`
+* `ApolloRouter` → `RouterHttpServer`
+
+A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
+reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
+In pseudo-syntax:
+
+```rust
+mod router {
+    use apollo_router::services::RouterRequest as Request;
+    use apollo_router::services::RouterResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+}
+
+mod query_planner {
+    use apollo_router::services::QueryPlannerRequest as Request;
+    use apollo_router::services::QueryPlannerResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+
+    // Reachable from Request or Response:
+    use apollo_router::query_planner::QueryPlan;
+    use apollo_router::query_planner::QueryPlanOptions;
+    use apollo_router::services::QueryPlannerContent;
+    use apollo_router::spec::Query;
+}
+
+mod execution {
+    use apollo_router::services::ExecutionRequest as Request;
+    use apollo_router::services::ExecutionResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+}
+
+mod subgraph {
+    use super::*;
+    use apollo_router::services::SubgraphRequest as Request;
+    use apollo_router::services::SubgraphResponse as Response;
+    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+
+    // Reachable from Request or Response:
+    use apollo_router::query_planner::OperationKind;
+}
+```
+
+Migration example:
+
+```diff
+-use tower::util::BoxService;
+-use tower::BoxError;
+-use apollo_router::services::{RouterRequest, RouterResponse};
++use apollo_router::stages::router;
+ 
+-async fn example(service: BoxService<RouterRequest, RouterResponse, BoxError>) -> RouterResponse {
++async fn example(service: router::BoxService) -> router::Response {
+-    let request = RouterRequest::builder()/*…*/.build();
++    let request = router::Request::builder()/*…*/.build();
+     service.oneshot(request).await
+ }
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Some items were removed from the public API ([PR #FIXME])
+
+If you used some of them and don’t find a replacement,
+please [file an issue](https://github.com/apollographql/router/issues/)
+with details about the use case.
+
+```
+apollo_router::errors::CacheResolverError
+apollo_router::errors::JsonExtError
+apollo_router::errors::PlanError
+apollo_router::errors::PlannerError
+apollo_router::errors::PlannerErrors
+apollo_router::errors::QueryPlannerError
+apollo_router::errors::ServiceBuildError
+apollo_router::json_ext
+apollo_router::mock_service!
+apollo_router::plugins
+apollo_router::plugin::plugins
+apollo_router::plugin::PluginFactory
+apollo_router::plugin::DynPlugin
+apollo_router::plugin::test::IntoSchema
+apollo_router::plugin::test::MockSubgraphFactory
+apollo_router::plugin::test::PluginTestHarness
+apollo_router::query_planner::QueryPlan::execute
+apollo_router::services
+apollo_router::Schema
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Router startup API changes ([PR #FIXME])
+
+The `RouterHttpServer::serve` method and its return type `RouterHandle` were removed,
+their functionality merged into `RouterHttpServer` (formerly `ApolloRouter`).
+The builder for `RouterHttpServer` now ends with a `start` method instead of `build`.
+This method immediatly starts the server in a new Tokio task.
+
+```diff
+ RouterHttpServer::builder()
+     .configuration(configuration)
+     .schema(schema)
+-    .build()
+-    .serve()
++    .start()
+     .await
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #FIXME])
+
+The builder for `apollo_router::Executable` had a `router_builder_fn` method
+allowing to specify how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
+with a provided configuration and schema.
+The only possible variation there was specifying when the server should shut down
+with a `ShutdownSource` parameter,
+so `router_builder_fn` was replaced with a new `shutdown` method that takes that.
+
+```diff
+ use apollo_router::Executable;
+-use apollo_router::RouterHttpServer;
+ use apollo_router::ShutdownSource;
+
+ Executable::builder()
+-    .router_builder_fn(|configuration, schema| RouterHttpServer::builder()
+-        .configuration(configuration)
+-        .schema(schema)
+-        .shutdown(ShutdownSource::None)
+-        .start())
++    .shutdown(ShutdownSource::None)
+     .start()
+     .await
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Removed constructors when there is a public builder ([PR #FIXME])
+
+Many types in the Router API can be constructed with the builder pattern.
+We use the [`buildstructor`](https://crates.io/crates/buildstructor) crate
+to auto-generate builder boilerplate based on the parameters of a constructor.
+These constructors have been made private so that users must go through the builder instead,
+which will allow us to add parameters in the future without a breaking API change.
+If you were using one of these constructors, the migration generally looks like this:
+
+```diff
+-apollo_router::graphql::Error::new(m, vec![l], Some(p), Default::default())
++apollo_router::graphql::Error::build()
++    .message(m)
++    .location(l)
++    .path(p)
++    .build()
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Removed deprecated type aliases ([PR #FIXME])
+
+A few versions ago, some types were moved from the crate root to a new `graphql` module.
+To help the transition, type aliases were left at the old location with a deprecation warning.
+These aliases are now removed, remaining imports must be changed to the new location:
+
+```diff
+-use apollo_router::Error;
+-use apollo_router::Request;
+-use apollo_router::Response;
++use apollo_router::graphql::Error;
++use apollo_router::graphql::Request;
++use apollo_router::graphql::Response;
+```
+
+Alternatively, import the module with `use apollo_router::graphql` 
+then use qualified paths such as `graphql::Request`.
+This can help disambiguate when multiple types share a name.
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #FIXME])
+
+`apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
+When no `Content-Type` header is specified, this builder will now default to `application/json`.
+This will help tests where a request goes through mandatory plugins including CSRF protection.
+which makes the request be accepted by CSRF protection.
+
+If a test requires a request specifically *without* a `Content-Type` header,
+this default can be removed from a `RouterRequest` after building it:
+
+```rust
+let mut router_request = RouterRequesT::fake_builder().build();
+router_request.originating_request.headers_mut().remove("content-type");
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
@@ -112,6 +320,35 @@ traffic_shaping:
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
+
+### Explicit `shutdown` for `RouterHttpServer` handle ([PR #FIXME])
+
+If you explicitly create a `RouterHttpServer` handle,
+dropping it while the server is running instructs the server shut down gracefuly.
+However with the handle dropped, there is no way to wait for shutdown to end
+or check that it went without error.
+Instead, the new `shutdown` async method can be called explicitly
+to obtain a `Result`:
+
+```diff
+ use RouterHttpServer;
+ let server = RouterHttpServer::builder().schema("schema").start();
+ // …
+-drop(server);
++server.shutdown().await.unwrap(); 
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Added `apollo_router::TestHarness` ([PR #FIXME])
+
+This is a builder for the part of an Apollo Router that handles GraphQL requests,
+as a `tower::Service`.
+This allows tests, benchmarks, etc
+to manipulate request and response objects in memory without going over the network.
+See the API documentation for an example. (It can be built with `cargo doc --open`.)
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🐛 Fixes
 

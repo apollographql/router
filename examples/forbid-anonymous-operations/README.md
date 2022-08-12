@@ -14,8 +14,8 @@ cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
 ```rust
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: router::BoxService,
+    ) -> router::BoxService {
         ServiceBuilder::new()
             .checkpoint(...) // Validation happens here
             .service(service)

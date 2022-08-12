@@ -7,9 +7,8 @@ use miette::NamedSource;
 use miette::Report;
 use miette::SourceSpan;
 use router_bridge::introspect::IntrospectionError;
-pub use router_bridge::planner::PlanError;
 use router_bridge::planner::PlanErrors;
-pub use router_bridge::planner::PlannerError;
+use router_bridge::planner::PlannerError;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +22,7 @@ pub(crate) use crate::graphql::Error;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+pub use crate::router::ApolloRouterError;
 pub use crate::spec::SpecError;
 
 /// Error types for execution.
@@ -156,7 +156,7 @@ impl From<QueryPlannerError> for FetchError {
 
 /// Error types for CacheResolver
 #[derive(Error, Debug, Display, Clone)]
-pub enum CacheResolverError {
+pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<BoxError>),
 }
@@ -167,25 +167,16 @@ impl From<BoxError> for CacheResolverError {
     }
 }
 
-/// An error while processing JSON data.
-#[derive(Debug, Error, Display)]
-pub enum JsonExtError {
-    /// Could not find path in JSON.
-    PathNotFound,
-    /// Attempt to flatten on non-array node.
-    InvalidFlatten,
-}
-
 /// Error types for service building.
 #[derive(Error, Debug, Display, Clone)]
-pub enum ServiceBuildError {
+pub(crate) enum ServiceBuildError {
     /// couldn't build Router Service: {0}
     QueryPlannerError(QueryPlannerError),
 }
 
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
-pub enum QueryPlannerError {
+pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
@@ -216,7 +207,7 @@ pub enum QueryPlannerError {
 
 #[derive(Clone, Debug, Error)]
 /// Container for planner setup errors
-pub struct PlannerErrors(Arc<Vec<PlannerError>>);
+pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
 
 impl std::fmt::Display for PlannerErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

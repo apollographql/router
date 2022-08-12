@@ -7,12 +7,12 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 use serde_json_bytes::Map;
-pub use serde_json_bytes::Value;
+pub(crate) use serde_json_bytes::Value;
 
 use crate::error::FetchError;
 
 /// A JSON object.
-pub type Object = Map<ByteString, Value>;
+pub(crate) type Object = Map<ByteString, Value>;
 
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
@@ -41,7 +41,7 @@ macro_rules! ensure_object {
 
 #[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
-pub trait ValueExt {
+pub(crate) trait ValueExt {
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
     /// exists.
     #[track_caller]

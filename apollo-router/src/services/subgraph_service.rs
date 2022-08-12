@@ -62,13 +62,13 @@ impl Display for Compression {
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
-pub struct SubgraphService {
+pub(crate) struct SubgraphService {
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
 }
 
 impl SubgraphService {
-    pub fn new(service: impl Into<String>) -> Self {
+    pub(crate) fn new(service: impl Into<String>) -> Self {
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
@@ -266,7 +266,7 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-pub trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
+pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
     type SubgraphService: Service<
             crate::SubgraphRequest,
             Response = crate::SubgraphResponse,
@@ -301,7 +301,7 @@ impl SubgraphCreator {
 /// make new instances of the subgraph service
 ///
 /// there can be multiple instances of that service executing at any given time
-pub trait MakeSubgraphService: Send + Sync + 'static {
+pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
     fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
 }
 

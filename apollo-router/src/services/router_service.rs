@@ -35,12 +35,12 @@ use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
-use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::RouterServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::stages::query_planner;
 use crate::Configuration;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -55,7 +55,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub struct RouterService<QueryPlannerService, ExecutionFactory> {
+pub(crate) struct RouterService<QueryPlannerService, ExecutionFactory> {
     query_planner_service: QueryPlannerService,
     execution_service_factory: ExecutionFactory,
     ready_query_planner_service: Option<QueryPlannerService>,
@@ -65,7 +65,7 @@ pub struct RouterService<QueryPlannerService, ExecutionFactory> {
 #[buildstructor::buildstructor]
 impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, ExecutionFactory> {
     #[builder]
-    pub fn new(
+    pub(crate) fn new(
         query_planner_service: QueryPlannerService,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
@@ -240,7 +240,7 @@ where
 /// collection of plugins, collection of subgraph services are assembled to generate a
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
-pub struct PluggableRouterServiceBuilder {
+pub(crate) struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
@@ -248,7 +248,7 @@ pub struct PluggableRouterServiceBuilder {
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>) -> Self {
+    pub(crate) fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
             plugins: Default::default(),
@@ -257,16 +257,7 @@ impl PluggableRouterServiceBuilder {
         }
     }
 
-    pub fn with_plugin<E: DynPlugin + Plugin>(
-        mut self,
-        plugin_name: String,
-        plugin: E,
-    ) -> PluggableRouterServiceBuilder {
-        self.plugins.insert(plugin_name, Box::new(plugin));
-        self
-    }
-
-    pub fn with_dyn_plugin(
+    pub(crate) fn with_dyn_plugin(
         mut self,
         plugin_name: String,
         plugin: Box<dyn DynPlugin>,
@@ -275,7 +266,7 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_subgraph_service<S>(
+    pub(crate) fn with_subgraph_service<S>(
         mut self,
         name: &str,
         service_maker: S,
@@ -288,7 +279,7 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn with_configuration(
+    pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,
     ) -> PluggableRouterServiceBuilder {
@@ -300,7 +291,7 @@ impl PluggableRouterServiceBuilder {
         &mut self.plugins
     }
 
-    pub async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -371,13 +362,9 @@ impl PluggableRouterServiceBuilder {
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
-pub struct RouterCreator {
-    query_planner_service: CachingQueryPlanner<
-        Buffer<
-            BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-            QueryPlannerRequest,
-        >,
-    >,
+pub(crate) struct RouterCreator {
+    query_planner_service:
+        CachingQueryPlanner<Buffer<query_planner::BoxService, QueryPlannerRequest>>,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
@@ -424,7 +411,7 @@ impl RouterServiceFactory for RouterCreator {
 }
 
 impl RouterCreator {
-    fn make(
+    pub(crate) fn make(
         &self,
     ) -> impl Service<
         RouterRequest,
@@ -454,7 +441,8 @@ impl RouterCreator {
     }
 
     /// Create a test service.
-    pub fn test_service(
+    #[cfg(test)]
+    pub(crate) fn test_service(
         &self,
     ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
         Buffer::new(self.make(), 512).boxed_clone()

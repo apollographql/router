@@ -1,15 +1,12 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphResponse;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -36,11 +33,7 @@ impl Plugin for PropagateStatusCode {
         })
     }
 
-    fn subgraph_service(
-        &self,
-        _name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let all_status_codes = self.status_codes.clone();
         service
             .map_response(move |res| {
@@ -68,10 +61,7 @@ impl Plugin for PropagateStatusCode {
     }
 
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -101,10 +91,8 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
-    use apollo_router::services::SubgraphRequest;
-    use apollo_router::services::SubgraphResponse;
+    use apollo_router::stages::router;
+    use apollo_router::stages::subgraph;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -118,13 +106,17 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.propagate_status_code")
-            .expect("Plugin not found")
-            .create_instance(
-                &json!({ "status_codes" : [500, 403, 401] }),
-                Default::default(),
-            )
+        let config = serde_json::json!({
+            "plugins": {
+                "example.propagate_status_code": {
+                    "status_codes" : [500, 403, 401]
+                }
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build()
             .await
             .unwrap();
     }
@@ -141,7 +133,7 @@ mod tests {
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(SubgraphResponse::fake_builder()
+            Ok(subgraph::Response::fake_builder()
                 .status_code(StatusCode::FORBIDDEN)
                 .build())
         });
@@ -158,7 +150,7 @@ mod tests {
             .expect("couldn't create plugin")
             .subgraph_service("accounts", mock_service.boxed());
 
-        let subgraph_request = SubgraphRequest::fake_builder().build();
+        let subgraph_request = subgraph::Request::fake_builder().build();
 
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
@@ -178,7 +170,7 @@ mod tests {
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(SubgraphResponse::fake_builder()
+            Ok(subgraph::Response::fake_builder()
                 .status_code(StatusCode::OK)
                 .build())
         });
@@ -195,7 +187,7 @@ mod tests {
             .expect("couldn't create plugin")
             .subgraph_service("accounts", mock_service.boxed());
 
-        let subgraph_request = SubgraphRequest::fake_builder().build();
+        let subgraph_request = subgraph::Request::fake_builder().build();
 
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
@@ -218,14 +210,14 @@ mod tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |router_request: RouterRequest| {
+            .returning(move |router_request: router::Request| {
                 let context = router_request.context;
                 // Insert several status codes which shall override the router response status
                 context
                     .insert(&"status_code".to_string(), json!(500u16))
                     .expect("couldn't insert status_code");
 
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .context(context)
                     .build()
                     .unwrap())
@@ -243,7 +235,7 @@ mod tests {
             .expect("couldn't create plugin")
             .router_service(mock_service.boxed());
 
-        let router_request = RouterRequest::fake_builder()
+        let router_request = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -264,10 +256,10 @@ mod tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |router_request: RouterRequest| {
+            .returning(move |router_request: router::Request| {
                 let context = router_request.context;
                 // Don't insert any StatusCode
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .context(context)
                     .build()
                     .unwrap())
@@ -285,7 +277,7 @@ mod tests {
             .expect("couldn't create plugin")
             .router_service(mock_service.boxed());
 
-        let router_request = RouterRequest::fake_builder()
+        let router_request = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
