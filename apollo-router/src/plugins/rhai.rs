@@ -96,6 +96,7 @@ mod router {
 
     pub(crate) type Request = RouterRequest;
     pub(crate) type Response = RhaiRouterResponse;
+    pub(crate) type DeferredResponse = RhaiRouterDeferredResponse;
     pub(crate) type Service = BoxService<Request, RouterResponse, BoxError>;
 }
 
@@ -112,6 +113,7 @@ mod execution {
 
     pub(crate) type Request = ExecutionRequest;
     pub(crate) type Response = RhaiExecutionResponse;
+    pub(crate) type DeferredResponse = RhaiExecutionDeferredResponse;
     pub(crate) type Service = BoxService<Request, ExecutionResponse, BoxError>;
 }
 
@@ -242,6 +244,20 @@ mod router_plugin_mod {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<Response, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.clone()))
+    }
+
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_execution_deferred_response(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<Response, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.clone()))
+    }
+
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_router_response(
         obj: &mut SharedMut<router::Response>,
@@ -296,6 +312,24 @@ mod router_plugin_mod {
         Ok(())
     }
 
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+        body: Response,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.response = body);
+        Ok(())
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_execution_deferred_response(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+        body: Response,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.response = body);
+        Ok(())
+    }
+
     pub(crate) fn map_request(rhai_service: &mut RhaiService, callback: FnPtr) {
         rhai_service
             .service
@@ -306,6 +340,12 @@ mod router_plugin_mod {
         rhai_service
             .service
             .map_response(rhai_service.clone(), callback)
+    }
+
+    pub(crate) fn map_deferred_response(rhai_service: &mut RhaiService, callback: FnPtr) {
+        rhai_service
+            .service
+            .map_deferred_response(rhai_service.clone(), callback)
     }
 }
 
@@ -571,9 +611,19 @@ pub(crate) struct RhaiExecutionResponse {
     response: http_ext::Response<Response>,
 }
 
+pub(crate) struct RhaiExecutionDeferredResponse {
+    context: Context,
+    response: Response,
+}
+
 pub(crate) struct RhaiRouterResponse {
     context: Context,
     response: http_ext::Response<Response>,
+}
+
+pub(crate) struct RhaiRouterDeferredResponse {
+    context: Context,
+    response: Response,
 }
 
 macro_rules! if_subgraph {
@@ -911,7 +961,6 @@ impl ServiceStep {
                             let RhaiRouterResponse { context, response } = response_opt.unwrap();
                             let (parts, body) = http::Response::from(response).into_parts();
 
-                            //FIXME we should also map over the stream of future responses
                             let response = http::Response::from_parts(
                                 parts,
                                 once(ready(body)).chain(rest).boxed(),
@@ -1011,7 +1060,6 @@ impl ServiceStep {
                             let RhaiExecutionResponse { context, response } = response_opt.unwrap();
                             let (parts, body) = http::Response::from(response).into_parts();
 
-                            //FIXME we should also map over the stream of future responses
                             let response = http::Response::from_parts(
                                 parts,
                                 once(ready(body)).chain(rest).boxed(),
@@ -1024,6 +1072,220 @@ impl ServiceStep {
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback);
+            }
+        }
+    }
+
+    fn map_deferred_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
+        match self {
+            ServiceStep::Router(service) => {
+                service.replace(|service| {
+                    BoxService::new(service.and_then(
+                        |router_response: RouterResponse| async move {
+                            // Let's define a local function to build an error response
+                            // XXX: This isn't ideal. We already have a response, so ideally we'd
+                            // like to append this error into the existing response. However,
+                            // the significantly different treatment of errors in different
+                            // response types makes this extremely painful. This needs to be
+                            // re-visited at some point post GA.
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> RouterResponse {
+                                let res = RouterResponse::error_builder()
+                                    .errors(vec![Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()
+                                    .expect("can't fail to build our error message");
+                                res
+                            }
+
+                            // we split the response stream into headers+first response, then a stream of deferred responses
+                            // for which we will implement mapping later
+                            let RouterResponse { response, context } = router_response;
+                            let (parts, stream) = http::Response::from(response).into_parts();
+                            let (first, rest) = stream.into_future().await;
+
+                            if first.is_none() {
+                                return Ok(failure_message(
+                                    context,
+                                    "rhai execution error: empty response".to_string(),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                ));
+                            }
+                            let first = first.unwrap();
+                            let ctx = context.clone();
+
+                            let mapped_stream = rest.filter_map(move |deferred_response| {
+                                let rhai_service = rhai_service.clone();
+                                let context = context.clone();
+                                let callback = callback.clone();
+                                async move {
+                                    let response = RhaiRouterDeferredResponse {
+                                        context,
+                                        response: deferred_response,
+                                    };
+                                    let shared_response = Shared::new(Mutex::new(Some(response)));
+
+                                    let result: Result<Dynamic, String> = if callback.is_curried() {
+                                        callback
+                                            .call(
+                                                &rhai_service.engine,
+                                                &rhai_service.ast,
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    } else {
+                                        let mut scope = rhai_service.scope.clone();
+                                        rhai_service
+                                            .engine
+                                            .call_fn(
+                                                &mut scope,
+                                                &rhai_service.ast,
+                                                callback.fn_name(),
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    };
+                                    if let Err(error) = result {
+                                        tracing::error!(
+                                            "map_deferred_response callback failed: {error}"
+                                        );
+                                        return None;
+                                    }
+
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    let RhaiRouterDeferredResponse { response, .. } =
+                                        response_opt.unwrap();
+                                    Some(response)
+                                }
+                            });
+
+                            let response = http::Response::from_parts(
+                                parts,
+                                once(ready(first)).chain(mapped_stream).boxed(),
+                            )
+                            .into();
+                            Ok(RouterResponse {
+                                context: ctx,
+                                response,
+                            })
+                        },
+                    ))
+                })
+            }
+            ServiceStep::QueryPlanner(_service) => {
+                tracing::error!("rhai execution error: map_deferred_response is not supported for query planner plugins");
+            }
+            ServiceStep::Execution(service) => {
+                service.replace(|service| {
+                    service
+                        .and_then(|execution_response: ExecutionResponse| async move {
+                            // Let's define a local function to build an error response
+                            // XXX: This isn't ideal. We already have a response, so ideally we'd
+                            // like to append this error into the existing response. However,
+                            // the significantly different treatment of errors in different
+                            // response types makes this extremely painful. This needs to be
+                            // re-visited at some point post GA.
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> ExecutionResponse {
+                                ExecutionResponse::error_builder()
+                                    .errors(vec![Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()
+                                    .expect("can't fail to build our error message")
+                            }
+
+                            // we split the response stream into headers+first response, then a stream of deferred responses
+                            // for which we will implement mapping later
+                            let ExecutionResponse { response, context } = execution_response;
+                            let (parts, stream) = http::Response::from(response).into_parts();
+                            let (first, rest) = stream.into_future().await;
+
+                            if first.is_none() {
+                                return Ok(failure_message(
+                                    context,
+                                    "rhai execution error: empty response".to_string(),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                ));
+                            }
+                            let first = first.unwrap();
+                            let ctx = context.clone();
+
+                            let mapped_stream = rest.filter_map(move |deferred_response| {
+                                let rhai_service = rhai_service.clone();
+                                let context = context.clone();
+                                let callback = callback.clone();
+                                async move {
+                                    let response = RhaiExecutionDeferredResponse {
+                                        context,
+                                        response: deferred_response,
+                                    };
+                                    let shared_response = Shared::new(Mutex::new(Some(response)));
+                                    let result: Result<Dynamic, String> = if callback.is_curried() {
+                                        callback
+                                            .call(
+                                                &rhai_service.engine,
+                                                &rhai_service.ast,
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    } else {
+                                        let mut scope = rhai_service.scope.clone();
+                                        rhai_service
+                                            .engine
+                                            .call_fn(
+                                                &mut scope,
+                                                &rhai_service.ast,
+                                                callback.fn_name(),
+                                                (shared_response.clone(),),
+                                            )
+                                            .map_err(|err| err.to_string())
+                                    };
+                                    if let Err(error) = result {
+                                        tracing::error!(
+                                            "map_deferred_response callback failed: {error}"
+                                        );
+                                        return None;
+                                    }
+
+                                    let mut guard = shared_response.lock().unwrap();
+                                    let response_opt = guard.take();
+                                    let RhaiExecutionDeferredResponse { response, .. } =
+                                        response_opt.unwrap();
+
+                                    Some(response)
+                                }
+                            });
+
+                            let response = http::Response::from_parts(
+                                parts,
+                                once(ready(first)).chain(mapped_stream).boxed(),
+                            )
+                            .into();
+                            Ok(ExecutionResponse {
+                                context: ctx,
+                                response,
+                            })
+                        })
+                        .boxed()
+                })
+            }
+            ServiceStep::Subgraph(_service) => {
+                tracing::error!("rhai execution error: map_deferred_response is not supported for subgraph plugins");
             }
         }
     }
@@ -1380,6 +1642,36 @@ impl Rhai {
             .register_set_result(
                 "context",
                 |obj: &mut SharedMut<query_planner::Response>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                },
+            );
+
+        engine
+            .register_get_result(
+                "context",
+                |obj: &mut SharedMut<router::DeferredResponse>| {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                },
+            )
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<router::DeferredResponse>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                },
+            );
+
+        engine
+            .register_get_result(
+                "context",
+                |obj: &mut SharedMut<execution::DeferredResponse>| {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                },
+            )
+            .register_set_result(
+                "context",
+                |obj: &mut SharedMut<execution::DeferredResponse>, context: Context| {
                     obj.with_mut(|response| response.context = context);
                     Ok(())
                 },
