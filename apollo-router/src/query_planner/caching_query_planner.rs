@@ -60,7 +60,7 @@ where
             );
             let context = request.context.clone();
             let entry = qp.cache.get(&key).await;
-            return if entry.is_first() {
+            if entry.is_first() {
                 let res = qp.delegate.ready().await?.call(request).await;
                 match res {
                     Ok(QueryPlannerResponse { content, context }) => {
@@ -82,8 +82,8 @@ where
                         Ok(QueryPlannerResponse { content, context })
                     }
                     Err(error) => {
-                        if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
-                            if let QueryPlannerError::PlanningErrors(pe) = &error {
+                        match error.downcast_ref::<QueryPlannerError>() {
+                            Some(QueryPlannerError::PlanningErrors(pe)) => {
                                 if let Err(inner_e) =
                                     context.insert(USAGE_REPORTING, pe.usage_reporting.clone())
                                 {
@@ -92,7 +92,8 @@ where
                                         inner_e
                                     );
                                 }
-                            } else if let QueryPlannerError::SpecError(e) = &error {
+                            }
+                            Some(QueryPlannerError::SpecError(e)) => {
                                 let error_key = match e {
                                     SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
                                     _ => "## GraphQLValidationFailure\n",
@@ -110,7 +111,9 @@ where
                                     );
                                 }
                             }
+                            _ => {}
                         }
+
                         let e = Arc::new(error);
                         entry.insert(Err(e.clone())).await;
                         Err(CacheResolverError::RetrievalError(e).into())
@@ -159,7 +162,7 @@ where
                         Err(CacheResolverError::RetrievalError(error).into())
                     }
                 }
-            };
+            }
         })
     }
 }
