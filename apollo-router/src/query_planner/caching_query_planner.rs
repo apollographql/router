@@ -151,7 +151,12 @@ where
 
                     e.into()
                 })
-                .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
+                .map(|query_plan| {
+                    QueryPlannerResponse::builder()
+                        .content(query_plan)
+                        .context(request.context)
+                        .build()
+                })
         })
     }
 }

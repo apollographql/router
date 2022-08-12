@@ -115,7 +115,11 @@ where
             let context = req.context;
             let body = req.originating_request.body();
             let variables = body.variables.clone();
-            let QueryPlannerResponse { content, context } = planning
+            let QueryPlannerResponse {
+                content,
+                context,
+                errors,
+            } = planning
                 .call(
                     QueryPlannerRequest::builder()
                         .query(
@@ -129,11 +133,19 @@ where
                 )
                 .await?;
 
+            if !errors.is_empty() {
+                return Ok(RouterResponse::builder()
+                    .context(context)
+                    .errors(errors)
+                    .build()
+                    .expect("this response build must not fail"));
+            }
+
             match content {
-                QueryPlannerContent::Introspection { response } => Ok(
+                Some(QueryPlannerContent::Introspection { response }) => Ok(
                     RouterResponse::new_from_graphql_response(*response, context),
                 ),
-                QueryPlannerContent::IntrospectionDisabled => {
+                Some(QueryPlannerContent::IntrospectionDisabled) => {
                     let mut resp = http::Response::new(
                         once(ready(
                             graphql::Response::builder()
@@ -151,7 +163,7 @@ where
                         context,
                     })
                 }
-                QueryPlannerContent::Plan { query, plan } => {
+                Some(QueryPlannerContent::Plan { query, plan }) => {
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
@@ -202,6 +214,8 @@ where
                         })
                     }
                 }
+                // This should never happen because if we have an empty query plan we should have error in errors vec
+                None => Err(BoxError::from("cannot compute a query plan")),
             }
         }
         .or_else(|error: BoxError| async move {

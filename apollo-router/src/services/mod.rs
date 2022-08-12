@@ -23,6 +23,7 @@ pub use self::execution_service::*;
 pub use self::router_service::*;
 pub use self::subgraph_service::*;
 use crate::error::Error;
+use crate::graphql;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -316,7 +317,9 @@ impl QueryPlannerRequest {
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
 pub struct QueryPlannerResponse {
-    pub(crate) content: QueryPlannerContent,
+    /// Optional in case of error
+    pub(crate) content: Option<QueryPlannerContent>,
+    pub errors: Vec<graphql::Error>,
     pub context: Context,
 }
 
@@ -339,8 +342,16 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub(crate) fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
-        Self { content, context }
+    pub(crate) fn new(
+        content: Option<QueryPlannerContent>,
+        context: Context,
+        errors: Vec<graphql::Error>,
+    ) -> QueryPlannerResponse {
+        Self {
+            content,
+            context,
+            errors,
+        }
     }
 
     /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
@@ -350,23 +361,17 @@ impl QueryPlannerResponse {
     #[builder]
     pub fn error_new(
         errors: Vec<Error>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<QueryPlannerResponse, BoxError> {
-        tracing::warn!("no way to propagate error response from QueryPlanner");
-        Ok(QueryPlannerResponse::new(
-            QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_builder().build()),
-                query: Arc::new(Query::default()),
-            },
-            context,
-        ))
+        Ok(QueryPlannerResponse::builder()
+            .errors(errors)
+            .context(context)
+            .build())
     }
 
     /// Get a reference of the query plan
-    pub fn query_plan(&self) -> &QueryPlannerContent {
-        &self.content
+    pub fn query_plan(&self) -> Option<&QueryPlannerContent> {
+        self.content.as_ref()
     }
 }
 

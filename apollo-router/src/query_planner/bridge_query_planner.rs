@@ -160,8 +160,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .await
             {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
-                    query_planner_content,
+                    query_planner_content.into(),
                     req.context,
+                    vec![],
                 )),
                 Err(e) => Err(tower::BoxError::from(e)),
             }
