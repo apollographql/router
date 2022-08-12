@@ -30,9 +30,9 @@ mod selection;
 
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
-pub struct QueryPlanOptions {
+pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    pub enable_variable_deduplication: bool,
+    pub(crate) enable_variable_deduplication: bool,
 }
 
 /// A plan for a given GraphQL query
@@ -250,12 +250,6 @@ impl PlanNode {
 }
 
 impl QueryPlan {
-    /// Pass some options to the QueryPlan
-    pub fn with_options(mut self, options: QueryPlanOptions) -> Self {
-        self.options = options;
-        self
-    }
-
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a, SF>(
         &self,

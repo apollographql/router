@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
+
+`QueryPlanOptions::query_plan_options` is no longer available in public.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
+
 ### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
 
 It was doing nothing.
@@ -56,6 +62,7 @@ It is now possible to create a subscriber and pass it explicitely to the telemet
 when creating it. It will then be modified to integrate the telemetry plugin's layer.
 
 By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1463
+>>>>>>> be6590826afb60bf3c683315c68f9ed47594a2a3
 
 ## 🚀 Features
 
