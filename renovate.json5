@@ -74,6 +74,20 @@
       "groupSlug": "all-non-major-gte-1.0",
       "automerge": true,
     },
+    // We're currently constrained in our ability to update the `tracing`
+    // packages to the latest versions because of our usage.  This should put
+    // those pacakges into their own group and away from other dep updates.
+    {
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackagePatterns": [
+        "^tracing"
+      ],
+      "groupName": "cargo tracing packages",
+      "groupSlug": "cargo-tracing-packages",
+      "dependencyDashboardApproval": true
+    },
     {
       "matchPaths": [
         "docs/package.json"
