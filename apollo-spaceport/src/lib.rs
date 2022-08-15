@@ -14,6 +14,7 @@ use std::error::Error;
 
 use agent::reporter_client::ReporterClient;
 pub use agent::*;
+pub use prost::*;
 pub use prost_types::Timestamp;
 pub use report::*;
 use sys_info::hostname;

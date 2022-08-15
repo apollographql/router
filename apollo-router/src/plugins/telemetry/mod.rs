@@ -700,9 +700,8 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        // TODO Apollo tracing at some point in the future.
-        // This is the shell of what was previously used to transmit metrics, but will in future be useful for sending traces.
-        // builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+
         let tracer_provider = builder.build();
         Ok(tracer_provider)
     }
