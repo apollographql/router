@@ -3,7 +3,6 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::DeferStreamSupport;
@@ -16,12 +15,11 @@ use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
+use super::QueryKey;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
-use crate::traits::QueryKey;
-use crate::traits::QueryPlanner;
 use crate::*;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
@@ -172,8 +170,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 }
 
-#[async_trait]
-impl QueryPlanner for BridgeQueryPlanner {
+impl BridgeQueryPlanner {
     async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
         let selections = self.parse_selections(key.0.clone()).await?;
 

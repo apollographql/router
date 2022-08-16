@@ -5,16 +5,17 @@ use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
-pub use fetch::OperationKind;
 use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
+pub use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -30,10 +31,16 @@ mod selection;
 
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
-pub struct QueryPlanOptions {
+pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    pub enable_variable_deduplication: bool,
+    pub(crate) enable_variable_deduplication: bool,
 }
+
+/// A planner key.
+///
+/// This type consists of a query string, an optional operation string and the
+/// [`QueryPlanOptions`].
+pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 
 /// A plan for a given GraphQL query
 #[derive(Debug)]
@@ -64,7 +71,7 @@ impl QueryPlan {
 }
 
 /// Query plans are composed of a set of nodes.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum PlanNode {
     /// These nodes must be executed in order.
@@ -250,14 +257,8 @@ impl PlanNode {
 }
 
 impl QueryPlan {
-    /// Pass some options to the QueryPlan
-    pub fn with_options(mut self, options: QueryPlanOptions) -> Self {
-        self.options = options;
-        self
-    }
-
     /// Execute the plan and return a [`Response`].
-    pub async fn execute<'a, SF>(
+    pub(crate) async fn execute<'a, SF>(
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
@@ -725,6 +726,7 @@ pub(crate) mod fetch {
 
     use indexmap::IndexSet;
     use serde::Deserialize;
+    use serde::Serialize;
     use tower::ServiceExt;
     use tracing::instrument;
     use tracing::Instrument;
@@ -743,7 +745,7 @@ pub(crate) mod fetch {
     use crate::*;
 
     /// GraphQL operation type.
-    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub enum OperationKind {
         Query,
@@ -768,7 +770,7 @@ pub(crate) mod fetch {
     }
 
     /// A fetch node.
-    #[derive(Debug, PartialEq, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
@@ -1084,7 +1086,7 @@ pub(crate) mod fetch {
 }
 
 /// A flatten node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FlattenNode {
     /// The path when result should be merged.
@@ -1095,7 +1097,7 @@ pub(crate) struct FlattenNode {
 }
 
 /// A primary query for a Defer node, the non deferred part
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Primary {
     /// Optional path, set if and only if the defer node is a
@@ -1113,7 +1115,7 @@ pub(crate) struct Primary {
 /// The "deferred" parts of the defer (note that it's an array). Each
 /// of those deferred elements will correspond to a different chunk of
 /// the response to the client (after the initial non-deferred one that is).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeferredNode {
     /// References one or more fetch node(s) (by `id`) within
@@ -1144,7 +1146,7 @@ impl DeferredNode {
     }
 }
 /// A deferred node.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     id: String,
@@ -1189,13 +1191,12 @@ mod tests {
     use std::sync::Arc;
 
     use http::Method;
-    use tower::ServiceBuilder;
-    use tower::ServiceExt;
 
     use super::*;
     use crate::json_ext::PathElement;
     use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
+    use crate::services::subgraph_service::MakeSubgraphService;
 
     macro_rules! test_query_plan {
         () => {
@@ -1235,6 +1236,7 @@ mod tests {
     /// The query planner reports the failed subgraph fetch as an error with a reason of "service
     /// closed", which is what this test expects.
     #[tokio::test]
+    #[should_panic(expected = "this panic should be propagated to the test harness")]
     async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
@@ -1249,14 +1251,19 @@ mod tests {
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service.expect_call().times(1).withf(|_| {
+                panic!("this panic should be propagated to the test harness");
+            });
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1299,25 +1306,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.body().operation_name
+                        == Some("topProducts_product_0".into());
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1356,23 +1365,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.method() == Method::POST;
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
+
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1467,32 +1480,41 @@ mod tests {
         };
 
         let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
+        mock_x_service.expect_clone().return_once(|| {
+            let mut mock_x_service = plugin::test::MockSubgraphService::new();
+            mock_x_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "t": {"id": 1234,
+                            "__typename": "T",
+                             "x": "X"
+                            }
+                        }})
+                        .build())
+                });
+            mock_x_service
+        });
+
         let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
+        mock_y_service.expect_clone().return_once(|| {
+            let mut mock_y_service = plugin::test::MockSubgraphService::new();
+            mock_y_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "_entities": [{"y": "Y", "__typename": "T"}]
+                        }})
+                        .build())
+                });
+            mock_y_service
+        });
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
@@ -1502,15 +1524,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "X".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_x_service.build().boxed()),
+                    Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "Y".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_y_service.build().boxed()),
+                    Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),
@@ -1623,10 +1641,15 @@ mod tests {
         };
 
         let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_a_service.expect_clone().returning(|| {
+            let mut mock_a_service = plugin::test::MockSubgraphService::new();
+            mock_a_service
+                .expect_call()
+                .times(1)
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+            mock_a_service
+        });
 
         // the first fetch returned null, so there should never be a call to B
         let mut mock_b_service = plugin::test::MockSubgraphService::new();
@@ -1636,15 +1659,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "A".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_a_service.build().boxed()),
+                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "B".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_b_service.build().boxed()),
+                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),

@@ -19,9 +19,9 @@ use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-pub use self::execution_service::*;
-pub use self::router_service::*;
-pub use self::subgraph_service::*;
+pub(crate) use self::execution_service::*;
+pub(crate) use self::router_service::*;
+pub(crate) use self::subgraph_service::*;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -31,7 +31,7 @@ use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
 use crate::query_planner::QueryPlanOptions;
-pub use crate::spec::Query;
+use crate::spec::Query;
 use crate::Context;
 
 mod execution_service;
@@ -68,8 +68,8 @@ impl RouterRequest {
     ///
     /// Required parameters are required in non-testing code to create a RouterRequest.
     #[allow(clippy::too_many_arguments)]
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: HashMap<String, Value>,
@@ -116,15 +116,21 @@ impl RouterRequest {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: HashMap<String, Value>,
         extensions: HashMap<String, Value>,
         context: Option<Context>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        mut headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
     ) -> Result<RouterRequest, BoxError> {
+        // Avoid testing requests getting blocked by the CSRF-prevention plugin
+        headers
+            .entry(IntoHeaderName::HeaderName(http::header::CONTENT_TYPE))
+            .or_insert(IntoHeaderValue::HeaderValue(HeaderValue::from_static(
+                "application/json",
+            )));
         RouterRequest::new(
             query,
             operation_name,
@@ -134,6 +140,39 @@ impl RouterRequest {
             headers,
             Uri::from_static("http://default"),
             Method::GET,
+        )
+    }
+
+    /// Create a request with an example query, for tests
+    #[builder(visibility = "pub")]
+    fn canned_new(
+        operation_name: Option<String>,
+        extensions: HashMap<String, Value>,
+        context: Option<Context>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+    ) -> Result<RouterRequest, BoxError> {
+        let query = "
+            query TopProducts($first: Int) { 
+                topProducts(first: $first) { 
+                    upc 
+                    name 
+                    reviews { 
+                        id 
+                        product { name } 
+                        author { id name } 
+                    } 
+                } 
+            }
+        ";
+        let mut variables = HashMap::new();
+        variables.insert("first".to_owned(), 2_usize.into());
+        Self::fake_new(
+            Some(query.to_owned()),
+            operation_name,
+            variables,
+            extensions,
+            context,
+            headers,
         )
     }
 }
@@ -153,8 +192,8 @@ impl RouterResponse {
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
     #[allow(clippy::too_many_arguments)]
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -208,8 +247,8 @@ impl RouterResponse {
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -232,8 +271,8 @@ impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
-    #[builder]
-    pub fn error_new(
+    #[builder(visibility = "pub")]
+    fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -282,13 +321,13 @@ impl RouterResponse {
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
-/// [`Context`] and [`QueryPlanOptions`] for the request.
+/// [`Context`] for the request.
 #[derive(Clone, Debug)]
 pub struct QueryPlannerRequest {
     pub query: String,
     pub operation_name: Option<String>,
     /// Query plan options
-    pub query_plan_options: QueryPlanOptions,
+    pub(crate) query_plan_options: QueryPlanOptions,
 
     pub context: Context,
 }
@@ -298,26 +337,25 @@ impl QueryPlannerRequest {
     /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
-        query_plan_options: QueryPlanOptions,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
             query,
             operation_name,
-            query_plan_options,
+            query_plan_options: QueryPlanOptions::default(),
             context,
         }
     }
 }
 
 assert_impl_all!(QueryPlannerResponse: Send);
-/// [`Context`] and [`QueryPlan`] for the response..
+/// [`Context`] and [`QueryPlan`] for the response.
 pub struct QueryPlannerResponse {
-    pub content: QueryPlannerContent,
+    pub(crate) content: QueryPlannerContent,
     pub context: Context,
 }
 
@@ -340,7 +378,7 @@ impl QueryPlannerResponse {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
+    pub(crate) fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
         Self { content, context }
     }
 
@@ -348,8 +386,8 @@ impl QueryPlannerResponse {
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
     #[allow(unused_variables)]
-    #[builder]
-    pub fn error_new(
+    #[builder(visibility = "pub")]
+    fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
@@ -363,6 +401,11 @@ impl QueryPlannerResponse {
             },
             context,
         ))
+    }
+
+    /// Get a reference of the query plan
+    pub fn query_plan(&self) -> &QueryPlannerContent {
+        &self.content
     }
 }
 
@@ -384,8 +427,8 @@ impl SubgraphRequest {
     /// This is the constructor (or builder) to use when constructing a real SubgraphRequest.
     ///
     /// Required parameters are required in non-testing code to create a SubgraphRequest.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         originating_request: Arc<http_ext::Request<Request>>,
         subgraph_request: http_ext::Request<Request>,
         operation_kind: OperationKind,
@@ -404,8 +447,8 @@ impl SubgraphRequest {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// SubgraphRequest. It's usually enough for testing, when a fully consructed SubgraphRequest is
     /// difficult to construct and not required for the pusposes of the test.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         originating_request: Option<Arc<http_ext::Request<Request>>>,
         subgraph_request: Option<http_ext::Request<Request>>,
         operation_kind: Option<OperationKind>,
@@ -462,8 +505,8 @@ impl SubgraphResponse {
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a SubgraphResponse.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
@@ -503,8 +546,8 @@ impl SubgraphResponse {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// SubgraphResponse. It's usually enough for testing, when a fully consructed SubgraphResponse is
     /// difficult to construct and not required for the pusposes of the test.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
@@ -527,8 +570,8 @@ impl SubgraphResponse {
     /// This is the constructor (or builder) to use when constructing a SubgraphResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
-    #[builder]
-    pub fn error_new(
+    #[builder(visibility = "pub")]
+    fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
@@ -562,8 +605,8 @@ impl ExecutionRequest {
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a ExecutionRequest.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         originating_request: http_ext::Request<Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
@@ -580,8 +623,8 @@ impl ExecutionRequest {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// ExecutionRequest. It's usually enough for testing, when a fully consructed ExecutionRequest is
     /// difficult to construct and not required for the pusposes of the test.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         originating_request: Option<http_ext::Request<Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
@@ -616,8 +659,8 @@ impl ExecutionResponse {
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a RouterRequest.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
@@ -657,8 +700,8 @@ impl ExecutionResponse {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// ExecutionResponse. It's usually enough for testing, when a fully consructed
     /// ExecutionResponse is difficult to construct and not required for the pusposes of the test.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
@@ -682,8 +725,8 @@ impl ExecutionResponse {
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
     #[allow(unused_variables)]
-    #[builder]
-    pub fn error_new(
+    #[builder(visibility = "pub")]
+    fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,

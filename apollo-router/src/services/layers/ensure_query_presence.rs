@@ -74,8 +74,7 @@ mod ensure_query_presence_tests {
                 .expect("expecting valid request"))
         });
 
-        let mock = mock_service.build();
-        let service_stack = EnsureQueryPresence::default().layer(mock);
+        let service_stack = EnsureQueryPresence::default().layer(mock_service);
 
         let request: crate::RouterRequest = RouterRequest::fake_builder()
             .query("{__typename}".to_string())
@@ -89,10 +88,7 @@ mod ensure_query_presence_tests {
     async fn it_fails_on_empty_query() {
         let expected_error = "Must provide query string.";
 
-        let mock_service = MockRouterService::new();
-        let mock = mock_service.build();
-
-        let service_stack = EnsureQueryPresence::default().layer(mock);
+        let service_stack = EnsureQueryPresence::default().layer(MockRouterService::new());
 
         let request: crate::RouterRequest = RouterRequest::fake_builder()
             .query("".to_string())
@@ -115,9 +111,7 @@ mod ensure_query_presence_tests {
     async fn it_fails_on_no_query() {
         let expected_error = "Must provide query string.";
 
-        let mock_service = MockRouterService::new();
-        let mock = mock_service.build();
-        let service_stack = EnsureQueryPresence::default().layer(mock);
+        let service_stack = EnsureQueryPresence::default().layer(MockRouterService::new());
 
         let request: crate::RouterRequest = RouterRequest::fake_builder()
             .build()

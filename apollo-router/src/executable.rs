@@ -15,6 +15,9 @@ use clap::CommandFactory;
 use clap::Parser;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
+use tracing::dispatcher::with_default;
+use tracing::dispatcher::Dispatch;
+use tracing::instrument::WithSubscriber;
 use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
@@ -22,14 +25,12 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::router::ApolloRouter;
-use crate::router::ConfigurationKind;
-use crate::router::SchemaKind;
-use crate::router::ShutdownKind;
-use crate::subscriber::set_global_subscriber;
-use crate::subscriber::RouterSubscriber;
+use crate::router::ConfigurationSource;
+use crate::router::RouterHttpServer;
+use crate::router::SchemaSource;
+use crate::router::ShutdownSource;
 
-static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(Parser, Debug)]
@@ -154,29 +155,26 @@ pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable that will parse commandline options and set up logging.
-    /// You may optionally supply a `router_builder_fn` to override building of the router.
+    /// Build an executable that will parse commandline options and set up logging,
+    /// then start an HTTP server.
+    ///
+    /// You may optionally specify when the server should gracefully shut down.
+    /// The default is on CTRL+C on the terminal (or a `SIGINT` signal).
     ///
     /// ```no_run
-    /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
-    /// # use anyhow::Result;
+    /// use apollo_router::{Executable, ShutdownSource};
     /// # #[tokio::main]
-    /// # async fn main()->Result<()> {
+    /// # async fn main() -> anyhow::Result<()> {
     /// Executable::builder()
-    ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
-    ///                 .configuration(configuration)
-    ///                 .schema(schema)
-    ///                 .shutdown(ShutdownKind::CtrlC)
-    ///                 .build())
-    ///   .start().await
+    ///   .shutdown(ShutdownSource::None)
+    ///   .start()
+    ///   .await
     /// # }
     /// ```
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
-    #[builder(entry = "builder", exit = "start")]
-    pub async fn start(
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
-    ) -> Result<()> {
+    #[builder(entry = "builder", exit = "start", visibility = "pub")]
+    async fn start(shutdown: Option<ShutdownSource>) -> Result<()> {
         let opt = Opt::parse();
 
         if opt.version {
@@ -192,24 +190,33 @@ impl Executable {
             return Ok(());
         }
 
-        // This is more complex than I'd like it to be. Really, we just want to pass
-        // a FmtSubscriber to set_global_subscriber(), but we can't because of the
-        // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
-        // for more details.
         let builder = tracing_subscriber::fmt::fmt().with_env_filter(
             EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
         );
 
-        let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
-            RouterSubscriber::TextSubscriber(builder.finish())
+        let dispatcher = if atty::is(atty::Stream::Stdout) {
+            Dispatch::new(builder.finish())
         } else {
-            RouterSubscriber::JsonSubscriber(builder.json().finish())
+            Dispatch::new(builder.json().finish())
         };
 
-        set_global_subscriber(subscriber)?;
+        GLOBAL_ENV_FILTER.set(opt.log_level.clone()).expect(
+            "failed setting the global env filter. THe start() function should only be called once",
+        );
 
-        GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
+        // The dispatcher we created is passed explicitely here to make sure we display the logs
+        // in the initialization pahse and in the state machine code, before a global subscriber
+        // is set using the configuration file
+        Self::inner_start(shutdown, opt, dispatcher.clone())
+            .with_subscriber(dispatcher)
+            .await
+    }
 
+    async fn inner_start(
+        shutdown: Option<ShutdownSource>,
+        opt: Opt,
+        dispatcher: Dispatch,
+    ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
 
         let configuration = opt
@@ -222,25 +229,26 @@ impl Executable {
                     path.to_path_buf()
                 };
 
-                ConfigurationKind::File {
+                ConfigurationSource::File {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
                 }
             })
             .unwrap_or_else(|| Configuration::builder().build().into());
+
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
         let schema = match (opt.supergraph_path, opt.apollo_key) {
             (Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
-                setup_panic_handler();
+                setup_panic_handler(dispatcher.clone());
 
                 let supergraph_path = if supergraph_path.is_relative() {
                     current_directory.join(supergraph_path)
                 } else {
                     supergraph_path
                 };
-                SchemaKind::File {
+                SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
                     delay: None,
@@ -248,6 +256,7 @@ impl Executable {
             }
             (None, Some(apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
+
                 let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
                 if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
                     return Err(anyhow!("Apollo poll interval must be at least 10s"));
@@ -265,7 +274,7 @@ impl Executable {
                         error: err.to_string(),
                     })?;
 
-                SchemaKind::Registry {
+                SchemaSource::Registry {
                     apollo_key,
                     apollo_graph_ref,
                     urls: uplink_endpoints,
@@ -307,14 +316,12 @@ impl Executable {
             }
         };
 
-        let router = router_builder_fn.unwrap_or(|configuration, schema| {
-            ApolloRouter::builder()
-                .configuration(configuration)
-                .schema(schema)
-                .shutdown(ShutdownKind::CtrlC)
-                .build()
-        })(configuration, schema);
-        if let Err(err) = router.serve().await {
+        let router = RouterHttpServer::builder()
+            .configuration(configuration)
+            .schema(schema)
+            .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
+            .start();
+        if let Err(err) = router.await {
             tracing::error!("{}", err);
             return Err(err.into());
         }
@@ -322,7 +329,7 @@ impl Executable {
     }
 }
 
-fn setup_panic_handler() {
+fn setup_panic_handler(dispatcher: Dispatch) {
     // Redirect panics to the logs.
     let backtrace_env = std::env::var("RUST_BACKTRACE");
     let show_backtraces =
@@ -331,12 +338,14 @@ fn setup_panic_handler() {
         tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
     }
     std::panic::set_hook(Box::new(move |e| {
-        if show_backtraces {
-            let backtrace = backtrace::Backtrace::new();
-            tracing::error!("{}\n{:?}", e, backtrace)
-        } else {
-            tracing::error!("{}", e)
-        }
+        with_default(&dispatcher, || {
+            if show_backtraces {
+                let backtrace = backtrace::Backtrace::new();
+                tracing::error!("{}\n{:?}", e, backtrace)
+            } else {
+                tracing::error!("{}", e)
+            }
+        });
     }));
 }
 

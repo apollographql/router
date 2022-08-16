@@ -17,7 +17,9 @@ use futures::FutureExt;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
+use tower::BoxError;
 use tracing::subscriber::SetGlobalDefaultError;
+use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
 use Event::NoMoreSchema;
@@ -29,7 +31,6 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::reload::Error as ReloadError;
 use crate::router_factory::YamlRouterServiceFactory;
 use crate::state_machine::StateMachine;
 
@@ -63,7 +64,7 @@ pub enum ApolloRouterError {
     ReadSchemaError(crate::error::SchemaError),
 
     /// could not create the HTTP pipeline: {0}
-    ServiceCreationError(tower::BoxError),
+    ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
@@ -76,18 +77,15 @@ pub enum ApolloRouterError {
 
     /// could not set global subscriber: {0}
     SetGlobalSubscriberError(SetGlobalDefaultError),
-
-    /// could not reload tracing layer: {0}
-    ReloadTracingLayerError(ReloadError),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
-pub enum SchemaKind {
+pub enum SchemaSource {
     /// A static schema.
     #[display(fmt = "String")]
-    String(String),
+    Static { schema_sdl: String },
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -123,19 +121,23 @@ pub enum SchemaKind {
     },
 }
 
-impl From<&'_ str> for SchemaKind {
+impl From<&'_ str> for SchemaSource {
     fn from(s: &'_ str) -> Self {
-        Self::String(s.to_owned())
+        Self::Static {
+            schema_sdl: s.to_owned(),
+        }
     }
 }
 
-impl SchemaKind {
+impl SchemaSource {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            SchemaKind::String(schema) => stream::once(future::ready(UpdateSchema(schema))).boxed(),
-            SchemaKind::Stream(stream) => stream.map(UpdateSchema).boxed(),
-            SchemaKind::File { path, watch, delay } => {
+            SchemaSource::Static { schema_sdl: schema } => {
+                stream::once(future::ready(UpdateSchema(schema))).boxed()
+            }
+            SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            SchemaSource::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -165,7 +167,7 @@ impl SchemaKind {
                     }
                 }
             }
-            SchemaKind::Registry {
+            SchemaSource::Registry {
                 apollo_key,
                 apollo_graph_ref,
                 urls,
@@ -196,11 +198,14 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 /// The user supplied config. Either a static instance or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
-pub enum ConfigurationKind {
+pub enum ConfigurationSource {
     /// A static configuration.
-    #[display(fmt = "Instance")]
+    ///
+    /// Can be created through `serde::Deserialize` from various formats,
+    /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
+    #[display(fmt = "Static")]
     #[from(types(Configuration))]
-    Instance(Box<Configuration>),
+    Static(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
@@ -221,17 +226,23 @@ pub enum ConfigurationKind {
     },
 }
 
-impl ConfigurationKind {
+impl Default for ConfigurationSource {
+    fn default() -> Self {
+        ConfigurationSource::Static(Default::default())
+    }
+}
+
+impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ConfigurationKind::Instance(instance) => {
+            ConfigurationSource::Static(instance) => {
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
-            ConfigurationKind::Stream(stream) => {
+            ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
-            ConfigurationKind::File { path, watch, delay } => {
+            ConfigurationSource::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -240,18 +251,20 @@ impl ConfigurationKind {
                     );
                     stream::empty().boxed()
                 } else {
-                    match ConfigurationKind::read_config(&path) {
+                    match ConfigurationSource::read_config(&path) {
                         Ok(configuration) => {
                             if watch {
                                 crate::files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(match ConfigurationKind::read_config(&path) {
-                                            Ok(config) => Some(config),
-                                            Err(err) => {
-                                                tracing::error!("{}", err);
-                                                None
-                                            }
-                                        })
+                                        future::ready(
+                                            match ConfigurationSource::read_config(&path) {
+                                                Ok(config) => Some(config),
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            },
+                                        )
                                     })
                                     .map(|x| UpdateConfiguration(Box::new(x)))
                                     .boxed()
@@ -284,10 +297,10 @@ impl ConfigurationKind {
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// The user supplied shutdown hook.
+/// Specifies when the Router’s HTTP server should gracefully shutdown
 #[derive(Display, Derivative)]
 #[derivative(Debug)]
-pub enum ShutdownKind {
+pub enum ShutdownSource {
     /// No graceful shutdown
     #[display(fmt = "None")]
     None,
@@ -301,13 +314,13 @@ pub enum ShutdownKind {
     CtrlC,
 }
 
-impl ShutdownKind {
+impl ShutdownSource {
     /// Convert this shutdown hook into a future. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ShutdownKind::None => stream::pending::<Event>().boxed(),
-            ShutdownKind::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
-            ShutdownKind::CtrlC => {
+            ShutdownSource::None => stream::pending::<Event>().boxed(),
+            ShutdownSource::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
+            ShutdownSource::CtrlC => {
                 #[cfg(not(unix))]
                 {
                     async {
@@ -339,76 +352,142 @@ impl ShutdownKind {
     }
 }
 
-/// Federated server takes requests and federates a response based on calls to subgraphs.
+/// The entry point for running the Router’s HTTP server.
 ///
 /// # Examples
 ///
 /// ```
-/// use apollo_router::ApolloRouter;
+/// use apollo_router::RouterHttpServer;
 /// use apollo_router::Configuration;
-/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
-///     let server = ApolloRouter::builder()
+///     RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
-///             .shutdown(ShutdownKind::CtrlC)
-///             .build();
-///     server.serve().await;
+///             .start()
+///             .await;
 /// };
 /// ```
 ///
 /// Shutdown via handle.
 /// ```
-/// use apollo_router::ApolloRouter;
+/// use apollo_router::RouterHttpServer;
 /// use apollo_router::Configuration;
-/// use apollo_router::ShutdownKind;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema = "schema";
-///     let server = ApolloRouter::builder()
+///     let mut server = RouterHttpServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
-///             .shutdown(ShutdownKind::CtrlC)
-///             .build();
-///     let handle = server.serve();
-///     drop(handle);
+///             .start();
+///     // …
+///     server.shutdown().await
 /// };
 /// ```
 ///
-pub struct ApolloRouter {
-    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) configuration: ConfigurationKind,
-
-    /// The Schema that the server will use. This can be static or a stream for hot reloading.
-    pub(crate) schema: SchemaKind,
-
-    /// A future that when resolved will shut down the server.
-    pub(crate) shutdown: ShutdownKind,
-
-    pub(crate) router_factory: YamlRouterServiceFactory,
+pub struct RouterHttpServer {
+    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
+    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
 #[buildstructor::buildstructor]
-impl ApolloRouter {
-    /// Build a new Apollo router.
+impl RouterHttpServer {
+    /// Returns a builder to start an HTTP server in a separate Tokio task.
     ///
-    /// This must only be called in the context of Executable::builder() because it relies on custom logging setup to support hot reload.
-    #[builder]
-    pub fn new(
-        configuration: ConfigurationKind,
-        schema: SchemaKind,
-        shutdown: Option<ShutdownKind>,
-    ) -> ApolloRouter {
-        ApolloRouter {
-            configuration,
+    /// Builder methods:
+    ///
+    /// * `.schema(impl Into<`[`SchemaSource`]`>)`
+    ///   Required.
+    ///   Specifies where to find the supergraph schema definition.
+    ///   Some sources support hot-reloading.
+    ///
+    /// * `.configuration(impl Into<`[`ConfigurationSource`]`>)`
+    ///   Optional.
+    ///   Specifies where to find the router configuration.
+    ///   If not provided, the default configuration as with an empty YAML file.
+    ///
+    /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
+    ///   Optional.
+    ///   Specifies when the server should gracefully shut down.
+    ///   If not provided, the default is [`ShutdownSource::CtrlC`].
+    ///
+    /// * `.start()`
+    ///   Finishes the builder,
+    ///   starts an HTTP server in a separate Tokio task,
+    ///   and returns a `RouterHttpServer` handle.
+    ///
+    /// The server handle can be used in multiple ways.
+    /// As a [`Future`], it resolves to `Result<(), `[`ApolloRouterError`]`>`
+    /// either when the server has finished gracefully shutting down
+    /// or when it encounters a fatal error that prevents it from starting.
+    ///
+    /// If the handle is dropped before being awaited as a future,
+    /// a graceful shutdown is triggered.
+    /// In order to wait until shutdown finishes,
+    /// use the [`shutdown`][Self::shutdown] method instead.
+    #[builder(visibility = "pub", entry = "builder", exit = "start")]
+    fn start(
+        schema: SchemaSource,
+        configuration: Option<ConfigurationSource>,
+        shutdown: Option<ShutdownSource>,
+    ) -> RouterHttpServer {
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+        let event_stream = generate_event_stream(
+            shutdown.unwrap_or(ShutdownSource::CtrlC),
+            configuration.unwrap_or_default(),
             schema,
-            shutdown: shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: YamlRouterServiceFactory::default(),
+            shutdown_receiver,
+        );
+        let server_factory = AxumHttpServerFactory::new();
+        let router_factory = YamlRouterServiceFactory::default();
+        let state_machine = StateMachine::new(server_factory, router_factory);
+        let listen_address = state_machine.listen_address.clone();
+        let result = spawn(
+            async move { state_machine.process_events(event_stream).await }
+                .with_current_subscriber(),
+        )
+        .map(|r| match r {
+            Ok(Ok(ok)) => Ok(ok),
+            Ok(Err(err)) => Err(err),
+            Err(err) => {
+                tracing::error!("{}", err);
+                Err(ApolloRouterError::StartupError)
+            }
+        })
+        .with_current_subscriber()
+        .boxed();
+
+        RouterHttpServer {
+            result,
+            shutdown_sender: Some(shutdown_sender),
+            listen_address,
         }
+    }
+
+    /// Returns the listen address when the router is ready to receive requests.
+    ///
+    /// This can be useful when the `server.listen` configuration specifies TCP port 0,
+    /// which instructs the operating system to pick an available port number.
+    ///
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
+        self.listen_address
+            .read()
+            .await
+            .clone()
+            .ok_or(ApolloRouterError::StartupError)
+    }
+
+    /// Trigger and wait for graceful shutdown
+    pub async fn shutdown(&mut self) -> Result<(), ApolloRouterError> {
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
+        (&mut self.result).await
     }
 }
 
@@ -431,35 +510,15 @@ pub(crate) enum Event {
     Shutdown,
 }
 
-/// A handle that allows the client to await for various server events.
-pub struct RouterHandle {
-    result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    shutdown_sender: Option<oneshot::Sender<()>>,
-}
-
-impl RouterHandle {
-    /// Returns the listen address when the router is ready to receive requests.
-    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
-        self.listen_address
-            .read()
-            .await
-            .clone()
-            .ok_or(ApolloRouterError::StartupError)
-    }
-}
-
-impl Drop for RouterHandle {
+impl Drop for RouterHttpServer {
     fn drop(&mut self) {
-        let _ = self
-            .shutdown_sender
-            .take()
-            .expect("shutdown sender must be present")
-            .send(());
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
-impl Future for RouterHandle {
+impl Future for RouterHttpServer {
     type Output = Result<(), ApolloRouterError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -467,64 +526,26 @@ impl Future for RouterHandle {
     }
 }
 
-impl ApolloRouter {
-    /// Start the federated server on a separate thread.
-    ///
-    /// Dropping the server handle will shutdown the server.
-    ///
-    /// returns: RouterHandle
-    ///
-    pub fn serve(self) -> RouterHandle {
-        let server_factory = AxumHttpServerFactory::new();
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let event_stream = Self::generate_event_stream(
-            self.shutdown,
-            self.configuration,
-            self.schema,
-            shutdown_receiver,
-        );
-
-        let state_machine = StateMachine::new(server_factory, self.router_factory);
-        let listen_address = state_machine.listen_address.clone();
-        let result = spawn(async move { state_machine.process_events(event_stream).await })
-            .map(|r| match r {
-                Ok(Ok(ok)) => Ok(ok),
-                Ok(Err(err)) => Err(err),
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    Err(ApolloRouterError::StartupError)
-                }
-            })
-            .boxed();
-
-        RouterHandle {
-            result,
-            shutdown_sender: Some(shutdown_sender),
-            listen_address,
-        }
-    }
-
-    /// Create the unified event stream.
-    /// This merges all contributing streams and sets up shutdown handling.
-    /// When a shutdown message is received no more events are emitted.
-    fn generate_event_stream(
-        shutdown: ShutdownKind,
-        configuration: ConfigurationKind,
-        schema: SchemaKind,
-        shutdown_receiver: oneshot::Receiver<()>,
-    ) -> impl Stream<Item = Event> {
-        // Chain is required so that the final shutdown message is sent.
-        let messages = stream::select_all(vec![
-            shutdown.into_stream().boxed(),
-            configuration.into_stream().boxed(),
-            schema.into_stream().boxed(),
-            shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
-        ])
-        .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
-        .chain(stream::iter(vec![Shutdown]))
-        .boxed();
-        messages
-    }
+/// Create the unified event stream.
+/// This merges all contributing streams and sets up shutdown handling.
+/// When a shutdown message is received no more events are emitted.
+fn generate_event_stream(
+    shutdown: ShutdownSource,
+    configuration: ConfigurationSource,
+    schema: SchemaSource,
+    shutdown_receiver: oneshot::Receiver<()>,
+) -> impl Stream<Item = Event> {
+    // Chain is required so that the final shutdown message is sent.
+    let messages = stream::select_all(vec![
+        shutdown.into_stream().boxed(),
+        configuration.into_stream().boxed(),
+        schema.into_stream().boxed(),
+        shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
+    ])
+    .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
+    .chain(stream::iter(vec![Shutdown]))
+    .boxed();
+    messages
 }
 
 #[cfg(test)]
@@ -540,27 +561,26 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
 
-    fn init_with_server() -> RouterHandle {
+    fn init_with_server() -> RouterHttpServer {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema = include_str!("testdata/supergraph.graphql");
-        ApolloRouter::builder()
+        RouterHttpServer::builder()
             .configuration(configuration)
             .schema(schema)
-            .build()
-            .serve()
+            .start()
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
-        let router_handle = init_with_server();
+        let mut router_handle = init_with_server();
         let listen_address = router_handle
             .listen_address()
             .await
             .expect("router failed to start");
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
-        drop(router_handle);
+        router_handle.shutdown().await.unwrap();
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
@@ -591,7 +611,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
         write_and_flush(&mut file, contents).await;
-        let mut stream = ConfigurationKind::File {
+        let mut stream = ConfigurationSource::File {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
@@ -621,7 +641,7 @@ mod tests {
     async fn config_by_file_invalid() {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
-        let mut stream = ConfigurationKind::File {
+        let mut stream = ConfigurationSource::File {
             path,
             watch: true,
             delay: None,
@@ -634,7 +654,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_missing() {
-        let mut stream = ConfigurationKind::File {
+        let mut stream = ConfigurationSource::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
@@ -651,7 +671,7 @@ mod tests {
         let contents = include_str!("testdata/supergraph_config.yaml");
         write_and_flush(&mut file, contents).await;
 
-        let mut stream = ConfigurationKind::File {
+        let mut stream = ConfigurationSource::File {
             path,
             watch: false,
             delay: None,
@@ -669,7 +689,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let schema = include_str!("testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;
-        let mut stream = SchemaKind::File {
+        let mut stream = SchemaSource::File {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
@@ -687,7 +707,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn schema_by_file_missing() {
-        let mut stream = SchemaKind::File {
+        let mut stream = SchemaSource::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
@@ -704,7 +724,7 @@ mod tests {
         let schema = include_str!("testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;
 
-        let mut stream = SchemaKind::File {
+        let mut stream = SchemaSource::File {
             path,
             watch: false,
             delay: None,

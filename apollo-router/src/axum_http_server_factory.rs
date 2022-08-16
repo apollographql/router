@@ -44,7 +44,6 @@ use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tower::util::BoxService;
 use tower::BoxError;
-use tower::MakeService;
 use tower::ServiceExt;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::MakeSpan;
@@ -62,6 +61,8 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::plugin::Handler;
+use crate::plugins::traffic_shaping::Elapsed;
+use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::RouterServiceFactory;
 
@@ -186,8 +187,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 );
             }
 
-            let svc = router.into_make_service();
-
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
             let mut listener = if let Some(listener) = listener {
@@ -231,7 +230,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             break;
                         }
                         res = listener.accept() => {
-                            let mut svc = svc.clone();
+                            let app = router.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
                             match res {
@@ -244,8 +243,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                                     tokio::task::spawn(async move{
                                         match res {
                                             NetworkStream::Tcp(stream) => {
-                                                // TODO: unwrap?
-                                                let app = svc.make_service(&stream).await.unwrap();
                                                 stream
                                                     .set_nodelay(true)
                                                     .expect(
@@ -273,8 +270,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                                             }
                                             #[cfg(unix)]
                                             NetworkStream::Unix(stream) => {
-                                                // TODO: unwrap?
-                                                let app = svc.make_service(&stream).await.unwrap();
                                                 let connection = Http::new()
                                                 .http1_keep_alive(true)
                                                 .serve_connection(stream, app);
@@ -504,6 +499,14 @@ where
 
             match service.call(Request::from_parts(head, body).into()).await {
                 Err(e) => {
+                    if let Some(source_err) = e.source() {
+                        if source_err.is::<RateLimited>() {
+                            return RateLimited::new().into_response();
+                        }
+                        if source_err.is::<Elapsed>() {
+                            return Elapsed::new().into_response();
+                        }
+                    }
                     tracing::error!("router service call failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -559,6 +562,15 @@ where
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
+            if let Some(source_err) = e.source() {
+                if source_err.is::<RateLimited>() {
+                    return RateLimited::new().into_response();
+                }
+                if source_err.is::<Elapsed>() {
+                    return Elapsed::new().into_response();
+                }
+            }
+
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "router service is not available to process request",
