@@ -10,7 +10,6 @@ use crate::graphql::Response;
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: usize = 5;
 
 /// A cache containing our well known introspection queries.
-#[derive(Debug)]
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
 }

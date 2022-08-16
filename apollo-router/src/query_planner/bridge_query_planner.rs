@@ -24,7 +24,7 @@ use crate::*;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
