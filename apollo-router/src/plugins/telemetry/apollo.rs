@@ -44,10 +44,9 @@ pub(crate) struct Config {
     #[serde(default = "default_buffer_size")]
     pub(crate) buffer_size: usize,
 
-    /// Disable ftv1 tracing. ftv1 tracing can cause performance issues.
-    /// This means that traces will not appear in Apollo Studio.
+    /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     #[serde(default)]
-    pub(crate) disable_ftv1: bool,
+    pub(crate) field_level_instrumentation: bool,
 
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
@@ -93,7 +92,7 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: 10000,
-            disable_ftv1: false,
+            field_level_instrumentation: false,
         }
     }
 }

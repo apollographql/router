@@ -175,6 +175,16 @@ impl Plugin for Telemetry {
             .instrument(Self::router_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
+            .map_response(|resp: RouterResponse| {
+                if let Ok(Some(usage_reporting)) =
+                    resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
+                {
+                    // Record the ftv1 trace for processing later
+                    Span::current()
+                        .record("operation.signature", &usage_reporting.stats_report_key);
+                }
+                resp
+            })
             .map_future_with_context(
                 move |req: &RouterRequest| {
                     Self::populate_context(config.clone(), req);
@@ -371,16 +381,15 @@ impl Plugin for Telemetry {
                 }),
         );
         let subgraph_metrics_conf = subgraph_metrics.clone();
-        let apollo_enabled = self
+        let ftv1_enabled = self
             .config
             .apollo
             .clone()
             .unwrap_or_default()
-            .apollo_key
-            .is_some();
+            .field_level_instrumentation;
         ServiceBuilder::new()
             .map_request(move |mut req: SubgraphRequest| {
-                if apollo_enabled && span_enabled!(::tracing::Level::INFO) {
+                if ftv1_enabled && span_enabled!(::tracing::Level::INFO) {
                     req.subgraph_request.headers_mut().append(
                         "apollo-federation-include-trace",
                         HeaderValue::from_static("ftv1"),
@@ -411,6 +420,7 @@ impl Plugin for Telemetry {
                 )
             })
             .map_response(|resp: SubgraphResponse| {
+                // Stash the FTV1 data
                 if let Some(serde_json_bytes::Value::String(ftv1)) =
                     resp.response.body().extensions.get("ftv1")
                 {
@@ -798,7 +808,8 @@ impl Telemetry {
                 graphql.operation.name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
-                "otel.kind" = %SpanKind::Internal
+                "otel.kind" = %SpanKind::Internal,
+                "operation.signature" = field::Empty
             );
             span
         }

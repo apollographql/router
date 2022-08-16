@@ -18,16 +18,16 @@ use url::Url;
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("protobuf decode error")]
-    ProtobufDecodeError(#[from] apollo_spaceport::DecodeError),
+    ProtobufDecode(#[from] apollo_spaceport::DecodeError),
 
     #[error("ftv1 span attribute should have been a string")]
-    Ftv1SpanAttributeError,
+    Ftv1SpanAttribute,
 
     #[error("ftv1 span attribute should have been a string")]
     MultipleErrors(Vec<Error>),
 
     #[error("duration could not be calcualted")]
-    SystemTimeError(#[from] SystemTimeError),
+    SystemTime(#[from] SystemTimeError),
 }
 
 /// A [`SpanExporter`] that writes to [`Reporter`].
@@ -90,7 +90,7 @@ impl Exporter {
             client_version: "".to_string(),
             http: None,
             cache_policy: None,
-            query_plan: node.map(|n| Box::new(n)),
+            query_plan: node.map(Box::new),
             full_query_cache_hit: false,
             persisted_query_hit: false,
             persisted_query_register: false,
@@ -188,7 +188,7 @@ impl Exporter {
                         data.as_bytes(),
                     ))?))
                 } else {
-                    Err(Error::Ftv1SpanAttributeError)
+                    Err(Error::Ftv1SpanAttribute)
                 }
             })
             .transpose()
@@ -216,7 +216,7 @@ impl SpanExporter for Exporter {
                     .traces_per_query
                     .entry(
                         span.attributes
-                            .get(&Key::new("operation_signature"))
+                            .get(&Key::new("operation.signature"))
                             .expect("operation signature must have been set on router span")
                             .to_string(),
                     )
@@ -240,7 +240,7 @@ impl SpanExporter for Exporter {
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
                 // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
                 self.spans_by_parent_id
-                    .get_or_insert(span.span_context.span_id(), || Vec::new());
+                    .get_or_insert(span.span_context.span_id(), Vec::new);
                 self.spans_by_parent_id
                     .get_mut(&span.span_context.span_id())
                     .expect("capacity of cache was zero")

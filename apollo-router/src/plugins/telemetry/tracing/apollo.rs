@@ -9,7 +9,7 @@ use crate::plugins::telemetry::tracing::{apollo_telemetry, TracingConfigurator};
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::debug!("configuring Apollo tracing");
+        tracing::debug!("configuring Apollo tracing {:?}", self);
         Ok(match self {
             Config {
                 endpoint: Some(endpoint),
@@ -19,6 +19,7 @@ impl TracingConfigurator for Config {
                 client_version_header,
                 schema_id,
                 buffer_size,
+                ..
             } => {
                 tracing::debug!("configuring exporter to Spaceport");
                 let exporter = apollo_telemetry::Exporter::builder()
