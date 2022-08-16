@@ -268,6 +268,7 @@ mod test {
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
+            buffer_size: 10000,
             schema_id: "schema_sha".to_string(),
         })
         .await?;
@@ -396,6 +397,7 @@ mod test {
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
+            buffer_size: 10000,
             schema_id: "schema_sha".to_string(),
         })
     }

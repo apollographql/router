@@ -3,16 +3,15 @@ use apollo_spaceport::trace::query_plan_node::{
     FetchNode, FlattenNode, ParallelNode, SequenceNode,
 };
 use apollo_spaceport::trace::QueryPlanNode;
-use apollo_spaceport::{Message, TracesAndStats};
+use apollo_spaceport::{Message, Report, TracesAndStats};
 use async_trait::async_trait;
 use http::header::HeaderName;
-use multimap::MultiMap;
+use lru::LruCache;
 use opentelemetry::sdk::export::trace::{ExportResult, SpanData, SpanExporter};
 use opentelemetry::trace::SpanId;
 use opentelemetry::{Key, Value};
-use std::collections::HashMap;
 use std::io::Cursor;
-use std::time::{SystemTime, SystemTimeError};
+use std::time::SystemTimeError;
 use thiserror::Error;
 use url::Url;
 
@@ -39,7 +38,7 @@ pub(crate) enum Error {
 #[allow(dead_code)]
 pub(crate) struct Exporter {
     trace_config: config::Trace,
-    spans_by_parent_id: MultiMap<SpanId, SpanData>,
+    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     endpoint: Url,
     apollo_key: String,
     apollo_graph_ref: String,
@@ -59,9 +58,10 @@ impl Exporter {
         client_name_header: HeaderName,
         client_version_header: HeaderName,
         schema_id: String,
+        buffer_size: usize,
     ) -> Self {
         Self {
-            spans_by_parent_id: Default::default(),
+            spans_by_parent_id: LruCache::new(buffer_size),
             trace_config,
             endpoint,
             apollo_key,
@@ -107,7 +107,8 @@ impl Exporter {
     ) -> Result<Option<QueryPlanNode>, Error> {
         let (child_nodes, errors) = self
             .spans_by_parent_id
-            .remove(&span.span_context.span_id())
+            .pop_entry(&span.span_context.span_id())
+            .map(|(_, spans)| spans)
             .unwrap_or_default()
             .into_iter()
             .map(|span| self.extract_query_plan_node(root_span, &span))
@@ -203,25 +204,47 @@ impl SpanExporter for Exporter {
         // We may get spams that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
+        let mut report = Report {
+            header: None,
+            traces_per_query: Default::default(),
+            end_time: None,
+            operation_count: 0,
+        };
         for span in batch {
             if span.name == "router" {
-                let trace = self.extract_query_plan_trace(span);
-                let traces = TracesAndStats {
-                    trace: vec![],
-                    stats_with_context: vec![],
-                    referenced_fields_by_type: Default::default(),
-                    internal_traces_contributing_to_stats: vec![],
-                };
-                apollo_spaceport::Report {
-                    header: None,
-                    traces_per_query: HashMap::new(),
-                    end_time: Some(SystemTime::now().into()),
-                    operation_count: 0,
-                };
+                let traces_and_stats = report
+                    .traces_per_query
+                    .entry(
+                        span.attributes
+                            .get(&Key::new("operation_signature"))
+                            .expect("operation signature must have been set on router span")
+                            .to_string(),
+                    )
+                    .or_insert_with(|| TracesAndStats {
+                        trace: vec![],
+                        stats_with_context: vec![],
+                        referenced_fields_by_type: Default::default(),
+                        internal_traces_contributing_to_stats: vec![],
+                    });
+                match self.extract_query_plan_trace(span) {
+                    Ok(trace) => {
+                        traces_and_stats.trace.push(trace);
+                    }
+                    Err(error) => {
+                        tracing::error!("failed to construct trace: {}, skipping", error);
+                    }
+                }
             } else {
                 // Not a root span, we may need it later so stash it.
+
+                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
                 self.spans_by_parent_id
-                    .insert(span.span_context.span_id(), span);
+                    .get_or_insert(span.span_context.span_id(), || Vec::new());
+                self.spans_by_parent_id
+                    .get_mut(&span.span_context.span_id())
+                    .expect("capacity of cache was zero")
+                    .push(span);
             }
         }
 

@@ -35,6 +35,10 @@ pub(crate) struct Config {
     )]
     pub(crate) client_version_header: HeaderName,
 
+    /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
+    #[serde(default = "default_buffer_size")]
+    pub(crate) buffer_size: usize,
+
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
@@ -65,6 +69,10 @@ fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
+fn default_buffer_size() -> usize {
+    10000
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -74,6 +82,7 @@ impl Default for Config {
             client_name_header: client_name_header_default(),
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
+            buffer_size: 10000,
         }
     }
 }
