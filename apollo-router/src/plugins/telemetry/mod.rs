@@ -13,6 +13,7 @@ use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
+use ::tracing::{field, span_enabled};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
 use bytes::Bytes;
@@ -370,7 +371,23 @@ impl Plugin for Telemetry {
                 }),
         );
         let subgraph_metrics_conf = subgraph_metrics.clone();
+        let apollo_enabled = self
+            .config
+            .apollo
+            .clone()
+            .unwrap_or_default()
+            .apollo_key
+            .is_some();
         ServiceBuilder::new()
+            .map_request(move |mut req: SubgraphRequest| {
+                if apollo_enabled && span_enabled!(::tracing::Level::INFO) {
+                    req.subgraph_request.headers_mut().append(
+                        "apollo-federation-include-trace",
+                        HeaderValue::from_static("ftv1"),
+                    );
+                }
+                req
+            })
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
                     .subgraph_request
@@ -390,7 +407,17 @@ impl Plugin for Telemetry {
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
+                    "ftv1" = field::Empty
                 )
+            })
+            .map_response(|resp: SubgraphResponse| {
+                if let Some(serde_json_bytes::Value::String(ftv1)) =
+                    resp.response.body().extensions.get("ftv1")
+                {
+                    // Record the ftv1 trace for processing later
+                    Span::current().record("ftv1", &ftv1.as_str().to_string());
+                }
+                resp
             })
             .map_future_with_context(
                 move |sub_request: &SubgraphRequest| {

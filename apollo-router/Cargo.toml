@@ -136,8 +136,8 @@ tower-http = { version = "0.3.4", features = [
     "timeout"
 ] }
 tower-service = "0.3.2"
-tracing = "=0.1.34"
-tracing-core = "=0.1.26"
+tracing = "0.1.32"
+tracing-core = "0.1.29"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
