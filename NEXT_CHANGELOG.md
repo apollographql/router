@@ -350,6 +350,16 @@ See the API documentation for an example. (It can be built with `cargo doc --ope
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Remove telemetry configuration hot reloading ([PR #1501](https://github.com/apollographql/router/pull/1501))
+
+The `map_deferred_response` method is now available for the router service and execution
+service in Rhai. When using the `@defer` directive, we get the data in a serie of graphql
+responses. The first one is available with the `map_response` method, where the HTTP headers
+and the response body can be modified. The following responses are available through
+`map_deferred_response`, which only has access to the response body.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1501
+
 ## 🐛 Fixes
 
 ## 🛠 Maintenance
