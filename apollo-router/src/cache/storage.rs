@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
 // a suitable implementation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct CacheStorage<K: Hash + Eq + Send, V: Clone> {
     inner: Arc<Mutex<LruCache<K, V>>>,
 }

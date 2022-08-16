@@ -74,7 +74,7 @@ impl BridgeQueryPlanner {
         }
     }
 
-    async fn introspection(&self, query: &str) -> Result<QueryPlannerContent, QueryPlannerError> {
+    async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
@@ -175,7 +175,7 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(key.0.as_str()).await;
+            return self.introspection(key.0).await;
         }
 
         self.plan(key.0, key.1, key.2, selections).await
@@ -201,7 +201,7 @@ mod tests {
     async fn test_plan() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(Introspection::new().await)),
             Default::default(),
         )
         .await
@@ -228,7 +228,7 @@ mod tests {
     async fn test_plan_invalid_query() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(Introspection::new().await)),
             Default::default(),
         )
         .await
@@ -272,7 +272,7 @@ mod tests {
     async fn empty_query_plan_should_be_a_planner_error() {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(Introspection::new().await)),
             Default::default(),
         )
         .await
@@ -306,7 +306,7 @@ mod tests {
     async fn test_plan_error() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(Introspection::new().await)),
             Default::default(),
         )
         .await

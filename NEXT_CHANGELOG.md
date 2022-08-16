@@ -292,6 +292,13 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
+### Don't prefill the introspection cache ([#1516](https://github.com/apollographql/router/issues/1516))
+
+The introspection query cache won't be warmed up anymore. Which reduces the router's idle memory footprint.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
+
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
 
 Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
