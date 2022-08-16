@@ -74,7 +74,9 @@ pub enum ConfigurationError {
 }
 
 /// The configuration for the router.
-/// Currently maintains a mapping of subgraphs.
+///
+/// Can be created through `serde::Deserialize` from various formats,
+/// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {

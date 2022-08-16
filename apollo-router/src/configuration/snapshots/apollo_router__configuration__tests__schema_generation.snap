@@ -1,11 +1,12 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 909
 expression: "&schema"
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "Configuration",
-  "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
+  "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
     "csrf": {
@@ -282,6 +283,9 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.expose_query_plan": {
+          "type": "boolean"
+        },
         "experimental.include_subgraph_errors": {
           "type": "object",
           "properties": {

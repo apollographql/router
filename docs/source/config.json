@@ -1,8 +1,6 @@
 {
   "title": "Router",
-  "algoliaFilters": [
-    "docset:router"
-  ],
+  "algoliaFilters": ["docset:router"],
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
@@ -36,6 +34,7 @@
     "Managed Federation": {
       "Overview": "/managed-federation/overview",
       "Setup": "/managed-federation/setup",
+      "Client awareness": "/managed-federation/client-awareness",
       "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
     },
     "Customizations": {

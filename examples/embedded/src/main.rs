@@ -1,42 +1,26 @@
-use std::sync::Arc;
-
-use anyhow::anyhow;
-use anyhow::Result;
-use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::SubgraphService;
+use apollo_router::stages::router;
+use apollo_router::TestHarness;
 use tower::ServiceExt;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    // get the supergraph from ../../examples/graphql/supergraph.graphql
-    let schema = include_str!("../../graphql/supergraph.graphql");
-    let schema = Arc::new(apollo_router::Schema::parse(schema, &Default::default())?);
-
-    // PluggableRouterServiceBuilder creates a GraphQL pipeline to process queries against a supergraph Schema
-    // The whole pipeline is set up...
-    let mut router_builder = PluggableRouterServiceBuilder::new(schema);
-
-    // ... except the SubgraphServices, so we'll let it know Requests against the `accounts` service
-    // can be performed with an http client against the `https://accounts.demo.starstuff.dev` url
-    let subgraph_service = SubgraphService::new("accounts".to_string());
-    router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
-
-    // We can now build our service stack...
-    let router_service = router_builder.build().await?;
+async fn main() -> Result<(), tower::BoxError> {
+    // TestHarness creates a GraphQL pipeline to process queries against a supergraph Schema
+    let router = TestHarness::builder()
+        .schema(include_str!("../../graphql/supergraph.graphql"))
+        .with_subgraph_network_requests()
+        .build()
+        .await?;
 
     // ...then create a GraphQL request...
-    let request = RouterRequest::fake_builder()
+    let request = router::Request::fake_builder()
         .query(r#"query Query { me { name } }"#)
         .build()
         .expect("expecting valid request");
 
     // ... and run it against the router service!
-    let res = router_service
-        .test_service()
+    let res = router
         .oneshot(request)
-        .await
-        .map_err(|e| anyhow!("router_service call failed: {}", e))?
+        .await?
         .next_response()
         .await
         .unwrap();

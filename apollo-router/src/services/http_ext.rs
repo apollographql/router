@@ -23,7 +23,7 @@ use crate::graphql;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
 /// because header name creation is fallible.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Eq)]
 pub enum IntoHeaderName {
     String(String),
     HeaderName(HeaderName),
@@ -31,10 +31,52 @@ pub enum IntoHeaderName {
 
 /// Temporary holder of header value while for use while building requests and responses. Required
 /// because header value creation is fallible.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Eq)]
 pub enum IntoHeaderValue {
     String(String),
     HeaderValue(HeaderValue),
+}
+
+impl PartialEq for IntoHeaderName {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl PartialEq for IntoHeaderValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Hash for IntoHeaderName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+impl Hash for IntoHeaderValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+impl IntoHeaderName {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            IntoHeaderName::String(s) => s.as_bytes(),
+            IntoHeaderName::HeaderName(h) => h.as_str().as_bytes(),
+        }
+    }
+}
+
+impl IntoHeaderValue {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            IntoHeaderValue::String(s) => s.as_bytes(),
+            IntoHeaderValue::HeaderValue(v) => v.as_bytes(),
+        }
+    }
 }
 
 impl<T> From<T> for IntoHeaderName
@@ -89,8 +131,8 @@ impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: http::Uri,
         method: http::Method,
@@ -116,8 +158,8 @@ impl<T> Request<T> {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<http::Method>,

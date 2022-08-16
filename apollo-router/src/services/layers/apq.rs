@@ -229,10 +229,8 @@ mod apq_tests {
                     .expect("expecting valid request"))
             });
 
-        let mock = mock_service.build();
-
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-        let mut service_stack = apq.layer(mock);
+        let mut service_stack = apq.layer(mock_service);
 
         let extensions = HashMap::from([(
             "persistedQuery".to_string(),
@@ -296,35 +294,30 @@ mod apq_tests {
             .unwrap(),
         };
 
-        let mut mock_service_builder = MockRouterService::new();
+        let mut mock_service = MockRouterService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
         // it should have not been forwarded to our mock service
 
         // the second one should have the right APQ header and the full query string
-        mock_service_builder
-            .expect_call()
-            .times(1)
-            .returning(move |req| {
-                let body = req.originating_request.body();
-                let as_json = body.extensions.get("persistedQuery").unwrap();
+        mock_service.expect_call().times(1).returning(move |req| {
+            let body = req.originating_request.body();
+            let as_json = body.extensions.get("persistedQuery").unwrap();
 
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+            let persisted_query: PersistedQuery =
+                serde_json_bytes::from_value(as_json.clone()).unwrap();
 
-                assert_eq!(persisted_query.sha256hash, hash2);
+            assert_eq!(persisted_query.sha256hash, hash2);
 
-                assert!(body.query.is_some());
+            assert!(body.query.is_some());
 
-                Ok(RouterResponse::fake_builder()
-                    .build()
-                    .expect("expecting valid request"))
-            });
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request"))
+        });
 
         // the last call should be an APQ error.
         // the provided hash was wrong, so the query wasn't inserted into the cache.
-
-        let mock_service = mock_service_builder.build();
 
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);

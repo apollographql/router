@@ -10,32 +10,25 @@ use std::sync::Mutex;
 use apollo_router::graphql;
 use apollo_router::graphql::Request;
 use apollo_router::http_ext;
-use apollo_router::json_ext::Object;
-use apollo_router::json_ext::ValueExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::plugins::csrf;
-use apollo_router::plugins::telemetry::apollo;
-use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::Telemetry;
-use apollo_router::plugins::telemetry::{self};
-use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphService;
-use apollo_router::Configuration;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use apollo_router::Context;
-use apollo_router::Schema;
+use apollo_router::_private::TelemetryPlugin;
 use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use test_span::prelude::*;
-use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+
+type Object = Map<ByteString, Value>;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -274,7 +267,7 @@ async fn queries_should_work_with_compression() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -308,7 +301,7 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -420,7 +413,7 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = RouterRequest {
+    let request = router::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -433,7 +426,7 @@ async fn mutation_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
-    let (router, registry) = setup_router_and_registry(Default::default()).await;
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
     let mut extensions: Object = Default::default();
     extensions.insert("code", "PERSISTED_QUERY_NOT_FOUND".into());
@@ -594,10 +587,9 @@ async fn missing_variables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
-    let config = json!({
+    let config = serde_json::json!({
         "server": {"experimental_parser_recursion_limit": 12_usize}
     });
-    let config = serde_json_bytes::from_value(config).unwrap();
     let request = Request::builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
         .build();
@@ -621,10 +613,9 @@ async fn query_just_under_recursion_limit() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
-    let config = json!({
+    let config = serde_json::json!({
         "server": {"experimental_parser_recursion_limit": 11_usize}
     });
-    let config = serde_json_bytes::from_value(config).unwrap();
     let request = Request::builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
         .build();
@@ -671,71 +662,51 @@ async fn query_node(
 }
 
 async fn query_rust(
-    request: RouterRequest,
+    request: router::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
-    query_rust_with_config(request, Default::default()).await
+    query_rust_with_config(request, serde_json::json!({})).await
 }
 
 async fn query_rust_with_config(
-    request: RouterRequest,
-    config: Arc<Configuration>,
+    request: router::Request,
+    config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
     (query_with_router(router, request).await, counting_registry)
 }
 
 async fn setup_router_and_registry(
-    config: Arc<Configuration>,
-) -> (
-    BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-    CountingServiceRegistry,
-) {
-    let schema = include_str!("fixtures/supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
+    config: serde_json::Value,
+) -> (router::BoxCloneService, CountingServiceRegistry) {
+    let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let subgraphs = schema.subgraphs();
-    let mut builder = PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(config);
-    let telemetry_plugin = Telemetry::new_with_subscriber(
-        PluginInit::new(
-            telemetry::config::Conf {
-                metrics: Option::default(),
-                tracing: Some(Tracing::default()),
-                apollo: Some(apollo::Config::default()),
-            },
-            Default::default(),
-        ),
-        Some(tracing_subscriber::registry().with(test_span::Layer {})),
+    let telemetry = TelemetryPlugin::new_with_subscriber(
+        serde_json::json!({
+            "tracing": {},
+            "apollo": {
+                "schema_id": ""
+            }
+        }),
+        tracing_subscriber::registry().with(test_span::Layer {}),
     )
     .await
     .unwrap();
-    let csrf_plugin = csrf::Csrf::new(PluginInit::new(Default::default(), Default::default()))
+    let router = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(config)
+        .unwrap()
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(telemetry)
+        .build()
         .await
         .unwrap();
-    builder = builder
-        .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
-        .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
-    for (name, _url) in subgraphs {
-        let cloned_counter = counting_registry.clone();
-        let cloned_name = name.clone();
-
-        let service =
-            SubgraphService::new(name.to_owned()).map_request(move |request: SubgraphRequest| {
-                let cloned_counter = cloned_counter.clone();
-                cloned_counter.increment(cloned_name.as_str());
-
-                request
-            });
-        builder = builder.with_subgraph_service(name, service);
-    }
-
-    let router = builder.build().await.unwrap().test_service();
-
     (router, counting_registry)
 }
 
 async fn query_with_router(
-    router: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-    request: RouterRequest,
+    router: router::BoxCloneService,
+    request: router::Request,
 ) -> graphql::Response {
     router
         .oneshot(request)
@@ -772,5 +743,75 @@ impl CountingServiceRegistry {
 
     fn totals(&self) -> HashMap<String, usize> {
         self.counts.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for CountingServiceRegistry {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        let name = subgraph_name.to_owned();
+        let counters = self.clone();
+        service
+            .map_request(move |request| {
+                counters.increment(&name);
+                request
+            })
+            .boxed()
+    }
+}
+
+trait ValueExt {
+    fn eq_and_ordered(&self, other: &Self) -> bool;
+}
+
+impl ValueExt for Value {
+    fn eq_and_ordered(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Object(a), Value::Object(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some((field_a, value_a)), Some((field_b, value_b)))
+                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some(value_a), Some(value_b))
+                            if ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (a, b) => a == b,
+        }
     }
 }

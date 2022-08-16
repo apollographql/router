@@ -25,10 +25,10 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::router::ApolloRouter;
-use crate::router::ConfigurationKind;
-use crate::router::SchemaKind;
-use crate::router::ShutdownKind;
+use crate::router::ConfigurationSource;
+use crate::router::RouterHttpServer;
+use crate::router::SchemaSource;
+use crate::router::ShutdownSource;
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
@@ -155,29 +155,26 @@ pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable that will parse commandline options and set up logging.
-    /// You may optionally supply a `router_builder_fn` to override building of the router.
+    /// Build an executable that will parse commandline options and set up logging,
+    /// then start an HTTP server.
+    ///
+    /// You may optionally specify when the server should gracefully shut down.
+    /// The default is on CTRL+C on the terminal (or a `SIGINT` signal).
     ///
     /// ```no_run
-    /// use apollo_router::{ApolloRouter, Executable, ShutdownKind};
-    /// # use anyhow::Result;
+    /// use apollo_router::{Executable, ShutdownSource};
     /// # #[tokio::main]
-    /// # async fn main()->Result<()> {
+    /// # async fn main() -> anyhow::Result<()> {
     /// Executable::builder()
-    ///   .router_builder_fn(|configuration, schema| ApolloRouter::builder()
-    ///                 .configuration(configuration)
-    ///                 .schema(schema)
-    ///                 .shutdown(ShutdownKind::CtrlC)
-    ///                 .build())
-    ///   .start().await
+    ///   .shutdown(ShutdownSource::None)
+    ///   .start()
+    ///   .await
     /// # }
     /// ```
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
-    #[builder(entry = "builder", exit = "start")]
-    pub async fn start(
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
-    ) -> Result<()> {
+    #[builder(entry = "builder", exit = "start", visibility = "pub")]
+    async fn start(shutdown: Option<ShutdownSource>) -> Result<()> {
         let opt = Opt::parse();
 
         if opt.version {
@@ -210,13 +207,13 @@ impl Executable {
         // The dispatcher we created is passed explicitely here to make sure we display the logs
         // in the initialization pahse and in the state machine code, before a global subscriber
         // is set using the configuration file
-        Self::inner_start(router_builder_fn, opt, dispatcher.clone())
+        Self::inner_start(shutdown, opt, dispatcher.clone())
             .with_subscriber(dispatcher)
             .await
     }
 
     async fn inner_start(
-        router_builder_fn: Option<fn(ConfigurationKind, SchemaKind) -> ApolloRouter>,
+        shutdown: Option<ShutdownSource>,
         opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
@@ -232,7 +229,7 @@ impl Executable {
                     path.to_path_buf()
                 };
 
-                ConfigurationKind::File {
+                ConfigurationSource::File {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
@@ -251,7 +248,7 @@ impl Executable {
                 } else {
                     supergraph_path
                 };
-                SchemaKind::File {
+                SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
                     delay: None,
@@ -277,7 +274,7 @@ impl Executable {
                         error: err.to_string(),
                     })?;
 
-                SchemaKind::Registry {
+                SchemaSource::Registry {
                     apollo_key,
                     apollo_graph_ref,
                     urls: uplink_endpoints,
@@ -319,14 +316,12 @@ impl Executable {
             }
         };
 
-        let router = router_builder_fn.unwrap_or(|configuration, schema| {
-            ApolloRouter::builder()
-                .configuration(configuration)
-                .schema(schema)
-                .shutdown(ShutdownKind::CtrlC)
-                .build()
-        })(configuration, schema);
-        if let Err(err) = router.serve().await {
+        let router = RouterHttpServer::builder()
+            .configuration(configuration)
+            .schema(schema)
+            .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
+            .start();
+        if let Err(err) = router.await {
             tracing::error!("{}", err);
             return Err(err.into());
         }
