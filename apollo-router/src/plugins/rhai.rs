@@ -26,6 +26,7 @@ use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use rhai::FnPtr;
+use rhai::FuncArgs;
 use rhai::Instant;
 use rhai::Map;
 use rhai::Scope;
@@ -735,26 +736,9 @@ impl ServiceStep {
                                 Ok(ControlFlow::Break(res))
                             }
                             let shared_request = Shared::new(Mutex::new(Some(request)));
-                            let result: Result<Dynamic, String> = if callback.is_curried() {
-                                callback
-                                    .call(
-                                        &rhai_service.engine,
-                                        &rhai_service.ast,
-                                        (shared_request.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            } else {
-                                let mut scope = rhai_service.scope.clone();
-                                rhai_service
-                                    .engine
-                                    .call_fn(
-                                        &mut scope,
-                                        &rhai_service.ast,
-                                        callback.fn_name(),
-                                        (shared_request.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            };
+                            let result =
+                                execute(&rhai_service, &callback, (shared_request.clone(),));
+
                             if let Err(error) = result {
                                 tracing::error!("map_request callback failed: {error}");
                                 let mut guard = shared_request.lock().unwrap();
@@ -799,26 +783,9 @@ impl ServiceStep {
                                 Ok(ControlFlow::Break(res))
                             }
                             let shared_request = Shared::new(Mutex::new(Some(request)));
-                            let result: Result<Dynamic, String> = if callback.is_curried() {
-                                callback
-                                    .call(
-                                        &rhai_service.engine,
-                                        &rhai_service.ast,
-                                        (shared_request.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            } else {
-                                let mut scope = rhai_service.scope.clone();
-                                rhai_service
-                                    .engine
-                                    .call_fn(
-                                        &mut scope,
-                                        &rhai_service.ast,
-                                        callback.fn_name(),
-                                        (shared_request.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            };
+                            let result =
+                                execute(&rhai_service, &callback, (shared_request.clone(),));
+
                             if let Err(error) = result {
                                 tracing::error!("map_request callback failed: {error}");
                                 let mut guard = shared_request.lock().unwrap();
@@ -897,26 +864,8 @@ impl ServiceStep {
                             };
                             let shared_response = Shared::new(Mutex::new(Some(response)));
 
-                            let result: Result<Dynamic, String> = if callback.is_curried() {
-                                callback
-                                    .call(
-                                        &rhai_service.engine,
-                                        &rhai_service.ast,
-                                        (shared_response.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            } else {
-                                let mut scope = rhai_service.scope.clone();
-                                rhai_service
-                                    .engine
-                                    .call_fn(
-                                        &mut scope,
-                                        &rhai_service.ast,
-                                        callback.fn_name(),
-                                        (shared_response.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            };
+                            let result =
+                                execute(&rhai_service, &callback, (shared_response.clone(),));
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
                                 let mut guard = shared_response.lock().unwrap();
@@ -996,26 +945,9 @@ impl ServiceStep {
                                 .into(),
                             };
                             let shared_response = Shared::new(Mutex::new(Some(response)));
-                            let result: Result<Dynamic, String> = if callback.is_curried() {
-                                callback
-                                    .call(
-                                        &rhai_service.engine,
-                                        &rhai_service.ast,
-                                        (shared_response.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            } else {
-                                let mut scope = rhai_service.scope.clone();
-                                rhai_service
-                                    .engine
-                                    .call_fn(
-                                        &mut scope,
-                                        &rhai_service.ast,
-                                        callback.fn_name(),
-                                        (shared_response.clone(),),
-                                    )
-                                    .map_err(|err| err.to_string())
-                            };
+                            let result =
+                                execute(&rhai_service, &callback, (shared_response.clone(),));
+
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
                                 let mut guard = shared_response.lock().unwrap();
@@ -1104,26 +1036,11 @@ impl ServiceStep {
                                     };
                                     let shared_response = Shared::new(Mutex::new(Some(response)));
 
-                                    let result: Result<Dynamic, String> = if callback.is_curried() {
-                                        callback
-                                            .call(
-                                                &rhai_service.engine,
-                                                &rhai_service.ast,
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    } else {
-                                        let mut scope = rhai_service.scope.clone();
-                                        rhai_service
-                                            .engine
-                                            .call_fn(
-                                                &mut scope,
-                                                &rhai_service.ast,
-                                                callback.fn_name(),
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    };
+                                    let result = execute(
+                                        &rhai_service,
+                                        &callback,
+                                        (shared_response.clone(),),
+                                    );
                                     if let Err(error) = result {
                                         tracing::error!(
                                             "map_deferred_response callback failed: {error}"
@@ -1207,26 +1124,11 @@ impl ServiceStep {
                                         response: deferred_response,
                                     };
                                     let shared_response = Shared::new(Mutex::new(Some(response)));
-                                    let result: Result<Dynamic, String> = if callback.is_curried() {
-                                        callback
-                                            .call(
-                                                &rhai_service.engine,
-                                                &rhai_service.ast,
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    } else {
-                                        let mut scope = rhai_service.scope.clone();
-                                        rhai_service
-                                            .engine
-                                            .call_fn(
-                                                &mut scope,
-                                                &rhai_service.ast,
-                                                callback.fn_name(),
-                                                (shared_response.clone(),),
-                                            )
-                                            .map_err(|err| err.to_string())
-                                    };
+                                    let result = execute(
+                                        &rhai_service,
+                                        &callback,
+                                        (shared_response.clone(),),
+                                    );
                                     if let Err(error) = result {
                                         tracing::error!(
                                             "map_deferred_response callback failed: {error}"
@@ -1263,6 +1165,23 @@ impl ServiceStep {
     }
 }
 
+fn execute(
+    rhai_service: &RhaiService,
+    callback: &FnPtr,
+    args: impl FuncArgs,
+) -> Result<Dynamic, String> {
+    if callback.is_curried() {
+        callback
+            .call(&rhai_service.engine, &rhai_service.ast, args)
+            .map_err(|err| err.to_string())
+    } else {
+        let mut scope = rhai_service.scope.clone();
+        rhai_service
+            .engine
+            .call_fn(&mut scope, &rhai_service.ast, callback.fn_name(), args)
+            .map_err(|err| err.to_string())
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
     scope: Scope<'static>,
