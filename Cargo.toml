@@ -17,6 +17,7 @@ members = [
     "examples/rhai-logging",
     "examples/rhai-data-response-mutate",
     "examples/rhai-error-response-mutate",
+    "examples/rhai-span",
     "examples/rhai-subgraph-request-log",
     "examples/rhai-surrogate-cache-key",
     "examples/supergraph_sdl",
