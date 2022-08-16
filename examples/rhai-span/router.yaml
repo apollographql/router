@@ -1,0 +1,3 @@
+rhai:
+  scripts: src
+  main: rhai_span.rhai
