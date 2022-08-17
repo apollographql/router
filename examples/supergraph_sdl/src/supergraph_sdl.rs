@@ -4,9 +4,7 @@ use apollo_compiler::ApolloCompiler;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use tower::util::BoxService;
+use apollo_router::stages::router;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -29,17 +27,14 @@ impl Plugin for SupergraphSDL {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // Clone our supergraph_sdl for use in map_request
         let supergraph_sdl = self.supergraph_sdl.clone();
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
-            .map_request(move |req: RouterRequest| {
+            .map_request(move |req: router::Request| {
                 // If we have a query
                 if let Some(query) = &req.originating_request.body().query {
                     // Compile our supergraph_sdl and query

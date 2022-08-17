@@ -76,6 +76,8 @@ The trait also provides a default implementations for each hook, which returns t
 ```rust title="hello_world.rs"
 // This is a bare-bones plugin that you can duplicate when creating your own.
 use apollo_router::plugin::PluginInit;
+use apollo_router::plugin::Plugin;
+use apollo_router::stages::*;
 
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
@@ -95,22 +97,22 @@ impl Plugin for HelloWorld {
     // implementation returns its associated service with no changes.
     fn router_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: router::BoxService,
+    ) -> router::BoxService {
         service
     }
 
     fn query_planning_service(
         &mut self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         service
     }
 
     fn execution_service(
         &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        service: execution::BoxService,
+    ) -> execution::BoxService {
         service
     }
 
@@ -120,8 +122,8 @@ impl Plugin for HelloWorld {
     fn subgraph_service(
         &mut self,
         name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         service
     }
 }
@@ -140,8 +142,8 @@ use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
 fn router_service(
     &mut self,
-    service: BoxService<RouterRequest, RouterResponse, BoxError>,
-) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    service: router::BoxService,
+) -> router::BoxService {
     // Always use service builder to compose your plugins.
     // It provides off-the-shelf building blocks for your plugin.
     ServiceBuilder::new()

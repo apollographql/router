@@ -54,9 +54,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::graphql::Response;
-    /// # use apollo_router::services::{RouterRequest, RouterResponse};
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest> + Send>(service: S) {
+    /// # fn test(service: router::BoxService) {
     /// //TODO This doc has highlighted a couple of issues that need to be resolved
     /// //let _ = ServiceBuilder::new()
     /// //            .cache(Cache::builder().time_to_live(Duration::from_secs(1)).max_capacity(100).build(),
@@ -101,22 +101,21 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::{RouterRequest, RouterResponse};
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test(service: router::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///             .checkpoint(|req:RouterRequest|{
-    ///                if req.originating_request.method() == Method::GET {
-    ///                  Ok(ControlFlow::Break(RouterResponse::builder()
-    ///                      .data("Only get requests allowed")
-    ///                      .context(req.context).build())
-    ///                    )
-    ///                }
-    ///                else {
-    ///                  Ok(ControlFlow::Continue(req))
-    ///                }
-    ///             })
-    ///             .service(service);
+    ///     .checkpoint(|req: router::Request|{
+    ///         if req.originating_request.method() == Method::GET {
+    ///             Ok(ControlFlow::Break(router::Response::builder()
+    ///                 .data("Only get requests allowed")
+    ///                 .context(req.context)
+    ///                 .build()?))
+    ///         } else {
+    ///             Ok(ControlFlow::Continue(req))
+    ///         }
+    ///     })
+    ///     .service(service);
     /// # }
     /// ```
     fn checkpoint<S, Request>(
@@ -162,23 +161,25 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::{RouterRequest, RouterResponse};
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, Box<dyn std::error::Error + Send + Sync>>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test(service: router::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///             .checkpoint_async(|req:RouterRequest| async {
-    ///                if req.originating_request.method() == Method::GET {
-    ///                  Ok(ControlFlow::Break(RouterResponse::builder()
-    ///                      .data("Only get requests allowed")
-    ///                      .context(req.context).build())
-    ///                    )
-    ///                }
-    ///                else {
-    ///                  Ok(ControlFlow::Continue(req))
-    ///                }
-    ///             }.boxed())
-    ///             .buffered()
-    ///             .service(service);
+    ///     .checkpoint_async(|req: router::Request|
+    ///         async {
+    ///             if req.originating_request.method() == Method::GET {
+    ///                 Ok(ControlFlow::Break(router::Response::builder()
+    ///                     .data("Only get requests allowed")
+    ///                     .context(req.context)
+    ///                     .build()?))
+    ///             } else {
+    ///                 Ok(ControlFlow::Continue(req))
+    ///             }
+    ///         }
+    ///         .boxed()
+    ///     )
+    ///     .buffered()
+    ///     .service(service);
     /// # }
     /// ```
     fn checkpoint_async<F, S, Fut, Request>(
@@ -205,9 +206,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::RouterRequest;
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// # fn test(service: router::BoxService) {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
     ///             .service(service);
@@ -234,9 +235,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::services::RouterRequest;
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest> + Send>(service: S) {
+    /// # fn test(service: router::BoxService) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
     ///             .service(service);
@@ -271,15 +272,15 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::services::{RouterRequest, RouterResponse};
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
-    /// let _ : BoxService<RouterRequest, S::Response, S::Error> = ServiceBuilder::new()
-    ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
-    ///                 fut.await
-    ///              })
-    ///             .service(service)
-    ///             .boxed();
+    /// # fn test(service: router::BoxService) {
+    /// let _ : router::BoxService = ServiceBuilder::new()
+    ///     .map_future_with_context(
+    ///         |req: &router::Request| req.context.clone(),
+    ///         |ctx : Context, fut| async { fut.await })
+    ///     .service(service)
+    ///     .boxed();
     /// # }
     /// ```
     fn map_future_with_context<C, F>(
@@ -333,15 +334,16 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::services::{RouterRequest, RouterResponse};
+    /// # use apollo_router::stages::router;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
-    /// let _ : BoxService<RouterRequest, S::Response, S::Error> = service
-    ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
-    ///                 fut.await
-    ///              })
-    ///             .boxed();
+    /// # fn test(service: router::BoxService) {
+    /// let _ : router::BoxService = service
+    ///     .map_future_with_context(
+    ///         |req: &router::Request| req.context.clone(),
+    ///         |ctx : Context, fut| async { fut.await }
+    ///     )
+    ///     .boxed();
     /// # }
     /// ```
     fn map_future_with_context<C, F>(

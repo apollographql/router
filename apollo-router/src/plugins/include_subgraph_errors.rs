@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -11,7 +10,7 @@ use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::SubgraphRequest;
+use crate::stages::subgraph;
 use crate::SubgraphResponse;
 
 #[allow(clippy::field_reassign_with_default)]
@@ -52,11 +51,7 @@ impl Plugin for IncludeSubgraphErrors {
         })
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Search for subgraph in our configured subgraph map.
         // If we can't find it, use the "all" value
         if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {

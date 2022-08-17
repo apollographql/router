@@ -114,7 +114,7 @@ mod test {
                     })
                 },
             )
-            .service(mock_service.build());
+            .service(mock_service);
 
         let result = service
             .ready()

@@ -45,8 +45,8 @@ pub struct Response {
 #[buildstructor::buildstructor]
 impl Response {
     /// Constructor
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,

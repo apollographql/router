@@ -6,7 +6,6 @@ use http::HeaderMap;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -15,13 +14,14 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::stages::router;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CSRFConfig {
+pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
     /// Note that setting this to true is deemed unsafe.
@@ -87,7 +87,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 /// won't execute operations at the request of origins who our CORS policy will
 /// block.
 #[derive(Debug, Clone)]
-pub struct Csrf {
+pub(crate) struct Csrf {
     config: CSRFConfig,
 }
 
@@ -101,10 +101,7 @@ impl Plugin for Csrf {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -240,21 +237,13 @@ mod csrf_tests {
     async fn it_lets_preflighted_request_pass_through() {
         let config = CSRFConfig::default();
         let with_preflight_content_type = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "application/json".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "application/json")
             .build()
             .unwrap();
         assert_accepted(config.clone(), with_preflight_content_type).await;
 
         let with_preflight_header = RouterRequest::fake_builder()
-            .headers(
-                [("apollo-require-preflight".into(), "this-is-a-test".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("apollo-require-preflight", "this-is-a-test")
             .build()
             .unwrap();
         assert_accepted(config, with_preflight_header).await;
@@ -263,7 +252,13 @@ mod csrf_tests {
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let config = CSRFConfig::default();
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        let mut non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        // fake_builder defaults to `Content-Type: application/json`,
+        // specifically to avoid the case we’re testing here.
+        non_preflighted_request
+            .originating_request
+            .headers_mut()
+            .remove("content-type");
         assert_rejected(config, non_preflighted_request).await
     }
 
@@ -271,21 +266,13 @@ mod csrf_tests {
     async fn it_rejects_non_preflighted_content_type_request() {
         let config = CSRFConfig::default();
         let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "text/plain")
             .build()
             .unwrap();
         assert_rejected(config.clone(), non_preflighted_request).await;
 
         let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain; charset=utf8".into())]
-                    .into_iter()
-                    .collect(),
-            )
+            .header("content-type", "text/plain; charset=utf8")
             .build()
             .unwrap();
         assert_rejected(config, non_preflighted_request).await;
@@ -310,11 +297,10 @@ mod csrf_tests {
                 .unwrap())
         });
 
-        let mock = mock_service.build();
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .router_service(mock_service.boxed());
         let res = service_stack
             .oneshot(request)
             .await
@@ -323,15 +309,15 @@ mod csrf_tests {
             .await
             .unwrap();
 
+        assert_eq!(res.errors, []);
         assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
     }
 
     async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
-        let mock = MockRouterService::new().build();
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .router_service(MockRouterService::new().boxed());
         let res = service_stack
             .oneshot(request)
             .await

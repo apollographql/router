@@ -68,8 +68,7 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
+use apollo_router::stages::router;
 use apollo_router::Context;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -79,7 +78,6 @@ use schemars::JsonSchema;
 use serde::de;
 use serde::Deserialize;
 use strum_macros::EnumString;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -211,10 +209,7 @@ impl Plugin for JwtAuth {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // We are going to use the `jwt-simple` crate for our JWT verification.
         // The crate provides straightforward support for the popular JWT algorithms.
 
@@ -232,15 +227,15 @@ impl Plugin for JwtAuth {
         let max_token_life = self.max_token_life;
 
         ServiceBuilder::new()
-            .checkpoint(move |req: RouterRequest| {
+            .checkpoint(move |req: router::Request| {
                 // We are going to do a lot of similar checking so let's define a local function
                 // to help reduce repetition
                 fn failure_message(
                     context: Context,
                     msg: String,
                     status: StatusCode,
-                ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
-                    let res = RouterResponse::error_builder()
+                ) -> Result<ControlFlow<router::Response, router::Request>, BoxError> {
+                    let res = router::Response::error_builder()
                         .errors(vec![graphql::Error {
                             message: msg,
                             ..Default::default()
@@ -251,7 +246,7 @@ impl Plugin for JwtAuth {
                     Ok(ControlFlow::Break(res))
                 }
 
-                // The http_request is stored in a `RouterRequest` context.
+                // The http_request is stored in a `Router::Request` context.
                 // We are going to check the headers for the presence of the header we're looking for
                 // We are implementing: https://www.rfc-editor.org/rfc/rfc6750
                 // so check for our AUTHORIZATION header.
@@ -393,8 +388,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::services::RouterRequest;
-    use apollo_router::services::RouterResponse;
+    use apollo_router::stages::router;
 
     use super::*;
 
@@ -404,10 +398,18 @@ mod tests {
     // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router::plugin::plugins()
-            .get("example.jwt")
-            .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}), Default::default())
+        let config = serde_json::json!({
+            "plugins": {
+                "example.jwt": {
+                    "algorithm": "HS256" ,
+                    "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"
+                }
+            }
+        });
+        apollo_router::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build()
             .await
             .unwrap();
     }
@@ -418,13 +420,13 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request without an authorization header
-        let request_without_any_authorization_header = RouterRequest::fake_builder()
+        let request_without_any_authorization_header = router::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -452,13 +454,13 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_no_bearer_in_auth = RouterRequest::fake_builder()
+        let request_with_no_bearer_in_auth = router::Request::fake_builder()
             .header("authorization", "should start with Bearer")
             .build()
             .expect("expecting valid request");
@@ -487,13 +489,13 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
+        let request_with_too_many_spaces_in_auth = router::Request::fake_builder()
             .header("authorization", "Bearer  ")
             .build()
             .expect("expecting valid request");
@@ -522,14 +524,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a properly formatted authorization header
         // Note: (The token isn't valid, but the format is...)
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", "Bearer atoken")
             .build()
             .expect("expecting valid request");
@@ -558,15 +560,16 @@ mod tests {
     #[tokio::test]
     async fn test_hmac_jwtauth_accepts_valid_tokens() {
         // create a mock service we will use to test our plugin
-        let mut mock = test::MockRouterService::new();
+        let mut mock_service = test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
-        mock.expect_call()
+        mock_service
+            .expect_call()
             .once()
-            .returning(move |req: RouterRequest| {
+            .returning(move |req: router::Request| {
                 // Let's make sure our request contains (some of) our JWTClaims
                 let claims: JWTClaims<NoCustomClaims> = req
                     .context
@@ -577,14 +580,11 @@ mod tests {
                 assert_eq!(claims.subject, Some("subject".to_string()));
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
-                Ok(RouterResponse::fake_builder()
+                Ok(router::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
                     .expect("expecting valid request"))
             });
-
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -614,7 +614,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", &format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");
@@ -641,7 +641,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -664,7 +664,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");
@@ -693,7 +693,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = test::MockRouterService::new().build();
+        let mock_service = test::MockRouterService::new();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -719,7 +719,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = RouterRequest::fake_builder()
+        let request_with_appropriate_auth = router::Request::fake_builder()
             .header("authorization", format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");

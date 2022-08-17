@@ -15,8 +15,10 @@
 //! mechanism for interacting with the request and response.
 
 pub mod serde;
+#[macro_use]
 pub mod test;
 
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -40,14 +42,10 @@ use tower::ServiceBuilder;
 
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::stages::execution;
+use crate::stages::query_planner;
+use crate::stages::router;
+use crate::stages::subgraph;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -92,20 +90,14 @@ where
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
-pub struct PluginFactory {
+pub(crate) struct PluginFactory {
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
+    pub(crate) type_id: TypeId,
 }
 
 impl PluginFactory {
-    pub fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
-        Self {
-            instance_factory,
-            schema_factory,
-        }
-    }
-
-    pub async fn create_instance(
+    pub(crate) async fn create_instance(
         &self,
         configuration: &serde_json::Value,
         supergraph_sdl: Arc<String>,
@@ -121,7 +113,7 @@ impl PluginFactory {
         (self.instance_factory)(configuration, Default::default()).await
     }
 
-    pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+    pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
         (self.schema_factory)(gen)
     }
 }
@@ -132,7 +124,18 @@ static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(
 });
 
 /// Register a plugin factory.
-pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
+pub fn register_plugin<P: Plugin>(name: String) {
+    let plugin_factory = PluginFactory {
+        instance_factory: |configuration, schema| {
+            Box::pin(async move {
+                let init = PluginInit::try_new(configuration.clone(), schema)?;
+                let plugin = P::new(init).await?;
+                Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+            })
+        },
+        schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+        type_id: TypeId::of::<P>(),
+    };
     PLUGIN_REGISTRY
         .lock()
         .expect("Lock poisoned")
@@ -140,7 +143,7 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
 }
 
 /// Get a copy of the registered plugin factories.
-pub fn plugins() -> HashMap<String, PluginFactory> {
+pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
@@ -151,7 +154,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
-    type Config: JsonSchema + DeserializeOwned;
+    type Config: JsonSchema + DeserializeOwned + Send;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -164,28 +167,26 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    ///
+    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
+    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
+    /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         service
     }
 
@@ -195,8 +196,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         service
     }
 
@@ -222,7 +223,7 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
-pub trait DynPlugin: Send + Sync + 'static {
+pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This is invoked after all plugins have been created and we're ready to go live.
     /// This method MUST not panic.
     fn activate(&mut self);
@@ -231,24 +232,22 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError>;
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    ///
+    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
+    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
+    /// must be performed on the query, they should be done in router service plugins.
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>;
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -256,8 +255,8 @@ pub trait DynPlugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService;
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
@@ -278,32 +277,22 @@ where
         self.activate()
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
     }
 
     fn query_planning_service(
         &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service: query_planner::BoxService,
+    ) -> query_planner::BoxService {
         self.query_planning_service(service)
     }
 
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
     }
 
@@ -321,7 +310,7 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
-    ($group: literal, $name: literal, $value: ident) => {
+    ($group: literal, $name: literal, $plugin_type: ident) => {
         $crate::_private::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
@@ -330,17 +319,7 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::plugin::register_plugin(
-                qualified_name,
-                $crate::plugin::PluginFactory::new(
-                    |configuration, schema| Box::pin(async move {
-                        let init = $crate::plugin::PluginInit::try_new(configuration.clone(), schema)?;
-                        let plugin = $value::new(init).await?;
-                        Ok(Box::new(plugin) as Box<dyn $crate::plugin::DynPlugin>)
-                    }),
-                    |gen| gen.subschema_for::<<$value as $crate::plugin::Plugin>::Config>()
-                )
-            );
+            $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
         }
     };
 }

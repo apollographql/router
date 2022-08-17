@@ -32,110 +32,99 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::http_ext;
     use apollo_router::plugin::test;
-    use apollo_router::plugin::Plugin;
-    use apollo_router::plugin::PluginInit;
-    use apollo_router::plugins::rhai::Conf;
-    use apollo_router::plugins::rhai::Rhai;
-    use apollo_router::services::SubgraphRequest;
-    use apollo_router::services::SubgraphResponse;
-    use http::header::HeaderName;
-    use http::HeaderValue;
+    use apollo_router::stages::router;
+    use apollo_router::stages::subgraph;
+    use futures::stream::StreamExt;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
         // create a mock service we will use to test our plugin
-        let mut mock = test::MockSubgraphService::new();
+        let mut mock_service = test::MockSubgraphService::new();
 
         // The expected reply is going to be JSON returned in the SubgraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
-        mock.expect_call()
-            .once()
-            .returning(move |req: SubgraphRequest| {
-                // Let's make sure our request contains our new headers
-                assert_eq!(
-                    req.subgraph_request
-                        .headers()
-                        .get("yummy_cookie")
-                        .expect("yummy_cookie is present"),
-                    "choco"
-                );
-                assert_eq!(
-                    req.subgraph_request
-                        .headers()
-                        .get("tasty_cookie")
-                        .expect("tasty_cookie is present"),
-                    "strawberry"
-                );
-                Ok(SubgraphResponse::fake_builder()
-                    .data(expected_mock_response_data)
-                    .build())
-            });
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = test::MockSubgraphService::new();
+            mock_service
+                .expect_call()
+                .once()
+                .returning(move |req: subgraph::Request| {
+                    // Let's make sure our request contains our new headers
+                    assert_eq!(
+                        req.subgraph_request
+                            .headers()
+                            .get("yummy_cookie")
+                            .expect("yummy_cookie is present"),
+                        "choco"
+                    );
+                    assert_eq!(
+                        req.subgraph_request
+                            .headers()
+                            .get("tasty_cookie")
+                            .expect("tasty_cookie is present"),
+                        "strawberry"
+                    );
+                    req.context
+                        .insert("mock_data", expected_mock_response_data.to_owned())
+                        .unwrap();
+                    Ok(subgraph::Response::fake_builder().build())
+                });
+            mock_service
+        });
 
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
-
-        let conf: Conf = serde_json::from_value(serde_json::json!({
-            "scripts": "src",
-            "main": "cookies_to_headers.rhai",
-        }))
-        .expect("json must be valid");
-
-        // Build an instance of our plugin to use in the test harness
-        let rhai = Rhai::new(PluginInit::new(conf, Default::default()))
+        let config = serde_json::json!({
+            "rhai": {
+                "scripts": "src",
+                "main": "cookies_to_headers.rhai",
+            }
+        });
+        let test_harness = apollo_router::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .extra_subgraph_plugin(move |_, _| mock_service.clone().boxed())
+            .extra_router_plugin(|service| {
+                service
+                    .map_response(|mut response| {
+                        let mock_data = response.context.get("mock_data").unwrap();
+                        let body = response.response.body_mut();
+                        let dummy = futures::stream::empty().boxed();
+                        let stream = std::mem::replace(body, dummy);
+                        *body = stream
+                            .map(move |mut resp| {
+                                resp.data = mock_data.clone();
+                                resp
+                            })
+                            .boxed();
+                        response
+                    })
+                    .boxed()
+            })
+            .build()
             .await
-            .expect("created plugin");
+            .unwrap();
 
-        let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
-
-        let mut sub_request = http_ext::Request::fake_builder()
-            .headers(Default::default())
-            .body(Default::default())
+        let request_with_appropriate_cookies = router::Request::canned_builder()
+            .header("cookie", "yummy_cookie=choco;tasty_cookie=strawberry")
             .build()
-            .expect("fake builds should always work; qed");
-        let mut originating_request = http_ext::Request::fake_builder()
-            .headers(Default::default())
-            .body(Default::default())
-            .build()
-            .expect("fake builds should always work; qed");
-
-        let headers = vec![(
-            HeaderName::from_static("cookie"),
-            HeaderValue::from_static("yummy_cookie=choco;tasty_cookie=strawberry"),
-        )];
-
-        for (name, value) in headers {
-            sub_request
-                .headers_mut()
-                .insert(name.clone(), value.clone());
-            originating_request.headers_mut().insert(name, value);
-        }
-
-        // Let's create a request with our cookies
-        let request_with_appropriate_cookies = SubgraphRequest::fake_builder()
-            .originating_request(std::sync::Arc::new(originating_request))
-            .subgraph_request(sub_request)
-            .build();
+            .unwrap();
 
         // ...And call our service stack with it
-        let service_response = service_stack
+        let mut service_response = test_harness
             .oneshot(request_with_appropriate_cookies)
             .await
             .unwrap();
 
+        let response = service_response.next_response().await.unwrap();
+        assert_eq!(response.errors, []);
         // Rhai should return a 200...
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        let graphql_response: apollo_router::graphql::Response =
-            http::Response::from(service_response.response).into_body();
-
-        assert!(graphql_response.errors.is_empty());
-        assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())
+        assert_eq!(expected_mock_response_data, response.data.unwrap())
     }
 }

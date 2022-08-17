@@ -1,14 +1,5 @@
-use std::str::FromStr;
-use std::sync::Arc;
-
-use apollo_router::graphql::Request;
-use apollo_router::http_ext;
-use apollo_router::plugin::plugins;
-use apollo_router::plugin::DynPlugin;
-use apollo_router::services::PluggableRouterServiceBuilder;
-use apollo_router::services::SubgraphService;
-use apollo_router::Schema;
-use serde_json::Value;
+use apollo_router::stages::router;
+use apollo_router::TestHarness;
 use tower::ServiceExt;
 
 // This test will fail if run with the "multi_thread" flavor.
@@ -22,47 +13,31 @@ async fn all_rhai_callbacks_are_invoked() {
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
 
-    let dyn_plugin: Box<dyn DynPlugin> = plugins()
-        .get("apollo.rhai")
-        .expect("Plugin not found")
-        .create_instance(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main": "test_callbacks.rhai"}"#)
-                .unwrap(),
-            Default::default(),
-        )
+    let config = serde_json::json!({
+        "rhai": {
+            "scripts": "tests/fixtures",
+            "main": "test_callbacks.rhai",
+        }
+    });
+    let router = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(include_str!("./fixtures/supergraph.graphql"))
+        .build()
         .await
         .unwrap();
-
-    let schema = include_str!("./fixtures/supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-
-    let mut builder = PluggableRouterServiceBuilder::new(schema.clone())
-        .with_dyn_plugin("apollo.rhai".to_string(), dyn_plugin);
-
-    let subgraphs = schema.subgraphs();
-    for (name, _url) in subgraphs {
-        let service = SubgraphService::new(name.to_owned());
-        builder = builder.with_subgraph_service(name, service);
-    }
-    let router = builder.build().await.unwrap().test_service();
-
-    let request = http_ext::Request::fake_builder()
-        .body(
-            Request::builder()
-                .query(r#"{ topProducts { name } }"#.to_string())
-                .build(),
-        )
+    let request = router::Request::fake_builder()
+        .query("{ topProducts { name } }")
         .build()
         .unwrap();
-
-    let _ = router
-        .oneshot(request.into())
+    let _response = router
+        .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
         .unwrap();
-
+    dbg!(_response);
     for expected_log in [
         "router_service setup",
         "from_router_request",
@@ -76,9 +51,9 @@ async fn all_rhai_callbacks_are_invoked() {
         "subgraph_service setup",
         "from_subgraph_request",
     ] {
-        assert!(tracing_test::internal::logs_with_scope_contain(
-            "apollo_router",
-            expected_log
-        ));
+        assert!(
+            tracing_test::internal::logs_with_scope_contain("apollo_router", expected_log),
+            "log not found: {expected_log}"
+        );
     }
 }

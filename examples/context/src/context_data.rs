@@ -1,12 +1,9 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::services::RouterRequest;
-use apollo_router::services::RouterResponse;
-use apollo_router::services::SubgraphRequest;
-use apollo_router::services::SubgraphResponse;
+use apollo_router::stages::router;
+use apollo_router::stages::subgraph;
 use http::StatusCode;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -44,15 +41,12 @@ impl Plugin for ContextData {
         Ok(Self::default())
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
-            .map_request(|req: RouterRequest| {
+            .map_request(|req: router::Request| {
                 // Populate a value in context for use later.
                 // Context values must be serializable to serde_json::Value.
                 if let Err(e) = req.context.insert("incoming_data", "world!".to_string()) {
@@ -74,13 +68,9 @@ impl Plugin for ContextData {
             .boxed()
     }
 
-    fn subgraph_service(
-        &self,
-        _name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         ServiceBuilder::new()
-            .map_request(|req: SubgraphRequest| {
+            .map_request(|req: subgraph::Request| {
                 // Pick up a value from the context that was populated earlier.
                 if let Ok(Some(data)) = req.context.get::<_, String>("incoming_data") {
                     tracing::info!("hello {}", data); // Hello world!
@@ -88,7 +78,7 @@ impl Plugin for ContextData {
                 req
             })
             .service(service)
-            .map_response(|mut resp: SubgraphResponse| {
+            .map_response(|mut resp: subgraph::Response| {
                 // A single context is created for the entire request.
                 // We use upsert because there may be multiple downstream subgraph requests.
                 // Upserts are guaranteed to be applied serially.

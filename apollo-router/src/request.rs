@@ -45,8 +45,8 @@ where
 
 #[buildstructor::buildstructor]
 impl Request {
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Option<Object>,
@@ -60,8 +60,8 @@ impl Request {
         }
     }
 
-    #[builder]
-    pub fn fake_new(
+    #[builder(visibility = "pub")]
+    fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Option<Object>,

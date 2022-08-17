@@ -84,9 +84,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
-        let mock = mock_service.build();
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
@@ -109,9 +107,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
-        let mock = mock_service.build();
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
@@ -134,9 +130,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
-        let mock = mock_service.build();
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
@@ -161,8 +155,8 @@ mod forbid_http_get_mutations_tests {
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
-        let mock = MockExecutionService::new().build();
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
+        let mut service_stack =
+            AllowOnlyHttpPostMutationsLayer::default().layer(MockExecutionService::new());
 
         let forbidden_requests = [
             Method::GET,

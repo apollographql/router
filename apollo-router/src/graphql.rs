@@ -33,8 +33,8 @@ pub struct Error {
 
 #[buildstructor::buildstructor]
 impl Error {
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
