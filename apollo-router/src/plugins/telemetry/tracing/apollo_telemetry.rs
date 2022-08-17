@@ -1,10 +1,14 @@
+use std::collections::HashMap;
 use std::io::Cursor;
+use std::str::FromStr;
 use std::time::SystemTimeError;
 
+use apollo_spaceport::trace::http::Values;
 use apollo_spaceport::trace::query_plan_node::FetchNode;
 use apollo_spaceport::trace::query_plan_node::FlattenNode;
 use apollo_spaceport::trace::query_plan_node::ParallelNode;
 use apollo_spaceport::trace::query_plan_node::SequenceNode;
+use apollo_spaceport::trace::Http;
 use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
 use apollo_spaceport::Report;
@@ -12,6 +16,7 @@ use apollo_spaceport::TracesAndStats;
 use async_trait::async_trait;
 use derivative::Derivative;
 use http::header::HeaderName;
+use http::Uri;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
@@ -214,6 +219,62 @@ impl Exporter {
             })
             .transpose()
     }
+
+    fn extract_http_data(&self, span: &SpanData) -> Http {
+        let method = match span
+            .attributes
+            .get(&Key::new("method"))
+            .map(|data| data.as_str())
+            .unwrap_or_default()
+            .as_ref()
+        {
+            "OPTIONS" => 1,
+            "GET" => 2,
+            "HEAD" => 3,
+            "POST" => 4,
+            "PUT" => 5,
+            "DELETE" => 6,
+            "TRACE" => 7,
+            "CONNECT" => 8,
+            "PATCH" => 9,
+            _ => 0,
+        };
+        let version = span
+            .attributes
+            .get(&Key::new("version"))
+            .map(|data| data.as_str())
+            .unwrap_or_default();
+        let headers = span
+            .attributes
+            .get(&Key::new("headers"))
+            .map(|data| data.as_str())
+            .unwrap_or_default();
+        let uri = Uri::from_str(
+            &span
+                .attributes
+                .get(&Key::new("uri"))
+                .map(|data| data.as_str())
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        let request_headers: HashMap<String, Values> =
+            serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(header_name, value)| (header_name, Values { value }))
+                .collect();
+
+        Http {
+            method,
+            host: uri.host().map(|h| h.to_string()).unwrap_or_default(),
+            path: uri.path().to_owned(),
+            request_headers,
+            response_headers: HashMap::new(),
+            status_code: 0,
+            secure: false,
+            protocol: version.to_string(),
+        }
+    }
 }
 
 #[async_trait]
@@ -257,6 +318,10 @@ impl SpanExporter for Exporter {
                     }
                 }
             } else {
+                if span.name == "request" {
+                    // TODO use it to fill http field in trace
+                    let http = self.extract_http_data(&span);
+                }
                 // Not a root span, we may need it later so stash it.
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required

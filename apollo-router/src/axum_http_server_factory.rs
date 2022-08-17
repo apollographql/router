@@ -27,6 +27,7 @@ use futures::prelude::*;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use http::header;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
@@ -673,6 +674,25 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
+        let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
+            if name.as_str().starts_with("Auth") || name == header::COOKIE {
+                None
+            } else {
+                Some((
+                    name.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                ))
+            }
+        });
+        let mut headers_map: HashMap<String, Vec<String>> = HashMap::new();
+        for (header_name, header_value) in headers_str {
+            let header_value_cloned = header_value.clone();
+            headers_map
+                .entry(header_name)
+                .and_modify(move |e| e.push(header_value_cloned))
+                .or_insert_with(move || vec![header_value]);
+        }
+        let headers_to_str = serde_json::to_string(&headers_map).unwrap_or_default();
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
@@ -685,6 +705,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
+                headers = %headers_to_str,
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
             )
@@ -696,6 +717,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
+                headers = %headers_to_str,
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
             )

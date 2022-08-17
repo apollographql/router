@@ -9,17 +9,20 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use ::tracing::field;
 use ::tracing::info_span;
+use ::tracing::span_enabled;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
-use ::tracing::{field, span_enabled};
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
+use axum::headers::HeaderName;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
+use http::header;
 use http::HeaderValue;
 use http::StatusCode;
 use once_cell::sync::OnceCell;
@@ -805,6 +808,7 @@ impl Telemetry {
                 .get(&client_version_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
+
             let span = info_span!(
                 ROUTER_SPAN_NAME,
                 graphql.document = query.as_str(),
@@ -813,7 +817,7 @@ impl Telemetry {
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal,
-                "operation.signature" = field::Empty
+                "operation.signature" = field::Empty,
             );
             span
         }

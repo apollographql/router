@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 923
 expression: "&schema"
 ---
 {
@@ -491,18 +492,26 @@ expression: "&schema"
               "minimum": 0.0
             },
             "client_name_header": {
+              "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-name",
               "type": "string",
               "nullable": true
             },
             "client_version_header": {
+              "description": "The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-version",
               "type": "string",
               "nullable": true
             },
             "endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
               "type": "string",
               "nullable": true
+            },
+            "field_level_instrumentation": {
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",
+              "default": false,
+              "type": "boolean"
             }
           },
           "additionalProperties": false,
