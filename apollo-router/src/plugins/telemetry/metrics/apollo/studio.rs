@@ -1,16 +1,12 @@
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
-use std::time::SystemTime;
 
 use apollo_spaceport::ReferencedFieldsForType;
-use apollo_spaceport::ReportHeader;
 use apollo_spaceport::StatsContext;
-use itertools::Itertools;
 use serde::Serialize;
 
 use super::duration_histogram::DurationHistogram;
-use crate::plugins::telemetry::apollo::TracesAndStats;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {

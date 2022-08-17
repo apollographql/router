@@ -2,19 +2,11 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
-use apollo_spaceport::ReportHeader;
 use apollo_spaceport::Reporter;
 use apollo_spaceport::ReporterError;
 use async_trait::async_trait;
 use deadpool::managed;
-use deadpool::managed::Pool;
-use deadpool::Runtime;
-use futures::channel::mpsc;
-use futures::stream::StreamExt;
-use studio::SingleStatsReport;
-use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
 
@@ -41,14 +33,12 @@ impl MetricsConfigurator for Config {
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
-                buffer_size,
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
-                let exporter =
-                    ApolloExporter::new(endpoint, key, reference, schema_id, *buffer_size)?;
+                let exporter = ApolloExporter::new(endpoint, key, reference, schema_id)?;
 
                 builder
                     .with_apollo_metrics_collector(exporter.provider())
@@ -84,11 +74,14 @@ impl managed::Manager for ReporterManager {
 #[cfg(test)]
 mod test {
     use std::future::Future;
+    use std::time::Duration;
 
+    use futures::stream::StreamExt;
     use http::header::HeaderName;
     use tower::ServiceExt;
 
     use super::super::super::config;
+    use super::studio::SingleStatsReport;
     use super::*;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;

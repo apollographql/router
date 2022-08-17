@@ -20,7 +20,6 @@ use futures::stream::StreamExt;
 // This entire file is license key functionality
 use http::header::HeaderName;
 use itertools::Itertools;
-use lru::LruCache;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -148,7 +147,7 @@ pub(crate) struct ReportBuilder {
 }
 
 impl ReportBuilder {
-    pub(crate) fn build(mut self) -> (Report, Vec<SingleReport>) {
+    pub(crate) fn build(mut self) -> (Report, VecTTL<SingleReport>) {
         // implement merge strategy and return orphans
         let duplicated_keys: Vec<String> = self
             .traces
@@ -157,7 +156,6 @@ impl ReportBuilder {
             .duplicates()
             .cloned()
             .collect();
-        let operation_count = duplicated_keys.len() as u64;
         let mut report = Report::default();
         for duplicated_key in duplicated_keys {
             let traces = self
@@ -175,10 +173,10 @@ impl ReportBuilder {
             entry.add_assign(stats);
             report.operation_count += 1;
         }
-        let mut orphans = Vec::with_capacity(2);
+        let mut orphans = VecTTL::with_capacity(2);
         if !self.stats.is_empty() {
             let single_stats_report = SingleStatsReport {
-                operation_count,
+                operation_count: self.stats.len() as u64,
                 stats: self.stats,
             };
             orphans.push(SingleReport::Stats(single_stats_report));
@@ -194,9 +192,12 @@ impl ReportBuilder {
     }
 }
 
-impl AddAssign<Vec<SingleReport>> for ReportBuilder {
-    fn add_assign(&mut self, report: Vec<SingleReport>) {
-        report.into_iter().for_each(|r| self.add_assign(r));
+impl AddAssign<VecTTL<SingleReport>> for ReportBuilder {
+    fn add_assign(&mut self, report: VecTTL<SingleReport>) {
+        report
+            .inner
+            .into_iter()
+            .for_each(|(r, _)| self.add_assign(r));
     }
 }
 
@@ -331,7 +332,6 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
-        buffer_size: usize,
     ) -> Result<ApolloExporter, BoxError> {
         let apollo_key = apollo_key.to_string();
         // Desired behavior:
@@ -370,14 +370,14 @@ impl ApolloExporter {
         tokio::spawn(async move {
             let timeout = tokio::time::interval(Duration::from_secs(5));
             let mut report_builder = ReportBuilder::default();
-            let mut buffer: Vec<SingleReport> = vec![];
-            // TODO use LRU
+            let mut buffer: VecTTL<SingleReport> = VecTTL::new();
 
             tokio::pin!(timeout);
 
             loop {
                 tokio::select! {
                     single_report = rx.next() => {
+                        buffer.purge();
                         report_builder += std::mem::take(&mut buffer);
                         if let Some(r) = single_report {
                             report_builder += r;
@@ -386,12 +386,9 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        // TODO use purge and add support for addAssign with VecTTl
+                        buffer.purge();
                         report_builder += std::mem::take(&mut buffer);
                         let (report, orphans) = std::mem::take(&mut report_builder).build();
-                        if report.operation_count > 0 && orphans.is_empty() {
-                            println!("SEND =========== {report:?}");
-                        }
                         buffer = orphans;
                         Self::send_report(&pool, &apollo_key, &header, report).await;
                     }
@@ -423,7 +420,7 @@ impl ApolloExporter {
                 match reporter
                     .submit(apollo_spaceport::ReporterRequest {
                         apollo_key: apollo_key.to_string(),
-                        report: Some(dbg!(report)),
+                        report: Some(report),
                     })
                     .await
                 {
@@ -501,22 +498,38 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
     ))
 }
 
-struct VecTTL<T> {
-    inner: Vec<(T, Instant)>,
+/// Simple implementation of a vector with a TTL
+pub(crate) struct VecTTL<T> {
+    pub(crate) inner: Vec<(T, Instant)>,
     duration: Duration,
 }
 
+impl<T> Default for VecTTL<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> VecTTL<T> {
-    fn new(duration: Duration) -> Self {
+    fn new() -> Self {
         Self {
             inner: Vec::new(),
-            duration,
+            duration: Duration::from_secs(10),
         }
     }
 
-    fn purge(&mut self) -> Vec<T> {
-        self.inner.retain(|(_, i)| i.elapsed() < self.duration);
+    pub(crate) fn with_capacity(cap: usize) -> Self {
+        Self {
+            inner: Vec::with_capacity(cap),
+            duration: Duration::from_secs(10),
+        }
+    }
 
-        self.inner.drain(..).map(|(e, _)| e).collect()
+    pub(crate) fn push(&mut self, val: T) {
+        self.inner.push((val, Instant::now()));
+    }
+
+    fn purge(&mut self) {
+        self.inner.retain(|(_, i)| i.elapsed() < self.duration);
     }
 }
