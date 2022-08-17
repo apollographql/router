@@ -201,7 +201,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
         None
     }
 
@@ -258,7 +258,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<Handler>;
+    fn custom_endpoint(&self) -> Option<stages::http::BoxService>;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -294,7 +294,7 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
         self.custom_endpoint()
     }
 
@@ -324,12 +324,12 @@ macro_rules! register_plugin {
 
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
-pub struct Handler {
+pub(crate) struct Handler {
     service: Buffer<stages::http::BoxService, stages::http::Request>,
 }
 
 impl Handler {
-    pub fn new(service: stages::http::BoxService) -> Self {
+    pub(crate) fn new(service: stages::http::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
