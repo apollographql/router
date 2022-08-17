@@ -117,7 +117,7 @@ impl Query {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
         } else {
-            failfast_debug!("invalid type for data in response.");
+            failfast_debug!("invalid type for data in response. data: {:#?}", data);
         }
 
         response.data = Some(Value::default());

@@ -10,40 +10,16 @@ use itertools::Itertools;
 use serde::Serialize;
 
 use super::duration_histogram::DurationHistogram;
-
-impl Report {
-    #[cfg(test)]
-    fn new(reports: Vec<SingleReport>) -> Report {
-        let mut aggregated_report = Report::default();
-        for report in reports {
-            aggregated_report += report;
-        }
-        aggregated_report
-    }
-
-    pub(crate) fn into_report(self, header: ReportHeader) -> apollo_spaceport::Report {
-        let mut report = apollo_spaceport::Report {
-            header: Some(header),
-            end_time: Some(SystemTime::now().into()),
-            operation_count: self.operation_count,
-            ..Default::default()
-        };
-
-        for (key, traces_and_stats) in self.traces_per_query {
-            report.traces_per_query.insert(key, traces_and_stats.into());
-        }
-        report
-    }
-}
+use crate::plugins::telemetry::apollo::TracesAndStats;
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct SingleReport {
-    pub(crate) traces_and_stats: HashMap<String, SingleTracesAndStats>,
+pub(crate) struct SingleStatsReport {
+    pub(crate) stats: HashMap<String, SingleStats>,
     pub(crate) operation_count: u64,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct SingleTracesAndStats {
+pub(crate) struct SingleStats {
     pub(crate) stats_with_context: SingleContextualizedStats,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
@@ -90,41 +66,6 @@ pub(crate) struct SingleFieldStat {
     pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
     pub(crate) latency: Duration,
-}
-
-#[derive(Default, Serialize)]
-pub(crate) struct Report {
-    traces_per_query: HashMap<String, TracesAndStats>,
-    pub(crate) operation_count: u64,
-}
-
-impl AddAssign<SingleReport> for Report {
-    fn add_assign(&mut self, report: SingleReport) {
-        for (k, v) in report.traces_and_stats {
-            *self.traces_per_query.entry(k).or_default() += v;
-        }
-
-        self.operation_count += report.operation_count;
-    }
-}
-
-#[derive(Default, Debug, Serialize)]
-pub(crate) struct TracesAndStats {
-    #[serde(with = "vectorize")]
-    pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
-    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
-}
-
-impl AddAssign<SingleTracesAndStats> for TracesAndStats {
-    fn add_assign(&mut self, stats: SingleTracesAndStats) {
-        *self
-            .stats_with_context
-            .entry(stats.stats_with_context.context.clone())
-            .or_default() += stats.stats_with_context;
-
-        // No merging required here because references fields by type will always be the same for each stats report key.
-        self.referenced_fields_by_type = stats.referenced_fields_by_type;
-    }
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -244,16 +185,6 @@ impl From<ContextualizedStats> for apollo_spaceport::ContextualizedStats {
     }
 }
 
-impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
-    fn from(stats: TracesAndStats) -> Self {
-        Self {
-            stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
-            referenced_fields_by_type: stats.referenced_fields_by_type,
-            ..Default::default()
-        }
-    }
-}
-
 impl From<QueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
@@ -313,22 +244,6 @@ impl From<FieldStat> for apollo_spaceport::FieldStat {
     }
 }
 
-pub(crate) mod vectorize {
-    use serde::Serialize;
-    use serde::Serializer;
-
-    pub(crate) fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: IntoIterator<Item = (&'a K, &'a V)>,
-        K: Serialize + 'a,
-        V: Serialize + 'a,
-    {
-        let container: Vec<_> = target.into_iter().collect();
-        serde::Serialize::serialize(&container, ser)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -337,6 +252,7 @@ mod test {
     use apollo_spaceport::ReferencedFieldsForType;
 
     use super::*;
+    use crate::plugins::telemetry::apollo::Report;
 
     #[test]
     fn test_aggregation() {
@@ -377,17 +293,17 @@ mod test {
         client_name: &str,
         client_version: &str,
         stats_report_key: &str,
-    ) -> SingleReport {
+    ) -> SingleStatsReport {
         // This makes me sad. Really this should have just been a case of generate a couple of metrics using
         // a prop testing library and then assert that things got merged OK. But in practise everything was too hard to use
 
         let mut count = Count::default();
 
-        SingleReport {
+        SingleStatsReport {
             operation_count: count.inc_u64(),
-            traces_and_stats: HashMap::from([(
+            stats: HashMap::from([(
                 stats_report_key.to_string(),
-                SingleTracesAndStats {
+                SingleStats {
                     stats_with_context: SingleContextualizedStats {
                         context: StatsContext {
                             client_name: client_name.to_string(),

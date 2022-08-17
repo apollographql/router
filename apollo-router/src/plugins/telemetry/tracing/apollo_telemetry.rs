@@ -1,20 +1,33 @@
-use crate::plugins::telemetry::config;
-use apollo_spaceport::trace::query_plan_node::{
-    FetchNode, FlattenNode, ParallelNode, SequenceNode,
-};
-use apollo_spaceport::trace::QueryPlanNode;
-use apollo_spaceport::{Message, TracesAndStats};
-use async_trait::async_trait;
-use http::header::HeaderName;
-use multimap::MultiMap;
-use opentelemetry::sdk::export::trace::{ExportResult, SpanData, SpanExporter};
-use opentelemetry::trace::SpanId;
-use opentelemetry::{Key, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::time::{SystemTime, SystemTimeError};
+use std::time::SystemTime;
+use std::time::SystemTimeError;
+
+use apollo_spaceport::trace::query_plan_node::FetchNode;
+use apollo_spaceport::trace::query_plan_node::FlattenNode;
+use apollo_spaceport::trace::query_plan_node::ParallelNode;
+use apollo_spaceport::trace::query_plan_node::SequenceNode;
+use apollo_spaceport::trace::QueryPlanNode;
+use apollo_spaceport::Message;
+use apollo_spaceport::TracesAndStats;
+use async_trait::async_trait;
+use derivative::Derivative;
+use http::header::HeaderName;
+use multimap::MultiMap;
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::trace::SpanId;
+use opentelemetry::Key;
+use opentelemetry::Value;
 use thiserror::Error;
 use url::Url;
+
+use super::apollo::SingleTraces;
+use super::apollo::SingleTracesReport;
+use crate::plugins::telemetry::apollo::Sender;
+use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::config;
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -35,7 +48,8 @@ pub(crate) enum Error {
 ///
 /// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: apollo_spaceport::Reporter
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 #[allow(dead_code)]
 pub(crate) struct Exporter {
     trace_config: config::Trace,
@@ -46,10 +60,13 @@ pub(crate) struct Exporter {
     client_name_header: HeaderName,
     client_version_header: HeaderName,
     schema_id: String,
+    #[derivative(Debug = "ignore")]
+    apollo_sender: Sender,
 }
 
 #[buildstructor::buildstructor]
 impl Exporter {
+    #[allow(clippy::too_many_arguments)]
     #[builder]
     pub(crate) fn new(
         trace_config: config::Trace,
@@ -59,6 +76,7 @@ impl Exporter {
         client_name_header: HeaderName,
         client_version_header: HeaderName,
         schema_id: String,
+        apollo_sender: Sender,
     ) -> Self {
         Self {
             spans_by_parent_id: Default::default(),
@@ -69,6 +87,7 @@ impl Exporter {
             client_name_header,
             client_version_header,
             schema_id,
+            apollo_sender,
         }
     }
 
@@ -203,9 +222,26 @@ impl SpanExporter for Exporter {
         // We may get spams that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
+        let mut traces = HashMap::new();
         for span in batch {
             if span.name == "router" {
+                let query = span
+                    .attributes
+                    .get(&Key::new("graphql.document"))
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("unknown query".into()))
+                    .as_str()
+                    .to_string();
                 let trace = self.extract_query_plan_trace(span);
+                match trace {
+                    Ok(trace) => {
+                        traces.insert(query, trace);
+                    }
+                    Err(_err) => {
+                        // TODO
+                    }
+                }
+
                 let traces = TracesAndStats {
                     trace: vec![],
                     stats_with_context: vec![],
@@ -226,8 +262,15 @@ impl SpanExporter for Exporter {
         }
 
         // TODO Clean up old spans that have been knocking around for a long time? In theory as long as all spans are parented correctly then we shouldn't need to.
-
+        dbg!(&traces);
         // TODO send spans to spaceport
+        self.apollo_sender
+            .send(SingleReport::Traces(SingleTracesReport {
+                traces: traces
+                    .into_iter()
+                    .map(|(k, v)| (k, SingleTraces::from(vec![v])))
+                    .collect(),
+            }));
         return ExportResult::Ok(());
     }
 }

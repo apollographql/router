@@ -21,7 +21,6 @@ use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
 use http::StatusCode;
-use metrics::apollo::Sender;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -44,6 +43,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use url::Url;
 
+use self::apollo::Sender;
+use self::apollo::SingleReport;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
@@ -57,8 +58,8 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
-use crate::plugins::telemetry::metrics::apollo::studio::SingleReport;
-use crate::plugins::telemetry::metrics::apollo::studio::SingleTracesAndStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::metrics::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
@@ -105,7 +106,7 @@ pub struct Telemetry {
     meter_provider: AggregateMeterProvider,
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
-    apollo_metrics_sender: metrics::apollo::Sender,
+    apollo_metrics_sender: apollo::Sender,
 }
 
 #[derive(Debug)]
@@ -578,6 +579,8 @@ impl Telemetry {
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
         // eventually be one.
         let mut builder = Self::create_metrics_exporters(&config)?;
+        // TODO refactor
+        config.apollo.as_mut().unwrap().apollo_sender = builder.apollo_metrics_provider();
 
         // the global tracer and subscriber initialization step must be performed only once
         TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
@@ -797,16 +800,16 @@ impl Telemetry {
                 .map_or(false, |x| x.unwrap_or_default())
             {
                 // The request was excluded don't report the details, but do report the operation count
-                SingleReport {
+                SingleStatsReport {
                     operation_count,
                     ..Default::default()
                 }
             } else {
-                metrics::apollo::studio::SingleReport {
+                metrics::apollo::studio::SingleStatsReport {
                     operation_count,
-                    traces_and_stats: HashMap::from([(
+                    stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
-                        SingleTracesAndStats {
+                        SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
                                     client_name: context
@@ -837,12 +840,12 @@ impl Telemetry {
             }
         } else {
             // Usage reporting was missing, so it counts as one operation.
-            SingleReport {
+            SingleStatsReport {
                 operation_count: 1,
                 ..Default::default()
             }
         };
-        sender.send(metrics);
+        sender.send(SingleReport::Stats(metrics));
     }
 
     async fn update_metrics(

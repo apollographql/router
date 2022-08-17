@@ -191,3 +191,20 @@ impl Reporter {
         self.client.add(Request::new(request)).await
     }
 }
+
+pub fn serialize_timestamp<S>(
+    timestamp: &Option<prost_types::Timestamp>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match timestamp {
+        Some(ts) => {
+            let mut encoded_ts = Vec::new();
+            ts.encode(&mut encoded_ts).unwrap();
+            serializer.serialize_str(&String::from_utf8_lossy(&encoded_ts))
+        }
+        None => serializer.serialize_none(),
+    }
+}
