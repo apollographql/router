@@ -377,7 +377,6 @@ impl SpanExporter for Exporter {
             }
         }
 
-        tracing::info!("Report {:#?}", report.traces_per_query);
         self.apollo_sender
             .send(SingleReport::Traces(SingleTracesReport {
                 traces: report
