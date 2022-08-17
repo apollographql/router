@@ -1,5 +1,7 @@
 //! Types for Tower services at the different stages of handling a request.
 
+#![allow(missing_docs)] // FIXME
+
 pub mod http {
     use tower::BoxError;
 

@@ -96,6 +96,7 @@ const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
+#[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
     config: config::Conf,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.

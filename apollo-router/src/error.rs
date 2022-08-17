@@ -32,6 +32,7 @@ pub use crate::spec::SpecError;
 #[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)] // FIXME
 pub enum FetchError {
     /// query references unknown service '{service}'
     ValidationUnknownServiceError {

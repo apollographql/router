@@ -83,6 +83,7 @@ where
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
+#[allow(missing_docs)] // FIXME
 pub struct CheckpointService<S, Request>
 where
     Request: Send + 'static,
