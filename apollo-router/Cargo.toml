@@ -19,7 +19,7 @@ failfast = []
 [dependencies]
 access-json = "0.1.0"
 anyhow = "1.0.61"
-apollo-parser = "0.2.9"
+apollo-parser = "0.2.10"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
 async-compression = { version = "0.3.14", features = [
@@ -48,8 +48,8 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.1"
-futures = { version = "0.3.21", features = ["thread-pool"] }
+envmnt = "0.10.2"
+futures = { version = "0.3.23", features = ["thread-pool"] }
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
@@ -63,7 +63,7 @@ indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"
-libc = "0.2.131"
+libc = "0.2.132"
 lru = "0.7.8"
 mockall = "0.11.2"
 moka = { version = "0.9.3", features = ["future", "futures-util"] }
