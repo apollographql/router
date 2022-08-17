@@ -311,12 +311,16 @@ impl RouterResponse {
 
     pub fn map<F>(self, f: F) -> RouterResponse
     where
-        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
+        F: FnOnce(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         RouterResponse {
             context: self.context,
             response: self.response.map(f),
         }
+    }
+
+    pub fn map_stream(self, f: impl FnMut(Response) -> Response + Send + 'static) -> Self {
+        self.map(move |stream| stream.map(f).boxed())
     }
 }
 
@@ -758,12 +762,16 @@ impl ExecutionResponse {
 
     pub fn map<F>(self, f: F) -> ExecutionResponse
     where
-        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
+        F: FnOnce(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         ExecutionResponse {
             context: self.context,
             response: self.response.map(f),
         }
+    }
+
+    pub fn map_stream(self, f: impl FnMut(Response) -> Response + Send + 'static) -> Self {
+        self.map(move |stream| stream.map(f).boxed())
     }
 
     pub async fn next_response(&mut self) -> Option<Response> {
