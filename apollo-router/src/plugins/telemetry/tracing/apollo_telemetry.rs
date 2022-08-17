@@ -95,7 +95,10 @@ impl Exporter {
         &mut self,
         span: SpanData,
     ) -> Result<apollo_spaceport::Trace, Error> {
-        let node = self.extract_query_plan_node(&span, &span)?;
+        let query_plan = self
+            .extract_query_plan_node(&span, &span)?
+            .pop()
+            .map(Box::new);
         Ok(apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -109,7 +112,7 @@ impl Exporter {
             client_version: "".to_string(),
             http: None,
             cache_policy: None,
-            query_plan: node.map(Box::new),
+            query_plan,
             full_query_cache_hit: false,
             persisted_query_hit: false,
             persisted_query_register: false,
@@ -123,7 +126,7 @@ impl Exporter {
         &mut self,
         root_span: &SpanData,
         span: &SpanData,
-    ) -> Result<Option<QueryPlanNode>, Error> {
+    ) -> Result<Vec<QueryPlanNode>, Error> {
         let (child_nodes, errors) = self
             .spans_by_parent_id
             .pop_entry(&span.span_context.span_id())
@@ -133,9 +136,8 @@ impl Exporter {
             .map(|span| self.extract_query_plan_node(root_span, &span))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
                 match next {
-                    Ok(Some(ok)) => oks.push(ok),
+                    Ok(mut children) => oks.append(&mut children),
                     Err(err) => errors.push(err),
-                    _ => {}
                 }
                 (oks, errors)
             });
@@ -144,16 +146,16 @@ impl Exporter {
         }
 
         Ok(match span.name.as_ref() {
-            "parallel" => Some(QueryPlanNode {
+            "parallel" => vec![QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
                     ParallelNode { nodes: child_nodes },
                 )),
-            }),
-            "sequence" => Some(QueryPlanNode {
+            }],
+            "sequence" => vec![QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
                     SequenceNode { nodes: child_nodes },
                 )),
-            }),
+            }],
             "fetch" => {
                 let (trace_parsing_failed, trace) = match self.extract_ftv1_trace(span) {
                     Ok(trace) => (false, trace),
@@ -161,13 +163,13 @@ impl Exporter {
                 };
                 let service_name = (span
                     .attributes
-                    .get(&Key::new("service_name"))
+                    .get(&Key::new("service.name"))
                     .cloned()
                     .unwrap_or_else(|| Value::String("unknown service".into()))
                     .as_str())
                 .to_string();
 
-                Some(QueryPlanNode {
+                vec![QueryPlanNode {
                     node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
                             service_name,
@@ -181,17 +183,17 @@ impl Exporter {
                             received_time: Some(span.end_time.into()),
                         }),
                     )),
-                })
+                }]
             }
-            "flatten" => Some(QueryPlanNode {
+            "flatten" => vec![QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
                     Box::new(FlattenNode {
                         response_path: vec![],
                         node: None,
                     }),
                 )),
-            }),
-            _ => None,
+            }],
+            _ => child_nodes,
         })
     }
 
@@ -253,18 +255,18 @@ impl SpanExporter for Exporter {
                             tracing::error!("failed to construct trace: {}, skipping", error);
                         }
                     }
-                } else {
-                    // Not a root span, we may need it later so stash it.
-
-                    // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                    // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                    self.spans_by_parent_id
-                        .get_or_insert(span.span_context.span_id(), Vec::new);
-                    self.spans_by_parent_id
-                        .get_mut(&span.span_context.span_id())
-                        .expect("capacity of cache was zero")
-                        .push(span);
                 }
+            } else {
+                // Not a root span, we may need it later so stash it.
+
+                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
+                self.spans_by_parent_id
+                    .get_or_insert(span.parent_span_id, Vec::new);
+                self.spans_by_parent_id
+                    .get_mut(&span.parent_span_id)
+                    .expect("capacity of cache was zero")
+                    .push(span);
             }
         }
 

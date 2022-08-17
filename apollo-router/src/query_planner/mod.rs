@@ -395,6 +395,7 @@ impl PlanNode {
                         .instrument(tracing::info_span!(
                             "fetch",
                             "otel.kind" = %SpanKind::Internal,
+                            "service.name" = fetch_node.service_name
                         ))
                         .await
                     {
