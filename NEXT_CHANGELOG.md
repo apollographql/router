@@ -373,4 +373,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+## 🚀 Features
+
+### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
+
+The CI check that ensures that the `license.html` file is up to date now displays what has changed when the file is out of sync.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ## 📚 Documentation
