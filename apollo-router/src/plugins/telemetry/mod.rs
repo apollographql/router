@@ -388,15 +388,6 @@ impl Plugin for Telemetry {
             .unwrap_or_default()
             .field_level_instrumentation;
         ServiceBuilder::new()
-            .map_request(move |mut req: SubgraphRequest| {
-                if ftv1_enabled && span_enabled!(::tracing::Level::INFO) {
-                    req.subgraph_request.headers_mut().append(
-                        "apollo-federation-include-trace",
-                        HeaderValue::from_static("ftv1"),
-                    );
-                }
-                req
-            })
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
                     .subgraph_request
@@ -419,8 +410,18 @@ impl Plugin for Telemetry {
                     "ftv1" = field::Empty
                 )
             })
+            .map_request(move |mut req: SubgraphRequest| {
+                if ftv1_enabled && span_enabled!(::tracing::Level::INFO) {
+                    req.subgraph_request.headers_mut().insert(
+                        "apollo-federation-include-trace",
+                        HeaderValue::from_static("ftv1"),
+                    );
+                }
+                req
+            })
             .map_response(|resp: SubgraphResponse| {
                 // Stash the FTV1 data
+                ::tracing::error!("Retrieving FTV1 {:#?}", resp.response);
                 if let Some(serde_json_bytes::Value::String(ftv1)) =
                     resp.response.body().extensions.get("ftv1")
                 {
