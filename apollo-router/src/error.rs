@@ -293,7 +293,7 @@ struct ParserError {
 
 impl ParseErrors {
     #[allow(clippy::needless_return)]
-    pub fn print(&self) {
+    pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF {
             return;
         } else if atty::is(atty::Stream::Stdout) {
