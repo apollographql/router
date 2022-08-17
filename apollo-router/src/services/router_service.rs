@@ -218,21 +218,16 @@ where
 
                                                 Either::Right(stream::iter(
                                                     sub_responses.into_iter().map(
-                                                        move |(path, data)| {
-                                                            let response = Response {
-                                                                label: response.label.clone(),
-                                                                data: Some(data),
-                                                                path: Some(path),
-                                                                errors: response.errors.clone(),
-                                                                extensions: response
-                                                                    .extensions
-                                                                    .clone(),
-                                                                has_next: Some(true),
-                                                                subselection: response
-                                                                    .subselection
-                                                                    .clone(),
-                                                            };
-                                                            response
+                                                        move |(path, data)| Response {
+                                                            label: response.label.clone(),
+                                                            data: Some(data),
+                                                            path: Some(path),
+                                                            errors: response.errors.clone(),
+                                                            extensions: response.extensions.clone(),
+                                                            has_next: Some(true),
+                                                            subselection: response
+                                                                .subselection
+                                                                .clone(),
                                                         },
                                                     ),
                                                 ))
