@@ -35,16 +35,19 @@ use crate::plugins::telemetry::config;
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
-    #[error("protobuf decode error")]
+    #[error("subgraph protobuf decode error")]
     ProtobufDecode(#[from] apollo_spaceport::DecodeError),
+
+    #[error("subgraph trace payload was not base64")]
+    Base64Decode(#[from] base64::DecodeError),
 
     #[error("ftv1 span attribute should have been a string")]
     Ftv1SpanAttribute,
 
-    #[error("ftv1 span attribute should have been a string")]
+    #[error("there were multiple tracing errors")]
     MultipleErrors(Vec<Error>),
 
-    #[error("duration could not be calcualted")]
+    #[error("duration could not be calculated")]
     SystemTime(#[from] SystemTimeError),
 }
 
@@ -64,8 +67,14 @@ pub(crate) struct Exporter {
     client_name_header: HeaderName,
     client_version_header: HeaderName,
     schema_id: String,
+    field_level_instrumentation: bool,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
+}
+
+enum TreeData {
+    QueryPlanNode(QueryPlanNode),
+    Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
 }
 
 #[buildstructor::buildstructor]
@@ -82,6 +91,7 @@ impl Exporter {
         schema_id: String,
         apollo_sender: Sender,
         buffer_size: usize,
+        field_level_instrumentation: bool,
     ) -> Self {
         Self {
             spans_by_parent_id: LruCache::new(buffer_size),
@@ -92,6 +102,7 @@ impl Exporter {
             client_name_header,
             client_version_header,
             schema_id,
+            field_level_instrumentation,
             apollo_sender,
         }
     }
@@ -103,7 +114,13 @@ impl Exporter {
         let query_plan = self
             .extract_query_plan_node(&span, &span)?
             .pop()
-            .map(Box::new);
+            .and_then(|node| {
+                if let TreeData::QueryPlanNode(node) = node {
+                    Some(Box::new(node))
+                } else {
+                    None
+                }
+            });
         Ok(apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -131,8 +148,8 @@ impl Exporter {
         &mut self,
         root_span: &SpanData,
         span: &SpanData,
-    ) -> Result<Vec<QueryPlanNode>, Error> {
-        let (child_nodes, errors) = self
+    ) -> Result<Vec<TreeData>, Error> {
+        let (mut child_nodes, errors) = self
             .spans_by_parent_id
             .pop_entry(&span.span_context.span_id())
             .map(|(_, spans)| spans)
@@ -151,20 +168,37 @@ impl Exporter {
         }
 
         Ok(match span.name.as_ref() {
-            "parallel" => vec![QueryPlanNode {
+            "parallel" => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
-                    ParallelNode { nodes: child_nodes },
+                    ParallelNode {
+                        nodes: child_nodes
+                            .into_iter()
+                            .filter_map(|child| match child {
+                                TreeData::QueryPlanNode(node) => Some(node),
+                                _ => None,
+                            })
+                            .collect(),
+                    },
                 )),
-            }],
-            "sequence" => vec![QueryPlanNode {
+            })],
+            "sequence" => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
-                    SequenceNode { nodes: child_nodes },
+                    SequenceNode {
+                        nodes: child_nodes
+                            .into_iter()
+                            .filter_map(|child| match child {
+                                TreeData::QueryPlanNode(node) => Some(node),
+                                _ => None,
+                            })
+                            .collect(),
+                    },
                 )),
-            }],
+            })],
             "fetch" => {
-                let (trace_parsing_failed, trace) = match self.extract_ftv1_trace(span) {
-                    Ok(trace) => (false, trace),
-                    Err(_err) => (true, None),
+                let (trace_parsing_failed, trace) = match child_nodes.pop() {
+                    Some(TreeData::Trace(Ok(trace))) => (false, trace),
+                    Some(TreeData::Trace(Err(_err))) => (true, None),
+                    _ => (false, None),
                 };
                 let service_name = (span
                     .attributes
@@ -174,7 +208,7 @@ impl Exporter {
                     .as_str())
                 .to_string();
 
-                vec![QueryPlanNode {
+                vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
                             service_name,
@@ -188,36 +222,44 @@ impl Exporter {
                             received_time: Some(span.end_time.into()),
                         }),
                     )),
-                }]
+                })]
             }
-            "flatten" => vec![QueryPlanNode {
+            "flatten" => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
                     Box::new(FlattenNode {
                         response_path: vec![],
                         node: None,
                     }),
                 )),
-            }],
+            })],
+            "subgraph" => {
+                vec![TreeData::Trace(self.find_ftv1_trace(span))]
+            }
             _ => child_nodes,
         })
     }
 
-    fn extract_ftv1_trace(
-        &self,
+    fn find_ftv1_trace(
+        &mut self,
         span: &SpanData,
     ) -> Result<Option<Box<apollo_spaceport::Trace>>, Error> {
-        span.attributes
-            .get(&Key::new("ftv1"))
-            .map(|data| {
-                if let Value::String(data) = data {
-                    Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
-                        data.as_bytes(),
-                    ))?))
-                } else {
-                    Err(Error::Ftv1SpanAttribute)
-                }
-            })
-            .transpose()
+        if !self.field_level_instrumentation {
+            Ok(None)
+        } else {
+            Ok(span
+                .attributes
+                .get(&Key::new("ftv1"))
+                .map(|data| {
+                    if let Value::String(data) = data {
+                        Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
+                            base64::decode(data.to_string())?,
+                        ))?))
+                    } else {
+                        Err(Error::Ftv1SpanAttribute)
+                    }
+                })
+                .transpose()?)
+        }
     }
 
     fn extract_http_data(&self, span: &SpanData) -> Http {
@@ -335,7 +377,7 @@ impl SpanExporter for Exporter {
             }
         }
 
-        // tracing::info!("Report {:#?}", report.traces_per_query);
+        tracing::info!("Report {:#?}", report.traces_per_query);
         self.apollo_sender
             .send(SingleReport::Traces(SingleTracesReport {
                 traces: report

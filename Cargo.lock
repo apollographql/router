@@ -136,6 +136,7 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
+ "base64 0.13.0",
  "buildstructor 0.5.0",
  "bytes",
  "clap 3.2.17",

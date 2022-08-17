@@ -425,7 +425,6 @@ impl Plugin for Telemetry {
             })
             .map_response(|resp: SubgraphResponse| {
                 // Stash the FTV1 data
-                ::tracing::error!("Retrieving FTV1 {:#?}", resp.response);
                 if let Some(serde_json_bytes::Value::String(ftv1)) =
                     resp.response.body().extensions.get("ftv1")
                 {
