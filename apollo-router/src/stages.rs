@@ -10,11 +10,11 @@ pub mod http {
     pub type Result = std::result::Result<Response, BoxError>;
 }
 
-pub mod router {
+pub mod supergraph {
     use tower::BoxError;
 
-    pub use crate::services::RouterRequest as Request;
-    pub use crate::services::RouterResponse as Response;
+    pub use crate::services::SupergraphRequest as Request;
+    pub use crate::services::SupergraphResponse as Response;
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
     pub type Result = std::result::Result<Response, BoxError>;

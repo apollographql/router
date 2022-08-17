@@ -1,4 +1,4 @@
-use apollo_router::stages::router;
+use apollo_router::stages::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
 
@@ -12,7 +12,7 @@ async fn main() -> Result<(), tower::BoxError> {
         .await?;
 
     // ...then create a GraphQL request...
-    let request = router::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query(r#"query Query { me { name } }"#)
         .build()
         .expect("expecting valid request");

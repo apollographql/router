@@ -3,8 +3,8 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::stages::execution;
 use apollo_router::stages::query_planner;
-use apollo_router::stages::router;
 use apollo_router::stages::subgraph;
+use apollo_router::stages::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -34,7 +34,7 @@ impl Plugin for HelloWorld {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]

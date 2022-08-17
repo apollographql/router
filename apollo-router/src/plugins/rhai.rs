@@ -51,8 +51,8 @@ use crate::register_plugin;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -88,8 +88,8 @@ impl<T> OptionDance<T> for SharedMut<T> {
 }
 
 mod router {
-    pub(crate) use crate::stages::router::*;
-    pub(crate) type Response = super::RhaiRouterResponse;
+    pub(crate) use crate::stages::supergraph::*;
+    pub(crate) type Response = super::RhaiSupergraphResponse;
 }
 
 mod query_planner {
@@ -327,12 +327,12 @@ impl Plugin for Rhai {
         Ok(Self { ast, engine })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        const FUNCTION_NAME_SERVICE: &str = "router_service";
+    fn supergraph_service(&self, service: router::BoxService) -> router::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
         }
-        tracing::debug!("router_service function found");
+        tracing::debug!("supergraph_service function found");
         let shared_service = Arc::new(Mutex::new(Some(service)));
         if let Err(error) = self.run_rhai_service(
             FUNCTION_NAME_SERVICE,
@@ -543,7 +543,7 @@ pub(crate) struct RhaiExecutionResponse {
     response: http_ext::Response<Response>,
 }
 
-pub(crate) struct RhaiRouterResponse {
+pub(crate) struct RhaiSupergraphResponse {
     context: Context,
     response: http_ext::Response<Response>,
 }
@@ -666,15 +666,15 @@ impl ServiceStep {
                 //gen_map_request!(router, service, rhai_service, callback);
                 service.replace(|service| {
                     ServiceBuilder::new()
-                        .checkpoint(move |request: RouterRequest| {
+                        .checkpoint(move |request: SupergraphRequest| {
                             // Let's define a local function to build an error response
                             fn failure_message(
                                 context: Context,
                                 msg: String,
                                 status: StatusCode,
-                            ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError>
+                            ) -> Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>
                             {
-                                let res = RouterResponse::error_builder()
+                                let res = SupergraphResponse::error_builder()
                                     .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
@@ -799,7 +799,7 @@ impl ServiceStep {
                 // gen_map_response!(router, service, rhai_service, callback);
                 service.replace(|service| {
                     BoxService::new(service.and_then(
-                        |router_response: RouterResponse| async move {
+                        |router_response: SupergraphResponse| async move {
                             // Let's define a local function to build an error response
                             // XXX: This isn't ideal. We already have a response, so ideally we'd
                             // like to append this error into the existing response. However,
@@ -810,8 +810,8 @@ impl ServiceStep {
                                 context: Context,
                                 msg: String,
                                 status: StatusCode,
-                            ) -> RouterResponse {
-                                let res = RouterResponse::error_builder()
+                            ) -> SupergraphResponse {
+                                let res = SupergraphResponse::error_builder()
                                     .errors(vec![Error {
                                         message: msg,
                                         ..Default::default()
@@ -825,7 +825,7 @@ impl ServiceStep {
 
                             // we split the response stream into headers+first response, then a stream of deferred responses
                             // for which we will implement mapping later
-                            let RouterResponse { response, context } = router_response;
+                            let SupergraphResponse { response, context } = router_response;
                             let (parts, stream) = http::Response::from(response).into_parts();
                             let (first, rest) = stream.into_future().await;
 
@@ -837,7 +837,7 @@ impl ServiceStep {
                                 ));
                             }
 
-                            let response = RhaiRouterResponse {
+                            let response = RhaiSupergraphResponse {
                                 context,
                                 response: http::Response::from_parts(
                                     parts,
@@ -880,7 +880,8 @@ impl ServiceStep {
 
                             let mut guard = shared_response.lock().unwrap();
                             let response_opt = guard.take();
-                            let RhaiRouterResponse { context, response } = response_opt.unwrap();
+                            let RhaiSupergraphResponse { context, response } =
+                                response_opt.unwrap();
                             let (parts, body) = http::Response::from(response).into_parts();
 
                             //FIXME we should also map over the stream of future responses
@@ -889,7 +890,7 @@ impl ServiceStep {
                                 once(ready(body)).chain(rest).boxed(),
                             )
                             .into();
-                            Ok(RouterResponse { context, response })
+                            Ok(SupergraphResponse { context, response })
                         },
                     ))
                 })
@@ -1379,20 +1380,20 @@ mod tests {
     use super::*;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
-    use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::Context;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
                     .header("x-custom-header", "CUSTOM_VALUE")
                     .context(req.context)
                     .build()
@@ -1408,10 +1409,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
-        let router_req = RouterRequest::fake_builder().context(context).build()?;
+        let router_req = SupergraphRequest::fake_builder().context(context).build()?;
 
         let mut router_resp = router_service.ready().await?.call(router_req).await?;
         assert_eq!(router_resp.response.status(), 200);

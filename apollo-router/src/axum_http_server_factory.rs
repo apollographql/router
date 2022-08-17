@@ -776,23 +776,23 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
-        RouterService {
+        SupergraphService {
             fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, graphql::Response>>, BoxError>;
         }
     }
 
-    type MockRouterServiceType = tower_test::mock::Mock<
+    type MockSupergraphServiceType = tower_test::mock::Mock<
         http_ext::Request<graphql::Request>,
         http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
     >;
 
     #[derive(Clone)]
     struct TestRouterServiceFactory {
-        inner: MockRouterServiceType,
+        inner: MockSupergraphServiceType,
     }
 
     impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
-        type Service = MockRouterServiceType;
+        type Service = MockSupergraphServiceType;
 
         fn new_service(&self) -> Self::Service {
             self.inner.clone()
@@ -800,7 +800,7 @@ mod tests {
     }
 
     impl RouterServiceFactory for TestRouterServiceFactory {
-        type RouterService = MockRouterServiceType;
+        type RouterService = MockSupergraphServiceType;
 
         type Future = <<TestRouterServiceFactory as NewService<
             http_ext::Request<graphql::Request>,
@@ -811,7 +811,7 @@ mod tests {
         }
     }
 
-    async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
+    async fn init(mut mock: MockSupergraphService) -> (HttpServerHandle, Client) {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
 
@@ -856,7 +856,7 @@ mod tests {
     }
 
     async fn init_with_config(
-        mut mock: MockRouterService,
+        mut mock: MockSupergraphService,
         conf: Configuration,
         plugin_handlers: HashMap<String, Handler>,
     ) -> (HttpServerHandle, Client) {
@@ -897,7 +897,7 @@ mod tests {
 
     #[cfg(unix)]
     async fn init_unix(
-        mut mock: MockRouterService,
+        mut mock: MockSupergraphService,
         temp_dir: &tempfile::TempDir,
     ) -> HttpServerHandle {
         let server_factory = AxumHttpServerFactory::new();
@@ -943,7 +943,7 @@ mod tests {
         // let root_span = info_span!("root");
         // {
         // let _guard = root_span.enter();
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
 
         // Regular studio redirect
@@ -974,7 +974,7 @@ mod tests {
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -1061,7 +1061,7 @@ mod tests {
             .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(1)
@@ -1103,7 +1103,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_request() -> Result<(), ApolloRouterError> {
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
 
         let response = client
@@ -1127,7 +1127,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -1189,7 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_response() -> Result<(), ApolloRouterError> {
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!("{}/test", server.listen_address());
 
@@ -1229,7 +1229,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -1298,7 +1298,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -1367,7 +1367,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(4)
@@ -1451,7 +1451,7 @@ mod tests {
             .build();
         let example_response = expected_response.clone();
 
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(1)
@@ -1511,7 +1511,7 @@ mod tests {
             .build();
         let example_response = expected_response.clone();
 
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(1)
@@ -1554,7 +1554,7 @@ mod tests {
 
     #[tokio::test]
     async fn response_failure() -> Result<(), ApolloRouterError> {
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(1)
@@ -1602,7 +1602,7 @@ mod tests {
 
     #[tokio::test]
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
@@ -1661,7 +1661,7 @@ mod tests {
             .build();
         let example_response = expected_response.clone();
 
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -1771,7 +1771,7 @@ Content-Type: application/json\r
         // let root_span = info_span!("root");
         // {
         // let _guard = root_span.enter();
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!(
             "{}/.well-known/apollo/server-health",
@@ -1797,7 +1797,7 @@ Content-Type: application/json\r
                     .build(),
             )
             .build();
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
         let url = format!("{}/health", server.listen_address());
 
@@ -1810,7 +1810,7 @@ Content-Type: application/json\r
         let query = "query";
         let operation_name = "operationName";
 
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!("{}", server.listen_address());
         let response = client
@@ -1828,7 +1828,7 @@ Content-Type: application/json\r
 
     #[test(tokio::test)]
     async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
             .server(
                 crate::configuration::Server::builder()
@@ -1857,7 +1857,7 @@ Content-Type: application/json\r
 
     #[test(tokio::test)]
     async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
-        let expectations = MockRouterService::new();
+        let expectations = MockSupergraphService::new();
         let plugin_handler = Handler::new(
             service_fn(|req: stages::http::Request| async move {
                 Ok::<_, BoxError>(http_ext::Response {
@@ -1935,7 +1935,7 @@ Content-Type: application/json\r
 
     #[test(tokio::test)]
     async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError> {
-        let mut expectations = MockRouterService::new();
+        let mut expectations = MockSupergraphService::new();
         expectations
             .expect_service_call()
             .times(2)
@@ -2002,7 +2002,7 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_origin_default() -> Result<(), ApolloRouterError> {
-        let (server, client) = init(MockRouterService::new()).await;
+        let (server, client) = init(MockSupergraphService::new()).await;
         let url = format!("{}/", server.listen_address());
 
         let response =
@@ -2027,7 +2027,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
         let url = format!("{}/", server.listen_address());
 
         let response =
@@ -2054,7 +2054,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
         let url = format!("{}/", server.listen_address());
 
         let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
@@ -2085,7 +2085,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockRouterService::new(), conf, HashMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
         let url = format!("{}/", server.listen_address());
 
         // regex tests

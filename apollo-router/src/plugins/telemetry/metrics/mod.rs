@@ -29,7 +29,7 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::services::RouterResponse;
+use crate::services::SupergraphResponse;
 use crate::stages;
 use crate::Context;
 
@@ -253,8 +253,8 @@ impl ErrorsForward {
 impl AttributesForwardConf {
     pub(crate) async fn get_attributes_from_router_response(
         &self,
-        response: RouterResponse,
-    ) -> (RouterResponse, HashMap<String, String>) {
+        response: SupergraphResponse,
+    ) -> (SupergraphResponse, HashMap<String, String>) {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -325,7 +325,7 @@ impl AttributesForwardConf {
         )
         .into();
 
-        (RouterResponse { context, response }, attributes)
+        (SupergraphResponse { context, response }, attributes)
     }
 
     /// Get attributes from context

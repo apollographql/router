@@ -50,7 +50,7 @@ This section covers functionality that the router explicitly exposes to Rhai.
 The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
 
 ```javascript
-fn router_service(service) {
+fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         let start = apollo_start.elapsed;
@@ -84,11 +84,11 @@ If you wish to indicate to the client that an error has occurred, Rhai supports 
 
 For example:
 ```javascript
-fn router_service(service) {
+fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // Something goes wrong during response processing...
-        throw "an error occurred setting up the router_service...");
+        throw "an error occurred setting up the supergraph_service...");
     };
     // Map our response using our closure
     service.map_response(f);
@@ -99,7 +99,7 @@ fn router_service(service) {
 
 Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
 
-  - `router_service`
+  - `supergraph_service`
   - `query_planner_service`
   - `execution_service`
   - `subgraph_service`
@@ -109,7 +109,7 @@ Each of these hooks is optional. Define only the functions you want to use custo
 Each function takes a single parameter: `service`, this is typed for each of the different services. The various service functions are not required to return anything. If they do, the return is ignored.
 
 ```javascript
-fn router_service(service) {}
+fn supergraph_service(service) {}
 fn query_planner_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service) {}
@@ -126,7 +126,7 @@ These can be invoked as methods on the supplied service object and are expected 
 
 For example:
 ```javascript
-fn router_service(service) {
+fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // Log out any errors we may have
@@ -226,7 +226,7 @@ request.subgraph.headers.x-my-new-header = 42.to_string();
 
 #### request.body.query
 
-The request query is accessible. If modified make sure to do this before QueryPlanning is performed (i.e.: `router_service()` or `query_planner_service()`) or the modification will have no effect on the query. For example, let's modify the query at the router_service stage and turn it into a completely invalid query.
+The request query is accessible. If modified make sure to do this before query planning is performed (i.e.: `supergraph_service()` or `query_planner_service()`) or the modification will have no effect on the query. For example, let's modify the query at the supergraph_service stage and turn it into a completely invalid query.
 
 ```javascript
 print(`${request.body.query}`); // log the query before modification
@@ -350,8 +350,8 @@ This example illustrates how to register router request handling.
 
 ```javascript
 
-// At the router_service stage, register callbacks for processing requests
-fn router_service(service) {
+// At the supergraph_service stage, register callbacks for processing requests
+fn supergraph_service(service) {
     const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the callback
 }
@@ -367,9 +367,9 @@ fn process_request(request) {
 This example manipulates headers and the request context:
 
 ```javascript
-// At the router_service stage, register callbacks for processing requests and
+// At the supergraph_service stage, register callbacks for processing requests and
 // responses.
-fn router_service(service) {
+fn supergraph_service(service) {
     const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the request callback
     const response_callback = Fn("process_response"); // This is standard Rhai functionality for creating a function pointer
