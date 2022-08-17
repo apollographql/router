@@ -352,6 +352,12 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🐛 Fixes
 
+### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
+
+This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1497
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
