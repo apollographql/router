@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub use mock::subgraph::MockSubgraph;
 pub use service::MockExecutionService;
-pub use service::MockQueryPlanningService;
+pub use service::MockQueryPlannerService;
 pub use service::MockRouterService;
 pub use service::MockSubgraphService;
 use tower::util::BoxService;

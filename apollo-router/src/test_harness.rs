@@ -137,7 +137,7 @@ impl<'a> TestHarness<'a> {
         self.extra_plugin(RouterServicePlugin(callback))
     }
 
-    /// Adds an ad-hoc plugin that has [`Plugin::query_planning_service`] implemented with `callback`.
+    /// Adds an ad-hoc plugin that has [`Plugin::query_planner_service`] implemented with `callback`.
     pub fn extra_query_planner_plugin(
         self,
         callback: impl Fn(query_planner::BoxService) -> query_planner::BoxService
@@ -248,7 +248,7 @@ where
         unreachable!()
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {

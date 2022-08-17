@@ -344,7 +344,7 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {

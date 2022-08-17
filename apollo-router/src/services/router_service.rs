@@ -325,7 +325,7 @@ impl PluggableRouterServiceBuilder {
                         .iter_mut()
                         .rev()
                         .fold(bridge_query_planner.boxed(), |acc, (_, e)| {
-                            e.query_planning_service(acc)
+                            e.query_planner_service(acc)
                         }),
                     DEFAULT_BUFFER_SIZE,
                 ),

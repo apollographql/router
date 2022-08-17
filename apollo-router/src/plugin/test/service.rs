@@ -44,6 +44,6 @@ macro_rules! mock_service {
 }
 
 mock_service!(Router, RouterRequest, RouterResponse);
-mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
+mock_service!(QueryPlanner, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);

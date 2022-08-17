@@ -170,12 +170,12 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     }
 
     /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    /// Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     ///
     /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
     /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
     /// must be performed on the query, they should be done in router service plugins.
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
@@ -233,12 +233,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn router_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
+    /// Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     ///
     /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
     /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
     /// must be performed on the query, they should be done in router service plugins.
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService;
@@ -279,11 +279,11 @@ where
         self.router_service(service)
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
-        self.query_planning_service(service)
+        self.query_planner_service(service)
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
