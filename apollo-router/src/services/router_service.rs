@@ -35,6 +35,7 @@ use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
+use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::RouterServiceFactory;
@@ -394,7 +395,7 @@ impl RouterServiceFactory for RouterCreator {
             .iter()
             .filter_map(|(plugin_name, plugin)| {
                 (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint())
+                    .then(|| plugin.custom_endpoint().map(Handler::new))
                     .flatten()
                     .map(|h| (plugin_name.clone(), h))
             })

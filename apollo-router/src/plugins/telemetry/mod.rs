@@ -493,7 +493,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -517,7 +517,7 @@ impl Plugin for Telemetry {
         )
         .boxed();
 
-        Some(Handler::new(svc))
+        Some(svc)
     }
 }
 
@@ -1400,7 +1400,6 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let handler = dyn_plugin.custom_endpoint().unwrap();
         let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
@@ -1409,7 +1408,8 @@ mod tests {
             .body(Bytes::new().into())
             .build()
             .unwrap();
-        let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         let http_req_prom = http_ext::Request::fake_builder()
@@ -1420,6 +1420,7 @@ mod tests {
             .body(Bytes::new().into())
             .build()
             .unwrap();
+        let handler = dyn_plugin.custom_endpoint().unwrap();
         let mut resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();

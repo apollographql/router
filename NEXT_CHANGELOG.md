@@ -176,6 +176,7 @@ apollo_router::plugins
 apollo_router::plugin::plugins
 apollo_router::plugin::PluginFactory
 apollo_router::plugin::DynPlugin
+apollo_router::plugin::Handler
 apollo_router::plugin::test::IntoSchema
 apollo_router::plugin::test::MockSubgraphFactory
 apollo_router::plugin::test::PluginTestHarness
@@ -284,9 +285,42 @@ If a test requires a request specifically *without* a `Content-Type` header,
 this default can be removed from a `RouterRequest` after building it:
 
 ```rust
-let mut router_request = RouterRequesT::fake_builder().build();
+let mut router_request = RouterRequest::fake_builder().build();
 router_request.originating_request.headers_mut().remove("content-type");
 ```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
+### Plugins return a service for custom endpoints ([Issue #1481](https://github.com/apollographql/router/issues/1481))
+
+Rust plugins can implement the `Plugin::custom_endpoint` trait method
+to handle some non-GraphQL HTTP requests.
+
+Previously, the return type of this method was `Option<apollo_router::plugin::Handler>`,
+where a `Handler` could be created with:
+
+```rust
+impl Handler {
+    pub fn new(service: tower::util::BoxService<
+        apollo_router::http_ext::Request<bytes::Bytes>, 
+        apollo_router::http_ext::Response<bytes::Bytes>, 
+        tower::BoxError
+    >) -> Self {/* … */}
+}
+```
+
+`Handler` has been removed from the public API, now plugins return a `BoxService` directly instead.
+Additionally, the type for HTTP request and response bodies was changed
+from `bytes::Bytes` to `hyper::Body` (which is more flexible, for example can be streamed).
+
+Changes needed if using custom enpoints are:
+
+* Replace `Handler::new(service)` with `service`
+* To read the full request body,
+  use [`hyper::body::to_bytes`](https://docs.rs/hyper/latest/hyper/body/fn.to_bytes.html)
+  or [`hyper::body::aggregate`](https://docs.rs/hyper/latest/hyper/body/fn.aggregate.html).
+* A response `Body` can be created through conversion traits from various types.
+  For example: `"string".into()`
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
