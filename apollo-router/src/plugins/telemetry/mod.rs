@@ -179,7 +179,7 @@ impl Plugin for Telemetry {
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
-                    // Record the ftv1 trace for processing later
+                    // Record the operation signature on the router span
                     Span::current()
                         .record("operation.signature", &usage_reporting.stats_report_key);
                 }

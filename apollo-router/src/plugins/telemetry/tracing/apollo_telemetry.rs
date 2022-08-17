@@ -212,45 +212,45 @@ impl SpanExporter for Exporter {
         };
         for span in batch {
             if span.name == "router" {
-                let traces_and_stats = report
-                    .traces_per_query
-                    .entry(
-                        span.attributes
-                            .get(&Key::new("operation.signature"))
-                            .expect("operation signature must have been set on router span")
-                            .to_string(),
-                    )
-                    .or_insert_with(|| TracesAndStats {
-                        trace: vec![],
-                        stats_with_context: vec![],
-                        referenced_fields_by_type: Default::default(),
-                        internal_traces_contributing_to_stats: vec![],
-                    });
-                match self.extract_query_plan_trace(span) {
-                    Ok(trace) => {
-                        traces_and_stats.trace.push(trace);
+                if let Some(operation_signature) = span
+                    .attributes
+                    .get(&Key::new("operation.signature"))
+                    .map(Value::to_string)
+                {
+                    let traces_and_stats = report
+                        .traces_per_query
+                        .entry(operation_signature)
+                        .or_insert_with(|| TracesAndStats {
+                            trace: vec![],
+                            stats_with_context: vec![],
+                            referenced_fields_by_type: Default::default(),
+                            internal_traces_contributing_to_stats: vec![],
+                        });
+                    match self.extract_query_plan_trace(span) {
+                        Ok(trace) => {
+                            traces_and_stats.trace.push(trace);
+                        }
+                        Err(error) => {
+                            tracing::error!("failed to construct trace: {}, skipping", error);
+                        }
                     }
-                    Err(error) => {
-                        tracing::error!("failed to construct trace: {}, skipping", error);
-                    }
-                }
-            } else {
-                // Not a root span, we may need it later so stash it.
+                } else {
+                    // Not a root span, we may need it later so stash it.
 
-                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                self.spans_by_parent_id
-                    .get_or_insert(span.span_context.span_id(), Vec::new);
-                self.spans_by_parent_id
-                    .get_mut(&span.span_context.span_id())
-                    .expect("capacity of cache was zero")
-                    .push(span);
+                    // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
+                    // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
+                    self.spans_by_parent_id
+                        .get_or_insert(span.span_context.span_id(), Vec::new);
+                    self.spans_by_parent_id
+                        .get_mut(&span.span_context.span_id())
+                        .expect("capacity of cache was zero")
+                        .push(span);
+                }
             }
         }
 
-        // TODO Clean up old spans that have been knocking around for a long time? In theory as long as all spans are parented correctly then we shouldn't need to.
-
         // TODO send spans to spaceport
+        tracing::info!("Report {:#?}", report.traces_per_query);
         return ExportResult::Ok(());
     }
 }
