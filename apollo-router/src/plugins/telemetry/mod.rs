@@ -15,7 +15,6 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -67,6 +66,7 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::stages;
 use crate::stages::execution;
 use crate::stages::query_planner;
 use crate::stages::router;
@@ -503,7 +503,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
+            move |req: &stages::http::Request, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -732,7 +732,7 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_ext::Request<Bytes>| async {
+            service_fn(|_req: stages::http::Request| async {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
@@ -1406,7 +1406,7 @@ mod tests {
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
             ))
             .method(Method::GET)
-            .body(Bytes::new())
+            .body(Bytes::new().into())
             .build()
             .unwrap();
         let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
@@ -1417,12 +1417,13 @@ mod tests {
                 "http://localhost:4000/plugins/apollo.telemetry/prometheus",
             ))
             .method(Method::GET)
-            .body(Bytes::new())
+            .body(Bytes::new().into())
             .build()
             .unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let prom_metrics = String::from_utf8_lossy(resp.body());
+        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let prom_metrics = String::from_utf8_lossy(&body);
         assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));

@@ -28,20 +28,18 @@ use std::task::Poll;
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
-use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
+use crate::stages;
 use crate::stages::execution;
 use crate::stages::query_planner;
 use crate::stages::router;
@@ -327,24 +325,19 @@ macro_rules! register_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub struct Handler {
-    service: Buffer<
-        BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-        http_ext::Request<Bytes>,
-    >,
+    service: Buffer<stages::http::BoxService, stages::http::Request>,
 }
 
 impl Handler {
-    pub fn new(
-        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-    ) -> Self {
+    pub fn new(service: stages::http::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<http_ext::Request<Bytes>> for Handler {
-    type Response = http_ext::Response<Bytes>;
+impl Service<stages::http::Request> for Handler {
+    type Response = stages::http::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -352,15 +345,13 @@ impl Service<http_ext::Request<Bytes>> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http_ext::Request<Bytes>) -> Self::Future {
+    fn call(&mut self, req: stages::http::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>> for Handler {
-    fn from(
-        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-    ) -> Self {
+impl From<stages::http::BoxService> for Handler {
+    fn from(original: stages::http::BoxService) -> Self {
         Self::new(original)
     }
 }

@@ -404,13 +404,14 @@ async fn custom_plugin_handler(
     handler: Handler,
 ) -> impl IntoResponse {
     let (mut head, body) = request.into_parts();
-    let body = hyper::body::to_bytes(body)
-        .await
-        .map_err(|err| err.to_string())?;
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
     let req = Request::from_parts(head, body).into();
-    handler.oneshot(req).await.map_err(|err| err.to_string())
+    handler
+        .oneshot(req)
+        .await
+        .map(http::Response::from)
+        .map_err(|err| err.to_string())
 }
 
 async fn handle_get(
@@ -732,6 +733,7 @@ mod tests {
     use crate::configuration::Cors;
     use crate::http_ext::Request;
     use crate::services::new_service::NewService;
+    use crate::stages;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -1857,7 +1859,7 @@ Content-Type: application/json\r
     async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockRouterService::new();
         let plugin_handler = Handler::new(
-            service_fn(|req: http_ext::Request<Bytes>| async move {
+            service_fn(|req: stages::http::Request| async move {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::OK)

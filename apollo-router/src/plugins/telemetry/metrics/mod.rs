@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
-use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -20,12 +19,10 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
-use tower::util::BoxService;
 use tower::BoxError;
 
 use crate::error::FetchError;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
@@ -33,6 +30,7 @@ use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::services::RouterResponse;
+use crate::stages;
 use crate::Context;
 
 pub(crate) mod apollo;
@@ -40,8 +38,6 @@ pub(crate) mod otlp;
 pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
-pub(crate) type CustomEndpoint =
-    BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -498,7 +494,7 @@ impl MetricsBuilder {
         self
     }
 
-    fn with_custom_endpoint(mut self, path: &str, endpoint: CustomEndpoint) -> Self {
+    fn with_custom_endpoint(mut self, path: &str, endpoint: stages::http::BoxService) -> Self {
         self.custom_endpoints
             .insert(path.to_string(), Handler::new(endpoint));
         self
