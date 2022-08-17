@@ -307,15 +307,7 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         let introspection = if configuration.server.introspection {
-            // Introspection instantiation can potentially block for some time
-            // We don't need to use the api schema here because on the deno side we always convert to API schema
-
-            let schema = self.schema.clone();
-            Some(Arc::new(
-                tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
-                    .await
-                    .expect("Introspection instantiation panicked"),
-            ))
+            Some(Arc::new(Introspection::new().await))
         } else {
             None
         };
