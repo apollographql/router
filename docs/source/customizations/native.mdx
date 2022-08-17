@@ -33,7 +33,7 @@ Most plugins should start by including the following set of `use` declarations:
 use apollo_router::plugin::Plugin;
 use apollo_router::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, SupergraphRequest, SupergraphResponse, SubgraphRequest, SubgraphResponse,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -95,7 +95,7 @@ impl Plugin for HelloWorld {
 
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
-    fn router_service(
+    fn supergraph_service(
         &mut self,
         service: router::BoxService,
     ) -> router::BoxService {
@@ -140,7 +140,7 @@ To define custom logic for a service hook, you can use [`ServiceBuilder`](https:
 use tower::ServiceBuilderExt;
 use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
-fn router_service(
+fn supergraph_service(
     &mut self,
     service: router::BoxService,
 ) -> router::BoxService {

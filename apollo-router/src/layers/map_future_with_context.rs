@@ -85,21 +85,21 @@ mod test {
     use tower::ServiceExt;
 
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::test::MockRouterService;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::plugin::test::MockSupergraphService;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     #[tokio::test]
     async fn test_layer() -> Result<(), BoxError> {
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_call()
             .once()
-            .returning(|_| Ok(RouterResponse::fake_builder().build().unwrap()));
+            .returning(|_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
 
         let mut service = ServiceBuilder::new()
             .map_future_with_context(
-                |req: &RouterRequest| {
+                |req: &SupergraphRequest| {
                     req.originating_request
                         .headers()
                         .get("hello")
@@ -107,7 +107,7 @@ mod test {
                         .unwrap()
                 },
                 |ctx: HeaderValue, resp| async move {
-                    let resp: Result<RouterResponse, BoxError> = resp.await;
+                    let resp: Result<SupergraphResponse, BoxError> = resp.await;
                     resp.map(|mut response| {
                         response.response.headers_mut().insert("hello", ctx.clone());
                         response
@@ -121,7 +121,7 @@ mod test {
             .await
             .unwrap()
             .call(
-                RouterRequest::fake_builder()
+                SupergraphRequest::fake_builder()
                     .header("hello", "world")
                     .build()
                     .unwrap(),

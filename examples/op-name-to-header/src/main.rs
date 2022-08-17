@@ -13,25 +13,25 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugin::test;
-    use apollo_router::stages::router;
+    use apollo_router::stages::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
         // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockRouterService::new();
+        let mut mock_service = test::MockSupergraphService::new();
 
-        // The expected reply is going to be JSON returned in the RouterResponse { data } section.
+        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
         // Let's set up our mock to make sure it will be called once
         mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockRouterService::new();
+            let mut mock_service = test::MockSupergraphService::new();
             mock_service
                 .expect_call()
                 .once()
-                .returning(move |req: router::Request| {
+                .returning(move |req: supergraph::Request| {
                     // Let's make sure our request contains our new header
                     assert_eq!(
                         req.originating_request
@@ -40,7 +40,7 @@ mod tests {
                             .expect("X-operation-name is present"),
                         "me"
                     );
-                    Ok(router::Response::fake_builder()
+                    Ok(supergraph::Response::fake_builder()
                         .data(expected_mock_response_data)
                         .build()
                         .unwrap())
@@ -57,13 +57,13 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .extra_router_plugin(move |_| mock_service.clone().boxed())
+            .extra_supergraph_plugin(move |_| mock_service.clone().boxed())
             .build()
             .await
             .unwrap();
 
         // Let's create a request with our operation name
-        let request_with_appropriate_name = router::Request::canned_builder()
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .build()
             .unwrap();

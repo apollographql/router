@@ -54,15 +54,15 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::graphql::Response;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// //TODO This doc has highlighted a couple of issues that need to be resolved
     /// //let _ = ServiceBuilder::new()
     /// //            .cache(Cache::builder().time_to_live(Duration::from_secs(1)).max_capacity(100).build(),
-    /// //                |req: &RouterRequest| req.originating_request.headers().get("cache_key"),
-    /// //                |resp: &RouterResponse| &resp.response.body(),
-    /// //                |req: RouterRequest, cached: &ResponseBody| RouterResponse::builder()
+    /// //                |req: &SupergraphRequest| req.originating_request.headers().get("cache_key"),
+    /// //                |resp: &SupergraphResponse| &resp.response.body(),
+    /// //                |req: SupergraphRequest, cached: &ResponseBody| SupergraphResponse::builder()
     /// //                    .context(req.context)
     /// //                    .data(cached.clone()) //TODO builder should take ResponseBody
     /// //                    .build().unwrap()) //TODO make response function fallible
@@ -101,13 +101,13 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///     .checkpoint(|req: router::Request|{
+    ///     .checkpoint(|req: supergraph::Request|{
     ///         if req.originating_request.method() == Method::GET {
-    ///             Ok(ControlFlow::Break(router::Response::builder()
+    ///             Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                 .data("Only get requests allowed")
     ///                 .context(req.context)
     ///                 .build()?))
@@ -161,14 +161,14 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///     .checkpoint_async(|req: router::Request|
+    ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
     ///             if req.originating_request.method() == Method::GET {
-    ///                 Ok(ControlFlow::Break(router::Response::builder()
+    ///                 Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                     .data("Only get requests allowed")
     ///                     .context(req.context)
     ///                     .build()?))
@@ -206,9 +206,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
     ///             .service(service);
@@ -235,9 +235,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
     ///             .service(service);
@@ -272,12 +272,12 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
-    /// let _ : router::BoxService = ServiceBuilder::new()
+    /// # fn test(service: supergraph::BoxService) {
+    /// let _ : supergraph::BoxService = ServiceBuilder::new()
     ///     .map_future_with_context(
-    ///         |req: &router::Request| req.context.clone(),
+    ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
     ///     .boxed();
@@ -334,13 +334,13 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::stages::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test(service: router::BoxService) {
-    /// let _ : router::BoxService = service
+    /// # fn test(service: supergraph::BoxService) {
+    /// let _ : supergraph::BoxService = service
     ///     .map_future_with_context(
-    ///         |req: &router::Request| req.context.clone(),
+    ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
     ///     .boxed();

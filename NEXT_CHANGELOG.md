@@ -96,14 +96,16 @@ At the crate root:
 
 In the `apollo_router::plugin::Plugin` trait:
 
+* `router_service` → `supergraph_service`
 * `query_planning_service` → `query_planner_service`
 
 A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
 reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
-In pseudo-syntax:
+Additionally, the "router stage" is now known as "supergraph stage".
+In pseudo-syntax, `use`’ing the old names:
 
 ```rust
-mod router {
+mod supergraph {
     use apollo_router::services::RouterRequest as Request;
     use apollo_router::services::RouterResponse as Response;
     type BoxService = tower::util::BoxService<Request, Response, BoxError>;

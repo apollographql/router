@@ -42,8 +42,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::stages;
 use crate::stages::execution;
 use crate::stages::query_planner;
-use crate::stages::router;
 use crate::stages::subgraph;
+use crate::stages::supergraph;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -163,9 +163,9 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     fn activate(&mut self) {}
 
     /// This service runs at the very beginning and very end of the request lifecycle.
-    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
     }
 
@@ -228,9 +228,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
     /// This service handles generating the query plan for each incoming request.
     /// Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
@@ -275,8 +275,8 @@ where
         self.activate()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        self.router_service(service)
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        self.supergraph_service(service)
     }
 
     fn query_planner_service(
