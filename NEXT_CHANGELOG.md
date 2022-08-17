@@ -292,6 +292,13 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
+### rhai logging functions now accept Dynamic parameters ([PR #1521](https://github.com/apollographql/router/pull/1521))
+
+Prior to this change, rhai logging functions worked with string parameters. This change means that any valid rhai object
+may now be passed as a logging parameter.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1521
+
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
 
 Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
