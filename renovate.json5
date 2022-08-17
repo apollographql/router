@@ -75,8 +75,13 @@
       "automerge": true,
     },
     // We're currently constrained in our ability to update the `tracing`
-    // packages to the latest versions because of our usage.  This should put
-    // those pacakges into their own group and away from other dep updates.
+    // packages to the latest versions because of our usage.  As an extension
+    // of the same concern, we cannot update our `opentelemetry` packages since
+    // those are tightly intertwined.  This exception puts those packages into
+    // their own group and away from other dep updates until the time that
+    // those problems are no longer.  For more details, see the explainations
+    // in the `/apollo-router/Cargo.toml` file around the declarations for
+    // `^opentelemetry` and `^tracing` packages.
     {
       "matchManagers": [
         "cargo"

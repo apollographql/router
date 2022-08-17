@@ -71,6 +71,18 @@ miette = { version = "5.1.1", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
 once_cell = "1.13.0"
+
+# Any package that starts with `opentelemetry` needs to be updated with care
+# because it is tightly intertwined with the `tracing` packages on account of
+# the `opentelemetry-tracing` package.
+#
+# We are constrained in our ability to update the `tracing` packages and that is
+# tracked in https://github.com/apollographql/router/issues/1407.
+#
+# To codify this with code, a rule in our Renovate configuration constraints and
+# groups `^tracing` and `^opentelemetry*` dependencies together as of
+# https://github.com/apollographql/router/pull/1509.  A comment which exists
+# there (and on `tracing` packages below) should be updated should this change.
 opentelemetry = { version = "0.17.0", features = [
     "rt-tokio",
     "serialize",
@@ -98,6 +110,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.10.0"
+
 paste = "1.0.7"
 prometheus = "0.13"
 rhai = { version = "1.8.0", features = ["sync", "serde", "internals"] }
@@ -136,11 +149,21 @@ tower-http = { version = "0.3.4", features = [
     "timeout"
 ] }
 tower-service = "0.3.2"
+
+# We are constrained in our ability to update the `tracing` packages, which is
+# tracked in https://github.com/apollographql/router/issues/1407.
+#
+# To codify this with code, a rule in our Renovate configuration constraints and
+# groups `^tracing` and `^opentelemetry*` dependencies together as of
+# https://github.com/apollographql/router/pull/1509.  A comment which exists
+# there (and above around the `opentelemetry` packages) should this ever change.
+# There is also a note below on the `^tracing` dev-dependencies!
 tracing = "=0.1.34"
 tracing-core = "=0.1.26"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
+
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
@@ -167,6 +190,9 @@ test-log = { version = "0.2.11", default-features = false, features = [
 ] }
 test-span = "0.7"
 tower-test = "0.4.0"
+
+# See note above in this file about `^tracing` packages which also applies to
+# these dev dependencies.
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
