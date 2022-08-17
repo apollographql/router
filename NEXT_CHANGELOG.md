@@ -292,9 +292,15 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
-### Don't prefill the introspection cache ([#1516](https://github.com/apollographql/router/issues/1516))
+### Reduce initial memory footprint by lazily populating introspection query cache ([#1516](https://github.com/apollographql/router/issues/1516))
 
-The introspection query cache won't be warmed up anymore. Which reduces the router's idle memory footprint.
+In an early alpha release of the Router, we only executed certain "known" introspection queries because of prior technical constraints that prohibited us from doing something more flexible.  Because the set of introspection queries was "known", it made sense to cache them.
+
+As of https://github.com/apollographql/router/pull/802, this special-casing is (thankfully) no longer necessary and we no longer need to _know_ (and constrain!) the introspection queries that the Router supports.
+
+We could have kept caching those "known" queries, however we were finding that the resulting cache size was quite large and making the Router's minimum memory footprint larger than need be since we were caching many introspection results which the Router instance would never encounter.
+
+This change removes the cache entirely and allows introspection queries served by the Router to merely be lazily calculated and cached on-demand, thereby reducing the initial memory footprint.  Disabling introspection entirely will prevent any use of this cache since no introspection will be possible.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
