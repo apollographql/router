@@ -20,10 +20,12 @@ use futures::stream::StreamExt;
 // This entire file is license key functionality
 use http::header::HeaderName;
 use itertools::Itertools;
+use lru::LruCache;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sys_info::hostname;
+use tokio::time::Instant;
 use tower::BoxError;
 use url::Url;
 
@@ -158,33 +160,37 @@ impl ReportBuilder {
         let operation_count = duplicated_keys.len() as u64;
         let mut report = Report::default();
         for duplicated_key in duplicated_keys {
-            let traces = self.traces.remove(&duplicated_key);
-            let stats = self.stats.remove(&duplicated_key);
+            let traces = self
+                .traces
+                .remove(&duplicated_key)
+                .expect("must exist because it's a duplicate key")
+                .traces;
+            let stats = self
+                .stats
+                .remove(&duplicated_key)
+                .expect("must exist because it's a duplicate key");
 
             let entry = report.traces_per_query.entry(duplicated_key).or_default();
-            if let Some(traces) = traces {
-                entry.traces = traces.traces;
-            }
-            if let Some(stats) = stats {
-                entry.add_assign(stats);
-            }
+            entry.traces = traces;
+            entry.add_assign(stats);
             report.operation_count += 1;
         }
-        let single_stats_report = SingleStatsReport {
-            operation_count,
-            stats: self.stats,
-        };
-        let single_traces_report = SingleTracesReport {
-            traces: self.traces,
-        };
+        let mut orphans = Vec::with_capacity(2);
+        if !self.stats.is_empty() {
+            let single_stats_report = SingleStatsReport {
+                operation_count,
+                stats: self.stats,
+            };
+            orphans.push(SingleReport::Stats(single_stats_report));
+        }
+        if !self.traces.is_empty() {
+            let single_traces_report = SingleTracesReport {
+                traces: self.traces,
+            };
+            orphans.push(SingleReport::Traces(single_traces_report));
+        }
 
-        dbg!((
-            report,
-            vec![
-                SingleReport::Stats(single_stats_report),
-                SingleReport::Traces(single_traces_report),
-            ],
-        ))
+        (report, orphans)
     }
 }
 
@@ -269,6 +275,7 @@ impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
             referenced_fields_by_type: stats.referenced_fields_by_type,
+            trace: stats.traces,
             ..Default::default()
         }
     }
@@ -295,11 +302,8 @@ pub(crate) enum Sender {
 impl Sender {
     pub(crate) fn send(&self, metrics: SingleReport) {
         match &self {
-            Sender::Noop => {
-                println!("NOOOP");
-            }
+            Sender::Noop => {}
             Sender::Spaceport(channel) => {
-                println!("send !");
                 if let Err(err) = channel.to_owned().try_send(metrics) {
                     tracing::warn!(
                         "could not send metrics to spaceport, metric will be dropped: {}",
@@ -327,6 +331,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        buffer_size: usize,
     ) -> Result<ApolloExporter, BoxError> {
         let apollo_key = apollo_key.to_string();
         // Desired behavior:
@@ -361,13 +366,12 @@ impl ApolloExporter {
         .build()
         .unwrap();
 
-        // TODO Put this in global apollo_exporter
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
             let timeout = tokio::time::interval(Duration::from_secs(5));
             let mut report_builder = ReportBuilder::default();
             let mut buffer: Vec<SingleReport> = vec![];
-            // TODO take care of orphans
+            // TODO use LRU
 
             tokio::pin!(timeout);
 
@@ -376,14 +380,18 @@ impl ApolloExporter {
                     single_report = rx.next() => {
                         report_builder += std::mem::take(&mut buffer);
                         if let Some(r) = single_report {
-                            report_builder += dbg!(r);
+                            report_builder += r;
                         } else {
                             break;
                         }
                        },
                     _ = timeout.tick() => {
+                        // TODO use purge and add support for addAssign with VecTTl
                         report_builder += std::mem::take(&mut buffer);
                         let (report, orphans) = std::mem::take(&mut report_builder).build();
+                        if report.operation_count > 0 && orphans.is_empty() {
+                            println!("SEND =========== {report:?}");
+                        }
                         buffer = orphans;
                         Self::send_report(&pool, &apollo_key, &header, report).await;
                     }
@@ -405,7 +413,6 @@ impl ApolloExporter {
         header: &ReportHeader,
         report: Report,
     ) {
-        println!("REPORT ===== {:?}", report);
         if report.operation_count == 0 {
             return;
         }
@@ -413,11 +420,10 @@ impl ApolloExporter {
         match pool.get().await {
             Ok(mut reporter) => {
                 let report = report.into_report(header.clone());
-                println!("REPORT ===== {report:#?}");
                 match reporter
                     .submit(apollo_spaceport::ReporterRequest {
                         apollo_key: apollo_key.to_string(),
-                        report: Some(report),
+                        report: Some(dbg!(report)),
                     })
                     .await
                 {
@@ -493,4 +499,24 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
         "{}, {}, {}, {}, {}",
         sysname, nodename, release, version, machine
     ))
+}
+
+struct VecTTL<T> {
+    inner: Vec<(T, Instant)>,
+    duration: Duration,
+}
+
+impl<T> VecTTL<T> {
+    fn new(duration: Duration) -> Self {
+        Self {
+            inner: Vec::new(),
+            duration,
+        }
+    }
+
+    fn purge(&mut self) -> Vec<T> {
+        self.inner.retain(|(_, i)| i.elapsed() < self.duration);
+
+        self.inner.drain(..).map(|(e, _)| e).collect()
+    }
 }

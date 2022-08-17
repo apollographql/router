@@ -268,10 +268,7 @@ impl SpanExporter for Exporter {
             }
         }
 
-        // TODO send spans to spaceport
-        tracing::info!("Report {:#?}", report.traces_per_query);
-        // TODO Clean up old spans that have been knocking around for a long time? In theory as long as all spans are parented correctly then we shouldn't need to.
-        // TODO send spans to spaceport
+        // tracing::info!("Report {:#?}", report.traces_per_query);
         self.apollo_sender
             .send(SingleReport::Traces(SingleTracesReport {
                 traces: report
