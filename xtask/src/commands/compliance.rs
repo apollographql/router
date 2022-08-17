@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io;
+use std::process::Command;
 
-use anyhow::ensure;
+use anyhow::anyhow;
 use anyhow::Result;
 use sha2::Digest;
 use sha2::Sha256;
@@ -34,13 +35,25 @@ impl Compliance {
 
         let licences_html_after = Self::digest_for_license_file()?;
 
-        ensure!(
-            licenses_html_before == licences_html_after,
-            "🚨 licenses.html file is not up to date. 🚨\n\
+        if licenses_html_before != licences_html_after {
+            eprintln!(
+                "{}",
+                String::from_utf8_lossy(
+                    Command::new(which::which("git").unwrap())
+                        .args(["diff", LICENSES_HTML_PATH])
+                        .output()
+                        .unwrap()
+                        .stdout
+                        .as_slice()
+                )
+            );
+
+            Err(anyhow!("🚨 licenses.html file is not up to date. 🚨\n\
             Please run `cargo about generate --workspace -o licenses.html about.hbs` to generate an up to date licenses list, and check the file in to the repository.\n\
-            💡 You can install `cargo-about` by running `cargo install cargo-about`."
-        );
-        Ok(())
+            💡 You can install `cargo-about` by running `cargo install cargo-about`."))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn run_local(&self) -> Result<()> {
@@ -63,7 +76,7 @@ impl Compliance {
 
         let licences_html_after = Self::digest_for_license_file()?;
 
-        (licenses_html_before == licences_html_after).then(|| {
+        (licenses_html_before != licences_html_after).then(|| {
             eprintln!(
                 "💅 licenses.html is now up to date. 💅\n\
                 Commit the changes and you should be good to go!"
