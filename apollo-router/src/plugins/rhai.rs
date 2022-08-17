@@ -1252,35 +1252,19 @@ impl Rhai {
             })
             // Register a series of logging functions
             .register_fn("log_trace", |out: Dynamic| {
-                tracing::trace!(%out, "rhai log");
+                tracing::trace!(%out, "rhai_trace");
             })
             .register_fn("log_debug", |out: Dynamic| {
-                tracing::debug!(%out, "rhai log");
+                tracing::debug!(%out, "rhai_debug");
             })
             .register_fn("log_info", |out: Dynamic| {
-                tracing::info!(%out, "rhai log");
+                tracing::info!(%out, "rhai_info");
             })
             .register_fn("log_warn", |out: Dynamic| {
-                tracing::warn!(%out, "rhai log");
+                tracing::warn!(%out, "rhai_warn");
             })
             .register_fn("log_error", |out: Dynamic| {
-                tracing::error!(%out, "rhai log");
-            })
-            // Register a series of spanning functions
-            .register_fn("span_trace", |out: Dynamic| {
-                tracing::trace_span!("rhai trace", "{}", out.to_string());
-            })
-            .register_fn("span_debug", |out: Dynamic| {
-                tracing::debug_span!("rhai trace", "{}", out.to_string());
-            })
-            .register_fn("span_info", |out: Dynamic| {
-                tracing::info_span!("rhai trace", "{}", out.to_string());
-            })
-            .register_fn("span_warn", |out: Dynamic| {
-                tracing::warn_span!("rhai trace", "{}", out.to_string());
-            })
-            .register_fn("span_error", |out: Dynamic| {
-                tracing::error_span!("rhai trace", "{}", out.to_string());
+                tracing::error!(%out, "rhai_error");
             })
             // Register a function for printing to stderr
             .register_fn("eprint", |x: &str| {
