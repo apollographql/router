@@ -358,6 +358,20 @@ This will make containers stop faster as they will not have to wait until a SIGK
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1497
 
+### Set the response path for deferred responses ([PR #1529](https://github.com/apollographql/router/pull/1529))
+
+Some GraphQL clients rely on the response path to find out which
+fragment created a deferred response, and generate code that checks the
+type of the value at that path.
+Previously the router was generating a value that starts at the root
+for every deferred response. Now it checks the path returned by the query
+plan execution and creates a response for each value that matches that
+path.
+In particular, for deferred fragments on an ojbect inside an array, it
+will create a separate response for each element of the array.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1529
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
