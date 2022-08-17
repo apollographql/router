@@ -33,7 +33,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
 
-### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
+### Removed `delay_interval` in telemetry configuration. ([PR #1498](https://github.com/apollographql/router/pull/1498))
 
 It was doing nothing.
 
@@ -83,7 +83,7 @@ using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
 
-### Some items were renamed or moved ([PR #FIXME])
+### Some items were renamed or moved ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 At the crate root:
 
@@ -156,7 +156,7 @@ Migration example:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Some items were removed from the public API ([PR #FIXME])
+### Some items were removed from the public API ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 If you used some of them and don’t find a replacement,
 please [file an issue](https://github.com/apollographql/router/issues/)
@@ -186,7 +186,7 @@ apollo_router::Schema
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Router startup API changes ([PR #FIXME])
+### Router startup API changes ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 The `RouterHttpServer::serve` method and its return type `RouterHandle` were removed,
 their functionality merged into `RouterHttpServer` (formerly `ApolloRouter`).
@@ -205,7 +205,7 @@ This method immediatly starts the server in a new Tokio task.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #FIXME])
+### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 The builder for `apollo_router::Executable` had a `router_builder_fn` method
 allowing to specify how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
@@ -232,7 +232,7 @@ so `router_builder_fn` was replaced with a new `shutdown` method that takes that
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Removed constructors when there is a public builder ([PR #FIXME])
+### Removed constructors when there is a public builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 Many types in the Router API can be constructed with the builder pattern.
 We use the [`buildstructor`](https://crates.io/crates/buildstructor) crate
@@ -252,7 +252,7 @@ If you were using one of these constructors, the migration generally looks like 
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Removed deprecated type aliases ([PR #FIXME])
+### Removed deprecated type aliases ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 A few versions ago, some types were moved from the crate root to a new `graphql` module.
 To help the transition, type aliases were left at the old location with a deprecation warning.
@@ -273,7 +273,7 @@ This can help disambiguate when multiple types share a name.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #FIXME])
+### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 `apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
 When no `Content-Type` header is specified, this builder will now default to `application/json`.
@@ -334,7 +334,7 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
-### Explicit `shutdown` for `RouterHttpServer` handle ([PR #FIXME])
+### Explicit `shutdown` for `RouterHttpServer` handle ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 If you explicitly create a `RouterHttpServer` handle,
 dropping it while the server is running instructs the server shut down gracefuly.
@@ -353,7 +353,7 @@ to obtain a `Result`:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Added `apollo_router::TestHarness` ([PR #FIXME])
+### Added `apollo_router::TestHarness` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 This is a builder for the part of an Apollo Router that handles GraphQL requests,
 as a `tower::Service`.
