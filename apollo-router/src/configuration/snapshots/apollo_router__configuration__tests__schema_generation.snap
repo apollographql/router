@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 909
 expression: "&schema"
 ---
 {
@@ -484,6 +483,13 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
+            "buffer_size": {
+              "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
+              "default": 10000,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
             "client_name_header": {
               "default": "apollographql-client-name",
               "type": "string",

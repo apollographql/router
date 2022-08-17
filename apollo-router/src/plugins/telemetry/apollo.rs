@@ -41,17 +41,21 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "Option<String>")]
     pub(crate) endpoint: Option<Url>,
 
+    /// The Apollo Studio API key.
     #[schemars(skip)]
     #[serde(skip, default = "apollo_key")]
     pub(crate) apollo_key: Option<String>,
 
+    /// The Apollo Studio graph reference.
     #[schemars(skip)]
     #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) apollo_graph_ref: Option<String>,
 
+    /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(
         deserialize_with = "deserialize_header_name",
@@ -59,12 +63,21 @@ pub(crate) struct Config {
     )]
     pub(crate) client_name_header: HeaderName,
 
+    /// The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_version_header_default_str")]
     #[serde(
         deserialize_with = "deserialize_header_name",
         default = "client_version_header_default"
     )]
     pub(crate) client_version_header: HeaderName,
+
+    /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
+    #[serde(default = "default_buffer_size")]
+    pub(crate) buffer_size: usize,
+
+    /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
+    #[serde(default)]
+    pub(crate) field_level_instrumentation: bool,
 
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
@@ -100,6 +113,10 @@ fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
+fn default_buffer_size() -> usize {
+    10000
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -110,6 +127,8 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             apollo_sender: Sender::default(),
+            buffer_size: 10000,
+            field_level_instrumentation: false,
         }
     }
 }
@@ -133,7 +152,7 @@ impl ReportBuilder {
             .traces
             .keys()
             .chain(self.stats.keys())
-            .dedup()
+            .duplicates()
             .cloned()
             .collect();
         let operation_count = duplicated_keys.len() as u64;
@@ -159,13 +178,19 @@ impl ReportBuilder {
             traces: self.traces,
         };
 
-        (
+        dbg!((
             report,
             vec![
                 SingleReport::Stats(single_stats_report),
                 SingleReport::Traces(single_traces_report),
             ],
-        )
+        ))
+    }
+}
+
+impl AddAssign<Vec<SingleReport>> for ReportBuilder {
+    fn add_assign(&mut self, report: Vec<SingleReport>) {
+        report.into_iter().for_each(|r| self.add_assign(r));
     }
 }
 
@@ -349,7 +374,7 @@ impl ApolloExporter {
             loop {
                 tokio::select! {
                     single_report = rx.next() => {
-
+                        report_builder += std::mem::take(&mut buffer);
                         if let Some(r) = single_report {
                             report_builder += dbg!(r);
                         } else {
@@ -357,8 +382,10 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        let report = std::mem::take(&mut report_builder).build();
-                        Self::send_report(&pool, &apollo_key, &header, report.0).await;
+                        report_builder += std::mem::take(&mut buffer);
+                        let (report, orphans) = std::mem::take(&mut report_builder).build();
+                        buffer = orphans;
+                        Self::send_report(&pool, &apollo_key, &header, report).await;
                     }
                 };
             }

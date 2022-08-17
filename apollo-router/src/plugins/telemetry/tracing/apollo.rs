@@ -24,6 +24,8 @@ impl TracingConfigurator for Config {
                 client_version_header,
                 schema_id,
                 apollo_sender,
+                buffer_size,
+                ..
             } => {
                 tracing::debug!("configuring exporter to Spaceport");
                 let exporter = apollo_telemetry::Exporter::builder()
@@ -35,6 +37,7 @@ impl TracingConfigurator for Config {
                     .client_version_header(client_version_header)
                     .schema_id(schema_id)
                     .apollo_sender(apollo_sender.clone())
+                    .buffer_size(*buffer_size)
                     .build();
                 builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
             }
