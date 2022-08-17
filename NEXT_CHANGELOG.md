@@ -94,6 +94,10 @@ At the crate root:
 * `ShutdownKind` → `ShutdownSource`
 * `ApolloRouter` → `RouterHttpServer`
 
+In the `apollo_router::plugin::Plugin` trait:
+
+* `query_planning_service` → `query_planner_service`
+
 A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
 reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
 In pseudo-syntax:

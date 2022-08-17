@@ -38,7 +38,7 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
