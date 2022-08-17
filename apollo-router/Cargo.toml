@@ -18,7 +18,7 @@ failfast = []
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.61"
+anyhow = "1.0.62"
 apollo-parser = "0.2.10"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
@@ -70,7 +70,7 @@ moka = { version = "0.9.3", features = ["future", "futures-util"] }
 miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
-once_cell = "1.13.0"
+once_cell = "1.13.1"
 
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of
