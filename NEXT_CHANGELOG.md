@@ -292,6 +292,13 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
 
+### rhai logging functions now accept Dynamic parameters ([PR #1521](https://github.com/apollographql/router/pull/1521))
+
+Prior to this change, rhai logging functions worked with string parameters. This change means that any valid rhai object
+may now be passed as a logging parameter.
+
+By [@garypen](https://github.com/garypen)
+
 ### Reduce initial memory footprint by lazily populating introspection query cache ([#1516](https://github.com/apollographql/router/issues/1516))
 
 In an early alpha release of the Router, we only executed certain "known" introspection queries because of prior technical constraints that prohibited us from doing something more flexible.  Because the set of introspection queries was "known", it made sense to cache them.
@@ -303,7 +310,6 @@ We could have kept caching those "known" queries, however we were finding that t
 This change removes the cache entirely and allows introspection queries served by the Router to merely be lazily calculated and cached on-demand, thereby reducing the initial memory footprint.  Disabling introspection entirely will prevent any use of this cache since no introspection will be possible.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
-
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
 
