@@ -39,10 +39,9 @@ impl Compliance {
             eprintln!(
                 "{}",
                 String::from_utf8_lossy(
-                    Command::new(which::which("git").unwrap())
+                    Command::new(which::which("git")?)
                         .args(["diff", LICENSES_HTML_PATH])
-                        .output()
-                        .unwrap()
+                        .output()?
                         .stdout
                         .as_slice()
                 )
