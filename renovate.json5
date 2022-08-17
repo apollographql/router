@@ -82,7 +82,8 @@
         "cargo"
       ],
       "matchPackagePatterns": [
-        "^tracing"
+        "^tracing",
+        "^opentelemetry",
       ],
       "groupName": "cargo tracing packages",
       "groupSlug": "cargo-tracing-packages",
