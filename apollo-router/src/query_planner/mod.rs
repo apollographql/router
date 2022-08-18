@@ -869,7 +869,7 @@ pub(crate) mod fetch {
                 Some(Variables { variables, paths })
             } else {
                 // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
-                // when the first fetch fails, the query plan wwill still execute up until the second fetch,
+                // when the first fetch fails, the query plan will still execute up until the second fetch,
                 // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
                 // the previous operation field) and the data is null. In that case, we recognize that we
                 // should not perform the next fetch
