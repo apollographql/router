@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Rename traffic shaping deduplication options ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Rename traffic shaping deduplication options ([PR #1540](https://github.com/apollographql/router/pull/1540))
 
 In the traffic shaping module:
  - `variables_deduplication` configuration option is renamed to `deduplicate_variables`.
