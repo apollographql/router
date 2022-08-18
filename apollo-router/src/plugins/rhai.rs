@@ -1146,6 +1146,22 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
+            .register_fn(
+                "headers_are_available",
+                |_: &mut SharedMut<router::Response>| -> bool { true },
+            )
+            .register_fn(
+                "headers_are_available",
+                |_: &mut SharedMut<router::DeferredResponse>| -> bool { false },
+            )
+            .register_fn(
+                "headers_are_available",
+                |_: &mut SharedMut<execution::Response>| -> bool { true },
+            )
+            .register_fn(
+                "headers_are_available",
+                |_: &mut SharedMut<execution::DeferredResponse>| -> bool { false },
+            )
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
                 let search_name =
