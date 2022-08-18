@@ -33,9 +33,8 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugin::test;
-    use apollo_router::stages::router;
     use apollo_router::stages::subgraph;
-    use futures::stream::StreamExt;
+    use apollo_router::stages::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -87,20 +86,14 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .extra_subgraph_plugin(move |_, _| mock_service.clone().boxed())
-            .extra_router_plugin(|service| {
+            .extra_supergraph_plugin(|service| {
                 service
-                    .map_response(|mut response| {
+                    .map_response(|response| {
                         let mock_data = response.context.get("mock_data").unwrap();
-                        let body = response.response.body_mut();
-                        let dummy = futures::stream::empty().boxed();
-                        let stream = std::mem::replace(body, dummy);
-                        *body = stream
-                            .map(move |mut resp| {
-                                resp.data = mock_data.clone();
-                                resp
-                            })
-                            .boxed();
-                        response
+                        response.map_stream(move |mut stream_item| {
+                            stream_item.data = mock_data.clone();
+                            stream_item
+                        })
                     })
                     .boxed()
             })
@@ -108,7 +101,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request_with_appropriate_cookies = router::Request::canned_builder()
+        let request_with_appropriate_cookies = supergraph::Request::canned_builder()
             .header("cookie", "yummy_cookie=choco;tasty_cookie=strawberry")
             .build()
             .unwrap();

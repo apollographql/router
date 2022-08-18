@@ -12,8 +12,8 @@ use apollo_router::graphql::Request;
 use apollo_router::http_ext;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::stages::router;
 use apollo_router::stages::subgraph;
+use apollo_router::stages::supergraph;
 use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use http::Method;
@@ -267,7 +267,7 @@ async fn queries_should_work_with_compression() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -301,7 +301,7 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -413,7 +413,7 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -808,13 +808,13 @@ async fn query_node(
 }
 
 async fn query_rust(
-    request: router::Request,
+    request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     query_rust_with_config(request, serde_json::json!({})).await
 }
 
 async fn query_rust_with_config(
-    request: router::Request,
+    request: supergraph::Request,
     config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
@@ -823,7 +823,7 @@ async fn query_rust_with_config(
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (router::BoxCloneService, CountingServiceRegistry) {
+) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
     let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
@@ -851,8 +851,8 @@ async fn setup_router_and_registry(
 }
 
 async fn query_with_router(
-    router: router::BoxCloneService,
-    request: router::Request,
+    router: supergraph::BoxCloneService,
+    request: supergraph::Request,
 ) -> graphql::Response {
     router
         .oneshot(request)

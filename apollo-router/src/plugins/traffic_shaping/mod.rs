@@ -39,8 +39,8 @@ use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
 use crate::stages::query_planner;
-use crate::stages::router;
 use crate::stages::subgraph;
+use crate::stages::supergraph;
 use crate::QueryPlannerRequest;
 use crate::SubgraphRequest;
 
@@ -173,7 +173,7 @@ impl Plugin for TrafficShaping {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .layer(TimeoutLayer::new(
                 self.config
@@ -233,7 +233,7 @@ impl Plugin for TrafficShaping {
         }
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
@@ -276,13 +276,13 @@ mod test {
     use super::*;
     use crate::graphql::Response;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
+    use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::PluggableRouterServiceBuilder;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
     use crate::Schema;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
         serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
@@ -293,9 +293,9 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
     ) {
-        let request = RouterRequest::fake_builder()
+        let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
@@ -316,7 +316,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -516,12 +516,12 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         mock_service.expect_clone().returning(|| {
-            let mut mock_service = MockRouterService::new();
+            let mut mock_service = MockSupergraphService::new();
 
             mock_service.expect_call().times(0..2).returning(move |_| {
-                Ok(RouterResponse::fake_builder()
+                Ok(SupergraphResponse::fake_builder()
                     .data(json!({ "test": 1234_u32 }))
                     .build()
                     .unwrap())
@@ -530,8 +530,8 @@ mod test {
         });
 
         let _response = plugin
-            .router_service(mock_service.clone().boxed())
-            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .supergraph_service(mock_service.clone().boxed())
+            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
             .next_response()
@@ -539,14 +539,14 @@ mod test {
             .unwrap();
 
         assert!(plugin
-            .router_service(mock_service.clone().boxed())
-            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .supergraph_service(mock_service.clone().boxed())
+            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
         tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
-            .router_service(mock_service.clone().boxed())
-            .oneshot(RouterRequest::fake_builder().build().unwrap())
+            .supergraph_service(mock_service.clone().boxed())
+            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
             .next_response()

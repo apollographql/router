@@ -277,7 +277,7 @@ pub struct Response<T> {
 impl<T> Response<T> {
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
-        F: FnMut(T) -> U,
+        F: FnOnce(T) -> U,
     {
         self.inner.map(f).into()
     }

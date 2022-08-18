@@ -18,8 +18,8 @@ failfast = []
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.58"
-apollo-parser = "0.2.9"
+anyhow = "1.0.62"
+apollo-parser = "0.2.10"
 apollo-spaceport = { path = "../apollo-spaceport" }
 apollo-uplink = { path = "../uplink" }
 async-compression = { version = "0.3.14", features = [
@@ -33,8 +33,8 @@ atty = "0.2.14"
 axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
-bytes = "1.1.0"
-clap = { version = "3.2.10", default-features = false, features = [
+bytes = "1.2.1"
+clap = { version = "3.2.17", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -48,8 +48,8 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.1"
-futures = { version = "0.3.21", features = ["thread-pool"] }
+envmnt = "0.10.2"
+futures = { version = "0.3.23", features = ["thread-pool"] }
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
@@ -63,14 +63,26 @@ indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"
-libc = "0.2.131"
+libc = "0.2.132"
 lru = "0.7.8"
 mockall = "0.11.2"
 moka = { version = "0.9.3", features = ["future", "futures-util"] }
-miette = { version = "5.1.1", features = ["fancy"] }
+miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
-once_cell = "1.13.0"
+once_cell = "1.13.1"
+
+# Any package that starts with `opentelemetry` needs to be updated with care
+# because it is tightly intertwined with the `tracing` packages on account of
+# the `opentelemetry-tracing` package.
+#
+# We are constrained in our ability to update the `tracing` packages and that is
+# tracked in https://github.com/apollographql/router/issues/1407.
+#
+# To codify this with code, a rule in our Renovate configuration constraints and
+# groups `^tracing` and `^opentelemetry*` dependencies together as of
+# https://github.com/apollographql/router/pull/1509.  A comment which exists
+# there (and on `tracing` packages below) should be updated should this change.
 opentelemetry = { version = "0.17.0", features = [
     "rt-tokio",
     "serialize",
@@ -98,7 +110,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.10.0"
-paste = "1.0.7"
+paste = "1.0.8"
 prometheus = "0.13"
 rhai = { version = "1.8.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
@@ -110,16 +122,16 @@ reqwest = { version = "0.11.11", default-features = false, features = [
 router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha1" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
-serde = { version = "1.0.139", features = ["derive", "rc"] }
+serde = { version = "1.0.143", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
-serde_json = { version = "1.0.82", features = ["preserve_order"] }
+serde_json = { version = "1.0.83", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
-thiserror = "1.0.31"
-tokio = { version = "1.19.2", features = ["full"] }
+thiserror = "1.0.32"
+tokio = { version = "1.20.1", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
@@ -136,11 +148,21 @@ tower-http = { version = "0.3.4", features = [
     "timeout"
 ] }
 tower-service = "0.3.2"
+
+# We are constrained in our ability to update the `tracing` packages, which is
+# tracked in https://github.com/apollographql/router/issues/1407.
+#
+# To codify this with code, a rule in our Renovate configuration constraints and
+# groups `^tracing` and `^opentelemetry*` dependencies together as of
+# https://github.com/apollographql/router/pull/1509.  A comment which exists
+# there (and above around the `opentelemetry` packages) should this ever change.
+# There is also a note below on the `^tracing` dev-dependencies!
 tracing = "=0.1.34"
 tracing-core = "=0.1.26"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
+
 url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
@@ -153,7 +175,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = "1.15.0"
+insta = { version = "1.18.2", features = [ "json" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 mockall = "0.11.2"
@@ -167,6 +189,9 @@ test-log = { version = "0.2.11", default-features = false, features = [
 ] }
 test-span = "0.7"
 tower-test = "0.4.0"
+
+# See note above in this file about `^tracing` packages which also applies to
+# these dev dependencies.
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",

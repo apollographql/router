@@ -60,12 +60,12 @@ Each Apollo Router service has a corresponding function that a customization can
 
 | Service | Function | Description |
 |---------|----------|-------------|
-| `RouterService` | `router_service` | <p>This service runs at the very beginning and very end of the request lifecycle.</p><p>Define `router_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further. </p>|
-| `QueryPlannerService` | `query_planning_service` | <p>This service handles generating the query plan for each incoming request. </p><p>Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).</p> |
+| `SupergraphService` | `supergraph_service` | <p>This service runs at the very beginning and very end of the request lifecycle.</p><p>Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further. </p>|
+| `QueryPlannerService` | `query_planner_service` | <p>This service handles generating the query plan for each incoming request. </p><p>Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).</p> |
 | `ExecutionService` | `execution_service` | <p>This service handles initiating the execution of a query plan after it's been generated.</p><p>Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).</p>|
 | `SubgraphService` | `subgraph_service` | This service handles communication between the Apollo Router and your subgraphs. Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph). |
 
-> _Most_ customizations use `router_service` and/or `subgraph_service`, whereas the other service functions are less common.
+> _Most_ customizations use `supergraph_service` and/or `subgraph_service`, whereas the other service functions are less common.
 
 Each service has a request and response data-structure that holds:
 * A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:

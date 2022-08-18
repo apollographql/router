@@ -1,7 +1,7 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::router;
+use apollo_router::stages::supergraph;
 {{#if type_basic}}
 use apollo_router::stages::execution;
 use apollo_router::stages::query_planner;
@@ -47,10 +47,10 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
-    fn router_service(
+    fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -63,7 +63,7 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
@@ -99,13 +99,13 @@ impl Plugin for {{pascal_name}} {
         Ok({{pascal_name}} { configuration: init.config })
     }
 
-    fn router_service(
+    fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
 
         ServiceBuilder::new()
-                    .checkpoint_async(|request : router::Request| async {
+                    .checkpoint_async(|request : supergraph::Request| async {
                         // Do some async call here to auth, and decide if to continue or not.
                         Ok(ControlFlow::Continue(request))
                     })
@@ -126,10 +126,10 @@ impl Plugin for {{pascal_name}} {
         Ok({{pascal_name}} { configuration: init.config })
     }
 
-    fn router_service(
+    fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
 
         ServiceBuilder::new()
                     .instrument(|_request| {
@@ -155,7 +155,7 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 #[cfg(test)]
 mod tests {
     use apollo_router::TestHarness;
-    use apollo_router::stages::router;
+    use apollo_router::stages::supergraph;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -173,7 +173,7 @@ mod tests {
             .build()
             .await
             .unwrap();
-        let request = router::Request::canned_builder().build().unwrap();
+        let request = supergraph::Request::canned_builder().build().unwrap();
         let mut streamed_response = test_harness.oneshot(request).await?;
 
         let first_response = streamed_response
