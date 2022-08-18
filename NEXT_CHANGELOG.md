@@ -33,7 +33,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
 
-### Removed `delay_interval` in telemetry configuration. [PR #FIXME]
+### Removed `delay_interval` in telemetry configuration. ([PR #1498](https://github.com/apollographql/router/pull/1498))
 
 It was doing nothing.
 
@@ -83,7 +83,7 @@ using an `expect_clone` call with mockall.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1440
 
-### Some items were renamed or moved ([PR #FIXME])
+### Some items were renamed or moved ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 At the crate root:
 
@@ -94,12 +94,18 @@ At the crate root:
 * `ShutdownKind` → `ShutdownSource`
 * `ApolloRouter` → `RouterHttpServer`
 
+In the `apollo_router::plugin::Plugin` trait:
+
+* `router_service` → `supergraph_service`
+* `query_planning_service` → `query_planner_service`
+
 A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
 reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
-In pseudo-syntax:
+Additionally, the "router stage" is now known as "supergraph stage".
+In pseudo-syntax, `use`’ing the old names:
 
 ```rust
-mod router {
+mod supergraph {
     use apollo_router::services::RouterRequest as Request;
     use apollo_router::services::RouterResponse as Response;
     type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -156,7 +162,7 @@ Migration example:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Some items were removed from the public API ([PR #FIXME])
+### Some items were removed from the public API ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 If you used some of them and don’t find a replacement,
 please [file an issue](https://github.com/apollographql/router/issues/)
@@ -171,11 +177,13 @@ apollo_router::errors::PlannerErrors
 apollo_router::errors::QueryPlannerError
 apollo_router::errors::ServiceBuildError
 apollo_router::json_ext
+apollo_router::layers::ServiceBuilderExt::cache
 apollo_router::mock_service!
 apollo_router::plugins
 apollo_router::plugin::plugins
 apollo_router::plugin::PluginFactory
 apollo_router::plugin::DynPlugin
+apollo_router::plugin::Handler
 apollo_router::plugin::test::IntoSchema
 apollo_router::plugin::test::MockSubgraphFactory
 apollo_router::plugin::test::PluginTestHarness
@@ -186,7 +194,7 @@ apollo_router::Schema
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Router startup API changes ([PR #FIXME])
+### Router startup API changes ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 The `RouterHttpServer::serve` method and its return type `RouterHandle` were removed,
 their functionality merged into `RouterHttpServer` (formerly `ApolloRouter`).
@@ -205,7 +213,7 @@ This method immediatly starts the server in a new Tokio task.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #FIXME])
+### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 The builder for `apollo_router::Executable` had a `router_builder_fn` method
 allowing to specify how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
@@ -232,7 +240,7 @@ so `router_builder_fn` was replaced with a new `shutdown` method that takes that
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Removed constructors when there is a public builder ([PR #FIXME])
+### Removed constructors when there is a public builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 Many types in the Router API can be constructed with the builder pattern.
 We use the [`buildstructor`](https://crates.io/crates/buildstructor) crate
@@ -252,7 +260,7 @@ If you were using one of these constructors, the migration generally looks like 
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Removed deprecated type aliases ([PR #FIXME])
+### Removed deprecated type aliases ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 A few versions ago, some types were moved from the crate root to a new `graphql` module.
 To help the transition, type aliases were left at the old location with a deprecation warning.
@@ -273,7 +281,7 @@ This can help disambiguate when multiple types share a name.
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #FIXME])
+### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 `apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
 When no `Content-Type` header is specified, this builder will now default to `application/json`.
@@ -284,13 +292,65 @@ If a test requires a request specifically *without* a `Content-Type` header,
 this default can be removed from a `RouterRequest` after building it:
 
 ```rust
-let mut router_request = RouterRequesT::fake_builder().build();
+let mut router_request = RouterRequest::fake_builder().build();
 router_request.originating_request.headers_mut().remove("content-type");
 ```
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Plugins return a service for custom endpoints ([Issue #1481](https://github.com/apollographql/router/issues/1481))
+
+Rust plugins can implement the `Plugin::custom_endpoint` trait method
+to handle some non-GraphQL HTTP requests.
+
+Previously, the return type of this method was `Option<apollo_router::plugin::Handler>`,
+where a `Handler` could be created with:
+
+```rust
+impl Handler {
+    pub fn new(service: tower::util::BoxService<
+        apollo_router::http_ext::Request<bytes::Bytes>, 
+        apollo_router::http_ext::Response<bytes::Bytes>, 
+        tower::BoxError
+    >) -> Self {/* … */}
+}
+```
+
+`Handler` has been removed from the public API, now plugins return a `BoxService` directly instead.
+Additionally, the type for HTTP request and response bodies was changed
+from `bytes::Bytes` to `hyper::Body` (which is more flexible, for example can be streamed).
+
+Changes needed if using custom enpoints are:
+
+* Replace `Handler::new(service)` with `service`
+* To read the full request body,
+  use [`hyper::body::to_bytes`](https://docs.rs/hyper/latest/hyper/body/fn.to_bytes.html)
+  or [`hyper::body::aggregate`](https://docs.rs/hyper/latest/hyper/body/fn.aggregate.html).
+* A response `Body` can be created through conversion traits from various types.
+  For example: `"string".into()`
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🚀 Features
+
+### rhai logging functions now accept Dynamic parameters ([PR #1521](https://github.com/apollographql/router/pull/1521))
+
+Prior to this change, rhai logging functions worked with string parameters. This change means that any valid rhai object
+may now be passed as a logging parameter.
+
+By [@garypen](https://github.com/garypen)
+
+### Reduce initial memory footprint by lazily populating introspection query cache ([#1516](https://github.com/apollographql/router/issues/1516))
+
+In an early alpha release of the Router, we only executed certain "known" introspection queries because of prior technical constraints that prohibited us from doing something more flexible.  Because the set of introspection queries was "known", it made sense to cache them.
+
+As of https://github.com/apollographql/router/pull/802, this special-casing is (thankfully) no longer necessary and we no longer need to _know_ (and constrain!) the introspection queries that the Router supports.
+
+We could have kept caching those "known" queries, however we were finding that the resulting cache size was quite large and making the Router's minimum memory footprint larger than need be since we were caching many introspection results which the Router instance would never encounter.
+
+This change removes the cache entirely and allows introspection queries served by the Router to merely be lazily calculated and cached on-demand, thereby reducing the initial memory footprint.  Disabling introspection entirely will prevent any use of this cache since no introspection will be possible.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
 
@@ -321,7 +381,7 @@ traffic_shaping:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1347
 
-### Explicit `shutdown` for `RouterHttpServer` handle ([PR #FIXME])
+### Explicit `shutdown` for `RouterHttpServer` handle ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 If you explicitly create a `RouterHttpServer` handle,
 dropping it while the server is running instructs the server shut down gracefuly.
@@ -340,7 +400,7 @@ to obtain a `Result`:
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Added `apollo_router::TestHarness` ([PR #FIXME])
+### Added `apollo_router::TestHarness` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 This is a builder for the part of an Apollo Router that handles GraphQL requests,
 as a `tower::Service`.
@@ -362,6 +422,20 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
+
+This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1497
+
 ## 🛠 Maintenance
+
+### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
+
+The CI check that ensures that the `license.html` file is up to date now displays what has changed when the file is out of sync.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
+## 🚀 Features
 
 ## 📚 Documentation

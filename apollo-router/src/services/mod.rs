@@ -20,8 +20,8 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 pub(crate) use self::execution_service::*;
-pub(crate) use self::router_service::*;
 pub(crate) use self::subgraph_service::*;
+pub(crate) use self::supergraph_service::*;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -38,14 +38,14 @@ mod execution_service;
 pub mod http_ext;
 pub(crate) mod layers;
 pub(crate) mod new_service;
-mod router_service;
 pub(crate) mod subgraph_service;
+mod supergraph_service;
 
-assert_impl_all!(RouterRequest: Send);
+assert_impl_all!(SupergraphRequest: Send);
 /// Represents the router processing step of the processing pipeline.
 ///
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
-pub struct RouterRequest {
+pub struct SupergraphRequest {
     /// Original request to the Router.
     pub originating_request: http_ext::Request<Request>,
 
@@ -53,7 +53,7 @@ pub struct RouterRequest {
     pub context: Context,
 }
 
-impl From<http_ext::Request<Request>> for RouterRequest {
+impl From<http_ext::Request<Request>> for SupergraphRequest {
     fn from(originating_request: http_ext::Request<Request>) -> Self {
         Self {
             originating_request,
@@ -63,10 +63,10 @@ impl From<http_ext::Request<Request>> for RouterRequest {
 }
 
 #[buildstructor::buildstructor]
-impl RouterRequest {
-    /// This is the constructor (or builder) to use when constructing a real RouterRequest.
+impl SupergraphRequest {
+    /// This is the constructor (or builder) to use when constructing a real SupergraphRequest.
     ///
-    /// Required parameters are required in non-testing code to create a RouterRequest.
+    /// Required parameters are required in non-testing code to create a SupergraphRequest.
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
@@ -78,7 +78,7 @@ impl RouterRequest {
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Uri,
         method: Method,
-    ) -> Result<RouterRequest, BoxError> {
+    ) -> Result<SupergraphRequest, BoxError> {
         let extensions: Object = extensions
             .into_iter()
             .map(|(name, value)| (ByteString::from(name), value))
@@ -109,10 +109,10 @@ impl RouterRequest {
         })
     }
 
-    /// This is the constructor (or builder) to use when constructing a "fake" RouterRequest.
+    /// This is the constructor (or builder) to use when constructing a "fake" SupergraphRequest.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterRequest. It's usually enough for testing, when a fully constructed RouterRequest is
+    /// SupergraphRequest. It's usually enough for testing, when a fully constructed SupergraphRequest is
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
@@ -124,14 +124,14 @@ impl RouterRequest {
         extensions: HashMap<String, Value>,
         context: Option<Context>,
         mut headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
-    ) -> Result<RouterRequest, BoxError> {
+    ) -> Result<SupergraphRequest, BoxError> {
         // Avoid testing requests getting blocked by the CSRF-prevention plugin
         headers
             .entry(IntoHeaderName::HeaderName(http::header::CONTENT_TYPE))
             .or_insert(IntoHeaderValue::HeaderValue(HeaderValue::from_static(
                 "application/json",
             )));
-        RouterRequest::new(
+        SupergraphRequest::new(
             query,
             operation_name,
             variables,
@@ -150,7 +150,7 @@ impl RouterRequest {
         extensions: HashMap<String, Value>,
         context: Option<Context>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
-    ) -> Result<RouterRequest, BoxError> {
+    ) -> Result<SupergraphRequest, BoxError> {
         let query = "
             query TopProducts($first: Int) { 
                 topProducts(first: $first) { 
@@ -177,20 +177,20 @@ impl RouterRequest {
     }
 }
 
-assert_impl_all!(RouterResponse: Send);
+assert_impl_all!(SupergraphResponse: Send);
 /// [`Context`] and [`http_ext::Response<Response>`] for the response.
 ///
 /// This consists of the response body and the context.
-pub struct RouterResponse {
+pub struct SupergraphResponse {
     pub response: http_ext::Response<BoxStream<'static, Response>>,
     pub context: Context,
 }
 
 #[buildstructor::buildstructor]
-impl RouterResponse {
-    /// This is the constructor (or builder) to use when constructing a real RouterResponse..
+impl SupergraphResponse {
+    /// This is the constructor (or builder) to use when constructing a real SupergraphResponse..
     ///
-    /// Required parameters are required in non-testing code to create a RouterResponse..
+    /// Required parameters are required in non-testing code to create a SupergraphResponse..
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
@@ -239,10 +239,10 @@ impl RouterResponse {
         })
     }
 
-    /// This is the constructor (or builder) to use when constructing a "fake" RouterResponse.
+    /// This is the constructor (or builder) to use when constructing a "fake" SupergraphResponse.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterResponse. It's usually enough for testing, when a fully constructed RouterResponse is
+    /// SupergraphResponse. It's usually enough for testing, when a fully constructed SupergraphResponse is
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
@@ -257,7 +257,7 @@ impl RouterResponse {
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
-        RouterResponse::new(
+        SupergraphResponse::new(
             data,
             path,
             errors,
@@ -268,7 +268,7 @@ impl RouterResponse {
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
+    /// This is the constructor (or builder) to use when constructing a SupergraphResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
     #[builder(visibility = "pub")]
@@ -278,7 +278,7 @@ impl RouterResponse {
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
-        RouterResponse::new(
+        SupergraphResponse::new(
             Default::default(),
             None,
             errors,
@@ -297,7 +297,7 @@ impl RouterResponse {
     }
 }
 
-impl RouterResponse {
+impl SupergraphResponse {
     pub async fn next_response(&mut self) -> Option<Response> {
         self.response.body_mut().next().await
     }
@@ -309,14 +309,18 @@ impl RouterResponse {
         Self { response, context }
     }
 
-    pub fn map<F>(self, f: F) -> RouterResponse
+    pub fn map<F>(self, f: F) -> SupergraphResponse
     where
-        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
+        F: FnOnce(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
-        RouterResponse {
+        SupergraphResponse {
             context: self.context,
             response: self.response.map(f),
         }
+    }
+
+    pub fn map_stream(self, f: impl FnMut(Response) -> Response + Send + 'static) -> Self {
+        self.map(move |stream| stream.map(f).boxed())
     }
 }
 
@@ -655,10 +659,10 @@ pub struct ExecutionResponse {
 
 #[buildstructor::buildstructor]
 impl ExecutionResponse {
-    /// This is the constructor (or builder) to use when constructing a real RouterRequest.
+    /// This is the constructor (or builder) to use when constructing a real SupergraphRequest.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
-    /// set and be correct to create a RouterRequest.
+    /// set and be correct to create a SupergraphRequest.
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -758,12 +762,16 @@ impl ExecutionResponse {
 
     pub fn map<F>(self, f: F) -> ExecutionResponse
     where
-        F: FnMut(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
+        F: FnOnce(BoxStream<'static, Response>) -> BoxStream<'static, Response>,
     {
         ExecutionResponse {
             context: self.context,
             response: self.response.map(f),
         }
+    }
+
+    pub fn map_stream(self, f: impl FnMut(Response) -> Response + Send + 'static) -> Self {
+        self.map(move |stream| stream.map(f).boxed())
     }
 
     pub async fn next_response(&mut self) -> Option<Response> {
@@ -792,12 +800,12 @@ mod test {
 
     use crate::graphql;
     use crate::Context;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     #[test]
-    fn router_request_builder() {
-        let request = RouterRequest::builder()
+    fn supergraph_request_builder() {
+        let request = SupergraphRequest::builder()
             .header("a", "b")
             .header("a", "c")
             .uri(Uri::from_static("http://example.com"))
@@ -855,8 +863,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn router_response_builder() {
-        let mut response = RouterResponse::builder()
+    async fn supergraph_response_builder() {
+        let mut response = SupergraphResponse::builder()
             .header("a", "b")
             .header("a", "c")
             .context(Context::new())

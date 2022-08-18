@@ -1,8 +1,8 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::router;
 use apollo_router::stages::subgraph;
+use apollo_router::stages::supergraph;
 use http::StatusCode;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -41,12 +41,12 @@ impl Plugin for ContextData {
         Ok(Self::default())
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
-            .map_request(|req: router::Request| {
+            .map_request(|req: supergraph::Request| {
                 // Populate a value in context for use later.
                 // Context values must be serializable to serde_json::Value.
                 if let Err(e) = req.context.insert("incoming_data", "world!".to_string()) {

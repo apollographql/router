@@ -14,8 +14,8 @@ use crate::register_plugin;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
@@ -38,7 +38,7 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
@@ -63,20 +63,20 @@ impl Plugin for ExposeQueryPlan {
             .boxed()
     }
 
-    fn router_service(
+    fn supergraph_service(
         &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
+    ) -> BoxService<SupergraphRequest, SupergraphResponse, BoxError> {
         let conf_enabled = self.enabled;
         service
-            .map_future_with_context(move |req: &RouterRequest| {
+            .map_future_with_context(move |req: &SupergraphRequest| {
                 let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
                 (req.originating_request.body().query.clone(), is_enabled)
             }, move |(query, is_enabled): (Option<String>, bool), f| async move {
-                let mut res: Result<RouterResponse, BoxError>  = f.await;
+                let mut res: Result<SupergraphResponse, BoxError>  = f.await;
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {
@@ -148,7 +148,7 @@ mod tests {
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -209,9 +209,9 @@ mod tests {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
     ) {
-        let request = RouterRequest::fake_builder()
+        let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .header(EXPOSE_QUERY_PLAN_HEADER_NAME, "true")

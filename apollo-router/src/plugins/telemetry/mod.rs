@@ -15,7 +15,6 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -67,17 +66,18 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::stages;
 use crate::stages::execution;
 use crate::stages::query_planner;
-use crate::stages::router;
 use crate::stages::subgraph;
+use crate::stages::supergraph;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::QueryPlannerRequest;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 pub(crate) mod apollo;
 pub(crate) mod config;
@@ -165,17 +165,17 @@ impl Plugin for Telemetry {
         Self::new_common::<Registry>(init.config, None).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
         let config_map_res = config.clone();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(
+            .instrument(Self::supergraph_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
             .map_future_with_context(
-                move |req: &RouterRequest| {
+                move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
                     req.context.clone()
                 },
@@ -185,7 +185,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let mut result: Result<RouterResponse, BoxError> = fut.await;
+                        let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -257,7 +257,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn query_planning_service(
+    fn query_planner_service(
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
@@ -493,7 +493,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -503,7 +503,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
+            move |req: &stages::http::Request, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -517,7 +517,7 @@ impl Plugin for Telemetry {
         )
         .boxed();
 
-        Some(Handler::new(svc))
+        Some(svc)
     }
 }
 
@@ -732,7 +732,7 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_ext::Request<Bytes>| async {
+            service_fn(|_req: stages::http::Request| async {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
@@ -744,11 +744,13 @@ impl Telemetry {
         )
     }
 
-    fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
+    fn supergraph_service_span(
+        config: apollo::Config,
+    ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         let client_name_header = config.client_name_header;
         let client_version_header = config.client_version_header;
 
-        move |request: &RouterRequest| {
+        move |request: &SupergraphRequest| {
             let http_request = &request.originating_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
@@ -850,9 +852,9 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<RouterResponse, BoxError>,
+        result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
-    ) -> Result<RouterResponse, BoxError> {
+    ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -906,7 +908,7 @@ impl Telemetry {
         res
     }
 
-    fn populate_context(config: Arc<Conf>, req: &RouterRequest) {
+    fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
@@ -1016,13 +1018,13 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -1187,12 +1189,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
                     .data(json!({"data": {"my_value": 2usize}}))
@@ -1338,10 +1340,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
-        let router_req = RouterRequest::fake_builder().header("test", "my_value_set");
+        let mut supergraph_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
 
-        let _router_response = router_service
+        let _router_response = supergraph_service
             .ready()
             .await
             .unwrap()
@@ -1400,16 +1402,16 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let handler = dyn_plugin.custom_endpoint().unwrap();
         let http_req_prom = http_ext::Request::fake_builder()
             .uri(Uri::from_static(
                 "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
             ))
             .method(Method::GET)
-            .body(Bytes::new())
+            .body(Bytes::new().into())
             .build()
             .unwrap();
-        let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         let http_req_prom = http_ext::Request::fake_builder()
@@ -1417,12 +1419,14 @@ mod tests {
                 "http://localhost:4000/plugins/apollo.telemetry/prometheus",
             ))
             .method(Method::GET)
-            .body(Bytes::new())
+            .body(Bytes::new().into())
             .build()
             .unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let prom_metrics = String::from_utf8_lossy(resp.body());
+        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let prom_metrics = String::from_utf8_lossy(&body);
         assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));

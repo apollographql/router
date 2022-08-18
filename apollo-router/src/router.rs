@@ -320,14 +320,34 @@ impl ShutdownSource {
         match self {
             ShutdownSource::None => stream::pending::<Event>().boxed(),
             ShutdownSource::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
-            ShutdownSource::CtrlC => async {
-                tokio::signal::ctrl_c()
-                    .await
-                    .expect("Failed to install CTRL+C signal handler");
+            ShutdownSource::CtrlC => {
+                #[cfg(not(unix))]
+                {
+                    async {
+                        tokio::signal::ctrl_c()
+                            .await
+                            .expect("Failed to install CTRL+C signal handler");
+                    }
+                    .map(|_| Shutdown)
+                    .into_stream()
+                    .boxed()
+                }
+
+                #[cfg(unix)]
+                future::select(
+                    tokio::signal::ctrl_c().map(|s| s.ok()).boxed(),
+                    async {
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("Failed to install SIGTERM signal handler")
+                            .recv()
+                            .await
+                    }
+                    .boxed(),
+                )
+                .map(|_| Shutdown)
+                .into_stream()
+                .boxed()
             }
-            .map(|_| Shutdown)
-            .into_stream()
-            .boxed(),
         }
     }
 }

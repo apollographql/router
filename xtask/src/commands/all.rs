@@ -17,11 +17,11 @@ pub struct All {
 
 impl All {
     pub fn run(&self) -> Result<()> {
+        eprintln!("Checking licenses...");
+        self.compliance.run_local()?;
         eprintln!("Checking format and clippy...");
         self.lint.run_local()?;
         eprintln!("Running tests...");
-        self.test.run()?;
-        eprintln!("Checking licenses...");
-        self.compliance.run_local()
+        self.test.run()
     }
 }

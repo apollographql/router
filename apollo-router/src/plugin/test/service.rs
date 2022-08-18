@@ -3,10 +3,10 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// Build a mock service handler for the router pipeline.
 macro_rules! mock_service {
@@ -43,7 +43,7 @@ macro_rules! mock_service {
     };
 }
 
-mock_service!(Router, RouterRequest, RouterResponse);
-mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
+mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
+mock_service!(QueryPlanner, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);

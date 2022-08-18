@@ -35,6 +35,7 @@ use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
+use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::RouterServiceFactory;
@@ -46,9 +47,9 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::Schema;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -79,7 +80,7 @@ impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, E
     }
 }
 
-impl<QueryPlannerService, ExecutionFactory> Service<RouterRequest>
+impl<QueryPlannerService, ExecutionFactory> Service<SupergraphRequest>
     for RouterService<QueryPlannerService, ExecutionFactory>
 where
     QueryPlannerService: Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>
@@ -89,7 +90,7 @@ where
     QueryPlannerService::Future: Send + 'static,
     ExecutionFactory: ExecutionServiceFactory,
 {
-    type Response = RouterResponse;
+    type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -103,7 +104,7 @@ where
             .poll_ready(cx)
     }
 
-    fn call(&mut self, req: RouterRequest) -> Self::Future {
+    fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let execution = self.execution_service_factory.new_service();
@@ -131,7 +132,7 @@ where
 
             match content {
                 QueryPlannerContent::Introspection { response } => Ok(
-                    RouterResponse::new_from_graphql_response(*response, context),
+                    SupergraphResponse::new_from_graphql_response(*response, context),
                 ),
                 QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(
@@ -146,7 +147,7 @@ where
                     );
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
-                    Ok(RouterResponse {
+                    Ok(SupergraphResponse {
                         response: resp.into(),
                         context,
                     })
@@ -155,7 +156,7 @@ where
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_graphql_response(err, context))
+                        Ok(SupergraphResponse::new_from_graphql_response(err, context))
                     } else {
                         let operation_name = body.operation_name.clone();
 
@@ -170,7 +171,7 @@ where
                             .await?;
 
                         let (parts, response_stream) = http::Response::from(response).into_parts();
-                        Ok(RouterResponse {
+                        Ok(SupergraphResponse {
                             context,
                             response: http::Response::from_parts(
                                 parts,
@@ -222,7 +223,7 @@ where
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
 
-            Ok(RouterResponse::builder()
+            Ok(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(status_code)
                 .context(context_cloned)
@@ -307,15 +308,7 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         let introspection = if configuration.server.introspection {
-            // Introspection instantiation can potentially block for some time
-            // We don't need to use the api schema here because on the deno side we always convert to API schema
-
-            let schema = self.schema.clone();
-            Some(Arc::new(
-                tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
-                    .await
-                    .expect("Introspection instantiation panicked"),
-            ))
+            Some(Arc::new(Introspection::new().await))
         } else {
             None
         };
@@ -332,7 +325,7 @@ impl PluggableRouterServiceBuilder {
                         .iter_mut()
                         .rev()
                         .fold(bridge_query_planner.boxed(), |acc, (_, e)| {
-                            e.query_planning_service(acc)
+                            e.query_planner_service(acc)
                         }),
                     DEFAULT_BUFFER_SIZE,
                 ),
@@ -402,7 +395,7 @@ impl RouterServiceFactory for RouterCreator {
             .iter()
             .filter_map(|(plugin_name, plugin)| {
                 (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint())
+                    .then(|| plugin.custom_endpoint().map(Handler::new))
                     .flatten()
                     .map(|h| (plugin_name.clone(), h))
             })
@@ -414,10 +407,10 @@ impl RouterCreator {
     pub(crate) fn make(
         &self,
     ) -> impl Service<
-        RouterRequest,
-        Response = RouterResponse,
+        SupergraphRequest,
+        Response = SupergraphResponse,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
+        Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
             .layer(self.apq.clone())
@@ -435,7 +428,7 @@ impl RouterCreator {
                             .schema(self.schema.clone())
                             .build(),
                     ),
-                    |acc, (_, e)| e.router_service(acc),
+                    |acc, (_, e)| e.supergraph_service(acc),
                 ),
             )
     }
@@ -444,7 +437,7 @@ impl RouterCreator {
     #[cfg(test)]
     pub(crate) fn test_service(
         &self,
-    ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> tower::util::BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
         Buffer::new(self.make(), 512).boxed_clone()
     }
 }
