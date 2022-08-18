@@ -153,7 +153,6 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use std::borrow::Cow;
-    use std::collections::HashMap;
 
     use serde_json_bytes::json;
     use tower::ServiceExt;
@@ -238,26 +237,23 @@ mod apq_tests {
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);
 
-        let extensions = HashMap::from([(
-            "persistedQuery".to_string(),
-            json!({
-                "version" : 1,
-                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
-            }),
-        )]);
+        let persisted = json!({
+            "version" : 1,
+            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+        });
 
         let hash_only = SupergraphRequest::fake_builder()
-            .extensions(extensions.clone())
+            .extension("persistedQuery", persisted.clone())
             .build()
             .expect("expecting valid request");
 
         let second_hash_only = SupergraphRequest::fake_builder()
-            .extensions(extensions.clone())
+            .extension("persistedQuery", persisted.clone())
             .build()
             .expect("expecting valid request");
 
         let with_query = SupergraphRequest::fake_builder()
-            .extensions(extensions)
+            .extension("persistedQuery", persisted.clone())
             .query("{__typename}".to_string())
             .build()
             .expect("expecting valid request");
@@ -328,29 +324,29 @@ mod apq_tests {
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);
 
-        let extensions = HashMap::from([(
-            "persistedQuery".to_string(),
-            json!({
-                "version" : 1,
-                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
-            }),
-        )]);
+        let persisted = json!({
+            "version" : 1,
+            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+        });
 
-        let request_builder = SupergraphRequest::fake_builder().extensions(extensions.clone());
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let hash_only = request_builder
             .context(Context::new())
             .build()
             .expect("expecting valid request");
 
-        let request_builder = SupergraphRequest::fake_builder().extensions(extensions.clone());
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let second_hash_only = request_builder
             .context(Context::new())
             .build()
             .expect("expecting valid request");
 
-        let request_builder = SupergraphRequest::fake_builder().extensions(extensions);
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let with_query = request_builder
             .query("{__typename}".to_string())
