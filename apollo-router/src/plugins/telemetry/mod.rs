@@ -36,6 +36,9 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::service_fn;
 use tower::steer::Steer;
 use tower::BoxError;
@@ -47,6 +50,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use url::Url;
 
+use self::apollo::ForwardValues;
 use self::apollo::Sender;
 use self::apollo::SingleReport;
 use self::config::Conf;
@@ -789,6 +793,7 @@ impl Telemetry {
     fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
         let client_name_header = config.client_name_header;
         let client_version_header = config.client_version_header;
+        let send_variable_values = config.send_variable_values.clone();
 
         move |request: &RouterRequest| {
             let http_request = &request.originating_request;
@@ -808,6 +813,11 @@ impl Telemetry {
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
 
+            let variables = Self::filter_variables_values(
+                &request.originating_request.body().variables,
+                &send_variable_values,
+            );
+
             let span = info_span!(
                 ROUTER_SPAN_NAME,
                 graphql.document = query.as_str(),
@@ -817,9 +827,57 @@ impl Telemetry {
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal,
                 "operation.signature" = field::Empty,
+                graphql.variables = %variables
             );
             span
         }
+    }
+
+    fn filter_variables_values(
+        variables: &Map<ByteString, Value>,
+        forward_rule: &ForwardValues,
+    ) -> String {
+        #[allow(clippy::mutable_key_type)] // False positive lint
+        let variables = match forward_rule {
+            ForwardValues::None => HashMap::new(),
+            ForwardValues::All => {
+                let variables: HashMap<ByteString, String> = variables
+                    .clone()
+                    .into_iter()
+                    .map(|(key, val)| (key, val.to_string()))
+                    .collect();
+                variables
+            }
+            ForwardValues::Only(variables_to_keep) => {
+                let variables: HashMap<ByteString, String> = variables
+                    .clone()
+                    .into_iter()
+                    .map(|(key, val)| {
+                        if !variables_to_keep.contains(&key.as_str().to_string()) {
+                            (key, String::new())
+                        } else {
+                            (key, val.to_string())
+                        }
+                    })
+                    .collect();
+                variables
+            }
+            ForwardValues::Except(variables_to_skip) => {
+                let variables: HashMap<ByteString, String> = variables
+                    .clone()
+                    .into_iter()
+                    .map(|(key, val)| {
+                        if variables_to_skip.contains(&key.as_str().to_string()) {
+                            (key, String::new())
+                        } else {
+                            (key, val.to_string())
+                        }
+                    })
+                    .collect();
+                variables
+            }
+        };
+        serde_json::to_string(&variables).expect("variables has already been deserialized")
     }
 
     fn update_apollo_metrics(

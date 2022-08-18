@@ -8,6 +8,7 @@ use apollo_spaceport::trace::query_plan_node::FetchNode;
 use apollo_spaceport::trace::query_plan_node::FlattenNode;
 use apollo_spaceport::trace::query_plan_node::ParallelNode;
 use apollo_spaceport::trace::query_plan_node::SequenceNode;
+use apollo_spaceport::trace::Details;
 use apollo_spaceport::trace::Http;
 use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
@@ -22,6 +23,7 @@ use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use thiserror::Error;
@@ -29,6 +31,7 @@ use url::Url;
 
 use super::apollo::SingleTraces;
 use super::apollo::SingleTracesReport;
+use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::apollo::Sender;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::config;
@@ -70,6 +73,8 @@ pub(crate) struct Exporter {
     field_level_instrumentation: bool,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
+    send_headers: ForwardValues,
+    send_variable_values: ForwardValues,
 }
 
 enum TreeData {
@@ -92,6 +97,8 @@ impl Exporter {
         apollo_sender: Sender,
         buffer_size: usize,
         field_level_instrumentation: bool,
+        send_headers: Option<ForwardValues>,
+        send_variable_values: Option<ForwardValues>,
     ) -> Self {
         Self {
             spans_by_parent_id: LruCache::new(buffer_size),
@@ -104,6 +111,8 @@ impl Exporter {
             schema_id,
             field_level_instrumentation,
             apollo_sender,
+            send_headers: send_headers.unwrap_or_default(),
+            send_variable_values: send_variable_values.unwrap_or_default(),
         }
     }
 
@@ -121,6 +130,26 @@ impl Exporter {
                     None
                 }
             });
+        let variables = span
+            .attributes
+            .get(&Key::new("graphql.variables"))
+            .map(|data| data.as_str())
+            .unwrap_or_default();
+        let variables_json = if variables != "{}" {
+            serde_json::from_str(&variables).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+        let details = Details {
+            variables_json,
+            operation_name: span
+                .attributes
+                .get(&Key::new("graphql.operation.name"))
+                .map(|data| data.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        };
         Ok(apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -129,7 +158,7 @@ impl Exporter {
             signature: "".to_string(),
             unexecuted_operation_body: "".to_string(),
             unexecuted_operation_name: "".to_string(),
-            details: None,
+            details: Some(details),
             client_name: "".to_string(),
             client_version: "".to_string(),
             http: None,
@@ -299,12 +328,26 @@ impl Exporter {
                 .unwrap_or_default(),
         )
         .unwrap_or_default();
-        let request_headers: HashMap<String, Values> =
-            serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(header_name, value)| (header_name, Values { value }))
-                .collect();
+        let mut request_headers: HashMap<String, Values> =
+            if let ForwardValues::None = &self.send_headers {
+                HashMap::new()
+            } else {
+                serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+                    .collect()
+            };
+
+        match &self.send_headers {
+            ForwardValues::Only(headers_to_keep) => {
+                request_headers.retain(|header_name, _v| headers_to_keep.contains(header_name));
+            }
+            ForwardValues::Except(skip_headers) => {
+                request_headers.retain(|header_name, _v| !skip_headers.contains(header_name));
+            }
+            ForwardValues::None | ForwardValues::All => {}
+        }
 
         Http {
             method,
@@ -319,6 +362,25 @@ impl Exporter {
     }
 }
 
+// Wrapper to add otel trace id on an apollo_spaceport::Trace
+#[derive(Debug)]
+struct TraceWithId {
+    trace_id: TraceId,
+    trace: apollo_spaceport::Trace,
+}
+
+impl TraceWithId {
+    fn new(trace_id: TraceId, trace: apollo_spaceport::Trace) -> Self {
+        Self { trace_id, trace }
+    }
+}
+
+impl From<TraceWithId> for apollo_spaceport::Trace {
+    fn from(trace_with_id: TraceWithId) -> Self {
+        trace_with_id.trace
+    }
+}
+
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
@@ -328,12 +390,7 @@ impl SpanExporter for Exporter {
         // We may get spams that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut report = Report {
-            header: None,
-            traces_per_query: Default::default(),
-            end_time: None,
-            operation_count: 0,
-        };
+        let mut traces_per_query: HashMap<String, Vec<TraceWithId>> = HashMap::new();
         for span in batch {
             if span.name == "router" {
                 if let Some(operation_signature) = span
@@ -341,18 +398,13 @@ impl SpanExporter for Exporter {
                     .get(&Key::new("operation.signature"))
                     .map(Value::to_string)
                 {
-                    let traces_and_stats = report
-                        .traces_per_query
+                    let traces_and_stats = traces_per_query
                         .entry(operation_signature)
-                        .or_insert_with(|| TracesAndStats {
-                            trace: vec![],
-                            stats_with_context: vec![],
-                            referenced_fields_by_type: Default::default(),
-                            internal_traces_contributing_to_stats: vec![],
-                        });
+                        .or_insert_with(Vec::new);
+                    let trace_id = span.span_context.trace_id();
                     match self.extract_query_plan_trace(span) {
                         Ok(trace) => {
-                            traces_and_stats.trace.push(trace);
+                            traces_and_stats.push(TraceWithId::new(trace_id, trace));
                         }
                         Err(error) => {
                             tracing::error!("failed to construct trace: {}, skipping", error);
@@ -361,8 +413,16 @@ impl SpanExporter for Exporter {
                 }
             } else {
                 if span.name == "request" {
-                    // TODO use it to fill http field in trace
-                    let http = self.extract_http_data(&span);
+                    if let Some(trace_found) =
+                        traces_per_query
+                            .values_mut()
+                            .flatten()
+                            .find(|trace_with_id| {
+                                trace_with_id.trace_id == span.span_context.trace_id()
+                            })
+                    {
+                        trace_found.trace.http = self.extract_http_data(&span).into();
+                    }
                 }
                 // Not a root span, we may need it later so stash it.
 
@@ -379,10 +439,18 @@ impl SpanExporter for Exporter {
 
         self.apollo_sender
             .send(SingleReport::Traces(SingleTracesReport {
-                traces: report
-                    .traces_per_query
+                traces: traces_per_query
                     .into_iter()
-                    .map(|(k, v)| (k, SingleTraces::from(v.trace)))
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            SingleTraces::from(
+                                v.into_iter()
+                                    .map(apollo_spaceport::Trace::from)
+                                    .collect::<Vec<apollo_spaceport::Trace>>(),
+                            ),
+                        )
+                    })
                     .collect(),
             }));
 

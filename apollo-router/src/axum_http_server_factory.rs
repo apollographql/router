@@ -675,7 +675,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
         let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
-            if name.as_str().starts_with("Auth") || name == header::COOKIE {
+            if name == header::AUTHORIZATION || name == header::COOKIE || name == header::SET_COOKIE
+            {
                 None
             } else {
                 Some((

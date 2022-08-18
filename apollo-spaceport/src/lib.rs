@@ -188,6 +188,7 @@ impl Reporter {
         &mut self,
         request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
+        dbg!(&request);
         self.client.add(Request::new(request)).await
     }
 }

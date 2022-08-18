@@ -8,6 +8,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -26,8 +27,20 @@ impl TracingConfigurator for Config {
                 apollo_sender,
                 buffer_size,
                 field_level_instrumentation,
+                send_headers,
+                send_variable_values,
             } => {
                 tracing::debug!("configuring exporter to Spaceport");
+
+                let mut send_headers = send_headers.clone();
+                match &mut send_headers {
+                    ForwardValues::None => todo!(),
+                    ForwardValues::All => todo!(),
+                    ForwardValues::Only(headers) | ForwardValues::Except(headers) => headers
+                        .iter_mut()
+                        .for_each(|header_name| *header_name = header_name.to_lowercase()),
+                };
+
                 let exporter = apollo_telemetry::Exporter::builder()
                     .trace_config(trace_config.clone())
                     .endpoint(endpoint.clone())
@@ -39,6 +52,8 @@ impl TracingConfigurator for Config {
                     .apollo_sender(apollo_sender.clone())
                     .buffer_size(*buffer_size)
                     .field_level_instrumentation(*field_level_instrumentation)
+                    .send_headers(send_headers)
+                    .send_variable_values(send_variable_values.clone())
                     .build();
                 builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
             }
