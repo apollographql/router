@@ -21,6 +21,7 @@ pub struct Error {
     pub message: String,
 
     /// The locations of the error from the originating request.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub locations: Vec<Location>,
 
     /// The path of the error.

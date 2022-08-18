@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use apollo_parser::ast;
 use derivative::Derivative;
+use graphql::Error;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
@@ -15,6 +16,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
@@ -67,18 +69,23 @@ impl Query {
                     Some(subselection_query) => {
                         let mut output = Object::default();
                         let operation = &subselection_query.operations[0];
+                        let mut errors = Vec::new();
                         response.data = Some(
                             match self.apply_root_selection_set(
                                 operation,
                                 &variables,
                                 &mut input,
                                 &mut output,
+                                &mut Path::default(),
+                                &mut errors,
                                 schema,
                             ) {
                                 Ok(()) => output.into(),
                                 Err(InvalidValue) => Value::Null,
                             },
                         );
+
+                        response.errors.extend(errors.into_iter());
 
                         return;
                     }
@@ -99,18 +106,23 @@ impl Query {
                         .collect()
                 };
 
+                let mut errors = Vec::new();
+
                 response.data = Some(
                     match self.apply_root_selection_set(
                         operation,
                         &all_variables,
                         &mut input,
                         &mut output,
+                        &mut Path::default(),
+                        &mut errors,
                         schema,
                     ) {
                         Ok(()) => output.into(),
                         Err(InvalidValue) => Value::Null,
                     },
                 );
+                response.errors.extend(errors.into_iter());
 
                 return;
             } else {
@@ -180,6 +192,10 @@ impl Query {
         variables: &Object,
         input: &mut Value,
         output: &mut Value,
+        path: &mut Path,
+        parent_type: &FieldType,
+        errors: &mut Vec<Error>,
+
         selection_set: &[Selection],
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
@@ -190,11 +206,37 @@ impl Query {
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
             FieldType::NonNull(inner_type) => {
-                match self.format_value(inner_type, variables, input, output, selection_set, schema)
-                {
+                match self.format_value(
+                    inner_type,
+                    variables,
+                    input,
+                    output,
+                    path,
+                    &field_type,
+                    errors,
+                    selection_set,
+                    schema,
+                ) {
                     Err(_) => Err(InvalidValue),
                     Ok(_) => {
                         if output.is_null() {
+                            let message = match path.last() {
+                                Some(PathElement::Key(k)) => format!(
+                                    "Cannot return null for non-nullable field {parent_type}.{}",
+                                   k
+                                ),
+                                Some(PathElement::Index(i)) => format!(
+                                    "Cannot return null for non-nullable array element of type {inner_type} at index {}",
+                                   i
+                                ),
+                                _ => todo!(),
+                            };
+                            errors.push(Error {
+                                message,
+                                path: Some(path.clone()),
+                                ..Error::default()
+                            });
+
                             Err(InvalidValue)
                         } else {
                             Ok(())
@@ -221,14 +263,20 @@ impl Query {
                         .iter_mut()
                         .enumerate()
                         .try_for_each(|(i, element)| {
-                            self.format_value(
+                            path.push(PathElement::Index(i));
+                            let res = self.format_value(
                                 inner_type,
                                 variables,
                                 element,
                                 &mut output_array[i],
+                                path,
+                                field_type,
+                                errors,
                                 selection_set,
                                 schema,
-                            )
+                            );
+                            path.pop();
+                            res
                         }) {
                         Err(InvalidValue) => {
                             *output = Value::Null;
@@ -285,6 +333,9 @@ impl Query {
                             variables,
                             input_object,
                             output_object,
+                            path,
+                            &FieldType::Named(type_name.to_string()),
+                            errors,
                             schema,
                         ) {
                             Ok(()) => Ok(()),
@@ -361,6 +412,9 @@ impl Query {
         variables: &Object,
         input: &mut Object,
         output: &mut Object,
+        path: &mut Path,
+        parent_type: &FieldType,
+        errors: &mut Vec<Error>,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
@@ -404,20 +458,35 @@ impl Query {
                                 *output_value = input_value.clone();
                             }
                         } else {
-                            self.format_value(
+                            path.push(PathElement::Key(field_name.as_str().to_string()));
+                            let res = self.format_value(
                                 field_type,
                                 variables,
                                 input_value,
                                 output_value,
+                                path,
+                                parent_type,
+                                errors,
                                 selection_set,
                                 schema,
-                            )?;
+                            );
+                            path.pop();
+                            res?
                         }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
+                            errors.push(Error {
+                                message: format!(
+                                    "Cannot return null for non-nullable field {parent_type}.{}",
+                                    field_name.as_str()
+                                ),
+                                path: Some(path.clone()),
+                                ..Error::default()
+                            });
+
                             return Err(InvalidValue);
                         }
                     }
@@ -458,7 +527,16 @@ impl Query {
                     };
 
                     if is_apply {
-                        self.apply_selection_set(selection_set, variables, input, output, schema)?;
+                        self.apply_selection_set(
+                            selection_set,
+                            variables,
+                            input,
+                            output,
+                            path,
+                            parent_type,
+                            errors,
+                            schema,
+                        )?;
                     }
                 }
                 Selection::FragmentSpread {
@@ -505,6 +583,9 @@ impl Query {
                                 variables,
                                 input,
                                 output,
+                                path,
+                                parent_type,
+                                errors,
                                 schema,
                             )?;
                         }
@@ -525,6 +606,8 @@ impl Query {
         variables: &Object,
         input: &mut Object,
         output: &mut Object,
+        path: &mut Path,
+        errors: &mut Vec<Error>,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in &operation.selection_set {
@@ -564,14 +647,20 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        self.format_value(
+                        path.push(PathElement::Key(field_name_str.to_string()));
+                        let res = self.format_value(
                             field_type,
                             variables,
                             input_value,
                             output_value,
+                            path,
+                            &field_type,
+                            errors,
                             selection_set,
                             schema,
-                        )?;
+                        );
+                        path.pop();
+                        res?
                     } else if field_name_str == TYPENAME {
                         if !output.contains_key(field_name_str) {
                             output.insert(
@@ -580,6 +669,14 @@ impl Query {
                             );
                         }
                     } else if field_type.is_non_null() {
+                        errors.push(Error {
+                            message: format!(
+                                "Cannot return null for non-nullable field {}.{field_name_str}",
+                                operation.kind
+                            ),
+                            path: Some(path.clone()),
+                            ..Error::default()
+                        });
                         return Err(InvalidValue);
                     }
                 }
@@ -593,7 +690,17 @@ impl Query {
                         return Err(InvalidValue);
                     }
 
-                    self.apply_selection_set(selection_set, variables, input, output, schema)?;
+                    self.apply_selection_set(
+                        selection_set,
+                        variables,
+                        input,
+                        output,
+                        path,
+                        //FIXME
+                        &FieldType::Boolean,
+                        errors,
+                        schema,
+                    )?;
                 }
                 Selection::FragmentSpread {
                     name,
@@ -619,6 +726,10 @@ impl Query {
                             variables,
                             input,
                             output,
+                            path,
+                            //FIXME
+                            &FieldType::Boolean,
+                            errors,
                             schema,
                         )?;
                     } else {
@@ -903,7 +1014,30 @@ mod tests {
                 $variables.as_object().unwrap().clone(),
                 api_schema,
             );
+
             assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
+        }};
+
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr, $expected_errors:expr $(,)?) => {{
+            let schema = with_supergraph_boilerplate($schema);
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+            let api_schema = schema.api_schema();
+            let query =
+                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
+            let mut response = Response::builder().data($response.clone()).build();
+
+            query.format_response(
+                &mut response,
+                $operation,
+                $variables.as_object().unwrap().clone(),
+                api_schema,
+            );
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
+            assert_eq_and_ordered!(
+                serde_json_bytes::to_value(&response.errors).unwrap(),
+                $expected_errors
+            );
         }};
     }
 
@@ -2217,11 +2351,18 @@ mod tests {
                 },
             }},
             None,
+            json! {{}},
             json! {{
                 "list": {
                     "l2": null,
                 },
             }},
+            json! {[
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "path": ["list", "l2", 1]
+                }
+            ]},
         );
 
         assert_format_response!(
@@ -2346,7 +2487,6 @@ mod tests {
         // nullable parent and child elements
         // child errors should stop at the child's level
         let query_review1_text1 = "query  { me { id reviews1 { text1 } } }";
-        // nullable text1 was absent, should we keep the empty object, or put a text1: null here?
         assert_format_response!(
             schema,
             query_review1_text1,
@@ -2422,12 +2562,19 @@ mod tests {
                 },
             }},
             None,
+            json! {{}},
             json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ null ],
                 },
             }},
+            json! {[
+                {
+                    "message": "Cannot return null for non-nullable field Named type Review.text2",
+                    "path": ["me", "reviews1", 0]
+                }
+            ]},
         );
 
         // text2 was null, reviews1 element should be nullified
