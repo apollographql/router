@@ -637,6 +637,152 @@ async fn query_just_at_recursion_limit() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_path() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = Request::builder()
+        .query(
+            r#"{
+            me {
+                id
+                ...@defer {
+                    name
+                }
+            }
+        }"#,
+        )
+        .build();
+
+    let request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request.into()).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    println!("first: {:?}", first);
+    assert_eq!(
+        first.data.unwrap(),
+        serde_json_bytes::json! {{
+            "me":{
+                "id":"1"
+            }
+        }}
+    );
+    assert_eq!(first.path, None);
+
+    let second = stream.next_response().await.unwrap();
+    println!("second: {:?}", second);
+    assert_eq!(
+        second.data.unwrap(),
+        serde_json_bytes::json! {{
+            "name": "Ada Lovelace"
+        }}
+    );
+    assert_eq!(second.path.unwrap().to_string(), "/me");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_path_in_array() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = Request::builder()
+        .query(
+            r#"{
+                me {
+                    reviews {
+                        id
+                        author {
+                            id
+                            ... @defer {
+                            name
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .build();
+
+    let request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request.into()).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    println!("first: {:?}", first);
+    assert_eq!(
+        first.data.unwrap(),
+        serde_json_bytes::json! {{
+            "me":{
+                "reviews":[
+                    {
+                        "id": "1",
+                        "author":
+                        {
+                            "id": "1"
+                        }
+                    },
+                    {
+                        "id": "2",
+                        "author":
+                        {
+                            "id": "1"
+                        }
+                    }
+                ]
+            }
+        }}
+    );
+    assert_eq!(first.path, None);
+
+    let second = stream.next_response().await.unwrap();
+    println!("second: {:?}", second);
+    assert_eq!(
+        second.data.unwrap(),
+        serde_json_bytes::json! {{
+            "name": "Ada Lovelace"
+        }}
+    );
+    assert_eq!(second.path.unwrap().to_string(), "/me/reviews/0/author");
+
+    let third = stream.next_response().await.unwrap();
+    println!("third: {:?}", third);
+    assert_eq!(
+        third.data.unwrap(),
+        serde_json_bytes::json! {{
+            "name": "Ada Lovelace"
+        }}
+    );
+    assert_eq!(third.path.unwrap().to_string(), "/me/reviews/1/author");
+}
+
 async fn query_node(
     request: &graphql::Request,
 ) -> Result<graphql::Response, apollo_router::error::FetchError> {

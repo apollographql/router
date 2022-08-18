@@ -5,6 +5,8 @@ use std::task::Poll;
 
 use futures::future::ready;
 use futures::future::BoxFuture;
+use futures::future::Either;
+use futures::stream;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
@@ -33,6 +35,7 @@ use crate::graphql;
 use crate::graphql::Response;
 use crate::http_ext::Request;
 use crate::introspection::Introspection;
+use crate::json_ext::ValueExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
@@ -176,7 +179,7 @@ where
                             response: http::Response::from_parts(
                                 parts,
                                 response_stream
-                                    .map(move |mut response: Response| {
+                                    .flat_map(move |mut response: Response| {
                                         tracing::debug_span!("format_response").in_scope(|| {
                                             query.format_response(
                                                 &mut response,
@@ -186,15 +189,51 @@ where
                                             )
                                         });
 
-                                        // we use the path to look up the subselections, but the generated response
-                                        // is an object starting at the root so the path should be empty
-                                        response.path = None;
+                                        match (response.path.as_ref(), response.data.as_ref()) {
+                                            (None, _) | (_, None) => {
+                                                if is_deferred {
+                                                    response.has_next = Some(true);
+                                                }
 
-                                        if is_deferred {
-                                            response.has_next = Some(true);
+                                                Either::Left(once(ready(response)))
+                                            }
+                                            // if the deferred response specified a path, we must extract the
+                                            //values matched by that path and create a separate response for
+                                            //each of them.
+                                            // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+                                            // would merge in the same ways, some clients will generate code
+                                            // that checks the specific type of the deferred response at that
+                                            // path, instead of starting from the root object, so to support
+                                            // this, we extract the value at that path.
+                                            // In particular, that means that a deferred fragment in an object
+                                            // under an array would generate one response par array element
+                                            (Some(response_path), Some(response_data)) => {
+                                                let mut sub_responses = Vec::new();
+                                                response_data.select_values_and_paths(
+                                                    response_path,
+                                                    |path, value| {
+                                                        sub_responses
+                                                            .push((path.clone(), value.clone()));
+                                                    },
+                                                );
+
+                                                Either::Right(stream::iter(
+                                                    sub_responses.into_iter().map(
+                                                        move |(path, data)| Response {
+                                                            label: response.label.clone(),
+                                                            data: Some(data),
+                                                            path: Some(path),
+                                                            errors: response.errors.clone(),
+                                                            extensions: response.extensions.clone(),
+                                                            has_next: Some(true),
+                                                            subselection: response
+                                                                .subselection
+                                                                .clone(),
+                                                        },
+                                                    ),
+                                                ))
+                                            }
                                         }
-
-                                        response
                                     })
                                     .in_current_span()
                                     .boxed(),
