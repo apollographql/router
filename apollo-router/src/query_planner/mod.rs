@@ -33,7 +33,7 @@ mod selection;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    pub(crate) enable_variable_deduplication: bool,
+    pub(crate) enable_deduplicate_variables: bool,
 }
 
 /// A planner key.
@@ -811,7 +811,7 @@ pub(crate) mod fetch {
             current_dir: &Path,
             request: &Arc<http_ext::Request<Request>>,
             schema: &Schema,
-            enable_variable_deduplication: bool,
+            enable_deduplicate_variables: bool,
         ) -> Option<Variables> {
             let body = request.body();
             if !requires.is_empty() {
@@ -824,7 +824,7 @@ pub(crate) mod fetch {
                 }));
 
                 let mut paths: HashMap<Path, usize> = HashMap::new();
-                let (paths, representations) = if enable_variable_deduplication {
+                let (paths, representations) = if enable_deduplicate_variables {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
@@ -924,7 +924,7 @@ pub(crate) mod fetch {
                 // Needs the original request here
                 parameters.originating_request,
                 parameters.schema,
-                parameters.options.enable_variable_deduplication,
+                parameters.options.enable_deduplicate_variables,
             )
             .await
             {
