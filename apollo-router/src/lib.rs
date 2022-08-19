@@ -60,6 +60,7 @@ pub mod error;
 mod executable;
 mod files;
 pub mod graphql;
+pub mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
@@ -84,7 +85,6 @@ pub use crate::router::ConfigurationSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::services::http_ext;
 pub use crate::test_harness::TestHarness;
 
 /// Not part of the public API
