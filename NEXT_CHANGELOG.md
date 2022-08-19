@@ -27,6 +27,37 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Rename map_future_with_context to map_future_with_request_data ([PR #1547](https://github.com/apollographql/router/pull/1547))
+
+The function is not very well named since it's in fact used to extract any data from a request for use in a future. This rename makes it clear.
+
+By [@garypen](https://github.com/garypen)
+
+### Rename traffic shaping deduplication options ([PR #1540](https://github.com/apollographql/router/pull/1540))
+
+In the traffic shaping module:
+ - `variables_deduplication` configuration option is renamed to `deduplicate_variables`.
+ - `query_deduplication` configuration option is renamed to `deduplicate_query`.
+
+```diff
+- traffic_shaping:
+-   variables_deduplication: true # Enable the variables deduplication optimization
+-   all:
+-     query_deduplication: true # Enable query deduplication for all subgraphs.
+-   subgraphs:
+-     products:
+-       query_deduplication: false # Disable query deduplication for products.
++ traffic_shaping:
++   deduplicate_variables: true # Enable the variables deduplication optimization
++   all:
++     deduplicate_query: true # Enable query deduplication for all subgraphs.
++   subgraphs:
++     products:
++       deduplicate_query: false # Disable query deduplication for products.
+```
+
+By [@garypen](https://github.com/garypen)
+
 ### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
 
 `QueryPlanOptions::query_plan_options` is no longer available in public.
@@ -169,8 +200,11 @@ please [file an issue](https://github.com/apollographql/router/issues/)
 with details about the use case.
 
 ```
+apollo_router::Configuration::boxed
+apollo_router::Configuration::is_compatible
 apollo_router::errors::CacheResolverError
 apollo_router::errors::JsonExtError
+apollo_router::errors::ParsesError::print
 apollo_router::errors::PlanError
 apollo_router::errors::PlannerError
 apollo_router::errors::PlannerErrors
@@ -422,11 +456,31 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Expose query plan: move the behavior to the execution_service ([#1541](https://github.com/apollographql/router/issues/1541))
+
+There isn't much use for QueryPlanner plugins. Most of the logic done there can be done in `execution_service`. Moreover users could get inconsistent plugin behavior because it depends on whether the QueryPlanner cache hits or not.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
 
 This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1497
+
+### Set the response path for deferred responses ([PR #1529](https://github.com/apollographql/router/pull/1529))
+
+Some GraphQL clients rely on the response path to find out which
+fragment created a deferred response, and generate code that checks the
+type of the value at that path.
+Previously the router was generating a value that starts at the root
+for every deferred response. Now it checks the path returned by the query
+plan execution and creates a response for each value that matches that
+path.
+In particular, for deferred fragments on an ojbect inside an array, it
+will create a separate response for each element of the array.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1529
 
 ## 🛠 Maintenance
 
@@ -437,5 +491,13 @@ The CI check that ensures that the `license.html` file is up to date now display
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 🚀 Features
+
+### Helm: Rhai script and Istio virtualservice support ([#1478](https://github.com/apollographql/router/issues/1478))
+
+You can now pass a Rhai script file to the helm chart.
+You can also provide an Istio VirtualService configuration, as well as custom Egress rules.
+Head over to the helm chart [default values](https://github.com/apollographql/router/blob/main/helm/chart/router/values.yaml) to get started.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 📚 Documentation

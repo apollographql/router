@@ -96,6 +96,7 @@ const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
+#[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
     config: config::Conf,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
@@ -174,7 +175,7 @@ impl Plugin for Telemetry {
             .instrument(Self::supergraph_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_future_with_context(
+            .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
                     req.context.clone()
@@ -392,7 +393,7 @@ impl Plugin for Telemetry {
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
-            .map_future_with_context(
+            .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
                     let subgraph_metrics_conf = subgraph_metrics_conf.clone();
                     let mut attributes = HashMap::new();

@@ -1,4 +1,7 @@
 //! GraphQL operation planning.
+
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -33,7 +36,7 @@ mod selection;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    pub(crate) enable_variable_deduplication: bool,
+    pub(crate) enable_deduplicate_variables: bool,
 }
 
 /// A planner key.
@@ -811,7 +814,7 @@ pub(crate) mod fetch {
             current_dir: &Path,
             request: &Arc<http_ext::Request<Request>>,
             schema: &Schema,
-            enable_variable_deduplication: bool,
+            enable_deduplicate_variables: bool,
         ) -> Option<Variables> {
             let body = request.body();
             if !requires.is_empty() {
@@ -824,7 +827,7 @@ pub(crate) mod fetch {
                 }));
 
                 let mut paths: HashMap<Path, usize> = HashMap::new();
-                let (paths, representations) = if enable_variable_deduplication {
+                let (paths, representations) = if enable_deduplicate_variables {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
@@ -869,7 +872,7 @@ pub(crate) mod fetch {
                 Some(Variables { variables, paths })
             } else {
                 // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
-                // when the first fetch fails, the query plan wwill still execute up until the second fetch,
+                // when the first fetch fails, the query plan will still execute up until the second fetch,
                 // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
                 // the previous operation field) and the data is null. In that case, we recognize that we
                 // should not perform the next fetch
@@ -924,7 +927,7 @@ pub(crate) mod fetch {
                 // Needs the original request here
                 parameters.originating_request,
                 parameters.schema,
-                parameters.options.enable_variable_deduplication,
+                parameters.options.enable_deduplicate_variables,
             )
             .await
             {

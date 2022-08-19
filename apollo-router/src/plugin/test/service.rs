@@ -1,4 +1,6 @@
 #![allow(dead_code, unreachable_pub)]
+#![allow(missing_docs)] // FIXME
+
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;

@@ -130,6 +130,7 @@ impl<Request, Response, Key, Value> CachingLayer<Request, Response, Key, Value>
 where
     Request: Send,
 {
+    #[allow(missing_docs)] // FIXME
     pub fn new(
         cache: Cache<Key, Sentinel<Result<Value, String>>>,
         key_fn: fn(&Request) -> Option<&Key>,

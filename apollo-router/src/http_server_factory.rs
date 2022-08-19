@@ -10,7 +10,7 @@ use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
-use crate::router_factory::RouterServiceFactory;
+use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.
 ///
@@ -27,7 +27,7 @@ pub(crate) trait HttpServerFactory {
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RF: RouterServiceFactory;
+        RF: SupergraphServiceFactory;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -85,7 +85,7 @@ impl HttpServerHandle {
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
-        RF: RouterServiceFactory,
+        RF: SupergraphServiceFactory,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {
