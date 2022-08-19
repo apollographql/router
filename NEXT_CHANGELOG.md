@@ -472,6 +472,13 @@ will create a separate response for each element of the array.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1529
 
+### Support the incremental response field ([PR #1551](https://github.com/apollographql/router/pull/1551))
+
+Recent changes in the `@defer` specification now mandate that the deferred responses are transmitted
+as an array in the new `incremental` field of the JSON response.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1551
+
 ## 🛠 Maintenance
 
 ### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
