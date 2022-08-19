@@ -279,7 +279,7 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::PluggableRouterServiceBuilder;
+    use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
     use crate::SupergraphResponse;
@@ -354,7 +354,7 @@ mod test {
         );
         let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
 
         let builder = builder
             .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
