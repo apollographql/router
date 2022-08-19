@@ -1,5 +1,7 @@
 //! Mock subgraph implementation
 
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;

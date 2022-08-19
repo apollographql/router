@@ -1,7 +1,8 @@
 //! Extension of map_future layer. Allows mapping of the future using some information obtained from the request.
 //!
 //! See [`Layer`] and [`Service`] for more details.
-//!
+
+#![allow(missing_docs)] // FIXME
 
 use std::future::Future;
 use std::task::Context;
@@ -11,54 +12,54 @@ use tower::Layer;
 use tower::Service;
 
 #[derive(Clone)]
-pub struct MapFutureWithContextLayer<C, F> {
-    ctx_fn: C,
-    map_fn: F,
+pub struct MapFutureWithRequestDataLayer<RF, MF> {
+    req_fn: RF,
+    map_fn: MF,
 }
 
-impl<C, F> MapFutureWithContextLayer<C, F> {
-    pub fn new(ctx_fn: C, map_fn: F) -> Self {
-        Self { ctx_fn, map_fn }
+impl<RF, MF> MapFutureWithRequestDataLayer<RF, MF> {
+    pub fn new(req_fn: RF, map_fn: MF) -> Self {
+        Self { req_fn, map_fn }
     }
 }
 
-impl<S, C, F> Layer<S> for MapFutureWithContextLayer<C, F>
+impl<S, RF, MF> Layer<S> for MapFutureWithRequestDataLayer<RF, MF>
 where
-    F: Clone,
-    C: Clone,
+    RF: Clone,
+    MF: Clone,
 {
-    type Service = MapFutureWithContextService<S, C, F>;
+    type Service = MapFutureWithRequestDataService<S, RF, MF>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        MapFutureWithContextService::new(inner, self.ctx_fn.clone(), self.map_fn.clone())
+        MapFutureWithRequestDataService::new(inner, self.req_fn.clone(), self.map_fn.clone())
     }
 }
 
-pub struct MapFutureWithContextService<S, C, F> {
+pub struct MapFutureWithRequestDataService<S, RF, MF> {
     inner: S,
-    ctx_fn: C,
-    map_fn: F,
+    req_fn: RF,
+    map_fn: MF,
 }
 
-impl<S, C, F> MapFutureWithContextService<S, C, F> {
-    pub fn new(inner: S, ctx_fn: C, map_fn: F) -> MapFutureWithContextService<S, C, F>
+impl<S, RF, MF> MapFutureWithRequestDataService<S, RF, MF> {
+    pub fn new(inner: S, req_fn: RF, map_fn: MF) -> MapFutureWithRequestDataService<S, RF, MF>
     where
-        C: Clone,
-        F: Clone,
+        RF: Clone,
+        MF: Clone,
     {
-        MapFutureWithContextService {
+        MapFutureWithRequestDataService {
             inner,
-            ctx_fn,
+            req_fn,
             map_fn,
         }
     }
 }
 
-impl<R, S, F, C, T, E, Fut, Ctx> Service<R> for MapFutureWithContextService<S, C, F>
+impl<R, S, MF, RF, T, E, Fut, ReqData> Service<R> for MapFutureWithRequestDataService<S, RF, MF>
 where
     S: Service<R>,
-    C: FnMut(&R) -> Ctx,
-    F: FnMut(Ctx, S::Future) -> Fut,
+    RF: FnMut(&R) -> ReqData,
+    MF: FnMut(ReqData, S::Future) -> Fut,
     E: From<S::Error>,
     Fut: Future<Output = Result<T, E>>,
 {
@@ -71,8 +72,8 @@ where
     }
 
     fn call(&mut self, req: R) -> Self::Future {
-        let ctx = (self.ctx_fn)(&req);
-        (self.map_fn)(ctx, self.inner.call(req))
+        let data = (self.req_fn)(&req);
+        (self.map_fn)(data, self.inner.call(req))
     }
 }
 
@@ -98,7 +99,7 @@ mod test {
             .returning(|_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
 
         let mut service = ServiceBuilder::new()
-            .map_future_with_context(
+            .map_future_with_request_data(
                 |req: &SupergraphRequest| {
                     req.originating_request
                         .headers()
@@ -106,10 +107,13 @@ mod test {
                         .cloned()
                         .unwrap()
                 },
-                |ctx: HeaderValue, resp| async move {
+                |value: HeaderValue, resp| async move {
                     let resp: Result<SupergraphResponse, BoxError> = resp.await;
                     resp.map(|mut response| {
-                        response.response.headers_mut().insert("hello", ctx.clone());
+                        response
+                            .response
+                            .headers_mut()
+                            .insert("hello", value.clone());
                         response
                     })
                 },

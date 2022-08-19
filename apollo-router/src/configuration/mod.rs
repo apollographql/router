@@ -37,6 +37,7 @@ use crate::plugin::plugins;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
+#[allow(missing_docs)] // FIXME
 pub enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
@@ -120,7 +121,8 @@ impl Configuration {
         }
     }
 
-    pub fn boxed(self) -> Box<Self> {
+    #[cfg(test)]
+    pub(crate) fn boxed(self) -> Box<Self> {
         Box::new(self)
     }
 
@@ -148,7 +150,7 @@ impl Configuration {
     }
 
     // checks that we can reload configuration from the current one to the new one
-    pub fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
+    pub(crate) fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
         if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
             == new.apollo_plugins.plugins.get(TELEMETRY_KEY)
         {

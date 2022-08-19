@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // FIXME
+
 use bytes::Bytes;
 use derivative::Derivative;
 use serde::de::Error;
