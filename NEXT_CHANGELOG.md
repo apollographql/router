@@ -467,4 +467,12 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 🚀 Features
 
+### Helm: Rhai script and Istio virtualservice support ([#1478](https://github.com/apollographql/router/issues/1478))
+
+You can now pass a Rhai script file to the helm chart.
+You can also provide an Istio VirtualService configuration, as well as custom Egress rules.
+Head over to the helm chart [default values](https://github.com/apollographql/router/blob/main/helm/chart/router/values.yaml) to get started.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ## 📚 Documentation
