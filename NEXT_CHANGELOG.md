@@ -200,8 +200,11 @@ please [file an issue](https://github.com/apollographql/router/issues/)
 with details about the use case.
 
 ```
+apollo_router::Configuration::boxed
+apollo_router::Configuration::is_compatible
 apollo_router::errors::CacheResolverError
 apollo_router::errors::JsonExtError
+apollo_router::errors::ParsesError::print
 apollo_router::errors::PlanError
 apollo_router::errors::PlannerError
 apollo_router::errors::PlannerErrors

@@ -1,7 +1,8 @@
 //! Extension of map_future layer. Allows mapping of the future using some information obtained from the request.
 //!
 //! See [`Layer`] and [`Service`] for more details.
-//!
+
+#![allow(missing_docs)] // FIXME
 
 use std::future::Future;
 use std::task::Context;

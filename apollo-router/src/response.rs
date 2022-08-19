@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // FIXME
+
 use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;
