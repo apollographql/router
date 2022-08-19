@@ -654,7 +654,7 @@ async fn defer_path() {
             r#"{
             me {
                 id
-                ...@defer {
+                ...@defer(label: "name") {
                     name
                 }
             }
@@ -673,27 +673,10 @@ async fn defer_path() {
     let mut stream = router.oneshot(request.into()).await.unwrap();
 
     let first = stream.next_response().await.unwrap();
-    println!("first: {:?}", first);
-    assert_eq!(
-        first.data.unwrap(),
-        serde_json_bytes::json! {{
-            "me":{
-                "id":"1"
-            }
-        }}
-    );
-    assert_eq!(first.path, None);
+    insta::assert_json_snapshot!(first);
 
     let second = stream.next_response().await.unwrap();
-    println!("second: {:?}", second);
-    let incr = second.incremental.get(0).clone().unwrap();
-    assert_eq!(
-        incr.data.as_ref().unwrap(),
-        &serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(incr.path.as_ref().unwrap().to_string(), "/me");
+    insta::assert_json_snapshot!(second);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -716,7 +699,7 @@ async fn defer_path_in_array() {
                         id
                         author {
                             id
-                            ... @defer {
+                            ... @defer(label: "author name") {
                             name
                             }
                         }
@@ -737,57 +720,10 @@ async fn defer_path_in_array() {
     let mut stream = router.oneshot(request.into()).await.unwrap();
 
     let first = stream.next_response().await.unwrap();
-    println!("first: {:?}", first);
-    assert_eq!(
-        first.data.unwrap(),
-        serde_json_bytes::json! {{
-            "me":{
-                "reviews":[
-                    {
-                        "id": "1",
-                        "author":
-                        {
-                            "id": "1"
-                        }
-                    },
-                    {
-                        "id": "2",
-                        "author":
-                        {
-                            "id": "1"
-                        }
-                    }
-                ]
-            }
-        }}
-    );
-    assert_eq!(first.path, None);
+    insta::assert_json_snapshot!(first);
 
     let second = stream.next_response().await.unwrap();
-    println!("second: {:?}", second);
-    let incr = second.incremental.get(0).clone().unwrap();
-    assert_eq!(
-        incr.data.as_ref().unwrap(),
-        &serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(
-        incr.path.as_ref().unwrap().to_string(),
-        "/me/reviews/0/author"
-    );
-
-    let incr = second.incremental.get(1).clone().unwrap();
-    assert_eq!(
-        incr.data.as_ref().unwrap(),
-        &serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(
-        incr.path.as_ref().unwrap().to_string(),
-        "/me/reviews/1/author"
-    );
+    insta::assert_json_snapshot!(second);
 }
 
 async fn query_node(
