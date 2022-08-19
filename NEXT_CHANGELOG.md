@@ -27,6 +27,31 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Rename traffic shaping deduplication options ([PR #1540](https://github.com/apollographql/router/pull/1540))
+
+In the traffic shaping module:
+ - `variables_deduplication` configuration option is renamed to `deduplicate_variables`.
+ - `query_deduplication` configuration option is renamed to `deduplicate_query`.
+
+```diff
+- traffic_shaping:
+-   variables_deduplication: true # Enable the variables deduplication optimization
+-   all:
+-     query_deduplication: true # Enable query deduplication for all subgraphs.
+-   subgraphs:
+-     products:
+-       query_deduplication: false # Disable query deduplication for products.
++ traffic_shaping:
++   deduplicate_variables: true # Enable the variables deduplication optimization
++   all:
++     deduplicate_query: true # Enable query deduplication for all subgraphs.
++   subgraphs:
++     products:
++       deduplicate_query: false # Disable query deduplication for products.
+```
+
+By [@garypen](https://github.com/garypen)
+
 ### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
 
 `QueryPlanOptions::query_plan_options` is no longer available in public.

@@ -53,7 +53,7 @@ trait Merge {
 #[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
-    query_deduplication: Option<bool>,
+    deduplicate_query: Option<bool>,
     /// Enable compression for subgraphs (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
     /// Enable global rate limiting
@@ -69,7 +69,7 @@ impl Merge for Shaping {
         match fallback {
             None => self.clone(),
             Some(fallback) => Shaping {
-                query_deduplication: self.query_deduplication.or(fallback.query_deduplication),
+                deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
                 global_rate_limit: self
@@ -106,7 +106,7 @@ struct Config {
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, Shaping>,
     /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
-    variables_deduplication: Option<bool>,
+    deduplicate_variables: Option<bool>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -205,7 +205,7 @@ impl Plugin for TrafficShaping {
                     .clone()
             });
             ServiceBuilder::new()
-                .option_layer(config.query_deduplication.unwrap_or_default().then(|| {
+                .option_layer(config.deduplicate_query.unwrap_or_default().then(|| {
                     // Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
@@ -237,10 +237,10 @@ impl Plugin for TrafficShaping {
         &self,
         service: query_planner::BoxService,
     ) -> query_planner::BoxService {
-        if matches!(self.config.variables_deduplication, Some(true)) {
+        if matches!(self.config.deduplicate_variables, Some(true)) {
             service
                 .map_request(|mut req: QueryPlannerRequest| {
-                    req.query_plan_options.enable_variable_deduplication = true;
+                    req.query_plan_options.enable_deduplicate_variables = true;
                     req
                 })
                 .boxed()
@@ -381,7 +381,7 @@ mod test {
     async fn it_returns_valid_response_for_deduplicated_variables() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
-        variables_deduplication: true
+        deduplicate_variables: true
         "#,
         )
         .unwrap();
@@ -436,10 +436,10 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          query_deduplication: true
+          deduplicate_query: true
         subgraphs: 
           products:
-            query_deduplication: false
+            deduplicate_query: false
         "#,
         )
         .unwrap();
