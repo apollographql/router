@@ -201,7 +201,9 @@ mod tests {
     async fn test_plan() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::new().await)),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -228,7 +230,9 @@ mod tests {
     async fn test_plan_invalid_query() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::new().await)),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -272,7 +276,9 @@ mod tests {
     async fn empty_query_plan_should_be_a_planner_error() {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::new().await)),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -306,7 +312,9 @@ mod tests {
     async fn test_plan_error() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::new().await)),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await

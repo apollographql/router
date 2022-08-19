@@ -3,31 +3,38 @@ use std::collections::HashMap;
 
 use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
+use router_bridge::planner::{DeferStreamSupport, QueryPlannerConfig};
 
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
+use crate::Configuration;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: usize = 5;
 
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
+    defer_support: bool,
 }
 
 impl Introspection {
-    pub(crate) async fn with_capacity(capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(configuration: &Configuration, capacity: usize) -> Self {
         Self {
             cache: CacheStorage::new(capacity).await,
+            defer_support: configuration.server.experimental_defer_support,
         }
     }
 
-    pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+    pub(crate) async fn new(configuration: &Configuration) -> Self {
+        Self::with_capacity(configuration, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
     }
 
     #[cfg(test)]
-    pub(crate) async fn from_cache(cache: HashMap<String, Response>) -> Self {
-        let this = Self::with_capacity(cache.len()).await;
+    pub(crate) async fn from_cache(
+        configuration: &Configuration,
+        cache: HashMap<String, Response>,
+    ) -> Self {
+        let this = Self::with_capacity(configuration, cache.len()).await;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;
@@ -46,10 +53,18 @@ impl Introspection {
         }
 
         // Do the introspection query and cache it
-        let mut response = introspect::batch_introspect(schema_sdl, vec![query.to_owned()])
-            .map_err(|err| IntrospectionError {
-                message: format!("Deno runtime error: {:?}", err).into(),
-            })??;
+        let mut response = introspect::batch_introspect(
+            schema_sdl,
+            vec![query.to_owned()],
+            QueryPlannerConfig {
+                defer_stream_support: Some(DeferStreamSupport {
+                    enable_defer: Some(self.defer_support),
+                }),
+            },
+        )
+        .map_err(|err| IntrospectionError {
+            message: format!("Deno runtime error: {:?}", err).into(),
+        })??;
         let introspection_result = response
             .pop()
             .ok_or_else(|| IntrospectionError {
@@ -89,7 +104,7 @@ mod introspection_tests {
             .iter()
             .cloned()
             .collect();
-        let introspection = Introspection::from_cache(cache).await;
+        let introspection = Introspection::from_cache(&Configuration::default(), cache).await;
 
         assert_eq!(
             expected_data,
