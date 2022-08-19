@@ -49,6 +49,7 @@ pub struct Response {
 impl Response {
     /// Constructor
     #[builder(visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -213,54 +214,6 @@ impl IncrementalResponse {
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
     }
-
-    /*/// Create a [`Response`] from the supplied [`Bytes`].
-    ///
-    /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<IncrementalResponse, FetchError> {
-        let value =
-            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            })?;
-        let mut object =
-            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            })?;
-
-        let data = object.remove("data");
-        let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            })?
-            .into_iter()
-            .flatten()
-            .map(|v| Error::from_value(service_name, v))
-            .collect::<Result<Vec<Error>, FetchError>>()?;
-
-        let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            })?
-            .map(|s| s.as_str().to_string());
-        let path = extract_key_value_from_object!(object, "path")
-            .map(serde_json_bytes::from_value)
-            .transpose()
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            })?;
-
-        Ok(IncrementalResponse {
-            label,
-            data,
-            path,
-            errors,
-        })
-    }*/
 }
 #[cfg(test)]
 mod tests {
