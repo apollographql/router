@@ -686,13 +686,14 @@ async fn defer_path() {
 
     let second = stream.next_response().await.unwrap();
     println!("second: {:?}", second);
+    let incr = second.incremental.get(0).clone().unwrap();
     assert_eq!(
-        second.data.unwrap(),
-        serde_json_bytes::json! {{
+        incr.data.as_ref().unwrap(),
+        &serde_json_bytes::json! {{
             "name": "Ada Lovelace"
         }}
     );
-    assert_eq!(second.path.unwrap().to_string(), "/me");
+    assert_eq!(incr.path.as_ref().unwrap().to_string(), "/me");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -764,23 +765,29 @@ async fn defer_path_in_array() {
 
     let second = stream.next_response().await.unwrap();
     println!("second: {:?}", second);
+    let incr = second.incremental.get(0).clone().unwrap();
     assert_eq!(
-        second.data.unwrap(),
-        serde_json_bytes::json! {{
+        incr.data.as_ref().unwrap(),
+        &serde_json_bytes::json! {{
             "name": "Ada Lovelace"
         }}
     );
-    assert_eq!(second.path.unwrap().to_string(), "/me/reviews/0/author");
+    assert_eq!(
+        incr.path.as_ref().unwrap().to_string(),
+        "/me/reviews/0/author"
+    );
 
-    let third = stream.next_response().await.unwrap();
-    println!("third: {:?}", third);
+    let incr = second.incremental.get(1).clone().unwrap();
     assert_eq!(
-        third.data.unwrap(),
-        serde_json_bytes::json! {{
+        incr.data.as_ref().unwrap(),
+        &serde_json_bytes::json! {{
             "name": "Ada Lovelace"
         }}
     );
-    assert_eq!(third.path.unwrap().to_string(), "/me/reviews/1/author");
+    assert_eq!(
+        incr.path.as_ref().unwrap().to_string(),
+        "/me/reviews/1/author"
+    );
 }
 
 async fn query_node(

@@ -40,6 +40,9 @@ pub struct Response {
 
     #[serde(skip_serializing)]
     pub subselection: Option<String>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub incremental: Vec<IncrementalResponse>,
 }
 
 #[buildstructor::buildstructor]
@@ -54,6 +57,7 @@ impl Response {
         extensions: Map<ByteString, Value>,
         subselection: Option<String>,
         has_next: Option<bool>,
+        incremental: Vec<IncrementalResponse>,
     ) -> Self {
         Self {
             label,
@@ -63,10 +67,11 @@ impl Response {
             extensions,
             subselection,
             has_next,
+            incremental,
         }
     }
 
-    /// If path is None, this is a primary query.
+    /// If path is None, this is a primary response.
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
     }
@@ -126,6 +131,24 @@ impl Response {
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
+        let incremental =
+            extract_key_value_from_object!(object, "incremental", Value::Array(a) => a).map_err(
+                |err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                },
+            )?;
+        let incremental: Vec<IncrementalResponse> = match incremental {
+            Some(v) => v
+                .into_iter()
+                .map(serde_json_bytes::from_value)
+                .collect::<Result<Vec<IncrementalResponse>, _>>()
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?,
+            None => vec![],
+        };
 
         Ok(Response {
             label,
@@ -135,10 +158,110 @@ impl Response {
             extensions,
             subselection: None,
             has_next,
+            incremental,
         })
     }
 }
 
+/// A graphql incremental response.
+/// Used with `@defer`
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct IncrementalResponse {
+    /// The label that was passed to the defer or stream directive for this patch.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub label: Option<String>,
+
+    /// The response data.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub data: Option<Value>,
+
+    /// The path that the data should be merged at.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub path: Option<Path>,
+
+    /// The optional graphql errors encountered.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub errors: Vec<Error>,
+
+    /// The optional graphql extensions.
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    pub extensions: Object,
+}
+
+#[buildstructor::buildstructor]
+impl IncrementalResponse {
+    /// Constructor
+    #[builder(visibility = "pub")]
+    fn new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        extensions: Map<ByteString, Value>,
+    ) -> Self {
+        Self {
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+        }
+    }
+
+    /// append_errors default the errors `path` with the one provided.
+    pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
+        self.errors.append(errors)
+    }
+
+    /*/// Create a [`Response`] from the supplied [`Bytes`].
+    ///
+    /// This will return an error (identifying the faulty service) if the input is invalid.
+    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<IncrementalResponse, FetchError> {
+        let value =
+            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        let data = object.remove("data");
+        let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .into_iter()
+            .flatten()
+            .map(|v| Error::from_value(service_name, v))
+            .collect::<Result<Vec<Error>, FetchError>>()?;
+
+        let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string());
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        Ok(IncrementalResponse {
+            label,
+            data,
+            path,
+            errors,
+        })
+    }*/
+}
 #[cfg(test)]
 mod tests {
     use serde_json::json;
