@@ -443,6 +443,12 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🐛 Fixes
 
+### Expose query plan: move the behavior to the execution_service ([#1541](https://github.com/apollographql/router/issues/1541))
+
+There isn't much use for QueryPlanner plugins. Most of the logic done there can be done in `execution_service`. Moreover users could get inconsistent plugin behavior because it depends on whether the QueryPlanner cache hits or not.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
 
 This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.
@@ -472,5 +478,13 @@ The CI check that ensures that the `license.html` file is up to date now display
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 🚀 Features
+
+### Helm: Rhai script and Istio virtualservice support ([#1478](https://github.com/apollographql/router/issues/1478))
+
+You can now pass a Rhai script file to the helm chart.
+You can also provide an Istio VirtualService configuration, as well as custom Egress rules.
+Head over to the helm chart [default values](https://github.com/apollographql/router/blob/main/helm/chart/router/values.yaml) to get started.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 📚 Documentation

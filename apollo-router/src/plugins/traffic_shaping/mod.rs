@@ -494,7 +494,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(310)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
