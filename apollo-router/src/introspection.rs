@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::{DeferStreamSupport, QueryPlannerConfig};
+use router_bridge::planner::DeferStreamSupport;
+use router_bridge::planner::QueryPlannerConfig;
 
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
