@@ -220,21 +220,26 @@ mod tests {
     #[tokio::test]
     async fn it_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(true)).await;
-        let router = build_mock_supergraph(plugin).await;
+        let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
             &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
-            router.clone(),
+            supergraph.clone(),
         )
         .await;
         // let's try that again
-        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, router).await;
+        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
     }
 
     #[tokio::test]
     async fn it_doesnt_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(false)).await;
-        let router = build_mock_supergraph(plugin).await;
-        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN, router).await;
+        let supergraph = build_mock_supergraph(plugin).await;
+        execute_supergraph_test(
+            VALID_QUERY,
+            &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
+            supergraph,
+        )
+        .await;
     }
 }
