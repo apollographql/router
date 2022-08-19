@@ -124,7 +124,7 @@ mod tests {
     // Unit testing this plugin will be a tad more complicated than testing the other ones.
     // We will first ensure the SubgraphService pushes the right status codes.
     //
-    // We will then make sure the RouterService is able to turn the relevant ordered status codes
+    // We will then make sure the SupergraphService is able to turn the relevant ordered status codes
     // into the relevant http response status.
 
     #[tokio::test]
@@ -201,7 +201,7 @@ mod tests {
     }
 
     // Now that our status codes mechanism has been tested,
-    // we can unit test the RouterService part of our plugin
+    // we can unit test the SupergraphService part of our plugin
 
     #[tokio::test]
     async fn router_service_override_status_code() {

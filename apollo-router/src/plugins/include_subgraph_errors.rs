@@ -97,7 +97,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::PluggableRouterServiceBuilder;
+    use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
     use crate::SupergraphResponse;
@@ -190,7 +190,7 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
             .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
