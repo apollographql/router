@@ -100,7 +100,6 @@ fn supergraph_service(service) {
 Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
 
   - `supergraph_service`
-  - `query_planner_service`
   - `execution_service`
   - `subgraph_service`
 
@@ -110,7 +109,6 @@ Each function takes a single parameter: `service`, this is typed for each of the
 
 ```javascript
 fn supergraph_service(service) {}
-fn query_planner_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service) {}
 ```
@@ -226,7 +224,7 @@ request.subgraph.headers.x-my-new-header = 42.to_string();
 
 #### request.body.query
 
-The request query is accessible. If modified make sure to do this before query planning is performed (i.e.: `supergraph_service()` or `query_planner_service()`) or the modification will have no effect on the query. For example, let's modify the query at the supergraph_service stage and turn it into a completely invalid query.
+The request query is accessible. If modified make sure to do this before query planning is performed (i.e.: `supergraph_service()`) or the modification will have no effect on the query. For example, let's modify the query at the supergraph_service stage and turn it into a completely invalid query.
 
 ```javascript
 print(`${request.body.query}`); // log the query before modification

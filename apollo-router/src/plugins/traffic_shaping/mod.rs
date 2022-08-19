@@ -38,10 +38,8 @@ use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
-use crate::stages::query_planner;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
-use crate::QueryPlannerRequest;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -225,22 +223,6 @@ impl Plugin for TrafficShaping {
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
-                    req
-                })
-                .boxed()
-        } else {
-            service
-        }
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        if matches!(self.config.deduplicate_variables, Some(true)) {
-            service
-                .map_request(|mut req: QueryPlannerRequest| {
-                    req.query_plan_options.enable_deduplicate_variables = true;
                     req
                 })
                 .boxed()

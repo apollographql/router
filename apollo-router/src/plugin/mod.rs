@@ -41,7 +41,6 @@ use tower::ServiceBuilder;
 use crate::layers::ServiceBuilderExt;
 use crate::stages;
 use crate::stages::execution;
-use crate::stages::query_planner;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
 
@@ -169,19 +168,6 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         service
     }
 
-    /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
-    ///
-    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
-    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
-    /// must be performed on the query, they should be done in router service plugins.
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        service
-    }
-
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
@@ -232,17 +218,6 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
-    /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planner_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
-    ///
-    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
-    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
-    /// must be performed on the query, they should be done in router service plugins.
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService;
-
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService;
@@ -277,13 +252,6 @@ where
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        self.query_planner_service(service)
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
