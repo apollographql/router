@@ -14,6 +14,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
+use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -122,6 +123,11 @@ where
                         .context(context)
                         .build(),
                 )
+                .instrument(tracing::info_span!("query_planning",
+                    graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
+                    graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                ))
                 .await?;
 
             match content {
