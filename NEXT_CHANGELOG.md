@@ -472,6 +472,12 @@ will create a separate response for each element of the array.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1529
 
+### Activate defer support in introspection ([PR #1557](https://github.com/apollographql/router/pull/1557))
+
+Introspection queries will now see the `@defer` directive if it was activated in the configuration file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1557
+
 ## 🛠 Maintenance
 
 ### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
