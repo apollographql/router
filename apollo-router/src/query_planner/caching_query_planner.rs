@@ -126,7 +126,23 @@ where
                     .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 
                 match res {
-                    Ok(content) => Ok(QueryPlannerResponse { content, context }),
+                    Ok(content) => {
+                        if let QueryPlannerContent::Plan { plan, .. } = &content {
+                            match (&plan.usage_reporting).serialize(Serializer) {
+                                Ok(v) => {
+                                    context.insert_json_value(USAGE_REPORTING, v);
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        Ok(QueryPlannerResponse { content, context })
+                    }
                     Err(error) => {
                         if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
                             if let QueryPlannerError::PlanningErrors(pe) = &error {
