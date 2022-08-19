@@ -4,7 +4,6 @@ use apollo_router::register_plugin;
 use apollo_router::stages::supergraph;
 {{#if type_basic}}
 use apollo_router::stages::execution;
-use apollo_router::stages::query_planner;
 use apollo_router::stages::subgraph;
 {{/if}}
 {{#if type_auth}}
