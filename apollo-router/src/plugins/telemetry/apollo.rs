@@ -174,35 +174,48 @@ pub(crate) struct ReportBuilder {
 }
 
 impl ReportBuilder {
-    // Return a stats report and a trace report because we can't send both trace and stats in the same payload
-    pub(crate) fn build(mut self) -> (Report, Report) {
+    pub(crate) fn build(mut self) -> (Report, VecTTL<SingleReport>) {
         // implement merge strategy and return orphans
-        let dedup_keys: Vec<String> = self
+        let duplicated_keys: Vec<String> = self
             .traces
             .keys()
             .chain(self.stats.keys())
-            .dedup()
+            .duplicates()
             .cloned()
             .collect();
-        let mut stats_report = Report::default();
-        let mut traces_report = Report::default();
-        for dedup_key in dedup_keys {
-            if let Some(traces) = self.traces.remove(&dedup_key) {
-                let entry = traces_report
-                    .traces_per_query
-                    .entry(dedup_key.clone())
-                    .or_default();
-                entry.traces = traces.traces;
-            }
-            if let Some(stats) = self.stats.remove(&dedup_key) {
-                let entry = stats_report.traces_per_query.entry(dedup_key).or_default();
-                entry.add_assign(stats);
-                // Only needed for stats report because we can't send both trace and stats in the same payload
-                // stats_report.operation_count += 1;
-            }
+        let mut report = Report::default();
+        for duplicated_key in duplicated_keys {
+            let traces = self
+                .traces
+                .remove(&duplicated_key)
+                .expect("must exist because it's a duplicate key")
+                .traces;
+            let stats = self
+                .stats
+                .remove(&duplicated_key)
+                .expect("must exist because it's a duplicate key");
+
+            let entry = report.traces_per_query.entry(duplicated_key).or_default();
+            entry.traces = traces;
+            entry.add_assign(stats);
+            report.operation_count += 1;
+        }
+        let mut orphans = VecTTL::with_capacity(2);
+        if !self.stats.is_empty() {
+            let single_stats_report = SingleStatsReport {
+                operation_count: self.stats.len() as u64,
+                stats: self.stats,
+            };
+            orphans.push(SingleReport::Stats(single_stats_report));
+        }
+        if !self.traces.is_empty() {
+            let single_traces_report = SingleTracesReport {
+                traces: self.traces,
+            };
+            orphans.push(SingleReport::Traces(single_traces_report));
         }
 
-        (stats_report, traces_report)
+        (report, orphans)
     }
 }
 
@@ -392,6 +405,8 @@ impl ApolloExporter {
             loop {
                 tokio::select! {
                     single_report = rx.next() => {
+                        buffer.purge();
+                        report_builder += std::mem::take(&mut buffer);
                         if let Some(r) = single_report {
                             report_builder += r;
                         } else {
@@ -399,25 +414,16 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
+                        buffer.purge();
                         report_builder += std::mem::take(&mut buffer);
-                        let (stats_report, traces_report) = std::mem::take(&mut report_builder).build();
-
-                        let futures: FuturesUnordered<_> = vec![Self::send_report(&pool, &apollo_key, &header, stats_report), Self::send_report(&pool, &apollo_key, &header, traces_report)]
-                            .into_iter()
-                            .collect();
-                        futures.collect::<Vec<()>>().await;
+                        let (report, orphans) = std::mem::take(&mut report_builder).build();
+                        buffer = orphans;
+                        Self::send_report(&pool, &apollo_key, &header, report).await;
                     }
                 };
             }
-            let (stats_report, traces_report) = report_builder.build();
 
-            let futures: FuturesUnordered<_> = vec![
-                Self::send_report(&pool, &apollo_key, &header, stats_report),
-                Self::send_report(&pool, &apollo_key, &header, traces_report),
-            ]
-            .into_iter()
-            .collect();
-            futures.collect::<Vec<()>>().await;
+            Self::send_report(&pool, &apollo_key, &header, report_builder.build().0).await;
         });
         Ok(ApolloExporter { tx })
     }
@@ -435,7 +441,7 @@ impl ApolloExporter {
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return;
         }
-        println!("SEND {}", report.operation_count);
+        println!("==== {}", serde_json::to_string_pretty(&report).unwrap());
 
         match pool.get().await {
             Ok(mut reporter) => {
