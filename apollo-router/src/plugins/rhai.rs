@@ -193,10 +193,24 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err("cannot access headers on a deferred response".into())
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_response(
         obj: &mut SharedMut<execution::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_execution_deferred_response(
+        _obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err("cannot access headers on a deferred response".into())
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -251,12 +265,28 @@ mod router_plugin_mod {
     }
 
     #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+        _headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        Err("cannot access headers on a deferred response".into())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_execution_response(
         obj: &mut SharedMut<execution::Response>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
         Ok(())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_execution_deferred_response(
+        _obj: &mut SharedMut<execution::DeferredResponse>,
+        _headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        Err("cannot access headers on a deferred response".into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
