@@ -30,7 +30,6 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::QueryPlan;
-use crate::query_planner::QueryPlanOptions;
 use crate::spec::Query;
 use crate::Context;
 
@@ -330,9 +329,6 @@ assert_impl_all!(QueryPlannerRequest: Send);
 pub struct QueryPlannerRequest {
     pub query: String,
     pub operation_name: Option<String>,
-    /// Query plan options
-    pub(crate) query_plan_options: QueryPlanOptions,
-
     pub context: Context,
 }
 
@@ -350,7 +346,6 @@ impl QueryPlannerRequest {
         Self {
             query,
             operation_name,
-            query_plan_options: QueryPlanOptions::default(),
             context,
         }
     }

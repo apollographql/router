@@ -63,14 +63,6 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        service
-    }
-
-    // Delete this function if you are not customizing it.
     fn execution_service(
         &self,
         service: execution::BoxService,

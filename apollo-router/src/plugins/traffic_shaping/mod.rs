@@ -261,6 +261,7 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::Configuration;
     use crate::PluggableRouterServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
@@ -336,7 +337,16 @@ mod test {
         );
         let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+        traffic_shaping:
+            deduplicate_variables: true
+        "#,
+        )
+        .unwrap();
+
+        let builder =
+            PluggableRouterServiceBuilder::new(schema.clone()).with_configuration(Arc::new(config));
 
         let builder = builder
             .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)

@@ -33,6 +33,7 @@ pub(crate) struct BridgeQueryPlanner {
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
+    deduplicate_variables: bool,
 }
 
 impl BridgeQueryPlanner {
@@ -41,6 +42,11 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
+        // The variables deduplication parameter lives in the traffic_shaping section of the config
+        let deduplicate_variables = configuration
+            .plugin_configuration("apollo.traffic_shaping")
+            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
+            .unwrap_or_default();
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
@@ -56,6 +62,7 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             configuration,
+            deduplicate_variables,
         })
     }
 
@@ -94,7 +101,6 @@ impl BridgeQueryPlanner {
         &self,
         query: String,
         operation: Option<String>,
-        options: QueryPlanOptions,
         mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
@@ -116,7 +122,9 @@ impl BridgeQueryPlanner {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
                         root: node,
-                        options,
+                        options: QueryPlanOptions {
+                            enable_deduplicate_variables: self.deduplicate_variables,
+                        },
                     }),
                     query: Arc::new(selections),
                 })
@@ -150,11 +158,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let this = self.clone();
         let fut = async move {
             match this
-                .get((
-                    req.query.clone(),
-                    req.operation_name.to_owned(),
-                    req.query_plan_options,
-                ))
+                .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
@@ -178,7 +182,7 @@ impl BridgeQueryPlanner {
             return self.introspection(key.0).await;
         }
 
-        self.plan(key.0, key.1, key.2, selections).await
+        self.plan(key.0, key.1, selections).await
     }
 }
 
@@ -207,11 +211,7 @@ mod tests {
         .await
         .unwrap();
         let result = planner
-            .get((
-                include_str!("testdata/query.graphql").into(),
-                None,
-                Default::default(),
-            ))
+            .get((include_str!("testdata/query.graphql").into(), None))
             .await
             .unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -237,7 +237,6 @@ mod tests {
             .get((
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 None,
-                Default::default(),
             ))
             .await
             .unwrap_err();
@@ -284,7 +283,6 @@ mod tests {
         .plan(
             include_str!("testdata/unknown_introspection_query.graphql").into(),
             None,
-            QueryPlanOptions::default(),
             Query::default(),
         )
         .await
@@ -311,7 +309,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let result = planner.get(("".into(), None, Default::default())).await;
+        let result = planner.get(("".into(), None)).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
