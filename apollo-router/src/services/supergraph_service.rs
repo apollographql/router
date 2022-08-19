@@ -40,7 +40,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::router_factory::RouterServiceFactory;
+use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::Configuration;
@@ -57,7 +57,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<ExecutionFactory> {
+pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
@@ -65,14 +65,14 @@ pub(crate) struct RouterService<ExecutionFactory> {
 }
 
 #[buildstructor::buildstructor]
-impl<ExecutionFactory> RouterService<ExecutionFactory> {
+impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
     ) -> Self {
-        RouterService {
+        SupergraphService {
             query_planner_service,
             execution_service_factory,
             ready_query_planner_service: None,
@@ -81,7 +81,7 @@ impl<ExecutionFactory> RouterService<ExecutionFactory> {
     }
 }
 
-impl<ExecutionFactory> Service<SupergraphRequest> for RouterService<ExecutionFactory>
+impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
 where
     ExecutionFactory: ExecutionServiceFactory,
 {
@@ -92,7 +92,7 @@ where
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // We need to obtain references to two hot services for use in call.
         // The reason for us to clone here is that the async block needs to own the hot services,
-        // and cloning will produce a cold service. Therefore cloning in `RouterService#call` is not
+        // and cloning will produce a cold service. Therefore cloning in `SupergraphService#call` is not
         // a valid course of action.
         self.ready_query_planner_service
             .get_or_insert_with(|| self.query_planner_service.clone())
@@ -277,14 +277,14 @@ where
 /// collection of plugins, collection of subgraph services are assembled to generate a
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
-pub(crate) struct PluggableRouterServiceBuilder {
+pub(crate) struct PluggableSupergraphServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
 }
 
-impl PluggableRouterServiceBuilder {
+impl PluggableSupergraphServiceBuilder {
     pub(crate) fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
@@ -298,7 +298,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
         plugin_name: String,
         plugin: Box<dyn DynPlugin>,
-    ) -> PluggableRouterServiceBuilder {
+    ) -> PluggableSupergraphServiceBuilder {
         self.plugins.insert(plugin_name, plugin);
         self
     }
@@ -307,7 +307,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
         name: &str,
         service_maker: S,
-    ) -> PluggableRouterServiceBuilder
+    ) -> PluggableSupergraphServiceBuilder
     where
         S: MakeSubgraphService,
     {
@@ -319,7 +319,7 @@ impl PluggableRouterServiceBuilder {
     pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,
-    ) -> PluggableRouterServiceBuilder {
+    ) -> PluggableSupergraphServiceBuilder {
         self.configuration = Some(configuration);
         self
     }
@@ -401,8 +401,8 @@ impl NewService<Request<graphql::Request>> for RouterCreator {
     }
 }
 
-impl RouterServiceFactory for RouterCreator {
-    type RouterService = BoxService<
+impl SupergraphServiceFactory for RouterCreator {
+    type SupergraphService = BoxService<
         Request<graphql::Request>,
         crate::http_ext::Response<BoxStream<'static, Response>>,
         BoxError,
@@ -440,7 +440,7 @@ impl RouterCreator {
             .service(
                 self.plugins.iter().rev().fold(
                     BoxService::new(
-                        RouterService::builder()
+                        SupergraphService::builder()
                             .query_planner_service(self.query_planner_service.clone())
                             .execution_service_factory(ExecutionCreator {
                                 schema: self.schema.clone(),

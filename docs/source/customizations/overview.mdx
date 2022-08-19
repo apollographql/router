@@ -27,15 +27,15 @@ Before building an Apollo Router customization, it helps first to understand how
 ```mermaid
 sequenceDiagram
     actor Client
-    participant RouterService
+    participant SupergraphService
     participant QueryPlannerService
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>RouterService: Sends request
-    RouterService->>QueryPlannerService: Fetches<br/>query plan
-    QueryPlannerService-->>RouterService: 
-    RouterService->>ExecutionService: Initiates query plan execution
+    Client->>SupergraphService: Sends request
+    SupergraphService->>QueryPlannerService: Fetches<br/>query plan
+    QueryPlannerService-->>SupergraphService: 
+    SupergraphService->>ExecutionService: Initiates query plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
     SubgraphService(s)-->>ExecutionService: 
@@ -46,11 +46,11 @@ sequenceDiagram
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
     SubgraphService(s)-->>ExecutionService: 
     end
-    ExecutionService-->>RouterService: Assembles and returns response
-    RouterService-->>Client: Returns response
+    ExecutionService-->>SupergraphService: Assembles and returns response
+    SupergraphService-->>Client: Returns response
 ```
 
-As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the response to the client.
+As execution proceeds "left to right" from the `SupergraphService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `SupergraphService`, each service passes the response to the client.
 
 Apollo Router customizations can hook into _any combination_ of these services and modify the request, response, or related metadata as they're passed along.
 

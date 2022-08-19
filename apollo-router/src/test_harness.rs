@@ -8,8 +8,8 @@ use crate::plugin::test::canned;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::router_factory::RouterServiceConfigurator;
-use crate::router_factory::YamlRouterServiceFactory;
+use crate::router_factory::SupergraphServiceConfigurator;
+use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::stages::execution;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
@@ -134,7 +134,7 @@ impl<'a> TestHarness<'a> {
         self,
         callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
     ) -> Self {
-        self.extra_plugin(RouterServicePlugin(callback))
+        self.extra_plugin(SupergraphServicePlugin(callback))
     }
 
     /// Adds an ad-hoc plugin that has [`Plugin::execution_service`] implemented with `callback`.
@@ -194,7 +194,7 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../../examples/graphql/local.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let router_creator = YamlRouterServiceFactory
+        let router_creator = YamlSupergraphServiceFactory
             .create(config, schema, None, Some(builder.extra_plugins))
             .await?;
         Ok(tower::service_fn(move |request| {
@@ -205,12 +205,13 @@ impl<'a> TestHarness<'a> {
     }
 }
 
-struct RouterServicePlugin<F>(F);
+struct SupergraphServicePlugin<F>(F);
+struct QueryPlannerServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
 
 #[async_trait::async_trait]
-impl<F> Plugin for RouterServicePlugin<F>
+impl<F> Plugin for SupergraphServicePlugin<F>
 where
     F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
 {

@@ -115,7 +115,7 @@ mod tests {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::services::PluggableRouterServiceBuilder;
+    use crate::services::PluggableSupergraphServiceBuilder;
     use crate::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
@@ -170,7 +170,7 @@ mod tests {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
             .with_dyn_plugin("experimental.expose_query_plan".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())

@@ -64,7 +64,7 @@ use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
-use crate::router_factory::RouterServiceFactory;
+use crate::router_factory::SupergraphServiceFactory;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -89,7 +89,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
-        RF: RouterServiceFactory,
+        RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -787,11 +787,11 @@ mod tests {
     >;
 
     #[derive(Clone)]
-    struct TestRouterServiceFactory {
+    struct TestSupergraphServiceFactory {
         inner: MockSupergraphServiceType,
     }
 
-    impl NewService<Request<graphql::Request>> for TestRouterServiceFactory {
+    impl NewService<Request<graphql::Request>> for TestSupergraphServiceFactory {
         type Service = MockSupergraphServiceType;
 
         fn new_service(&self) -> Self::Service {
@@ -799,10 +799,10 @@ mod tests {
         }
     }
 
-    impl RouterServiceFactory for TestRouterServiceFactory {
-        type RouterService = MockSupergraphServiceType;
+    impl SupergraphServiceFactory for TestSupergraphServiceFactory {
+        type SupergraphService = MockSupergraphServiceType;
 
-        type Future = <<TestRouterServiceFactory as NewService<
+        type Future = <<TestSupergraphServiceFactory as NewService<
             http_ext::Request<graphql::Request>,
         >>::Service as Service<http_ext::Request<graphql::Request>>>::Future;
 
@@ -827,7 +827,7 @@ mod tests {
         });
         let server = server_factory
             .create(
-                TestRouterServiceFactory {
+                TestSupergraphServiceFactory {
                     inner: service.into_inner(),
                 },
                 Arc::new(
@@ -875,7 +875,7 @@ mod tests {
         });
         let server = server_factory
             .create(
-                TestRouterServiceFactory {
+                TestSupergraphServiceFactory {
                     inner: service.into_inner(),
                 },
                 Arc::new(conf),
@@ -915,7 +915,7 @@ mod tests {
         });
         let server = server_factory
             .create(
-                TestRouterServiceFactory {
+                TestSupergraphServiceFactory {
                     inner: service.into_inner(),
                 },
                 Arc::new(
