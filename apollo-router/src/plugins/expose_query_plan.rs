@@ -69,7 +69,7 @@ impl Plugin for ExposeQueryPlan {
     ) -> BoxService<SupergraphRequest, SupergraphResponse, BoxError> {
         let conf_enabled = self.enabled;
         service
-            .map_future_with_context(move |req: &SupergraphRequest| {
+            .map_future_with_request_data(move |req: &SupergraphRequest| {
                 let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();

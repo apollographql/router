@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Rename map_future_with_context to map_future_with_request_data ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+
+The function is not very well named since it's in fact used to extract any data from a request for use in a future. This rename makes it clear.
+
+By [@garypen](https://github.com/garypen)
+
 ### Rename traffic shaping deduplication options ([PR #1540](https://github.com/apollographql/router/pull/1540))
 
 In the traffic shaping module:
