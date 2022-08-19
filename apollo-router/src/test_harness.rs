@@ -206,7 +206,6 @@ impl<'a> TestHarness<'a> {
 }
 
 struct SupergraphServicePlugin<F>(F);
-struct QueryPlannerServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
 
