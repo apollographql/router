@@ -33,7 +33,7 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::YamlRouterServiceFactory;
+use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -445,7 +445,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlRouterServiceFactory::default();
+        let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
         let listen_address = state_machine.listen_address.clone();
         let result = spawn(
