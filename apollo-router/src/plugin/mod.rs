@@ -151,6 +151,14 @@ pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
+    /// The configuration for this plugin.
+    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    ///
+    /// If a plugin is [registered][register_plugin!],
+    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// by having a sub-section named after the plugin.
+    /// The contents of this section are deserialized into this `Config` type
+    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
     type Config: JsonSchema + DeserializeOwned + Send;
 
     /// This is invoked once after the router starts and compiled-in

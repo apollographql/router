@@ -65,6 +65,7 @@ pub struct TestHarness<'a> {
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
 impl<'a> TestHarness<'a> {
+    #![allow(missing_docs)] // FIXME
     pub fn builder() -> Self {
         Self {
             schema: None,

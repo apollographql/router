@@ -32,6 +32,7 @@ pub use crate::spec::SpecError;
 #[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)] // FIXME
 pub enum FetchError {
     /// query references unknown service '{service}'
     ValidationUnknownServiceError {
@@ -293,7 +294,7 @@ struct ParserError {
 
 impl ParseErrors {
     #[allow(clippy::needless_return)]
-    pub fn print(&self) {
+    pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF {
             return;
         } else if atty::is(atty::Stream::Stdout) {

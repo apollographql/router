@@ -1,4 +1,7 @@
 //! serde support for commonly used data structures.
+
+#![allow(missing_docs)] // FIXME
+
 use std::fmt::Formatter;
 use std::str::FromStr;
 

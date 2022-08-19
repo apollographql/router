@@ -1,4 +1,7 @@
 //! GraphQL operation planning.
+
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;

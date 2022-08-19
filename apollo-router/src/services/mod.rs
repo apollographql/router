@@ -1,5 +1,7 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -12,11 +12,11 @@ use tracing::Span;
 
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
-use crate::layers::map_future_with_context::MapFutureWithContextLayer;
-use crate::layers::map_future_with_context::MapFutureWithContextService;
+use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
+use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
 
-pub mod map_future_with_context;
+pub mod map_future_with_request_data;
 
 pub mod async_checkpoint;
 pub mod instrument;
@@ -204,10 +204,10 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///
     /// # Arguments
     ///
-    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `req_fn`: The callback to extract data from the request.
     /// * `map_fn`: The callback to map the future.
     ///
-    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    /// returns: ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>>
     ///
     /// # Examples
     ///
@@ -222,19 +222,19 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ : supergraph::BoxService = ServiceBuilder::new()
-    ///     .map_future_with_context(
+    ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
     ///     .boxed();
     /// # }
     /// ```
-    fn map_future_with_context<C, F>(
+    fn map_future_with_request_data<RF, MF>(
         self,
-        ctx_fn: C,
-        map_fn: F,
-    ) -> ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>> {
-        self.layer(MapFutureWithContextLayer::new(ctx_fn, map_fn))
+        req_fn: RF,
+        map_fn: MF,
+    ) -> ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>> {
+        self.layer(MapFutureWithRequestDataLayer::new(req_fn, map_fn))
     }
 
     /// Utility function to allow us to specify default methods on this trait rather than duplicating in the impl.
@@ -266,10 +266,10 @@ pub trait ServiceExt<Request>: Service<Request> {
     ///
     /// # Arguments
     ///
-    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `req_fn`: The callback to extract data from the request.
     /// * `map_fn`: The callback to map the future.
     ///
-    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    /// returns: ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>>
     ///
     /// # Examples
     ///
@@ -285,24 +285,24 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ : supergraph::BoxService = service
-    ///     .map_future_with_context(
+    ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
     ///     .boxed();
     /// # }
     /// ```
-    fn map_future_with_context<C, F>(
+    fn map_future_with_request_data<RF, MF>(
         self,
-        cxt_fn: C,
-        map_fn: F,
-    ) -> MapFutureWithContextService<Self, C, F>
+        req_fn: RF,
+        map_fn: MF,
+    ) -> MapFutureWithRequestDataService<Self, RF, MF>
     where
         Self: Sized,
-        C: Clone,
-        F: Clone,
+        RF: Clone,
+        MF: Clone,
     {
-        MapFutureWithContextService::new(self, cxt_fn, map_fn)
+        MapFutureWithRequestDataService::new(self, req_fn, map_fn)
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
