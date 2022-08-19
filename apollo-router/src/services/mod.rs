@@ -328,10 +328,10 @@ impl SupergraphResponse {
 assert_impl_all!(QueryPlannerRequest: Send);
 /// [`Context`] for the request.
 #[derive(Clone, Debug)]
-pub struct QueryPlannerRequest {
-    pub query: String,
-    pub operation_name: Option<String>,
-    pub context: Context,
+pub(crate) struct QueryPlannerRequest {
+    pub(crate) query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) context: Context,
 }
 
 #[buildstructor::buildstructor]
@@ -339,7 +339,7 @@ impl QueryPlannerRequest {
     /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
-    #[builder(visibility = "pub")]
+    #[builder]
     pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
@@ -355,9 +355,9 @@ impl QueryPlannerRequest {
 
 assert_impl_all!(QueryPlannerResponse: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
-pub struct QueryPlannerResponse {
+pub(crate) struct QueryPlannerResponse {
     pub(crate) content: QueryPlannerContent,
-    pub context: Context,
+    pub(crate) context: Context,
 }
 
 /// Query, QueryPlan and Introspection data.
@@ -381,32 +381,6 @@ impl QueryPlannerResponse {
     #[builder]
     pub(crate) fn new(content: QueryPlannerContent, context: Context) -> QueryPlannerResponse {
         Self { content, context }
-    }
-
-    /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
-    /// It has no path and no response data.
-    /// This is useful for things such as authentication errors.
-    #[allow(unused_variables)]
-    #[builder(visibility = "pub")]
-    fn error_new(
-        errors: Vec<Error>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
-        context: Context,
-    ) -> Result<QueryPlannerResponse, BoxError> {
-        tracing::warn!("no way to propagate error response from QueryPlanner");
-        Ok(QueryPlannerResponse::new(
-            QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_builder().build()),
-                query: Arc::new(Query::default()),
-            },
-            context,
-        ))
-    }
-
-    /// Get a reference of the query plan
-    pub fn query_plan(&self) -> &QueryPlannerContent {
-        &self.content
     }
 }
 
