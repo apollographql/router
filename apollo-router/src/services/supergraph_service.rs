@@ -354,8 +354,8 @@ impl PluggableRouterServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service = ServiceBuilder::new()
-            .service(CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await);
+        let query_planner_service =
+            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
 
         let plugins = Arc::new(self.plugins);
 
