@@ -29,8 +29,7 @@ use opentelemetry::Value;
 use thiserror::Error;
 use url::Url;
 
-use super::apollo::SingleTraces;
-use super::apollo::SingleTracesReport;
+use super::apollo::TracesReport;
 use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::apollo::Sender;
 use crate::plugins::telemetry::apollo::SingleReport;
@@ -366,12 +365,17 @@ impl Exporter {
 #[derive(Debug)]
 struct TraceWithId {
     trace_id: TraceId,
+    signature: String,
     trace: apollo_spaceport::Trace,
 }
 
 impl TraceWithId {
-    fn new(trace_id: TraceId, trace: apollo_spaceport::Trace) -> Self {
-        Self { trace_id, trace }
+    fn new(trace_id: TraceId, trace: apollo_spaceport::Trace, signature: String) -> Self {
+        Self {
+            trace_id,
+            trace,
+            signature,
+        }
     }
 }
 
@@ -390,21 +394,27 @@ impl SpanExporter for Exporter {
         // We may get spams that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut traces_per_query: HashMap<String, Vec<TraceWithId>> = HashMap::new();
+        let mut traces_per_query: HashMap<String, TraceWithId> = HashMap::new();
         for span in batch {
             if span.name == "router" {
-                if let Some(operation_signature) = span
+                let operation_signature_attr = span
                     .attributes
                     .get(&Key::new("operation.signature"))
-                    .map(Value::to_string)
+                    .map(Value::to_string);
+                let request_id_attr = span
+                    .attributes
+                    .get(&Key::new("request.id"))
+                    .map(Value::to_string);
+                if let (Some(operation_signature), Some(request_id)) =
+                    (operation_signature_attr, request_id_attr)
                 {
-                    let traces_and_stats = traces_per_query
-                        .entry(operation_signature)
-                        .or_insert_with(Vec::new);
                     let trace_id = span.span_context.trace_id();
                     match self.extract_query_plan_trace(span) {
                         Ok(trace) => {
-                            traces_and_stats.push(TraceWithId::new(trace_id, trace));
+                            traces_per_query.insert(
+                                request_id,
+                                TraceWithId::new(trace_id, trace, operation_signature),
+                            );
                         }
                         Err(error) => {
                             tracing::error!("failed to construct trace: {}, skipping", error);
@@ -413,14 +423,9 @@ impl SpanExporter for Exporter {
                 }
             } else {
                 if span.name == "request" {
-                    if let Some(trace_found) =
-                        traces_per_query
-                            .values_mut()
-                            .flatten()
-                            .find(|trace_with_id| {
-                                trace_with_id.trace_id == span.span_context.trace_id()
-                            })
-                    {
+                    if let Some(trace_found) = traces_per_query.values_mut().find(|trace_with_id| {
+                        trace_with_id.trace_id == span.span_context.trace_id()
+                    }) {
                         trace_found.trace.http = self.extract_http_data(&span).into();
                     }
                 }
@@ -437,22 +442,12 @@ impl SpanExporter for Exporter {
             }
         }
 
-        self.apollo_sender
-            .send(SingleReport::Traces(SingleTracesReport {
-                traces: traces_per_query
-                    .into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k,
-                            SingleTraces::from(
-                                v.into_iter()
-                                    .map(apollo_spaceport::Trace::from)
-                                    .collect::<Vec<apollo_spaceport::Trace>>(),
-                            ),
-                        )
-                    })
-                    .collect(),
-            }));
+        self.apollo_sender.send(SingleReport::Traces(TracesReport {
+            traces: traces_per_query
+                .into_iter()
+                .map(|(k, v)| (k, (v.signature, v.trace)))
+                .collect(),
+        }));
 
         return ExportResult::Ok(());
     }

@@ -52,25 +52,6 @@ impl MetricsConfigurator for Config {
     }
 }
 
-pub(crate) struct ReporterManager {
-    endpoint: Url,
-}
-
-#[async_trait]
-impl managed::Manager for ReporterManager {
-    type Type = Reporter;
-    type Error = ReporterError;
-
-    async fn create(&self) -> Result<Reporter, Self::Error> {
-        let url = self.endpoint.to_string();
-        Ok(Reporter::try_new(url).await?)
-    }
-
-    async fn recycle(&self, _r: &mut Reporter) -> managed::RecycleResult<Self::Error> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::future::Future;

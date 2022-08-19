@@ -7,6 +7,7 @@ use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
+use crate::http_ext::RequestId;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::config;
@@ -34,8 +35,7 @@ impl TracingConfigurator for Config {
 
                 let mut send_headers = send_headers.clone();
                 match &mut send_headers {
-                    ForwardValues::None => todo!(),
-                    ForwardValues::All => todo!(),
+                    ForwardValues::None | ForwardValues::All => {}
                     ForwardValues::Only(headers) | ForwardValues::Except(headers) => headers
                         .iter_mut()
                         .for_each(|header_name| *header_name = header_name.to_lowercase()),
@@ -62,12 +62,9 @@ impl TracingConfigurator for Config {
     }
 }
 
+// List of signature and trace by request_id
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct SingleTracesReport {
-    pub(crate) traces: HashMap<String, SingleTraces>,
-}
-
-#[derive(Default, Debug, Serialize, derive_more::From)]
-pub(crate) struct SingleTraces {
-    pub(crate) traces: Vec<Trace>,
+pub(crate) struct TracesReport {
+    // signature and trace by request_id
+    pub(crate) traces: HashMap<String, (String, Trace)>,
 }

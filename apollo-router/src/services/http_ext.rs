@@ -10,6 +10,7 @@ use std::ops::DerefMut;
 use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
+use derive_more::Display;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
@@ -18,6 +19,8 @@ use http::header::{self};
 use http::HeaderValue;
 use http::Method;
 use multimap::MultiMap;
+use serde::Serialize;
+use ulid::Ulid;
 
 use crate::graphql;
 
@@ -119,6 +122,21 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
     }
 }
 
+#[derive(Clone, Debug, Display, Default, Serialize, PartialEq, Eq, Hash)]
+pub struct RequestId(pub(crate) Ulid);
+impl RequestId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+}
+impl std::ops::Deref for RequestId {
+    type Target = Ulid;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Wrap an http Request.
 #[derive(Debug)]
 pub struct Request<T> {
@@ -146,7 +164,8 @@ impl<T> Request<T> {
                 builder = builder.header(header_name.clone(), header_value);
             }
         }
-        let req = builder.body(body)?;
+        let mut req = builder.body(body)?;
+        req.extensions_mut().insert(RequestId::new());
 
         Ok(Self { inner: req })
     }
@@ -190,7 +209,10 @@ impl<T> DerefMut for Request<T> {
 
 impl<T> From<http::Request<T>> for Request<T> {
     fn from(inner: http::Request<T>) -> Self {
-        Request { inner }
+        let mut req = Request { inner };
+        req.extensions_mut().insert(RequestId::new());
+
+        req
     }
 }
 

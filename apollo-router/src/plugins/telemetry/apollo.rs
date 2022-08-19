@@ -34,8 +34,8 @@ use url::Url;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
-use super::tracing::apollo::SingleTraces;
-use super::tracing::apollo::SingleTracesReport;
+use super::metrics::apollo::studio::Stats;
+use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
@@ -164,69 +164,83 @@ impl Default for ForwardValues {
 #[derive(Debug, Serialize)]
 pub(crate) enum SingleReport {
     Stats(SingleStatsReport),
-    Traces(SingleTracesReport),
+    Traces(TracesReport),
 }
 
-#[derive(Default, Serialize)]
+impl SingleReport {
+    pub(crate) fn try_into_stats(self) -> Result<SingleStatsReport, Self> {
+        if let Self::Stats(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+#[derive(Default)]
 pub(crate) struct ReportBuilder {
-    pub(crate) traces: HashMap<String, SingleTraces>,
-    pub(crate) stats: HashMap<String, SingleStats>,
+    // signature / trace by request_id
+    pub(crate) traces: HashMap<String, (String, Trace)>,
+    // Buffer all (signatures and stats) by request_id to not have both traces and stats
+    pub(crate) stats: HashMap<String, HashMap<String, SingleStats>>,
+    pub(crate) report: Report,
 }
 
 impl ReportBuilder {
-    pub(crate) fn build(mut self) -> (Report, VecTTL<SingleReport>) {
-        // implement merge strategy and return orphans
-        let duplicated_keys: Vec<String> = self
+    pub(crate) fn build(mut self) -> Report {
+        // implement merge strategy
+
+        dbg!(&self.stats);
+        let duplicated_keys_for_reqs: Vec<String> = self
             .traces
             .keys()
             .chain(self.stats.keys())
             .duplicates()
             .cloned()
             .collect();
-        let mut report = Report::default();
-        for duplicated_key in duplicated_keys {
-            let traces = self
+
+        // let mut report = Report::default();
+        for duplicated_key in duplicated_keys_for_reqs {
+            let (operation_signature, trace) = self
                 .traces
                 .remove(&duplicated_key)
-                .expect("must exist because it's a duplicate key")
-                .traces;
-            let stats = self
+                .expect("must exist because it's a duplicate key");
+            let _stats = self
                 .stats
                 .remove(&duplicated_key)
                 .expect("must exist because it's a duplicate key");
 
-            let entry = report.traces_per_query.entry(duplicated_key).or_default();
-            entry.traces = traces;
-            entry.add_assign(stats);
-            report.operation_count += 1;
-        }
-        let mut orphans = VecTTL::with_capacity(2);
-        if !self.stats.is_empty() {
-            let single_stats_report = SingleStatsReport {
-                operation_count: self.stats.len() as u64,
-                stats: self.stats,
-            };
-            orphans.push(SingleReport::Stats(single_stats_report));
-        }
-        if !self.traces.is_empty() {
-            let single_traces_report = SingleTracesReport {
-                traces: self.traces,
-            };
-            orphans.push(SingleReport::Traces(single_traces_report));
+            let entry = self
+                .report
+                .traces_per_query
+                .entry(operation_signature)
+                .or_default();
+            // Because if we have traces we can't also provide metrics because it's computed as 2 requests in Studio
+
+            self.report.operation_count += 1;
+            entry.traces.push(trace);
         }
 
-        (report, orphans)
+        for (key, stats) in self.stats.into_iter().flat_map(|(_, v)| v) {
+            *self.report.traces_per_query.entry(key).or_default() += stats;
+            self.report.operation_count += 1;
+        }
+        self.report += TracesReport {
+            traces: self.traces,
+        };
+
+        self.report
     }
 }
 
-impl AddAssign<VecTTL<SingleReport>> for ReportBuilder {
-    fn add_assign(&mut self, report: VecTTL<SingleReport>) {
-        report
-            .inner
-            .into_iter()
-            .for_each(|(r, _)| self.add_assign(r));
-    }
-}
+// impl AddAssign<VecTTL<SingleReport>> for ReportBuilder {
+//     fn add_assign(&mut self, report: VecTTL<SingleReport>) {
+//         report
+//             .inner
+//             .into_iter()
+//             .for_each(|(r, _)| self.add_assign(r));
+//     }
+// }
 
 impl AddAssign<SingleReport> for ReportBuilder {
     fn add_assign(&mut self, report: SingleReport) {
@@ -239,13 +253,16 @@ impl AddAssign<SingleReport> for ReportBuilder {
 
 impl AddAssign<SingleStatsReport> for ReportBuilder {
     fn add_assign(&mut self, report: SingleStatsReport) {
-        self.stats.extend(report.stats.into_iter());
+        println!("pusssshhhhhhhhhhhhh !!!!!!!!!!!!!!!!! {report:?}");
+        // TODO FIXME I think it's wrong because report.stat should not be hashmap because we have only one stat per request_id
+        self.stats
+            .insert(report.request_id.to_string(), report.stats);
     }
 }
 
-impl AddAssign<SingleTracesReport> for ReportBuilder {
-    fn add_assign(&mut self, report: SingleTracesReport) {
-        self.traces.extend(report.traces.into_iter());
+impl AddAssign<TracesReport> for ReportBuilder {
+    fn add_assign(&mut self, report: TracesReport) {
+        self.traces.extend(report.traces);
     }
 }
 
@@ -280,7 +297,19 @@ impl Report {
     }
 }
 
-#[cfg(test)]
+impl AddAssign<TracesReport> for Report {
+    fn add_assign(&mut self, report: TracesReport) {
+        self.operation_count += report.traces.len() as u64;
+        for (_request_id, (operation_signature, trace)) in report.traces {
+            self.traces_per_query
+                .entry(operation_signature)
+                .or_default()
+                .traces
+                .push(trace);
+        }
+    }
+}
+
 impl AddAssign<SingleStatsReport> for Report {
     fn add_assign(&mut self, report: SingleStatsReport) {
         for (k, v) in report.stats {
@@ -398,15 +427,14 @@ impl ApolloExporter {
         tokio::spawn(async move {
             let timeout = tokio::time::interval(Duration::from_secs(5));
             let mut report_builder = ReportBuilder::default();
-            let mut buffer: VecTTL<SingleReport> = VecTTL::new();
+            // let mut buffer: VecTTL<SingleReport> = VecTTL::new();
 
             tokio::pin!(timeout);
 
             loop {
                 tokio::select! {
                     single_report = rx.next() => {
-                        buffer.purge();
-                        report_builder += std::mem::take(&mut buffer);
+                        // report_builder += std::mem::take(&mut buffer);
                         if let Some(r) = single_report {
                             report_builder += r;
                         } else {
@@ -414,16 +442,13 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        buffer.purge();
-                        report_builder += std::mem::take(&mut buffer);
-                        let (report, orphans) = std::mem::take(&mut report_builder).build();
-                        buffer = orphans;
+                        let report= std::mem::take(&mut report_builder).build();
                         Self::send_report(&pool, &apollo_key, &header, report).await;
                     }
                 };
             }
 
-            Self::send_report(&pool, &apollo_key, &header, report_builder.build().0).await;
+            Self::send_report(&pool, &apollo_key, &header, report_builder.build()).await;
         });
         Ok(ApolloExporter { tx })
     }
@@ -525,40 +550,4 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
         "{}, {}, {}, {}, {}",
         sysname, nodename, release, version, machine
     ))
-}
-
-/// Simple implementation of a vector with a TTL
-pub(crate) struct VecTTL<T> {
-    pub(crate) inner: Vec<(T, Instant)>,
-    duration: Duration,
-}
-
-impl<T> Default for VecTTL<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T> VecTTL<T> {
-    fn new() -> Self {
-        Self {
-            inner: Vec::new(),
-            duration: Duration::from_secs(10),
-        }
-    }
-
-    pub(crate) fn with_capacity(cap: usize) -> Self {
-        Self {
-            inner: Vec::with_capacity(cap),
-            duration: Duration::from_secs(10),
-        }
-    }
-
-    pub(crate) fn push(&mut self, val: T) {
-        self.inner.push((val, Instant::now()));
-    }
-
-    fn purge(&mut self) {
-        self.inner.retain(|(_, i)| i.elapsed() < self.duration);
-    }
 }

@@ -58,6 +58,7 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::http_ext;
+use crate::http_ext::RequestId;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -196,9 +197,16 @@ impl Plugin for Telemetry {
             .map_future_with_context(
                 move |req: &RouterRequest| {
                     Self::populate_context(config.clone(), req);
-                    req.context.clone()
+                    (
+                        req.originating_request
+                            .extensions()
+                            .get::<RequestId>()
+                            .expect("request id must be set")
+                            .clone(),
+                        req.context.clone(),
+                    )
                 },
-                move |ctx: Context, fut| {
+                move |(request_id, ctx): (RequestId, Context), fut| {
                     let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
@@ -218,6 +226,7 @@ impl Plugin for Telemetry {
                                 if !matches!(sender, Sender::Noop) {
                                     Self::update_apollo_metrics(
                                         &ctx,
+                                        &request_id,
                                         sender,
                                         true,
                                         start.elapsed(),
@@ -250,6 +259,7 @@ impl Plugin for Telemetry {
                                 Ok(router_response.map(move |response_stream| {
                                     let sender = sender.clone();
                                     let ctx = ctx.clone();
+                                    let request_id = request_id.clone();
 
                                     response_stream
                                         .map(move |response| {
@@ -258,6 +268,7 @@ impl Plugin for Telemetry {
                                             if !matches!(sender, Sender::Noop) {
                                                 Self::update_apollo_metrics(
                                                     &ctx,
+                                                    &request_id,
                                                     sender.clone(),
                                                     is_not_success || response_has_errors,
                                                     start.elapsed(),
@@ -817,6 +828,11 @@ impl Telemetry {
                 &request.originating_request.body().variables,
                 &send_variable_values,
             );
+            let request_id: &RequestId = request
+                .originating_request
+                .extensions()
+                .get()
+                .expect("request id must be set");
 
             let span = info_span!(
                 ROUTER_SPAN_NAME,
@@ -827,7 +843,8 @@ impl Telemetry {
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal,
                 "operation.signature" = field::Empty,
-                graphql.variables = %variables
+                graphql.variables = %variables,
+                request.id = %request_id
             );
             span
         }
@@ -882,6 +899,7 @@ impl Telemetry {
 
     fn update_apollo_metrics(
         context: &Context,
+        request_id: &RequestId,
         sender: Sender,
         has_errors: bool,
         duration: Duration,
@@ -906,6 +924,7 @@ impl Telemetry {
                 }
             } else {
                 metrics::apollo::studio::SingleStatsReport {
+                    request_id: request_id.clone(),
                     operation_count,
                     stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
@@ -939,6 +958,7 @@ impl Telemetry {
                 }
             }
         } else {
+            println!("do not find the usage reporting!!!!!!!!!!!!");
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
                 operation_count: 1,

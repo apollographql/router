@@ -497,7 +497,6 @@ where
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
-
             match service.call(Request::from_parts(head, body).into()).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
