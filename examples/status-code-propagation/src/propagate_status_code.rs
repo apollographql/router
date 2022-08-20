@@ -1,8 +1,8 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::subgraph;
-use apollo_router::stages::supergraph;
+use apollo_router::services::subgraph;
+use apollo_router::services::supergraph;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -91,8 +91,8 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
-    use apollo_router::stages::subgraph;
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::subgraph;
+    use apollo_router::services::supergraph;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;

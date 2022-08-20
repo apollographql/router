@@ -19,7 +19,7 @@ use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::Response;
-use crate::stages::execution;
+use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::Schema;

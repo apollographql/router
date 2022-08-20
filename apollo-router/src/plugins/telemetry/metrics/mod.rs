@@ -29,8 +29,8 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::services::transport;
 use crate::services::SupergraphResponse;
-use crate::stages;
 use crate::Context;
 
 pub(crate) mod apollo;
@@ -494,7 +494,7 @@ impl MetricsBuilder {
         self
     }
 
-    fn with_custom_endpoint(mut self, path: &str, endpoint: stages::http::BoxService) -> Self {
+    fn with_custom_endpoint(mut self, path: &str, endpoint: transport::BoxService) -> Self {
         self.custom_endpoints
             .insert(path.to_string(), Handler::new(endpoint));
         self

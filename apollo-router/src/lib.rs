@@ -15,7 +15,7 @@
 //!
 //! * [`plugin`] - various APIs for implementing a plugin
 //!
-//! * [`stages`] - the various stages of handling a GraphQL requests,
+//! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 //!
 //! Ultimately, you might want to be interested in all aspects of the implementation, in which case
@@ -70,9 +70,8 @@ mod request;
 mod response;
 mod router;
 mod router_factory;
-mod services;
+pub mod services;
 mod spec;
-pub mod stages;
 mod state_machine;
 mod test_harness;
 
@@ -101,5 +100,5 @@ pub mod _private {
 }
 
 // TODO: clean these up and import from relevant modules instead
-pub(crate) use services::*;
-pub(crate) use spec::*;
+pub(crate) use crate::services::*;
+pub(crate) use crate::spec::*;

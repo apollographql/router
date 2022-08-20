@@ -4,8 +4,8 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::stages::supergraph;
-use apollo_router::stages::subgraph;
+use apollo_router::services::supergraph;
+use apollo_router::services::subgraph;
 use apollo_router::TestHarness;
 use apollo_router::graphql::Response;
 use once_cell::sync::Lazy;

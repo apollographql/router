@@ -88,17 +88,17 @@ impl<T> OptionDance<T> for SharedMut<T> {
 }
 
 mod router {
-    pub(crate) use crate::stages::supergraph::*;
+    pub(crate) use crate::services::supergraph::*;
     pub(crate) type Response = super::RhaiSupergraphResponse;
 }
 
 mod execution {
-    pub(crate) use crate::stages::execution::*;
+    pub(crate) use crate::services::execution::*;
     pub(crate) type Response = super::RhaiExecutionResponse;
 }
 
 mod subgraph {
-    pub(crate) use crate::stages::subgraph::*;
+    pub(crate) use crate::services::subgraph::*;
 }
 
 #[export_module]

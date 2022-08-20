@@ -10,7 +10,7 @@ use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::subgraph;
+use crate::services::subgraph;
 use crate::SubgraphResponse;
 
 #[allow(clippy::field_reassign_with_default)]

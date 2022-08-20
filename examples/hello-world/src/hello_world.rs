@@ -1,9 +1,9 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::execution;
-use apollo_router::stages::subgraph;
-use apollo_router::stages::supergraph;
+use apollo_router::services::execution;
+use apollo_router::services::subgraph;
+use apollo_router::services::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;

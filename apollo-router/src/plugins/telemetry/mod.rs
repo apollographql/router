@@ -66,10 +66,10 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
-use crate::stages;
-use crate::stages::execution;
-use crate::stages::subgraph;
-use crate::stages::supergraph;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::services::transport;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::SubgraphRequest;
@@ -473,7 +473,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -483,7 +483,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &stages::http::Request, _services: &[_]| {
+            move |req: &transport::Request, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -712,7 +712,7 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: stages::http::Request| async {
+            service_fn(|_req: transport::Request| async {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)

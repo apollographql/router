@@ -77,7 +77,7 @@ The trait also provides a default implementations for each hook, which returns t
 // This is a bare-bones plugin that you can duplicate when creating your own.
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::Plugin;
-use apollo_router::stages::*;
+use apollo_router::services::*;
 
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
