@@ -1,4 +1,4 @@
-use apollo_router::stages::supergraph;
+use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
 

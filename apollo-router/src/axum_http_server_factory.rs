@@ -733,7 +733,7 @@ mod tests {
     use crate::configuration::Cors;
     use crate::http_ext::Request;
     use crate::services::new_service::NewService;
-    use crate::stages;
+    use crate::services::transport;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -1859,7 +1859,7 @@ Content-Type: application/json\r
     async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let plugin_handler = Handler::new(
-            service_fn(|req: stages::http::Request| async move {
+            service_fn(|req: transport::Request| async move {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::OK)

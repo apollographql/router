@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::subgraph;
+use crate::services::subgraph;
 use crate::SubgraphRequest;
 
 #[derive(Debug, Clone)]

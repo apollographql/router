@@ -68,7 +68,7 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::supergraph;
+use apollo_router::services::supergraph;
 use apollo_router::Context;
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -388,7 +388,7 @@ mod tests {
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::supergraph;
 
     use super::*;
 

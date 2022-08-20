@@ -37,9 +37,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
+use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
-use crate::stages::subgraph;
-use crate::stages::supergraph;
+use crate::services::supergraph;
 use crate::Configuration;
 use crate::SubgraphRequest;
 

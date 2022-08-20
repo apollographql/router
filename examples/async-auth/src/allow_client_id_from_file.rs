@@ -6,7 +6,7 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::supergraph;
+use apollo_router::services::supergraph;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -175,7 +175,7 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::supergraph;
     use apollo_router::TestHarness;
     use http::StatusCode;
     use serde_json::json;

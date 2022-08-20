@@ -10,9 +10,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
-use crate::stages::execution;
-use crate::stages::subgraph;
-use crate::stages::supergraph;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
 use crate::Schema;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
@@ -35,7 +35,7 @@ use crate::Schema;
 /// Example making a single request:
 ///
 /// ```
-/// use apollo_router::stages::supergraph;
+/// use apollo_router::services::supergraph;
 /// use apollo_router::TestHarness;
 /// use tower::util::ServiceExt;
 ///
