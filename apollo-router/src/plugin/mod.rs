@@ -39,10 +39,10 @@ use tower::Service;
 use tower::ServiceBuilder;
 
 use crate::layers::ServiceBuilderExt;
-use crate::stages;
-use crate::stages::execution;
-use crate::stages::subgraph;
-use crate::stages::supergraph;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::transport;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -195,7 +195,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         None
     }
 
@@ -241,7 +241,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<stages::http::BoxService>;
+    fn custom_endpoint(&self) -> Option<transport::BoxService>;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -270,7 +270,7 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         self.custom_endpoint()
     }
 
@@ -301,19 +301,19 @@ macro_rules! register_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<stages::http::BoxService, stages::http::Request>,
+    service: Buffer<transport::BoxService, transport::Request>,
 }
 
 impl Handler {
-    pub(crate) fn new(service: stages::http::BoxService) -> Self {
+    pub(crate) fn new(service: transport::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<stages::http::Request> for Handler {
-    type Response = stages::http::Response;
+impl Service<transport::Request> for Handler {
+    type Response = transport::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -321,13 +321,13 @@ impl Service<stages::http::Request> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: stages::http::Request) -> Self::Future {
+    fn call(&mut self, req: transport::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<stages::http::BoxService> for Handler {
-    fn from(original: stages::http::BoxService) -> Self {
+impl From<transport::BoxService> for Handler {
+    fn from(original: transport::BoxService) -> Self {
         Self::new(original)
     }
 }

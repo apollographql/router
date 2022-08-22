@@ -11,7 +11,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::execution;
+use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 

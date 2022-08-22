@@ -47,7 +47,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
@@ -107,7 +107,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
@@ -152,7 +152,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
@@ -181,7 +181,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let instrumented = ServiceBuilder::new()
@@ -218,7 +218,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ : supergraph::BoxService = ServiceBuilder::new()
@@ -280,7 +280,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::supergraph;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
     /// # fn test(service: supergraph::BoxService) {
