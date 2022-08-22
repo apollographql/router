@@ -116,43 +116,22 @@ In the `apollo_router::plugin::Plugin` trait:
 
 * `router_service` → `supergraph_service`
 
-A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
-reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
-Additionally, the "router stage" is now known as "supergraph stage".
-In pseudo-syntax, `use`’ing the old names:
+In the `apollo_router::services` module, to new public sub-modules:
+
+* `SupergraphRequest` → `supergraph::Request`
+* `SupergraphResponse` → `supergraph::Response`
+* `ExecutionRequest` → `execution::Request`
+* `ExecutionResponse` → `execution::Response`
+* `SubgraphRequest` → `subgraph::Request`
+* `SubgraphResponse` → `subgraph::Response`
+
+For convenience, these new sub-modules each contain type aliases
+base on their respective `Request` and `Response` types.
 
 ```rust
-mod supergraph {
-    use apollo_router::services::RouterRequest as Request;
-    use apollo_router::services::RouterResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-}
-
-pub mod execution {
-    use tower::BoxError;
-
-    pub use crate::services::ExecutionRequest as Request;
-    pub use crate::services::ExecutionResponse as Response;
-    pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-    pub type Result = std::result::Result<Response, BoxError>;
-
-    // Reachable from Request or Response:
-    pub use crate::query_planner::QueryPlan;
-    pub use crate::services::QueryPlannerContent;
-}
-
-mod subgraph {
-    use super::*;
-    use apollo_router::services::SubgraphRequest as Request;
-    use apollo_router::services::SubgraphResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-
-    // Reachable from Request or Response:
-    use apollo_router::query_planner::OperationKind;
-}
+pub type BoxService = tower::util::BoxService<Request, Response, tower::BoxError>;
+pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, tower::BoxError>;
+pub type ServiceResult = Result<Response, tower::BoxError>;
 ```
 
 Migration example:
@@ -161,7 +140,7 @@ Migration example:
 -use tower::util::BoxService;
 -use tower::BoxError;
 -use apollo_router::services::{RouterRequest, RouterResponse};
-+use apollo_router::stages::router;
++use apollo_router::services::router;
  
 -async fn example(service: BoxService<RouterRequest, RouterResponse, BoxError>) -> RouterResponse {
 +async fn example(service: router::BoxService) -> router::Response {
