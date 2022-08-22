@@ -49,8 +49,8 @@ use tracing_subscriber::Registry;
 use url::Url;
 
 use self::apollo::ForwardValues;
-use self::apollo::Sender;
 use self::apollo::SingleReport;
+use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
@@ -88,6 +88,7 @@ use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 
 pub(crate) mod apollo;
+pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 mod metrics;
 mod otlp;
@@ -113,7 +114,7 @@ pub struct Telemetry {
     meter_provider: AggregateMeterProvider,
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
-    apollo_metrics_sender: apollo::Sender,
+    apollo_metrics_sender: apollo_exporter::Sender,
 }
 
 #[derive(Debug)]

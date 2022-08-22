@@ -30,7 +30,7 @@ use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Handler;
-use crate::plugins::telemetry::apollo::Sender;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::services::RouterResponse;
 use crate::Context;

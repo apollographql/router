@@ -5,8 +5,8 @@ use std::sync::atomic::Ordering;
 
 use tower::BoxError;
 
-use crate::plugins::telemetry::apollo::ApolloExporter;
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -62,7 +62,7 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::telemetry::apollo;
-    use crate::plugins::telemetry::apollo::Sender;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::Context;

@@ -29,8 +29,8 @@ use url::Url;
 
 use super::apollo::TracesReport;
 use crate::plugins::telemetry::apollo::ForwardValues;
-use crate::plugins::telemetry::apollo::Sender;
 use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 
