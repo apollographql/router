@@ -16,7 +16,7 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::{SpanProcessorExt, TracingConfigurator};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 // Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint
@@ -110,7 +110,8 @@ impl TracingConfigurator for Config {
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                 .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
-                .build(),
+                .build()
+                .filtered(),
         ))
     }
 }

@@ -12,8 +12,6 @@ use apollo_spaceport::trace::Details;
 use apollo_spaceport::trace::Http;
 use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
-use apollo_spaceport::Report;
-use apollo_spaceport::TracesAndStats;
 use async_trait::async_trait;
 use derivative::Derivative;
 use http::header::HeaderName;
@@ -276,7 +274,7 @@ impl Exporter {
         } else {
             Ok(span
                 .attributes
-                .get(&Key::new("ftv1"))
+                .get(&Key::new("apollo_private_ftv1"))
                 .map(|data| {
                     if let Value::String(data) = data {
                         Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(

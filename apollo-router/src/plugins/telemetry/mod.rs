@@ -17,12 +17,10 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
-use axum::headers::HeaderName;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
-use http::header;
 use http::HeaderValue;
 use http::StatusCode;
 use once_cell::sync::OnceCell;
@@ -426,7 +424,7 @@ impl Plugin for Telemetry {
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
-                    "ftv1" = field::Empty
+                    "apollo_private_ftv1" = field::Empty
                 )
             })
             .map_request(move |mut req: SubgraphRequest| {
@@ -444,7 +442,7 @@ impl Plugin for Telemetry {
                     resp.response.body().extensions.get("ftv1")
                 {
                     // Record the ftv1 trace for processing later
-                    Span::current().record("ftv1", &ftv1.as_str().to_string());
+                    Span::current().record("apollo_private_ftv1", &ftv1.as_str().to_string());
                 }
                 resp
             })
@@ -804,7 +802,7 @@ impl Telemetry {
     fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
         let client_name_header = config.client_name_header;
         let client_version_header = config.client_version_header;
-        let send_variable_values = config.send_variable_values.clone();
+        let send_variable_values = config.send_variable_values;
 
         move |request: &RouterRequest| {
             let http_request = &request.originating_request;
