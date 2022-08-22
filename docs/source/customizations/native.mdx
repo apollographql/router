@@ -89,10 +89,6 @@ impl Plugin for HelloWorld {
         Ok(HelloWorld { configuration: init.config })
     }
 
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self);
-
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
     fn supergraph_service(
@@ -242,7 +238,7 @@ There is no sequencing for plugin registration, and registrations might even exe
 
 ### Activate
 
-When the router is ready to start serving requests, it calls each plugin's `activate` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
+Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
 
 Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
 

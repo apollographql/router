@@ -26,6 +26,15 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Remove `activate()` from the plugin API ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+
+Recent changes to configuration reloading means that the only known consumer of this API, telemetry, is no longer using it.
+
+Let's remove it since it's simple to add back if later required.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
