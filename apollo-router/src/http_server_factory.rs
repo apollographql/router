@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,7 +8,6 @@ use futures::prelude::*;
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::Handler;
 use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.
@@ -24,7 +22,6 @@ pub(crate) trait HttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
-        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
@@ -81,7 +78,6 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        plugin_handlers: HashMap<String, Handler>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -113,12 +109,7 @@ impl HttpServerHandle {
         };
 
         let handle = factory
-            .create(
-                router,
-                Arc::clone(&configuration),
-                listener,
-                plugin_handlers,
-            )
+            .create(router, Arc::clone(&configuration), listener)
             .await?;
         tracing::debug!("restarted on {}", handle.listen_address());
 

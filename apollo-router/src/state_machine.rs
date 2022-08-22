@@ -306,16 +306,10 @@ where
                     tracing::error!("cannot create the router: {}", err);
                     Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
-            let plugin_handlers = router_factory.custom_endpoints();
 
             let server_handle = self
                 .http_server_factory
-                .create(
-                    router_factory.clone(),
-                    configuration.clone(),
-                    None,
-                    plugin_handlers,
-                )
+                .create(router_factory.clone(), configuration.clone(), None)
                 .await
                 .map_err(|err| {
                     tracing::error!("cannot start the router: {}", err);
@@ -360,14 +354,11 @@ where
             .await
         {
             Ok(new_router_service) => {
-                let plugin_handlers = new_router_service.custom_endpoints();
-
                 let server_handle = server_handle
                     .restart(
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
-                        plugin_handlers,
                     )
                     .await
                     .map_err(|err| {
@@ -436,7 +427,6 @@ mod tests {
     use crate::http_ext::Response;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
-    use crate::plugin::Handler;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;
@@ -715,7 +705,6 @@ mod tests {
             _service_factory: RF,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
-            _plugin_handlers: HashMap<String, Handler>,
         ) -> Self::Future
         where
             RF: SupergraphServiceFactory,

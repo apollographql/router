@@ -33,10 +33,31 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::plugin::DynPlugin;
+use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::transport;
+use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
+
+/// Could eventually add a public builder similar to `test_harness.rs`
+/// https://github.com/apollographql/router/issues/1496
+async fn make_transport_service<RF>(
+    schema: &str,
+    configuration: Arc<Configuration>,
+    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
+) -> Result<transport::BoxCloneService, BoxError> {
+    let schema = Arc::new(Schema::parse(schema, &configuration)?);
+    let service_factory = YamlSupergraphServiceFactory
+        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .await?;
+    Ok(crate::axum_http_server_factory::make_transport_service(
+        service_factory,
+        configuration,
+    )?)
+}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
