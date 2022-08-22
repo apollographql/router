@@ -3,12 +3,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use apollo_spaceport::Reporter;
-use apollo_spaceport::ReporterError;
-use async_trait::async_trait;
-use deadpool::managed;
 use tower::BoxError;
-use url::Url;
 
 use crate::plugins::telemetry::apollo::ApolloExporter;
 use crate::plugins::telemetry::apollo::Config;

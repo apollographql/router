@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::trace::{Builder, EvictedHashMap, Span, SpanProcessor};
 use opentelemetry::trace::TraceResult;

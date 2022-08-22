@@ -24,14 +24,12 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sys_info::hostname;
-use tokio::time::Instant;
 use tower::BoxError;
 use url::Url;
 
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
-use super::metrics::apollo::studio::Stats;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 
@@ -162,16 +160,6 @@ impl Default for ForwardValues {
 pub(crate) enum SingleReport {
     Stats(SingleStatsReport),
     Traces(TracesReport),
-}
-
-impl SingleReport {
-    pub(crate) fn try_into_stats(self) -> Result<SingleStatsReport, Self> {
-        if let Self::Stats(v) = self {
-            Ok(v)
-        } else {
-            Err(self)
-        }
-    }
 }
 
 #[derive(Default)]
