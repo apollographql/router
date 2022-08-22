@@ -187,7 +187,8 @@ impl ReportBuilder {
     pub(crate) fn build(mut self) -> Report {
         // implement merge strategy
 
-        dbg!(&self.stats);
+        dbg!(self.stats.keys());
+        dbg!(self.traces.keys());
         let duplicated_keys_for_reqs: Vec<String> = self
             .traces
             .keys()
@@ -196,6 +197,7 @@ impl ReportBuilder {
             .cloned()
             .collect();
 
+        println!("duplicated keys {duplicated_keys_for_reqs:?}");
         // let mut report = Report::default();
         for duplicated_key in duplicated_keys_for_reqs {
             let (operation_signature, trace) = self
@@ -250,7 +252,6 @@ impl AddAssign<SingleReport> for ReportBuilder {
 
 impl AddAssign<SingleStatsReport> for ReportBuilder {
     fn add_assign(&mut self, report: SingleStatsReport) {
-        println!("pusssshhhhhhhhhhhhh !!!!!!!!!!!!!!!!! {report:?}");
         // TODO FIXME I think it's wrong because report.stat should not be hashmap because we have only one stat per request_id
         self.stats
             .insert(report.request_id.to_string(), report.stats);
@@ -422,7 +423,9 @@ impl ApolloExporter {
 
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(Duration::from_secs(5));
+            // Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
+            // It's less error prone to set a different value to let us compute traces and metrics
+            let timeout = tokio::time::interval(Duration::from_secs(7));
             let mut report_builder = ReportBuilder::default();
             // let mut buffer: VecTTL<SingleReport> = VecTTL::new();
 
