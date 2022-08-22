@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-# [0.16] (unreleased) - 2022-08-22
+# [0.16.0] - 2022-08-22
 
 ## ❗ BREAKING ❗
 
