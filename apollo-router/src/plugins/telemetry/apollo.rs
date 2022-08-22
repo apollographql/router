@@ -1,4 +1,5 @@
 //! Configuration for apollo telemetry.
+// This entire file is license key functionality
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
@@ -9,7 +10,6 @@ use apollo_spaceport::ReportHeader;
 use apollo_spaceport::StatsContext;
 use apollo_spaceport::Trace;
 use derivative::Derivative;
-// This entire file is license key functionality
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
@@ -26,6 +26,10 @@ use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::http_ext::RequestId;
 use crate::plugin::serde::deserialize_header_name;
+
+// TTL for orphan traces/metrics
+// An orphan is a metric without an associated trace or contrary
+const ORPHANS_TTL: Duration = Duration::from_secs(13);
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -202,10 +206,9 @@ impl ReportBuilder {
         // It stored in an EntryTTL to set a TTL on elements, once it has reached the TTL
         // it means we can send the metrics because we know there isn't any associated trace
         let mut orphans = Vec::new();
-        let ttl = Duration::from_secs(15);
         for (request_id, entry) in self.stats {
             // These stats reached TTL without finding corresponding traces then send it
-            if entry.created.elapsed() > ttl {
+            if entry.created.elapsed() > ORPHANS_TTL {
                 for (key, stats) in entry.inner {
                     *self.report.traces_per_query.entry(key).or_default() += stats;
                 }
@@ -223,7 +226,7 @@ impl ReportBuilder {
 
         for (request_id, entry) in self.traces {
             // This trace reached TTL without finding corresponding metrics then send it
-            if entry.created.elapsed() > ttl {
+            if entry.created.elapsed() > ORPHANS_TTL {
                 self.report += TracesReport {
                     traces: HashMap::from([(request_id, entry.inner)]),
                 };

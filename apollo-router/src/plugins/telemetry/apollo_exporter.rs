@@ -1,3 +1,5 @@
+//! Configuration for apollo telemetry exporter.
+// This entire file is license key functionality
 use std::time::Duration;
 use std::time::Instant;
 
@@ -21,6 +23,9 @@ use super::apollo::SingleReport;
 use crate::plugins::telemetry::apollo::ReportBuilder;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
+// Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
+// It's less error prone to set a different value to let us compute traces and metrics
+pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
 
 #[derive(Clone)]
 pub(crate) enum Sender {
@@ -96,9 +101,7 @@ impl ApolloExporter {
 
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
-            // Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
-            // It's less error prone to set a different value to let us compute traces and metrics
-            let timeout = tokio::time::interval(Duration::from_secs(7));
+            let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
             let mut report_builder = ReportBuilder::default();
             let mut buffer = Vec::new();
 
