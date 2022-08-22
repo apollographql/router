@@ -165,6 +165,37 @@ impl Drop for Telemetry {
     }
 }
 
+#[derive(Copy, Clone)]
+enum Ftv1Handler {
+    Enabled,
+    Disabled,
+}
+
+impl Ftv1Handler {
+    fn handle_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
+        if let Ftv1Handler::Enabled = self {
+            if span_enabled!(::tracing::Level::INFO) {
+                req.subgraph_request.headers_mut().insert(
+                    "apollo-federation-include-trace",
+                    HeaderValue::from_static("ftv1"),
+                );
+            }
+        }
+        req
+    }
+
+    fn handle_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
+        // Stash the FTV1 data
+        if let Some(serde_json_bytes::Value::String(ftv1)) =
+            resp.response.body().extensions.get("ftv1")
+        {
+            // Record the ftv1 trace for processing later
+            Span::current().record("apollo_private_ftv1", &ftv1.as_str().to_string());
+        }
+        resp
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -332,78 +363,10 @@ impl Plugin for Telemetry {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
+        let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
+        let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let name = name.to_owned();
-        let subgraph_metrics = Arc::new(
-            self.config
-                .metrics
-                .as_ref()
-                .and_then(|m| m.common.as_ref())
-                .and_then(|c| c.attributes.as_ref())
-                .and_then(|c| c.subgraph.as_ref())
-                .map(|subgraph_cfg| {
-                    macro_rules! extend_config {
-                        ($forward_kind: ident) => {{
-                            let mut cfg = subgraph_cfg
-                                .all
-                                .as_ref()
-                                .and_then(|a| a.$forward_kind.clone())
-                                .unwrap_or_default();
-                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                                cfg.extend(
-                                    subgraphs
-                                        .get(&name)
-                                        .and_then(|s| s.$forward_kind.clone())
-                                        .unwrap_or_default(),
-                                );
-                            }
-
-                            cfg
-                        }};
-                    }
-                    macro_rules! merge_config {
-                        ($forward_kind: ident) => {{
-                            let mut cfg = subgraph_cfg
-                                .all
-                                .as_ref()
-                                .and_then(|a| a.$forward_kind.clone())
-                                .unwrap_or_default();
-                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                                cfg.merge(
-                                    subgraphs
-                                        .get(&name)
-                                        .and_then(|s| s.$forward_kind.clone())
-                                        .unwrap_or_default(),
-                                );
-                            }
-
-                            cfg
-                        }};
-                    }
-                    let insert = extend_config!(insert);
-                    let context = extend_config!(context);
-                    let request = merge_config!(request);
-                    let response = merge_config!(response);
-                    let errors = merge_config!(errors);
-
-                    AttributesForwardConf {
-                        insert: (!insert.is_empty()).then(|| insert),
-                        request: (request.header.is_some() || request.body.is_some())
-                            .then(|| request),
-                        response: (response.header.is_some() || response.body.is_some())
-                            .then(|| response),
-                        errors: (errors.extensions.is_some() || errors.include_messages)
-                            .then(|| errors),
-                        context: (!context.is_empty()).then(|| context),
-                    }
-                }),
-        );
-        let subgraph_metrics_conf = subgraph_metrics.clone();
-        let ftv1_enabled = self
-            .config
-            .apollo
-            .clone()
-            .unwrap_or_default()
-            .field_level_instrumentation;
+        let ftv1 = self.ftv1_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -427,28 +390,11 @@ impl Plugin for Telemetry {
                     "apollo_private_ftv1" = field::Empty
                 )
             })
-            .map_request(move |mut req: SubgraphRequest| {
-                if ftv1_enabled && span_enabled!(::tracing::Level::INFO) {
-                    req.subgraph_request.headers_mut().insert(
-                        "apollo-federation-include-trace",
-                        HeaderValue::from_static("ftv1"),
-                    );
-                }
-                req
-            })
-            .map_response(|resp: SubgraphResponse| {
-                // Stash the FTV1 data
-                if let Some(serde_json_bytes::Value::String(ftv1)) =
-                    resp.response.body().extensions.get("ftv1")
-                {
-                    // Record the ftv1 trace for processing later
-                    Span::current().record("apollo_private_ftv1", &ftv1.as_str().to_string());
-                }
-                resp
-            })
+            .map_request(move |req| ftv1.handle_request(req))
+            .map_response(move |resp| ftv1.handle_response(resp))
             .map_future_with_context(
                 move |sub_request: &SubgraphRequest| {
-                    let subgraph_metrics_conf = subgraph_metrics_conf.clone();
+                    let subgraph_metrics_conf = subgraph_metrics_conf_req.clone();
                     let mut attributes = HashMap::new();
                     if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
                         attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
@@ -471,11 +417,11 @@ impl Plugin for Telemetry {
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
-                    let subgraph_metrics = subgraph_metrics.clone();
+                    let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |r: Result<SubgraphResponse, BoxError>| {
-                        let subgraph_metrics_conf = subgraph_metrics.clone();
+                        let subgraph_metrics_conf = subgraph_metrics_conf.clone();
                         let mut metric_attrs = context
                             .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
                             .ok()
@@ -1074,6 +1020,87 @@ impl Telemetry {
 
             let _ = context.insert(ATTRIBUTES, attributes);
         }
+    }
+
+    fn ftv1_handler(&self) -> Ftv1Handler {
+        if self
+            .config
+            .apollo
+            .clone()
+            .unwrap_or_default()
+            .field_level_instrumentation
+        {
+            Ftv1Handler::Enabled
+        } else {
+            Ftv1Handler::Disabled
+        }
+    }
+
+    fn create_subgraph_metrics_conf(&self, name: &str) -> Arc<Option<AttributesForwardConf>> {
+        Arc::new(
+            self.config
+                .metrics
+                .as_ref()
+                .and_then(|m| m.common.as_ref())
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|c| c.subgraph.as_ref())
+                .map(|subgraph_cfg| {
+                    macro_rules! extend_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.extend(
+                                    subgraphs
+                                        .get(&name.to_owned())
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    macro_rules! merge_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.merge(
+                                    subgraphs
+                                        .get(&name.to_owned())
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    let insert = extend_config!(insert);
+                    let context = extend_config!(context);
+                    let request = merge_config!(request);
+                    let response = merge_config!(response);
+                    let errors = merge_config!(errors);
+
+                    AttributesForwardConf {
+                        insert: (!insert.is_empty()).then(|| insert),
+                        request: (request.header.is_some() || request.body.is_some())
+                            .then(|| request),
+                        response: (response.header.is_some() || response.body.is_some())
+                            .then(|| response),
+                        errors: (errors.extensions.is_some() || errors.include_messages)
+                            .then(|| errors),
+                        context: (!context.is_empty()).then(|| context),
+                    }
+                }),
+        )
     }
 }
 
