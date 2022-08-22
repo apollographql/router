@@ -1,26 +1,22 @@
 ---
 title: Rhai scripts for the Apollo Router
-description: Extend router functionality without compiling a custom plugin
+description: Extend your router without building a custom binary
 ---
 
-The Apollo Router provides support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
+You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
 
-Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
+Rhai scripts can hook into any of these [Apollo Router services](./overview/#how-customizations-work) to perform custom tasks.
 
-## Limitations
+## Use cases
 
-Like the rest of the Apollo Router, Rhai support is in active development. At this time, functionality is limited.
+Common use cases for Apollo Router Rhai scripts include:
 
-**What you can do:**
-* Manipulate request/response HTTP headers
-* Manipulate request/response context
-* Perform `checkpoint`-style short circuiting of requests
-* Modify the status codes of requests/responses
-* Modify the body of requests
-* Modify the body of responses
-
-**What you can't do (yet):**
-* Execute calls to external services
+* Modifying the details of HTTP requests and responses, including:
+    * Request and response bodies
+    * Headers
+    * Status codes
+    * Context
+* Performing `checkpoint`-style short circuiting of requests
 
 ## Configuration
 
@@ -42,9 +38,6 @@ This section covers functionality that the router explicitly exposes to Rhai.
 
 > **Deadlocks** The router requires that its rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within rhai could cause a deadlock. This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this a local copy of the required data is obtained and used in the closure.
 
-
-
-
 ### Global State
 
 The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
@@ -65,6 +58,7 @@ fn supergraph_service(service) {
     service.map_response(f);
 }
 ```
+
 ### Logging
 
 If you print() a message then it will be logged to the router logs at info level. If you want more control over the log level, then there are a series of logging functions:
@@ -340,9 +334,18 @@ response.body.errors += error_to_add;
 print(`${response.body.errors}`); // logs the response errors
 ```
 
-## Full Examples
+## Limitations
 
-### Example 1
+Currently, Rhai scripts _cannot_ do the following:
+
+* Execute network requests
+* Read or write to disk
+
+If you need to customize the Apollo Router to do any of these, you can instead create a [native Rust plugin](./native/).
+
+## Examples
+
+### Handling incoming requests
 
 This example illustrates how to register router request handling.
 
@@ -360,7 +363,7 @@ fn process_request(request) {
 }
 ```
 
-### Example 2
+### Manipulating headers and the request context
 
 This example manipulates headers and the request context:
 
@@ -399,7 +402,7 @@ fn process_response(response) {
 }
 ```
 
-### Example 3
+### Converting cookies to headers
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
 
