@@ -27,9 +27,8 @@ pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
-// Reachable from Request or Response:
+// Reachable from Request
 pub use crate::query_planner::QueryPlan;
-pub use crate::services::query_planner::QueryPlannerContent;
 
 assert_impl_all!(Request: Send);
 /// [`Context`] and [`QueryPlan`] for the request.
