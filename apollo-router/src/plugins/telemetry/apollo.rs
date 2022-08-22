@@ -16,10 +16,7 @@ use deadpool::managed::Pool;
 use deadpool::Runtime;
 use derivative::Derivative;
 use futures::channel::mpsc;
-use futures::future::BoxFuture;
-use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use futures::FutureExt;
 // This entire file is license key functionality
 use http::header::HeaderName;
 use itertools::Itertools;
