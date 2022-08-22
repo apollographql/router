@@ -43,7 +43,7 @@ pub(crate) struct QueryPlanOptions {
 ///
 /// This type consists of a query string, an optional operation string and the
 /// [`QueryPlanOptions`].
-pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
+pub(crate) type QueryKey = (String, Option<String>);
 
 /// A plan for a given GraphQL query
 #[derive(Debug)]

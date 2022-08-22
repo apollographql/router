@@ -68,12 +68,10 @@ use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
 use crate::stages;
 use crate::stages::execution;
-use crate::stages::query_planner;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
 use crate::Context;
 use crate::ExecutionRequest;
-use crate::QueryPlannerRequest;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
@@ -254,25 +252,6 @@ impl Plugin for Telemetry {
                     }
                 },
             )
-            .service(service)
-            .boxed()
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        ServiceBuilder::new()
-            .instrument(move |req: &QueryPlannerRequest| {
-                let query = req.query.clone();
-                let operation_name = req.operation_name.clone().unwrap_or_default();
-
-                info_span!("query_planning",
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal
-                )
-            })
             .service(service)
             .boxed()
     }

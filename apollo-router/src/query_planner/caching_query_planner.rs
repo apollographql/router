@@ -53,11 +53,7 @@ where
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
         let mut qp = self.clone();
         Box::pin(async move {
-            let key = (
-                request.query.clone(),
-                request.operation_name.to_owned(),
-                request.query_plan_options.clone(),
-            );
+            let key = (request.query.clone(), request.operation_name.to_owned());
             let context = request.context.clone();
             let entry = qp.cache.get(&key).await;
             if entry.is_first() {

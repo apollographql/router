@@ -17,6 +17,7 @@ use apollo_router::stages::supergraph;
 use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use http::Method;
+use http::StatusCode;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
@@ -567,7 +568,11 @@ async fn missing_variables() {
         .build()
         .expect("expecting valid request");
 
-    let (response, _) = query_rust(originating_request.into()).await;
+    let (mut http_response, _) = http_query_rust(originating_request.into()).await;
+
+    assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
+
+    let response = http_response.next_response().await.unwrap();
     let expected = vec![
         apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -654,7 +659,7 @@ async fn defer_path() {
             r#"{
             me {
                 id
-                ...@defer {
+                ...@defer(label: "name") {
                     name
                 }
             }
@@ -673,26 +678,10 @@ async fn defer_path() {
     let mut stream = router.oneshot(request.into()).await.unwrap();
 
     let first = stream.next_response().await.unwrap();
-    println!("first: {:?}", first);
-    assert_eq!(
-        first.data.unwrap(),
-        serde_json_bytes::json! {{
-            "me":{
-                "id":"1"
-            }
-        }}
-    );
-    assert_eq!(first.path, None);
+    insta::assert_json_snapshot!(first);
 
     let second = stream.next_response().await.unwrap();
-    println!("second: {:?}", second);
-    assert_eq!(
-        second.data.unwrap(),
-        serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(second.path.unwrap().to_string(), "/me");
+    insta::assert_json_snapshot!(second);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -715,7 +704,7 @@ async fn defer_path_in_array() {
                         id
                         author {
                             id
-                            ... @defer {
+                            ... @defer(label: "author name") {
                             name
                             }
                         }
@@ -736,51 +725,10 @@ async fn defer_path_in_array() {
     let mut stream = router.oneshot(request.into()).await.unwrap();
 
     let first = stream.next_response().await.unwrap();
-    println!("first: {:?}", first);
-    assert_eq!(
-        first.data.unwrap(),
-        serde_json_bytes::json! {{
-            "me":{
-                "reviews":[
-                    {
-                        "id": "1",
-                        "author":
-                        {
-                            "id": "1"
-                        }
-                    },
-                    {
-                        "id": "2",
-                        "author":
-                        {
-                            "id": "1"
-                        }
-                    }
-                ]
-            }
-        }}
-    );
-    assert_eq!(first.path, None);
+    insta::assert_json_snapshot!(first);
 
     let second = stream.next_response().await.unwrap();
-    println!("second: {:?}", second);
-    assert_eq!(
-        second.data.unwrap(),
-        serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(second.path.unwrap().to_string(), "/me/reviews/0/author");
-
-    let third = stream.next_response().await.unwrap();
-    println!("third: {:?}", third);
-    assert_eq!(
-        third.data.unwrap(),
-        serde_json_bytes::json! {{
-            "name": "Ada Lovelace"
-        }}
-    );
-    assert_eq!(third.path.unwrap().to_string(), "/me/reviews/1/author");
+    insta::assert_json_snapshot!(second);
 }
 
 async fn query_node(
@@ -807,10 +755,27 @@ async fn query_node(
         )
 }
 
+async fn http_query_rust(
+    request: supergraph::Request,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    http_query_rust_with_config(request, serde_json::json!({})).await
+}
+
 async fn query_rust(
     request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     query_rust_with_config(request, serde_json::json!({})).await
+}
+
+async fn http_query_rust_with_config(
+    request: supergraph::Request,
+    config: serde_json::Value,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    let (router, counting_registry) = setup_router_and_registry(config).await;
+    (
+        http_query_with_router(router, request).await,
+        counting_registry,
+    )
 }
 
 async fn query_rust_with_config(
@@ -861,6 +826,13 @@ async fn query_with_router(
         .next_response()
         .await
         .unwrap()
+}
+
+async fn http_query_with_router(
+    router: supergraph::BoxCloneService,
+    request: supergraph::Request,
+) -> supergraph::Response {
+    router.oneshot(request).await.unwrap()
 }
 
 #[derive(Debug, Clone)]

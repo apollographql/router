@@ -94,10 +94,6 @@ mod router {
     pub(crate) type DeferredResponse = super::RhaiSupergraphDeferredResponse;
 }
 
-mod query_planner {
-    pub(crate) use crate::stages::query_planner::*;
-}
-
 mod execution {
     pub(crate) use crate::stages::execution::*;
     pub(crate) type Response = super::RhaiExecutionResponse;
@@ -409,26 +405,6 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
-        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
-            return service;
-        }
-        tracing::debug!("query_planner_service function found");
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if let Err(error) = self.run_rhai_service(
-            FUNCTION_NAME_SERVICE,
-            None,
-            ServiceStep::QueryPlanner(shared_service.clone()),
-        ) {
-            tracing::error!("service callback failed: {error}");
-        }
-        shared_service.take_unwrap()
-    }
-
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
@@ -467,7 +443,6 @@ impl Plugin for Rhai {
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
     Router(SharedMut<router::BoxService>),
-    QueryPlanner(SharedMut<query_planner::BoxService>),
     Execution(SharedMut<execution::BoxService>),
     Subgraph(SharedMut<subgraph::BoxService>),
 }
@@ -781,9 +756,6 @@ impl ServiceStep {
                         .boxed()
                 })
             }
-            ServiceStep::QueryPlanner(service) => {
-                gen_map_request!(query_planner, service, rhai_service, callback);
-            }
             ServiceStep::Execution(service) => {
                 //gen_map_request!(execution, service, rhai_service, callback);
                 service.replace(|service| {
@@ -949,9 +921,6 @@ impl ServiceStep {
                         },
                     ))
                 })
-            }
-            ServiceStep::QueryPlanner(service) => {
-                gen_map_response!(query_planner, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
                 service.replace(|service| {
@@ -1436,30 +1405,6 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
 
         register_rhai_interface!(engine, router, execution, subgraph);
-
-        engine
-            .register_get_result("context", |obj: &mut SharedMut<query_planner::Request>| {
-                Ok(obj.with_mut(|request| request.context.clone()))
-            })
-            .register_get_result("context", |obj: &mut SharedMut<query_planner::Response>| {
-                Ok(obj.with_mut(|response| response.context.clone()))
-            });
-
-        engine
-            .register_set_result(
-                "context",
-                |obj: &mut SharedMut<query_planner::Request>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                },
-            )
-            .register_set_result(
-                "context",
-                |obj: &mut SharedMut<query_planner::Response>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                },
-            );
 
         engine
             .register_get_result(
