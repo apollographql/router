@@ -98,7 +98,7 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
 }
 
 fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
-    let router_span = trace.select_path("$..spans[?(@.operationName == 'router')]")?[0];
+    let router_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
     // We can't actually assert the values on a span. Only that a field has been set.
     assert_eq!(
         router_span
