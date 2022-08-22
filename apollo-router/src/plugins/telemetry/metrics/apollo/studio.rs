@@ -33,12 +33,11 @@ impl Add<SingleStats> for SingleStats {
     type Output = Stats;
 
     fn add(self, rhs: SingleStats) -> Self::Output {
-        let mut res = Stats::default();
-        // No merging required here because references fields by type will always be the same for each stats report key.
-        res.referenced_fields_by_type = rhs.referenced_fields_by_type;
-        res.stats_with_context += rhs.stats_with_context;
-
-        res
+        Stats {
+            stats_with_context: self.stats_with_context + rhs.stats_with_context,
+            // No merging required here because references fields by type will always be the same for each stats report key.
+            referenced_fields_by_type: rhs.referenced_fields_by_type,
+        }
     }
 }
 

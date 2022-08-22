@@ -956,14 +956,13 @@ impl Telemetry {
                 }
             }
         } else {
-            println!("do not find the usage reporting!!!!!!!!!!!!");
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
                 operation_count: 1,
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics));
+        sender.send(SingleReport::Stats(metrics.into()));
     }
 
     async fn update_metrics(

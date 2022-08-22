@@ -7,7 +7,6 @@ use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
-use crate::http_ext::RequestId;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::config;
