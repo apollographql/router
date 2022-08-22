@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // FIXME
+
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,7 +33,7 @@ use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::YamlRouterServiceFactory;
+use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -320,14 +322,34 @@ impl ShutdownSource {
         match self {
             ShutdownSource::None => stream::pending::<Event>().boxed(),
             ShutdownSource::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
-            ShutdownSource::CtrlC => async {
-                tokio::signal::ctrl_c()
-                    .await
-                    .expect("Failed to install CTRL+C signal handler");
+            ShutdownSource::CtrlC => {
+                #[cfg(not(unix))]
+                {
+                    async {
+                        tokio::signal::ctrl_c()
+                            .await
+                            .expect("Failed to install CTRL+C signal handler");
+                    }
+                    .map(|_| Shutdown)
+                    .into_stream()
+                    .boxed()
+                }
+
+                #[cfg(unix)]
+                future::select(
+                    tokio::signal::ctrl_c().map(|s| s.ok()).boxed(),
+                    async {
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("Failed to install SIGTERM signal handler")
+                            .recv()
+                            .await
+                    }
+                    .boxed(),
+                )
+                .map(|_| Shutdown)
+                .into_stream()
+                .boxed()
             }
-            .map(|_| Shutdown)
-            .into_stream()
-            .boxed(),
         }
     }
 }
@@ -423,7 +445,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlRouterServiceFactory::default();
+        let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
         let listen_address = state_machine.listen_address.clone();
         let result = spawn(

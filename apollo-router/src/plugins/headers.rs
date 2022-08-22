@@ -32,7 +32,7 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::subgraph;
+use crate::services::subgraph;
 use crate::SubgraphRequest;
 
 register_plugin!("apollo", "headers", Headers);

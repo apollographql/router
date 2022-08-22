@@ -1899,6 +1899,11 @@ expression: "&schema"
               ],
               "nullable": true
             },
+            "deduplicate_query": {
+              "description": "Enable query deduplication",
+              "type": "boolean",
+              "nullable": true
+            },
             "global_rate_limit": {
               "description": "Enable global rate limiting",
               "type": "object",
@@ -1921,11 +1926,6 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
-            "query_deduplication": {
-              "description": "Enable query deduplication",
-              "type": "boolean",
-              "nullable": true
-            },
             "timeout": {
               "description": "Enable timeout for incoming requests",
               "default": null,
@@ -1933,6 +1933,11 @@ expression: "&schema"
             }
           },
           "additionalProperties": false,
+          "nullable": true
+        },
+        "deduplicate_variables": {
+          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "type": "boolean",
           "nullable": true
         },
         "router": {
@@ -1986,6 +1991,11 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
+              "deduplicate_query": {
+                "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              },
               "global_rate_limit": {
                 "description": "Enable global rate limiting",
                 "type": "object",
@@ -2008,11 +2018,6 @@ expression: "&schema"
                 "additionalProperties": false,
                 "nullable": true
               },
-              "query_deduplication": {
-                "description": "Enable query deduplication",
-                "type": "boolean",
-                "nullable": true
-              },
               "timeout": {
                 "description": "Enable timeout for incoming requests",
                 "default": null,
@@ -2021,11 +2026,6 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
-        },
-        "variables_deduplication": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": "boolean",
-          "nullable": true
         }
       },
       "additionalProperties": false

@@ -1,7 +1,6 @@
 use std::task::Context;
 use std::task::Poll;
 
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry::sdk::Resource;
@@ -19,6 +18,7 @@ use crate::http_ext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::services::transport;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -64,8 +64,8 @@ pub(crate) struct PrometheusService {
     registry: Registry,
 }
 
-impl Service<http_ext::Request<Bytes>> for PrometheusService {
-    type Response = http_ext::Response<Bytes>;
+impl Service<transport::Request> for PrometheusService {
+    type Response = transport::Response;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -73,7 +73,7 @@ impl Service<http_ext::Request<Bytes>> for PrometheusService {
         Ok(()).into()
     }
 
-    fn call(&mut self, _req: http_ext::Request<Bytes>) -> Self::Future {
+    fn call(&mut self, _req: transport::Request) -> Self::Future {
         let metric_families = self.registry.gather();
         Box::pin(async move {
             let encoder = TextEncoder::new();

@@ -2,6 +2,8 @@
 //!
 //! To improve their usability.
 
+#![allow(missing_docs)] // FIXME
+
 use std::cmp::PartialEq;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -299,7 +301,7 @@ pub struct Response<T> {
 impl<T> Response<T> {
     pub fn map<F, U>(self, f: F) -> Response<U>
     where
-        F: FnMut(T) -> U,
+        F: FnOnce(T) -> U,
     {
         self.inner.map(f).into()
     }

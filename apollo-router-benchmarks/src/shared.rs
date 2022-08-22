@@ -4,8 +4,8 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::stages::router;
-use apollo_router::stages::subgraph;
+use apollo_router::services::supergraph;
+use apollo_router::services::subgraph;
 use apollo_router::TestHarness;
 use apollo_router::graphql::Response;
 use once_cell::sync::Lazy;
@@ -21,14 +21,14 @@ static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
 static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
 pub async fn basic_composition_benchmark(
-    mut router_service: router::BoxCloneService,
+    mut supergraph_service: supergraph::BoxCloneService,
 ) {
-    let request = router::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .variable("first", 2usize)
         .build().expect("expecting valid request");
 
-    let response = router_service
+    let response = supergraph_service
         .ready()
         .await
         .unwrap()

@@ -32,7 +32,7 @@ use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
-use crate::plugins::telemetry::ROUTER_SPAN_NAME;
+use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -159,6 +159,7 @@ impl Exporter {
             details: Some(details),
             client_name: "".to_string(),
             client_version: "".to_string(),
+            // Filled later
             http: None,
             cache_policy: None,
             query_plan,
@@ -395,7 +396,7 @@ impl SpanExporter for Exporter {
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
         let mut traces_per_query: HashMap<String, TraceWithId> = HashMap::new();
         for span in batch {
-            if span.name == ROUTER_SPAN_NAME {
+            if span.name == SUPERGRAPH_SPAN_NAME {
                 let operation_signature_attr = span
                     .attributes
                     .get(&Key::new("operation.signature"))

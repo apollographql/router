@@ -32,6 +32,7 @@ pub use crate::spec::SpecError;
 #[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)] // FIXME
 pub enum FetchError {
     /// query references unknown service '{service}'
     ValidationUnknownServiceError {
@@ -124,13 +125,8 @@ impl FetchError {
     /// Convert the error to an appropriate response.
     pub fn to_response(&self) -> Response {
         Response {
-            label: Default::default(),
-            data: Default::default(),
-            path: Default::default(),
             errors: vec![self.to_graphql_error(None)],
-            extensions: Default::default(),
-            subselection: Default::default(),
-            has_next: Default::default(),
+            ..Response::default()
         }
     }
 }
@@ -293,7 +289,7 @@ struct ParserError {
 
 impl ParseErrors {
     #[allow(clippy::needless_return)]
-    pub fn print(&self) {
+    pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF {
             return;
         } else if atty::is(atty::Stream::Stdout) {

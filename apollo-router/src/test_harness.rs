@@ -8,12 +8,11 @@ use crate::plugin::test::canned;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::router_factory::RouterServiceConfigurator;
-use crate::router_factory::YamlRouterServiceFactory;
-use crate::stages::execution;
-use crate::stages::query_planner;
-use crate::stages::router;
-use crate::stages::subgraph;
+use crate::router_factory::SupergraphServiceConfigurator;
+use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
 use crate::Schema;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
@@ -36,13 +35,13 @@ use crate::Schema;
 /// Example making a single request:
 ///
 /// ```
-/// use apollo_router::stages::router;
+/// use apollo_router::services::supergraph;
 /// use apollo_router::TestHarness;
 /// use tower::util::ServiceExt;
 ///
 /// # #[tokio::main] async fn main() -> Result<(), tower::BoxError> {
 /// let config = serde_json::json!({"server": {"introspection": false}});
-/// let request = router::Request::fake_builder()
+/// let request = supergraph::Request::fake_builder()
 ///     // Request building here
 ///     .build()
 ///     .unwrap();
@@ -66,6 +65,7 @@ pub struct TestHarness<'a> {
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
 impl<'a> TestHarness<'a> {
+    #![allow(missing_docs)] // FIXME
     pub fn builder() -> Self {
         Self {
             schema: None,
@@ -129,23 +129,12 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    /// Adds an ad-hoc plugin that has [`Plugin::router_service`] implemented with `callback`.
-    pub fn extra_router_plugin(
+    /// Adds an ad-hoc plugin that has [`Plugin::supergraph_service`] implemented with `callback`.
+    pub fn extra_supergraph_plugin(
         self,
-        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+        callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
     ) -> Self {
-        self.extra_plugin(RouterServicePlugin(callback))
-    }
-
-    /// Adds an ad-hoc plugin that has [`Plugin::query_planning_service`] implemented with `callback`.
-    pub fn extra_query_planner_plugin(
-        self,
-        callback: impl Fn(query_planner::BoxService) -> query_planner::BoxService
-            + Send
-            + Sync
-            + 'static,
-    ) -> Self {
-        self.extra_plugin(QueryPlannerServicePlugin(callback))
+        self.extra_plugin(SupergraphServicePlugin(callback))
     }
 
     /// Adds an ad-hoc plugin that has [`Plugin::execution_service`] implemented with `callback`.
@@ -176,7 +165,7 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the GraphQL service
-    pub async fn build(self) -> Result<router::BoxCloneService, BoxError> {
+    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let builder = if self.schema.is_none() {
             self.extra_subgraph_plugin(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -205,7 +194,7 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../../examples/graphql/local.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let router_creator = YamlRouterServiceFactory
+        let router_creator = YamlSupergraphServiceFactory
             .create(config, schema, None, Some(builder.extra_plugins))
             .await?;
         Ok(tower::service_fn(move |request| {
@@ -216,15 +205,14 @@ impl<'a> TestHarness<'a> {
     }
 }
 
-struct RouterServicePlugin<F>(F);
-struct QueryPlannerServicePlugin<F>(F);
+struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
 
 #[async_trait::async_trait]
-impl<F> Plugin for RouterServicePlugin<F>
+impl<F> Plugin for SupergraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+    F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
 {
     type Config = ();
 
@@ -232,26 +220,7 @@ where
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        (self.0)(service)
-    }
-}
-
-#[async_trait::async_trait]
-impl<F> Plugin for QueryPlannerServicePlugin<F>
-where
-    F: 'static + Send + Sync + Fn(query_planner::BoxService) -> query_planner::BoxService,
-{
-    type Config = ();
-
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        unreachable!()
-    }
-
-    fn query_planning_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         (self.0)(service)
     }
 }

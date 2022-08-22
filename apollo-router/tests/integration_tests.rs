@@ -12,11 +12,12 @@ use apollo_router::graphql::Request;
 use apollo_router::http_ext;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::stages::router;
-use apollo_router::stages::subgraph;
+use apollo_router::services::subgraph;
+use apollo_router::services::supergraph;
 use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use http::Method;
+use http::StatusCode;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
@@ -267,7 +268,7 @@ async fn queries_should_work_with_compression() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -301,7 +302,7 @@ async fn queries_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -413,7 +414,7 @@ async fn mutation_should_work_over_post() {
         .build()
         .expect("expecting valid request");
 
-    let request = router::Request {
+    let request = supergraph::Request {
         originating_request: http_request,
         context: Context::new(),
     };
@@ -567,7 +568,11 @@ async fn missing_variables() {
         .build()
         .expect("expecting valid request");
 
-    let (response, _) = query_rust(originating_request.into()).await;
+    let (mut http_response, _) = http_query_rust(originating_request.into()).await;
+
+    assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
+
+    let response = http_response.next_response().await.unwrap();
     let expected = vec![
         apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -637,6 +642,95 @@ async fn query_just_at_recursion_limit() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_path() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = Request::builder()
+        .query(
+            r#"{
+            me {
+                id
+                ...@defer(label: "name") {
+                    name
+                }
+            }
+        }"#,
+        )
+        .build();
+
+    let request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request.into()).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_path_in_array() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = Request::builder()
+        .query(
+            r#"{
+                me {
+                    reviews {
+                        id
+                        author {
+                            id
+                            ... @defer(label: "author name") {
+                            name
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .build();
+
+    let request = http_ext::Request::fake_builder()
+        .body(request)
+        .header("content-type", "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request.into()).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+}
+
 async fn query_node(
     request: &graphql::Request,
 ) -> Result<graphql::Response, apollo_router::error::FetchError> {
@@ -661,14 +755,31 @@ async fn query_node(
         )
 }
 
+async fn http_query_rust(
+    request: supergraph::Request,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    http_query_rust_with_config(request, serde_json::json!({})).await
+}
+
 async fn query_rust(
-    request: router::Request,
+    request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     query_rust_with_config(request, serde_json::json!({})).await
 }
 
+async fn http_query_rust_with_config(
+    request: supergraph::Request,
+    config: serde_json::Value,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    let (router, counting_registry) = setup_router_and_registry(config).await;
+    (
+        http_query_with_router(router, request).await,
+        counting_registry,
+    )
+}
+
 async fn query_rust_with_config(
-    request: router::Request,
+    request: supergraph::Request,
     config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
@@ -677,7 +788,7 @@ async fn query_rust_with_config(
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (router::BoxCloneService, CountingServiceRegistry) {
+) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
     let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
@@ -705,8 +816,8 @@ async fn setup_router_and_registry(
 }
 
 async fn query_with_router(
-    router: router::BoxCloneService,
-    request: router::Request,
+    router: supergraph::BoxCloneService,
+    request: supergraph::Request,
 ) -> graphql::Response {
     router
         .oneshot(request)
@@ -715,6 +826,13 @@ async fn query_with_router(
         .next_response()
         .await
         .unwrap()
+}
+
+async fn http_query_with_router(
+    router: supergraph::BoxCloneService,
+    request: supergraph::Request,
+) -> supergraph::Response {
+    router.oneshot(request).await.unwrap()
 }
 
 #[derive(Debug, Clone)]

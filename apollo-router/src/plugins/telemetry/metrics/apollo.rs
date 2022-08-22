@@ -66,7 +66,7 @@ mod test {
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::Context;
-    use crate::RouterRequest;
+    use crate::SupergraphRequest;
     use crate::TestHarness;
 
     #[tokio::test]
@@ -172,7 +172,7 @@ mod test {
             .build()
             .await?
             .oneshot(
-                RouterRequest::fake_builder()
+                SupergraphRequest::fake_builder()
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")
                     .query(query)

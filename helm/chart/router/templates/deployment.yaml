@@ -5,19 +5,11 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
   {{/* There may not be much configuration so check that there is something */}}
-  {{- if .Values.router.configuration }}
-  {{- if .Values.router.configuration.telemetry }}
-  {{- if .Values.router.configuration.telemetry.metrics }}
-  {{- if .Values.router.configuration.telemetry.metrics.prometheus }}
-  {{- if .Values.router.configuration.telemetry.metrics.prometheus.enabled }}
+  {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
     prometheus.io/path: /plugins/apollo.telemetry/prometheus
     prometheus.io/port: "{{ .Values.containerPorts.http }}"
     prometheus.io/scrape: "true"
-  {{- end }}
-  {{- end }}
-  {{- end }}
-  {{- end }}
   {{- end }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
@@ -108,17 +100,28 @@ spec:
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
               readOnly: true
+            {{- if index .Values.router.configuration "rhai" }}
+            - name: router-rhai
+              mountPath: {{ .Values.router.configuration.rhai.scripts | default "/dist/rhai" }}/{{ .Values.router.configuration.rhai.main | default "main.rhai" }}
+              subPath: {{ .Values.router.configuration.rhai.main | default "main.rhai" }}
+              readOnly: true
             {{- end }}
+            {{- end }}
+      volumes:
           {{- if .Values.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
           {{- end }}
           {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
-      volumes:
         {{- if .Values.router.configuration }}
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
+        {{- if index .Values.router.configuration "rhai" }}
+        - name: router-rhai
+          configMap:
+            name: {{ include "router.rhaiConfigMapName" . }}
+        {{- end }}
         {{- end }}
         {{- if .Values.extraVolumes }}
         {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}

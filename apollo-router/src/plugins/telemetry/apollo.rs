@@ -252,7 +252,6 @@ impl AddAssign<SingleReport> for ReportBuilder {
 
 impl AddAssign<EntryTTL<SingleStatsReport>> for ReportBuilder {
     fn add_assign(&mut self, report: EntryTTL<SingleStatsReport>) {
-        // TODO FIXME I think it's wrong because report.stat should not be hashmap because we have only one stat per request_id
         self.stats
             .insert(report.request_id.to_string(), report.map(|r| r.stats));
     }

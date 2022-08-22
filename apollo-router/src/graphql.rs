@@ -1,5 +1,7 @@
 //! Namespace for the GraphQL [`Request`], [`Response`], and [`Error`] types.
 
+#![allow(missing_docs)] // FIXME
+
 use std::fmt;
 
 use serde::Deserialize;

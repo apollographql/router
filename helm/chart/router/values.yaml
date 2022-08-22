@@ -12,6 +12,11 @@ router:
   args:
   - --hot-reload
 
+# -- If using rhai, specify the location of your input file
+rhai:
+  # -- input rhai file, contents will be stored in a ConfigMap
+  input_file: ""
+
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
@@ -91,6 +96,38 @@ ingress:
   #  - secretName: chart-example-tls
   #    hosts:
   #      - chart-example.local
+
+# set to true to enable istio's virtualservice
+virtualservice:
+  enabled: false
+  # namespace: ""
+  # gatewayName: ""
+  # http:
+  #   main:
+  #     # set enabled to true to add
+  #     # the default matcher of `exact: "/" or prefix: "/graphql"`
+  #     # with the <$fullName>.<.Release.Namespace>.svc.cluster.local destination
+  #     enabled: true
+  #   # use additionals to provide your custom virtualservice rules
+  #   additionals: []
+  #   - name: "default-nginx-routes"
+  #       match:
+  #         - uri:
+  #             prefix: "/foo"
+  #       rewrite:
+  #         uri: /
+  #       route:
+  #         - destination:
+  #             host: my.custom.backend.svc.cluster.local
+  #             port:
+  #               number: 80
+
+# set to true and provide configuration details if you want to make external https calls through istio's virtualservice
+serviceentry:
+  enabled: false
+  # hosts:
+  # a list of external hosts you want to be able to make https calls to
+  #   - api.example.com
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious

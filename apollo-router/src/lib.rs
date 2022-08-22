@@ -15,7 +15,7 @@
 //!
 //! * [`plugin`] - various APIs for implementing a plugin
 //!
-//! * [`stages`] - the various stages of handling a GraphQL requests,
+//! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 //!
 //! Ultimately, you might want to be interested in all aspects of the implementation, in which case
@@ -23,6 +23,7 @@
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
+#![warn(missing_docs)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
@@ -59,6 +60,7 @@ pub mod error;
 mod executable;
 mod files;
 pub mod graphql;
+pub mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
@@ -68,9 +70,8 @@ mod request;
 mod response;
 mod router;
 mod router_factory;
-mod services;
+pub mod services;
 mod spec;
-pub mod stages;
 mod state_machine;
 mod test_harness;
 
@@ -83,7 +84,6 @@ pub use crate::router::ConfigurationSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::services::http_ext;
 pub use crate::test_harness::TestHarness;
 
 /// Not part of the public API
@@ -100,5 +100,5 @@ pub mod _private {
 }
 
 // TODO: clean these up and import from relevant modules instead
-pub(crate) use services::*;
-pub(crate) use spec::*;
+pub(crate) use crate::services::*;
+pub(crate) use crate::spec::*;
