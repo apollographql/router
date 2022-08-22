@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 146
 expression: get_spans()
 ---
 {
@@ -23,11 +22,11 @@ expression: get_spans()
       "record": {
         "entries": [
           [
-            "query",
+            "graphql.document",
             "{ topProducts { name name2:name } }"
           ],
           [
-            "operation_name",
+            "graphql.operation.name",
             ""
           ],
           [
@@ -50,8 +49,8 @@ expression: get_spans()
           "module_path": "apollo_router::plugins::telemetry",
           "fields": {
             "names": [
-              "query",
-              "operation_name",
+              "graphql.document",
+              "graphql.operation.name",
               "client_name",
               "client_version",
               "otel.kind"
@@ -65,6 +64,14 @@ expression: get_spans()
           "record": {
             "entries": [
               [
+                "graphql.document",
+                "{ topProducts { name name2:name } }"
+              ],
+              [
+                "graphql.operation.name",
+                ""
+              ],
+              [
                 "otel.kind",
                 "internal"
               ]
@@ -76,6 +83,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -112,12 +121,16 @@ expression: get_spans()
           "record": {
             "entries": [
               [
-                "otel.kind",
-                "internal"
+                "graphql.document",
+                "{ topProducts { name name2:name } }"
               ],
               [
-                "message",
-                "flushing telemetry"
+                "graphql.operation.name",
+                ""
+              ],
+              [
+                "otel.kind",
+                "internal"
               ]
             ],
             "metadata": {
@@ -127,6 +140,8 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
+                  "graphql.document",
+                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -180,6 +195,14 @@ expression: get_spans()
                         "products"
                       ],
                       [
+                        "graphql.document",
+                        "{topProducts{name name2:name}}"
+                      ],
+                      [
+                        "graphql.operation.name",
+                        ""
+                      ],
+                      [
                         "otel.kind",
                         "internal"
                       ]
@@ -192,6 +215,8 @@ expression: get_spans()
                       "fields": {
                         "names": [
                           "name",
+                          "graphql.document",
+                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }
@@ -311,15 +336,15 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::services::router_service::format_response": {
-          "name": "apollo_router::services::router_service::format_response",
+        "apollo_router::services::supergraph_service::format_response": {
+          "name": "apollo_router::services::supergraph_service::format_response",
           "record": {
             "entries": [],
             "metadata": {
               "name": "format_response",
-              "target": "apollo_router::services::router_service",
+              "target": "apollo_router::services::supergraph_service",
               "level": "DEBUG",
-              "module_path": "apollo_router::services::router_service",
+              "module_path": "apollo_router::services::supergraph_service",
               "fields": {
                 "names": []
               }

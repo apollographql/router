@@ -1,6 +1,6 @@
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
-fn router_service(service) {
+fn supergraph_service(service) {
     print("registering request callback to add operation name to a header");
     const request_callback = Fn("process_request");
     map_request(service, request_callback);

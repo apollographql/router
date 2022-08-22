@@ -12,7 +12,7 @@ fn from_elem(c: &mut Criterion) {
 
         let router = runtime.block_on(builder.build()).unwrap();
         b.to_async(runtime)
-            .iter(|| basic_composition_benchmark(router.test_service()));
+            .iter(|| basic_composition_benchmark(router.clone()));
     });
 }
 

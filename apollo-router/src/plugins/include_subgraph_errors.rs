@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -11,7 +10,7 @@ use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::SubgraphRequest;
+use crate::stages::subgraph;
 use crate::SubgraphResponse;
 
 #[allow(clippy::field_reassign_with_default)]
@@ -52,11 +51,7 @@ impl Plugin for IncludeSubgraphErrors {
         })
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Search for subgraph in our configured subgraph map.
         // If we can't find it, use the "all" value
         if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {
@@ -102,10 +97,10 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::PluggableRouterServiceBuilder;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
         serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
@@ -135,9 +130,9 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
     ) {
-        let request = RouterRequest::fake_builder()
+        let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
@@ -158,7 +153,7 @@ mod test {
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -195,7 +190,7 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
             .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())

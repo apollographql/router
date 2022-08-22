@@ -4,15 +4,14 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::stages::subgraph;
 use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
@@ -36,8 +35,8 @@ impl Plugin for OverrideSubgraphUrl {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         let new_url = self.urls.get(subgraph_name).cloned();
         service
             .map_request(move |mut req: SubgraphRequest| {
@@ -63,11 +62,11 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
-    use super::*;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
     use crate::Context;
     use crate::SubgraphRequest;
+    use crate::SubgraphResponse;
 
     #[tokio::test]
     async fn plugin_registered() {
@@ -100,7 +99,7 @@ mod tests {
             .await
             .unwrap();
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
+            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
         let subgraph_req = SubgraphRequest::fake_builder().context(context);

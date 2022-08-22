@@ -22,14 +22,14 @@ pub(crate) trait TracingConfigurator {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub enum AgentEndpoint {
+pub(crate) enum AgentEndpoint {
     Default(AgentDefault),
     Url(Url),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum AgentDefault {
+pub(crate) enum AgentDefault {
     Default,
 }
 

@@ -1,7 +1,7 @@
 // This is a test used to make sure each callback is called
 
-fn router_service(service) {
-    log_info("router_service setup");
+fn supergraph_service(service) {
+    log_info("supergraph_service setup");
     service.map_request(|request| {
         log_info("from_router_request");
     });

@@ -3,7 +3,6 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::DeferStreamSupport;
@@ -16,17 +15,16 @@ use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
+use super::QueryKey;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
-use crate::traits::QueryKey;
-use crate::traits::QueryPlanner;
 use crate::*;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
@@ -76,7 +74,7 @@ impl BridgeQueryPlanner {
         }
     }
 
-    async fn introspection(&self, query: &str) -> Result<QueryPlannerContent, QueryPlannerError> {
+    async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
@@ -172,13 +170,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 }
 
-#[async_trait]
-impl QueryPlanner for BridgeQueryPlanner {
+impl BridgeQueryPlanner {
     async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(key.0.as_str()).await;
+            return self.introspection(key.0).await;
         }
 
         self.plan(key.0, key.1, key.2, selections).await
@@ -204,7 +201,9 @@ mod tests {
     async fn test_plan() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -231,7 +230,9 @@ mod tests {
     async fn test_plan_invalid_query() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -275,7 +276,9 @@ mod tests {
     async fn empty_query_plan_should_be_a_planner_error() {
         let err = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await
@@ -309,7 +312,9 @@ mod tests {
     async fn test_plan_error() {
         let planner = BridgeQueryPlanner::new(
             Arc::new(example_schema()),
-            Some(Arc::new(Introspection::from_schema(&example_schema()))),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
             Default::default(),
         )
         .await

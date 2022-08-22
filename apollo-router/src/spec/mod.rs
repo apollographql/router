@@ -7,8 +7,8 @@ mod selection;
 use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
-pub(crate) use query::*;
-pub use schema::Schema;
+pub use query::Query;
+pub(crate) use schema::Schema;
 pub(crate) use selection::*;
 use thiserror::Error;
 

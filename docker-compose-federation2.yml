@@ -52,7 +52,7 @@ services:
 
   collector:
     container_name: collector
-    image: otel/opentelemetry-collector:0.56.0
+    image: otel/opentelemetry-collector:0.57.2
     command: ["--config=/conf/collector-config.yml"]
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/collector-config.yml:/conf/collector-config.yml
@@ -71,7 +71,7 @@ services:
       - "9411:9411"
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:v2.36.2
+    image: prom/prometheus:v2.37.0
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:

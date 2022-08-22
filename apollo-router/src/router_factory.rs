@@ -18,17 +18,21 @@ use crate::plugin::Handler;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
-use crate::PluggableRouterServiceBuilder;
+use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
-/// Factory for creating a RouterService
+/// Factory for creating a SupergraphService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait RouterServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+/// SupergraphService on each request
+pub(crate) trait SupergraphServiceFactory:
+    NewService<Request<graphql::Request>, Service = Self::SupergraphService>
+    + Clone
+    + Send
+    + Sync
+    + 'static
 {
-    type RouterService: Service<
+    type SupergraphService: Service<
             Request<graphql::Request>,
             Response = Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
@@ -39,40 +43,42 @@ pub(crate) trait RouterServiceFactory:
     fn custom_endpoints(&self) -> HashMap<String, Handler>;
 }
 
-/// Factory for creating a RouterServiceFactory
+/// Factory for creating a SupergraphServiceFactory
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
-/// RouterServiceFactory from configuration when it changes
+/// SupergraphServiceFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
-    type RouterServiceFactory: RouterServiceFactory;
+pub(crate) trait SupergraphServiceConfigurator: Send + Sync + 'static {
+    type SupergraphServiceFactory: SupergraphServiceFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<Self::RouterServiceFactory, BoxError>;
+        previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<Self::SupergraphServiceFactory, BoxError>;
 }
 
-/// Main implementation of the RouterService factory, supporting the extensions system
+/// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlRouterServiceFactory;
+pub(crate) struct YamlSupergraphServiceFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceConfigurator for YamlRouterServiceFactory {
-    type RouterServiceFactory = RouterCreator;
+impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
+    type SupergraphServiceFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<Self::RouterServiceFactory, BoxError> {
+        _previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
@@ -102,13 +108,13 @@ impl RouterServiceConfigurator for YamlRouterServiceFactory {
 /// test only helper method to create a router factory in integration tests
 ///
 /// not meant to be used directly
-pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
+pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
-    let service = YamlRouterServiceFactory::default()
-        .create(Arc::new(config), Arc::new(schema), None)
+    let service = YamlSupergraphServiceFactory::default()
+        .create(Arc::new(config), Arc::new(schema), None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -125,21 +131,25 @@ caused by
 async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
-    let mut mandatory_plugins = vec!["experimental.include_subgraph_errors", "apollo.csrf"];
-
-    // Telemetry is *only* mandatory if the global subscriber is set
-    if crate::subscriber::is_global_subscriber_set() {
-        mandatory_plugins.insert(0, "apollo.telemetry");
-    }
+    let mandatory_plugins = vec![
+        "experimental.include_subgraph_errors",
+        "apollo.csrf",
+        "apollo.telemetry",
+    ];
 
     let mut errors = Vec::new();
     let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
+    let extra = extra_plugins.unwrap_or_default();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
-        let name = name.clone();
+        if extra.iter().any(|(n, _)| *n == name) {
+            // An instance of this plugin was already added through TestHarness::extra_plugin
+            continue;
+        }
 
         match plugin_registry.get(name.as_str()) {
             Some(factory) => {
@@ -168,6 +178,7 @@ async fn create_plugins(
             None => errors.push(ConfigurationError::PluginUnknown(name)),
         }
     }
+    plugin_instances.extend(extra);
 
     // At this point we've processed all of the plugins that were provided in configuration.
     // We now need to do process our list of mandatory plugins:
@@ -278,8 +289,8 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::RouterServiceConfigurator;
-    use crate::router_factory::YamlRouterServiceFactory;
+    use crate::router_factory::SupergraphServiceConfigurator;
+    use crate::router_factory::YamlSupergraphServiceFactory;
     use crate::Schema;
 
     #[derive(Debug)]
@@ -395,8 +406,8 @@ mod test {
         let schema = include_str!("testdata/supergraph.graphql");
         let schema = Schema::parse(schema, &config).unwrap();
 
-        let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
+        let service = YamlSupergraphServiceFactory::default()
+            .create(Arc::new(config), Arc::new(schema), None, None)
             .await;
         service.map(|_| ())
     }

@@ -3,7 +3,7 @@
 
 // Call map_request/map_response for our service and pass in strings with the names
 // of the functions to callback
-fn router_service(service) {
+fn supergraph_service(service) {
     print("registering callbacks for operation timing");
 
     const request_callback = Fn("process_request");

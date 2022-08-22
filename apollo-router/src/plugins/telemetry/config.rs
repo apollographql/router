@@ -1,7 +1,6 @@
 //! Configuration for the telemetry plugin.
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
@@ -14,7 +13,7 @@ use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
 
-pub trait GenericWith<T>
+pub(crate) trait GenericWith<T>
 where
     Self: Sized,
 {
@@ -42,50 +41,49 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
     #[allow(dead_code)]
-    pub metrics: Option<Metrics>,
-    pub tracing: Option<Tracing>,
-    pub apollo: Option<apollo::Config>,
+    pub(crate) metrics: Option<Metrics>,
+    pub(crate) tracing: Option<Tracing>,
+    pub(crate) apollo: Option<apollo::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
-pub struct Metrics {
-    pub common: Option<MetricsCommon>,
-    pub otlp: Option<otlp::Config>,
-    pub prometheus: Option<metrics::prometheus::Config>,
+pub(crate) struct Metrics {
+    pub(crate) common: Option<MetricsCommon>,
+    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct MetricsCommon {
-    pub delay_interval: Option<Duration>,
+pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
-    pub attributes: Option<MetricsAttributesConf>,
+    pub(crate) attributes: Option<MetricsAttributesConf>,
     #[serde(default)]
     /// Resources
-    pub resources: HashMap<String, String>,
+    pub(crate) resources: HashMap<String, String>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Tracing {
-    pub propagation: Option<Propagation>,
-    pub trace_config: Option<Trace>,
-    pub otlp: Option<otlp::Config>,
-    pub jaeger: Option<tracing::jaeger::Config>,
-    pub zipkin: Option<tracing::zipkin::Config>,
-    pub datadog: Option<tracing::datadog::Config>,
+pub(crate) struct Tracing {
+    pub(crate) propagation: Option<Propagation>,
+    pub(crate) trace_config: Option<Trace>,
+    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) jaeger: Option<tracing::jaeger::Config>,
+    pub(crate) zipkin: Option<tracing::zipkin::Config>,
+    pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Propagation {
-    pub baggage: Option<bool>,
-    pub trace_context: Option<bool>,
-    pub jaeger: Option<bool>,
-    pub datadog: Option<bool>,
-    pub zipkin: Option<bool>,
+pub(crate) struct Propagation {
+    pub(crate) baggage: Option<bool>,
+    pub(crate) trace_context: Option<bool>,
+    pub(crate) jaeger: Option<bool>,
+    pub(crate) datadog: Option<bool>,
+    pub(crate) zipkin: Option<bool>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, JsonSchema)]

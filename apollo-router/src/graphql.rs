@@ -1,5 +1,7 @@
 //! Namespace for the GraphQL [`Request`], [`Response`], and [`Error`] types.
 
+#![allow(missing_docs)] // FIXME
+
 use std::fmt;
 
 use serde::Deserialize;
@@ -33,8 +35,8 @@ pub struct Error {
 
 #[buildstructor::buildstructor]
 impl Error {
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,

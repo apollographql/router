@@ -101,17 +101,11 @@ server:
     # Set to true to add the `Access-Control-Allow-Credentials` header
     allow_credentials: false
 
-    # Set to true to mirror a client's received `access-control-request-headers`
+    # The headers to allow.
+    # Not setting this mirrors a client's received `access-control-request-headers`
     # This is equivalent to allowing any headers,
     # except it will also work if allow_credentials is set to true
-    allow_any_header: false
-
-    # The headers to allow.
-    # (Ignored if allow_any_header is set to true)
-    allow_headers: 
-      - content-type
-      - apollographql-client-version
-      - apollographql-client-name
+    allow_headers: []
 
     # Allowed request methods
     methods:

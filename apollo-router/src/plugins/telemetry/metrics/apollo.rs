@@ -247,18 +247,18 @@ mod test {
     use std::future::Future;
 
     use http::header::HeaderName;
+    use tower::ServiceExt;
 
     use super::super::super::config;
     use super::*;
-    use crate::plugin::test::IntoSchema::Canned;
-    use crate::plugin::test::PluginTestHarness;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::Context;
-    use crate::RouterRequest;
+    use crate::SupergraphRequest;
+    use crate::TestHarness;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
@@ -356,14 +356,12 @@ mod test {
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = futures::channel::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Spaceport(tx);
-        let mut test_harness = PluginTestHarness::builder()
-            .plugin(plugin)
-            .schema(Canned)
+        TestHarness::builder()
+            .extra_plugin(plugin)
             .build()
-            .await?;
-        let _ = test_harness
-            .call(
-                RouterRequest::fake_builder()
+            .await?
+            .oneshot(
+                SupergraphRequest::fake_builder()
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")
                     .query(query)
@@ -377,7 +375,6 @@ mod test {
             .await
             .unwrap();
 
-        drop(test_harness);
         let results = rx
             .collect::<Vec<_>>()
             .await
