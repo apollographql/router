@@ -38,10 +38,9 @@ use crate::plugin::PluginInit;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
-use crate::stages::query_planner;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
-use crate::QueryPlannerRequest;
+use crate::Configuration;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -95,7 +94,10 @@ struct RouterShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct Config {
+
+// FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
+// Remove this once the configuration yml changes.
+pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level
     router: Option<RouterShaping>,
@@ -132,7 +134,9 @@ impl Merge for RateLimitConf {
     }
 }
 
-struct TrafficShaping {
+// FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
+// Remove this once the configuration yml changes.
+pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
@@ -232,22 +236,6 @@ impl Plugin for TrafficShaping {
             service
         }
     }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        if matches!(self.config.deduplicate_variables, Some(true)) {
-            service
-                .map_request(|mut req: QueryPlannerRequest| {
-                    req.query_plan_options.enable_deduplicate_variables = true;
-                    req
-                })
-                .boxed()
-        } else {
-            service
-        }
-    }
 }
 
 impl TrafficShaping {
@@ -257,6 +245,15 @@ impl TrafficShaping {
     ) -> Option<T> {
         let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
         merged_subgraph_config.or_else(|| all_config.cloned())
+    }
+}
+
+impl TrafficShaping {
+    pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
+        configuration
+            .plugin_configuration("apollo.traffic_shaping")
+            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
+            .unwrap_or_default()
     }
 }
 
@@ -279,6 +276,7 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::Configuration;
     use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
@@ -354,7 +352,16 @@ mod test {
         );
         let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+        traffic_shaping:
+            deduplicate_variables: true
+        "#,
+        )
+        .unwrap();
+
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone())
+            .with_configuration(Arc::new(config));
 
         let builder = builder
             .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)

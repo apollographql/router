@@ -27,6 +27,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+
+### Remove QueryPlannerService ([PR #1552](https://github.com/apollographql/router/pull/1552))
+
+This service was redundant, since anything done as part of the `QueryPlannerService` could be done either at the `SupergraphService` or at the `ExecutionService` level.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ### Rename map_future_with_context to map_future_with_request_data ([PR #1547](https://github.com/apollographql/router/pull/1547))
 
 The function is not very well named since it's in fact used to extract any data from a request for use in a future. This rename makes it clear.
@@ -128,7 +135,6 @@ At the crate root:
 In the `apollo_router::plugin::Plugin` trait:
 
 * `router_service` → `supergraph_service`
-* `query_planning_service` → `query_planner_service`
 
 A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
 reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
@@ -143,24 +149,18 @@ mod supergraph {
     type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 }
 
-mod query_planner {
-    use apollo_router::services::QueryPlannerRequest as Request;
-    use apollo_router::services::QueryPlannerResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub mod execution {
+    use tower::BoxError;
+
+    pub use crate::services::ExecutionRequest as Request;
+    pub use crate::services::ExecutionResponse as Response;
+    pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+    pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub type Result = std::result::Result<Response, BoxError>;
 
     // Reachable from Request or Response:
-    use apollo_router::query_planner::QueryPlan;
-    use apollo_router::query_planner::QueryPlanOptions;
-    use apollo_router::services::QueryPlannerContent;
-    use apollo_router::spec::Query;
-}
-
-mod execution {
-    use apollo_router::services::ExecutionRequest as Request;
-    use apollo_router::services::ExecutionResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+    pub use crate::query_planner::QueryPlan;
+    pub use crate::services::QueryPlannerContent;
 }
 
 mod subgraph {

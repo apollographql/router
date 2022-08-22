@@ -11,7 +11,6 @@ use crate::plugin::PluginInit;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::stages::execution;
-use crate::stages::query_planner;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
 use crate::Schema;
@@ -138,17 +137,6 @@ impl<'a> TestHarness<'a> {
         self.extra_plugin(SupergraphServicePlugin(callback))
     }
 
-    /// Adds an ad-hoc plugin that has [`Plugin::query_planner_service`] implemented with `callback`.
-    pub fn extra_query_planner_plugin(
-        self,
-        callback: impl Fn(query_planner::BoxService) -> query_planner::BoxService
-            + Send
-            + Sync
-            + 'static,
-    ) -> Self {
-        self.extra_plugin(QueryPlannerServicePlugin(callback))
-    }
-
     /// Adds an ad-hoc plugin that has [`Plugin::execution_service`] implemented with `callback`.
     pub fn extra_execution_plugin(
         self,
@@ -218,7 +206,6 @@ impl<'a> TestHarness<'a> {
 }
 
 struct SupergraphServicePlugin<F>(F);
-struct QueryPlannerServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
 
@@ -234,25 +221,6 @@ where
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        (self.0)(service)
-    }
-}
-
-#[async_trait::async_trait]
-impl<F> Plugin for QueryPlannerServicePlugin<F>
-where
-    F: 'static + Send + Sync + Fn(query_planner::BoxService) -> query_planner::BoxService,
-{
-    type Config = ();
-
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        unreachable!()
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
         (self.0)(service)
     }
 }

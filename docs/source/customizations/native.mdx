@@ -102,13 +102,6 @@ impl Plugin for HelloWorld {
         service
     }
 
-    fn query_planner_service(
-        &mut self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        service
-    }
-
     fn execution_service(
         &mut self,
         service: execution::BoxService,

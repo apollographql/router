@@ -22,21 +22,6 @@ pub mod supergraph {
     pub type Result = std::result::Result<Response, BoxError>;
 }
 
-pub mod query_planner {
-    use tower::BoxError;
-
-    pub use crate::services::QueryPlannerRequest as Request;
-    pub use crate::services::QueryPlannerResponse as Response;
-    pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-    pub type Result = std::result::Result<Response, BoxError>;
-
-    // Reachable from Request or Response:
-    pub use crate::query_planner::QueryPlan;
-    pub use crate::services::QueryPlannerContent;
-    pub use crate::spec::Query;
-}
-
 pub mod execution {
     use tower::BoxError;
 
@@ -45,6 +30,10 @@ pub mod execution {
     pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
     pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
     pub type Result = std::result::Result<Response, BoxError>;
+
+    // Reachable from Request or Response:
+    pub use crate::query_planner::QueryPlan;
+    pub use crate::services::QueryPlannerContent;
 }
 
 pub mod subgraph {

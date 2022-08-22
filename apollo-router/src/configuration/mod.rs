@@ -149,6 +149,13 @@ impl Configuration {
         plugins
     }
 
+    pub(crate) fn plugin_configuration(&self, plugin_name: &str) -> Option<Value> {
+        self.plugins()
+            .iter()
+            .find(|(name, _)| name == plugin_name)
+            .map(|(_, value)| value.clone())
+    }
+
     // checks that we can reload configuration from the current one to the new one
     pub(crate) fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
         if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
