@@ -435,6 +435,12 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Include formatted query plan when exposing the query plan ([#1557](https://github.com/apollographql/router/issues/1557))
+
+Move the location of the `text` field when exposing the query plan and fill it with a formatted query plan.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
+
 ### Variables validation: return a 400 if variables validation fails ([#1403](https://github.com/apollographql/router/issues/1403))
 
 Failure to validate variables against a query and a schema will now return an HTTP 400.
