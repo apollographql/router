@@ -458,6 +458,12 @@ There isn't much use for QueryPlanner plugins. Most of the logic done there can 
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
+### Include usage reporting data in the context even when the query plan has been cached ([#1559](https://github.com/apollographql/router/issues/1559))
+
+Include usage reporting data in the context even when the query plan has been cached when calling `CachingQueryPlanner`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1559
+
 ### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
 
 This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.

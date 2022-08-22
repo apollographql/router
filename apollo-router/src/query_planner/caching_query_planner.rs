@@ -122,7 +122,23 @@ where
                     .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 
                 match res {
-                    Ok(content) => Ok(QueryPlannerResponse { content, context }),
+                    Ok(content) => {
+                        if let QueryPlannerContent::Plan { plan, .. } = &content {
+                            match (&plan.usage_reporting).serialize(Serializer) {
+                                Ok(v) => {
+                                    context.insert_json_value(USAGE_REPORTING, v);
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "usage reporting was not serializable to context, {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        Ok(QueryPlannerResponse { content, context })
+                    }
                     Err(error) => {
                         if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
                             if let QueryPlannerError::PlanningErrors(pe) = &error {
@@ -167,12 +183,14 @@ where
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
+    use query_planner::QueryPlan;
     use router_bridge::planner::PlanErrors;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
+    use crate::query_planner::QueryPlanOptions;
 
     mock! {
         #[derive(Debug)]
@@ -212,11 +230,8 @@ mod tests {
     async fn test_plan() {
         let mut delegate = MockMyQueryPlanner::new();
         delegate.expect_clone().returning(|| {
-            println!("cloning query planner");
             let mut planner = MockMyQueryPlanner::new();
             planner.expect_sync_call().times(0..2).returning(|_| {
-                println!("calling query planner");
-
                 Err(QueryPlannerError::from(PlanErrors {
                     errors: Default::default(),
                     usage_reporting: UsageReporting {
@@ -249,5 +264,57 @@ mod tests {
             ))
             .await
             .is_err());
+    }
+
+    macro_rules! test_query_plan {
+        () => {
+            include_str!("testdata/query_plan.json")
+        };
+    }
+
+    #[test(tokio::test)]
+    async fn test_usage_reporting() {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            planner.expect_sync_call().times(0..2).returning(|_| {
+                let query_plan: QueryPlan = QueryPlan {
+                    root: serde_json::from_str(test_query_plan!()).unwrap(),
+                    options: QueryPlanOptions::default(),
+                    usage_reporting: UsageReporting {
+                        stats_report_key: "this is a test report key".to_string(),
+                        referenced_fields_by_type: Default::default(),
+                    },
+                };
+                let qp_content = QueryPlannerContent::Plan {
+                    query: Arc::new(Query::default()),
+                    plan: Arc::new(query_plan),
+                };
+
+                Ok(QueryPlannerResponse::builder()
+                    .content(qp_content)
+                    .context(Context::new())
+                    .build())
+            });
+            planner
+        });
+
+        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
+
+        for _ in 0..5 {
+            assert!(planner
+                .call(QueryPlannerRequest::new(
+                    "".into(),
+                    Some("".into()),
+                    Context::new()
+                ))
+                .await
+                .unwrap()
+                .context
+                .get::<_, UsageReporting>(USAGE_REPORTING)
+                .ok()
+                .flatten()
+                .is_some());
+        }
     }
 }
