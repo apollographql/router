@@ -6,19 +6,35 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [0.16.0] - 2022-08-22
 
+We're getting closer and closer to our 1.0 release and with that we have a lot of polish that we're applying to our API to get it ready for it to be a durable surface area for our consumers to depend on.  Due to various learnings we've had during the pre-1.0 phases of the Router, we are evolving our API to match what we now know.
+
+We do not intend on doing this much moving around of things again soon, but anyone who has been following the repository the last couple weeks knows there has been a lot of activity and discussion about where things should live.  This means that this release has an _abnormally high number of breaking changes_, though we believe you'll find **_most_ of them to be relatively straightforward** to pivot away from.
+
+Please review the full change log to get all the details, but for the most part the changes in this release consist of:
+
+ - a lot of renames of existing symbols
+ - the re-location of exported symbols to more appropriate modules 
+ - the privatization of functions which we don't believe users needed directly (see below if any of these turn out to be a problem).
+ 
+ During each step of the migration, we recommend **searching this changelog** for a symbol to find advice on how to migrate it.  We've tried to make the instructions and path forward as clear as possible.
+
+- If you find yourself **needing help migrating** to the new patterns, please first take a close look at the examples provided in this change log and if you still need help, please [**open a discussion**](https://github.com/apollographql/router/discussions/).
+- If you find yourself **unable to do something** you had previously been able to do, please [**open an issue**](https://github.com/apollographql/router/issues).  Please make sure you include your use-case so we can understand better and document it for posterity!
+
+We appreciate your patience working through these and we're excited for the steps ahead!
 ## ❗ BREAKING ❗
 
-### Remove QueryPlannerService ([PR #1552](https://github.com/apollographql/router/pull/1552))
+### Remove `QueryPlannerService` ([PR #1552](https://github.com/apollographql/router/pull/1552))
 
 This service was redundant, since anything done as part of the `QueryPlannerService` could be done either at the `SupergraphService` or at the `ExecutionService` level.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o)
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1552
 
-### Rename map_future_with_context to map_future_with_request_data ([PR #1547](https://github.com/apollographql/router/pull/1547))
+### Rename `map_future_with_context` to `map_future_with_request_data` ([PR #1547](https://github.com/apollographql/router/pull/1547))
 
 The function is not very well named since it's in fact used to extract any data from a request for use in a future. This rename makes it clear.
 
-By [@garypen](https://github.com/garypen)
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1547
 
 ### Rename traffic shaping deduplication options ([PR #1540](https://github.com/apollographql/router/pull/1540))
 
@@ -43,11 +59,11 @@ In the traffic shaping module:
 +       deduplicate_query: false # Disable query deduplication for products.
 ```
 
-By [@garypen](https://github.com/garypen)
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1540
 
-### Put `query_plan_options` in private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
+### Make `query_plan_options` private and wrap `QueryPlanContent` in an opaque type ([PR #1486](https://github.com/apollographql/router/pull/1486))
 
-`QueryPlanOptions::query_plan_options` is no longer available in public.
+`QueryPlanOptions::query_plan_options` is no longer public.  If you still necessitate usage of this, please open an issue with your use case.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1486
 
@@ -65,7 +81,7 @@ telemetry:
         nanos: 500000000
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1498
 
 ### Remove telemetry configuration hot reloading ([PR #1463](https://github.com/apollographql/router/pull/1463))
 
@@ -83,7 +99,7 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Reorder query planner execution ([PR #1484](https://github.com/apollographql/router/pull/1484))
 
-Query planning is deterministic, it only depends on the query, operation name and query planning
+Query planning is deterministic and only depends on the query, operation name and query planning
 options. As such, we can cache the result of the entire process.
 
 This changes the pipeline to apply query planner plugins between the cache and the bridge planner,
@@ -92,7 +108,7 @@ they should happen in a supergraph service.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1464
 
-### Remove Buffer from Mock*Service ([PR #1440](https://github.com/apollographql/router/pull/1440)
+### Remove `Buffer` from `Mock*Service` ([PR #1440](https://github.com/apollographql/router/pull/1440)
 
 This removes the usage of `tower_test::mock::Mock` in mocked services because it isolated the service in a task
 so panics triggered by mockall were not transmitted up to the unit test that should catch it.
@@ -209,11 +225,10 @@ By [@SimonSapin](https://github.com/SimonSapin)
 ### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 The builder for `apollo_router::Executable` had a `router_builder_fn` method
-allowing to specify how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
+allowing the specification of how a `RouterHttpServer` (previously `ApolloRouter`) was to be created
 with a provided configuration and schema.
-The only possible variation there was specifying when the server should shut down
-with a `ShutdownSource` parameter,
-so `router_builder_fn` was replaced with a new `shutdown` method that takes that.
+Since the only possible variation was specifying _when_ the server should shut down
+(with a `ShutdownSource` parameter) the `router_builder_fn` was replaced with a new `shutdown` method.
 
 ```diff
  use apollo_router::Executable;
