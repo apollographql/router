@@ -125,13 +125,8 @@ impl FetchError {
     /// Convert the error to an appropriate response.
     pub fn to_response(&self) -> Response {
         Response {
-            label: Default::default(),
-            data: Default::default(),
-            path: Default::default(),
             errors: vec![self.to_graphql_error(None)],
-            extensions: Default::default(),
-            subselection: Default::default(),
-            has_next: Default::default(),
+            ..Response::default()
         }
     }
 }

@@ -5,8 +5,6 @@ use std::task::Poll;
 
 use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::future::Either;
-use futures::stream;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
@@ -41,6 +39,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::response::IncrementalResponse;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
@@ -183,7 +182,7 @@ where
                             response: http::Response::from_parts(
                                 parts,
                                 response_stream
-                                    .flat_map(move |mut response: Response| {
+                                    .map(move |mut response: Response| {
                                         tracing::debug_span!("format_response").in_scope(|| {
                                             query.format_response(
                                                 &mut response,
@@ -199,7 +198,7 @@ where
                                                     response.has_next = Some(true);
                                                 }
 
-                                                Either::Left(once(ready(response)))
+                                                response
                                             }
                                             // if the deferred response specified a path, we must extract the
                                             //values matched by that path and create a separate response for
@@ -221,21 +220,27 @@ where
                                                     },
                                                 );
 
-                                                Either::Right(stream::iter(
-                                                    sub_responses.into_iter().map(
-                                                        move |(path, data)| Response {
-                                                            label: response.label.clone(),
-                                                            data: Some(data),
-                                                            path: Some(path),
-                                                            errors: response.errors.clone(),
-                                                            extensions: response.extensions.clone(),
-                                                            has_next: Some(true),
-                                                            subselection: response
-                                                                .subselection
-                                                                .clone(),
-                                                        },
-                                                    ),
-                                                ))
+                                                Response::builder()
+                                                    .has_next(true)
+                                                    .incremental(
+                                                        sub_responses
+                                                            .into_iter()
+                                                            .map(move |(path, data)| {
+                                                                IncrementalResponse::builder()
+                                                                    .and_label(
+                                                                        response.label.clone(),
+                                                                    )
+                                                                    .data(data)
+                                                                    .path(path)
+                                                                    .errors(response.errors.clone())
+                                                                    .extensions(
+                                                                        response.extensions.clone(),
+                                                                    )
+                                                                    .build()
+                                                            })
+                                                            .collect(),
+                                                    )
+                                                    .build()
                                             }
                                         }
                                     })
