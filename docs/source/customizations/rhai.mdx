@@ -3,9 +3,11 @@ title: Rhai scripts for the Apollo Router
 description: Extend your router without building a custom binary
 ---
 
-You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
+You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is ideal for performing common scripting tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
 
-Rhai scripts can hook into any of these [Apollo Router services](./overview/#how-customizations-work) to perform custom tasks.
+> To start familiarizing yourself with Rhai, see the [language reference](https://rhai.rs/book/language/) and some basic [syntax examples](https://rhai.rs/book/start/examples/scripts.html).
+
+Rhai scripts can hook into any combination of services in the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work).
 
 ## Use cases
 
@@ -20,15 +22,26 @@ Common use cases for Apollo Router Rhai scripts include:
 
 ## Configuration
 
+To use Rhai scripts with the Apollo Router, you must do the following:
+
+* Place all of your Rhai files in a specific directory.
+    * By default, the Apollo Router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
+* Define a "main" Rhai file in your router project.
+    * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
+
+You can modify any of these defaults in your [YAML config file](../configuration/overview/#yaml-config-file) like so:
+
+
 ```yaml
+# This is a top-level key.
 rhai:
-  # You must have a "main" rhai file. By default this is "main.rhai"
-  # You can change this name by specifying main:
+  # Specify a different Rhai script directory path with this key.
+  # The path can be relative or absolute.
+  scripts: "/rhai/scripts/directory"
+
+  # Specify a different name for your "main" Rhai file with this key.
+  # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
-  # Your rhai scripts are loaded from relative directory "./rhai"
-  # (relative to the directory in which your router is executing)
-  # You can change this location by specifying scripts:
-  scripts: "/where/I/keep/my/rhai/scripts"
 ```
 
 ## Rhai Router Execution Environment
@@ -345,6 +358,8 @@ If you need to customize the Apollo Router to do any of these, you can instead c
 
 ## Examples
 
+In addition to the examples below, see more examples in the Router repo's [examples directory](https://github.com/apollographql/router/tree/main/examples). Rhai-specific examples are listed in `README.md`.
+
 ### Handling incoming requests
 
 This example illustrates how to register router request handling.
@@ -441,5 +456,3 @@ fn process_request(request) {
     }
 }
 ```
-
-There are eight complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.

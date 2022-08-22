@@ -23,20 +23,17 @@ The Apollo Router supports two types of customizations:
 
 ## How customizations work
 
-Before you build a customization, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, four **services** in the router communicate with each other as shown:
+Before you build a customization, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, three **services** in the router communicate with each other as shown:
 
 ```mermaid
 sequenceDiagram
     actor Client
     participant SupergraphService
-    participant QueryPlannerService
     participant ExecutionService
     participant SubgraphService(s)
 
     Client->>SupergraphService: Sends request
-    SupergraphService->>QueryPlannerService: Fetches<br/>query plan
-    QueryPlannerService-->>SupergraphService: 
-    SupergraphService->>ExecutionService: Initiates query plan execution
+    SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
     SubgraphService(s)-->>ExecutionService: 
@@ -47,7 +44,7 @@ sequenceDiagram
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
     SubgraphService(s)-->>ExecutionService: 
     end
-    ExecutionService-->>SupergraphService: Assembles and returns response
+    ExecutionService-->>SupergraphService: Assembles and<br/>returns response
     SupergraphService-->>Client: Returns response
 ```
 
@@ -120,8 +117,6 @@ Define `subgraph_service` to configure this communication (for example, to dynam
 
 </tbody>
 </table>
-
-> _Most_ customizations use `supergraph_service` and/or `subgraph_service`, whereas the other service functions are less common.
 
 Each service has a request and response data-structure that holds:
 * A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
