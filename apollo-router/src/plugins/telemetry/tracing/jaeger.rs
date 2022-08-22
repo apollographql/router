@@ -16,7 +16,8 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::tracing::{SpanProcessorExt, TracingConfigurator};
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 // Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint

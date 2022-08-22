@@ -1,7 +1,11 @@
 use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::trace::{Builder, EvictedHashMap, Span, SpanProcessor};
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::EvictedHashMap;
+use opentelemetry::sdk::trace::Span;
+use opentelemetry::sdk::trace::SpanProcessor;
 use opentelemetry::trace::TraceResult;
-use opentelemetry::{Context, KeyValue};
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use reqwest::Url;
 use schemars::JsonSchema;
 use serde::Deserialize;
