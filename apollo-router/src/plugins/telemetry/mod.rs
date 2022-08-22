@@ -83,7 +83,7 @@ mod metrics;
 mod otlp;
 mod tracing;
 
-static ROUTER_SPAN_NAME: &str = "router";
+static SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -748,7 +748,7 @@ impl Telemetry {
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
-                ROUTER_SPAN_NAME,
+                SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),

@@ -157,7 +157,7 @@ fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
             "execution",
             "HTTP POST",
             "request",
-            "router",
+            "supergraph",
             "fetch",
             //"parse_query", Parse query will only happen once
             //"query_planning", query planning will only happen once
