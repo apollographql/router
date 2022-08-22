@@ -19,6 +19,7 @@ use super::QueryKey;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
 use crate::*;
 
@@ -42,11 +43,9 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
-        // The variables deduplication parameter lives in the traffic_shaping section of the config
-        let deduplicate_variables = configuration
-            .plugin_configuration("apollo.traffic_shaping")
-            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
-            .unwrap_or_default();
+        // FIXME: The variables deduplication parameter lives in the traffic_shaping section of the config
+        let deduplicate_variables =
+            TrafficShaping::get_configuration_deduplicate_variables(&configuration);
         Ok(Self {
             planner: Arc::new(
                 Planner::new(

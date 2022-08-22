@@ -40,6 +40,7 @@ use crate::register_plugin;
 use crate::services::subgraph_service::Compression;
 use crate::stages::subgraph;
 use crate::stages::supergraph;
+use crate::Configuration;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -93,7 +94,10 @@ struct RouterShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct Config {
+
+// FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
+// Remove this once the configuration yml changes.
+pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level
     router: Option<RouterShaping>,
@@ -130,7 +134,9 @@ impl Merge for RateLimitConf {
     }
 }
 
-struct TrafficShaping {
+// FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
+// Remove this once the configuration yml changes.
+pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
@@ -239,6 +245,15 @@ impl TrafficShaping {
     ) -> Option<T> {
         let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
         merged_subgraph_config.or_else(|| all_config.cloned())
+    }
+}
+
+impl TrafficShaping {
+    pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
+        configuration
+            .plugin_configuration("apollo.traffic_shaping")
+            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
+            .unwrap_or_default()
     }
 }
 
