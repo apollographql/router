@@ -1,4 +1,4 @@
-use apollo_router::stages::supergraph;
+use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
 
@@ -42,9 +42,6 @@ async fn all_rhai_callbacks_are_invoked() {
         "supergraph_service setup",
         "from_router_request",
         "from_router_response",
-        "query_planner_service setup",
-        "from_query_planner_response",
-        "from_query_planner_request",
         "execution_service setup",
         "from_execution_request",
         "from_execution_response",

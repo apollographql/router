@@ -77,7 +77,7 @@ The trait also provides a default implementations for each hook, which returns t
 // This is a bare-bones plugin that you can duplicate when creating your own.
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::Plugin;
-use apollo_router::stages::*;
+use apollo_router::services::*;
 
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
@@ -99,13 +99,6 @@ impl Plugin for HelloWorld {
         &mut self,
         service: router::BoxService,
     ) -> router::BoxService {
-        service
-    }
-
-    fn query_planner_service(
-        &mut self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
         service
     }
 

@@ -10,16 +10,6 @@ fn supergraph_service(service) {
     });
 }
 
-fn query_planner_service(service) {
-    log_info("query_planner_service setup");
-    service.map_request(|request| {
-        log_info("from_query_planner_request");
-    });
-    service.map_response(|response| {
-        log_info("from_query_planner_response");
-    });
-}
-
 fn execution_service(service) {
     log_info("execution_service setup");
     service.map_request(|request| {

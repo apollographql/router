@@ -1,10 +1,9 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::execution;
-use apollo_router::stages::query_planner;
-use apollo_router::stages::subgraph;
-use apollo_router::stages::supergraph;
+use apollo_router::services::execution;
+use apollo_router::services::subgraph;
+use apollo_router::services::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -51,15 +50,6 @@ impl Plugin for HelloWorld {
             // .timeout()
             .service(service)
             .boxed()
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        // This is the default implementation and does not modify the default service.
-        // The trait also has this implementation, and we just provide it here for illustration.
-        service
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {

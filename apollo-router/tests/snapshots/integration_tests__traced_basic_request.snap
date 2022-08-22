@@ -17,8 +17,8 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::plugins::telemetry::router": {
-      "name": "apollo_router::plugins::telemetry::router",
+    "apollo_router::plugins::telemetry::supergraph": {
+      "name": "apollo_router::plugins::telemetry::supergraph",
       "record": {
         "entries": [
           [
@@ -43,7 +43,7 @@ expression: get_spans()
           ]
         ],
         "metadata": {
-          "name": "router",
+          "name": "supergraph",
           "target": "apollo_router::plugins::telemetry",
           "level": "INFO",
           "module_path": "apollo_router::plugins::telemetry",
@@ -59,8 +59,8 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::plugins::telemetry::query_planning": {
-          "name": "apollo_router::plugins::telemetry::query_planning",
+        "apollo_router::services::supergraph_service::query_planning": {
+          "name": "apollo_router::services::supergraph_service::query_planning",
           "record": {
             "entries": [
               [
@@ -78,9 +78,9 @@ expression: get_spans()
             ],
             "metadata": {
               "name": "query_planning",
-              "target": "apollo_router::plugins::telemetry",
+              "target": "apollo_router::services::supergraph_service",
               "level": "INFO",
-              "module_path": "apollo_router::plugins::telemetry",
+              "module_path": "apollo_router::services::supergraph_service",
               "fields": {
                 "names": [
                   "graphql.document",

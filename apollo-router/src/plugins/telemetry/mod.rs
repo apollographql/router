@@ -66,14 +66,12 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
-use crate::stages;
-use crate::stages::execution;
-use crate::stages::query_planner;
-use crate::stages::subgraph;
-use crate::stages::supergraph;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::services::transport;
 use crate::Context;
 use crate::ExecutionRequest;
-use crate::QueryPlannerRequest;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
@@ -85,7 +83,7 @@ mod metrics;
 mod otlp;
 mod tracing;
 
-static ROUTER_SPAN_NAME: &str = "router";
+static SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -254,25 +252,6 @@ impl Plugin for Telemetry {
                     }
                 },
             )
-            .service(service)
-            .boxed()
-    }
-
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        ServiceBuilder::new()
-            .instrument(move |req: &QueryPlannerRequest| {
-                let query = req.query.clone();
-                let operation_name = req.operation_name.clone().unwrap_or_default();
-
-                info_span!("query_planning",
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal
-                )
-            })
             .service(service)
             .boxed()
     }
@@ -494,7 +473,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<stages::http::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -504,7 +483,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &stages::http::Request, _services: &[_]| {
+            move |req: &transport::Request, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -733,7 +712,7 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: stages::http::Request| async {
+            service_fn(|_req: transport::Request| async {
                 Ok::<_, BoxError>(http_ext::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
@@ -769,7 +748,7 @@ impl Telemetry {
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
-                ROUTER_SPAN_NAME,
+                SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),

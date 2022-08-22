@@ -1,11 +1,10 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::supergraph;
+use apollo_router::services::supergraph;
 {{#if type_basic}}
-use apollo_router::stages::execution;
-use apollo_router::stages::query_planner;
-use apollo_router::stages::subgraph;
+use apollo_router::services::execution;
+use apollo_router::services::subgraph;
 {{/if}}
 {{#if type_auth}}
 use apollo_router::layers::ServiceBuilderExt;
@@ -59,14 +58,6 @@ impl Plugin for {{pascal_name}} {
         //             .boxed()
 
         // Returning the original service means that we didn't add any extra functionality for at this point in the lifecycle.
-        service
-    }
-
-    // Delete this function if you are not customizing it.
-    fn query_planner_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
         service
     }
 
@@ -155,7 +146,7 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 #[cfg(test)]
 mod tests {
     use apollo_router::TestHarness;
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::supergraph;
     use tower::BoxError;
     use tower::ServiceExt;
 

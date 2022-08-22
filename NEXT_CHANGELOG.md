@@ -27,6 +27,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+
+### Remove QueryPlannerService ([PR #1552](https://github.com/apollographql/router/pull/1552))
+
+This service was redundant, since anything done as part of the `QueryPlannerService` could be done either at the `SupergraphService` or at the `ExecutionService` level.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ### Rename map_future_with_context to map_future_with_request_data ([PR #1547](https://github.com/apollographql/router/pull/1547))
 
 The function is not very well named since it's in fact used to extract any data from a request for use in a future. This rename makes it clear.
@@ -128,51 +135,23 @@ At the crate root:
 In the `apollo_router::plugin::Plugin` trait:
 
 * `router_service` → `supergraph_service`
-* `query_planning_service` → `query_planner_service`
 
-A new `apollo_router::stages` module replaces `apollo_router::services` in the public API,
-reexporting its items and adding `BoxService` and `BoxCloneService` type aliases.
-Additionally, the "router stage" is now known as "supergraph stage".
-In pseudo-syntax, `use`’ing the old names:
+In the `apollo_router::services` module, to new public sub-modules:
+
+* `SupergraphRequest` → `supergraph::Request`
+* `SupergraphResponse` → `supergraph::Response`
+* `ExecutionRequest` → `execution::Request`
+* `ExecutionResponse` → `execution::Response`
+* `SubgraphRequest` → `subgraph::Request`
+* `SubgraphResponse` → `subgraph::Response`
+
+For convenience, these new sub-modules each contain type aliases
+base on their respective `Request` and `Response` types.
 
 ```rust
-mod supergraph {
-    use apollo_router::services::RouterRequest as Request;
-    use apollo_router::services::RouterResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-}
-
-mod query_planner {
-    use apollo_router::services::QueryPlannerRequest as Request;
-    use apollo_router::services::QueryPlannerResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-
-    // Reachable from Request or Response:
-    use apollo_router::query_planner::QueryPlan;
-    use apollo_router::query_planner::QueryPlanOptions;
-    use apollo_router::services::QueryPlannerContent;
-    use apollo_router::spec::Query;
-}
-
-mod execution {
-    use apollo_router::services::ExecutionRequest as Request;
-    use apollo_router::services::ExecutionResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-}
-
-mod subgraph {
-    use super::*;
-    use apollo_router::services::SubgraphRequest as Request;
-    use apollo_router::services::SubgraphResponse as Response;
-    type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-    type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-
-    // Reachable from Request or Response:
-    use apollo_router::query_planner::OperationKind;
-}
+pub type BoxService = tower::util::BoxService<Request, Response, tower::BoxError>;
+pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, tower::BoxError>;
+pub type ServiceResult = Result<Response, tower::BoxError>;
 ```
 
 Migration example:
@@ -181,7 +160,7 @@ Migration example:
 -use tower::util::BoxService;
 -use tower::BoxError;
 -use apollo_router::services::{RouterRequest, RouterResponse};
-+use apollo_router::stages::router;
++use apollo_router::services::router;
  
 -async fn example(service: BoxService<RouterRequest, RouterResponse, BoxError>) -> RouterResponse {
 +async fn example(service: router::BoxService) -> router::Response {
@@ -444,13 +423,35 @@ See the API documentation for an example. (It can be built with `cargo doc --ope
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
+### Remove telemetry configuration hot reloading ([PR #1501](https://github.com/apollographql/router/pull/1501))
+
+The `map_deferred_response` method is now available for the router service and execution
+service in Rhai. When using the `@defer` directive, we get the data in a serie of graphql
+responses. The first one is available with the `map_response` method, where the HTTP headers
+and the response body can be modified. The following responses are available through
+`map_deferred_response`, which only has access to the response body.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/1501
+
 ## 🐛 Fixes
+
+### Variables validation: return a 400 if variables validation fails ([#1403](https://github.com/apollographql/router/issues/1403))
+
+Failure to validate variables against a query and a schema will now return an HTTP 400.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ### Expose query plan: move the behavior to the execution_service ([#1541](https://github.com/apollographql/router/issues/1541))
 
 There isn't much use for QueryPlanner plugins. Most of the logic done there can be done in `execution_service`. Moreover users could get inconsistent plugin behavior because it depends on whether the QueryPlanner cache hits or not.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
+### Include usage reporting data in the context even when the query plan has been cached ([#1559](https://github.com/apollographql/router/issues/1559))
+
+Include usage reporting data in the context even when the query plan has been cached when calling `CachingQueryPlanner`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1559
 
 ### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
 
@@ -478,6 +479,13 @@ Introspection queries will now see the `@defer` directive if it was activated in
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1557
 
+### Support the incremental response field ([PR #1551](https://github.com/apollographql/router/pull/1551))
+
+Recent changes in the `@defer` specification now mandate that the deferred responses are transmitted
+as an array in the new `incremental` field of the JSON response.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1551
+
 ## 🛠 Maintenance
 
 ### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
@@ -497,3 +505,9 @@ Head over to the helm chart [default values](https://github.com/apollographql/ro
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 📚 Documentation
+
+### Clarify path parameter usage ([PR #1473](https://github.com/apollographql/router/pull/1473))
+
+Add an inline example of path parameter usage to the [section of the docs](https://www.apollographql.com/docs/router/configuration/overview/#endpoint-path) explaining that you cannot specify a wildcard in the middle of a path.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1473

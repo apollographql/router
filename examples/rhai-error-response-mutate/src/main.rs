@@ -12,7 +12,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::supergraph;
     use apollo_router::Context;
     use http::StatusCode;
     use tower::util::ServiceExt;

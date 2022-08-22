@@ -10,8 +10,8 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::execution;
-use crate::stages::supergraph;
+use crate::services::execution;
+use crate::services::supergraph;
 
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
@@ -69,9 +69,11 @@ impl Plugin for ExposeQueryPlan {
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
+
                 is_enabled
             }, move | is_enabled: bool, f| async move {
-                let mut res: supergraph::Result = f.await;
+                let mut res: supergraph::ServiceResult = f.await;
+
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {

@@ -33,8 +33,8 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugin::test;
-    use apollo_router::stages::subgraph;
-    use apollo_router::stages::supergraph;
+    use apollo_router::services::subgraph;
+    use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
