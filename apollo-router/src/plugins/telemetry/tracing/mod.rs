@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::trace::{Builder, EvictedHashMap, Span, SpanProcessor};
 use opentelemetry::trace::TraceResult;
@@ -97,7 +98,7 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
                 attributes: span
                     .attributes
                     .into_iter()
-                    .filter(|(k, _)| k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
                     .fold(
                         EvictedHashMap::new(attributes_len as u32, attributes_len),
                         |mut m, (k, v)| {
