@@ -17,6 +17,7 @@ use apollo_router::stages::supergraph;
 use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use http::Method;
+use http::StatusCode;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
@@ -567,7 +568,11 @@ async fn missing_variables() {
         .build()
         .expect("expecting valid request");
 
-    let (response, _) = query_rust(originating_request.into()).await;
+    let (mut http_response, _) = http_query_rust(originating_request.into()).await;
+
+    assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
+
+    let response = http_response.next_response().await.unwrap();
     let expected = vec![
         apollo_router::error::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -807,10 +812,27 @@ async fn query_node(
         )
 }
 
+async fn http_query_rust(
+    request: supergraph::Request,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    http_query_rust_with_config(request, serde_json::json!({})).await
+}
+
 async fn query_rust(
     request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     query_rust_with_config(request, serde_json::json!({})).await
+}
+
+async fn http_query_rust_with_config(
+    request: supergraph::Request,
+    config: serde_json::Value,
+) -> (supergraph::Response, CountingServiceRegistry) {
+    let (router, counting_registry) = setup_router_and_registry(config).await;
+    (
+        http_query_with_router(router, request).await,
+        counting_registry,
+    )
 }
 
 async fn query_rust_with_config(
@@ -861,6 +883,13 @@ async fn query_with_router(
         .next_response()
         .await
         .unwrap()
+}
+
+async fn http_query_with_router(
+    router: supergraph::BoxCloneService,
+    request: supergraph::Request,
+) -> supergraph::Response {
+    router.oneshot(request).await.unwrap()
 }
 
 #[derive(Debug, Clone)]

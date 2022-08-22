@@ -446,6 +446,12 @@ By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🐛 Fixes
 
+### Variables validation: return a 400 if variables validation fails ([#1403](https://github.com/apollographql/router/issues/1403))
+
+Failure to validate variables against a query and a schema will now return an HTTP 400.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o)
+
 ### Expose query plan: move the behavior to the execution_service ([#1541](https://github.com/apollographql/router/issues/1541))
 
 There isn't much use for QueryPlanner plugins. Most of the logic done there can be done in `execution_service`. Moreover users could get inconsistent plugin behavior because it depends on whether the QueryPlanner cache hits or not.

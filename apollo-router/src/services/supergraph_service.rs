@@ -161,7 +161,9 @@ where
                     let is_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(SupergraphResponse::new_from_graphql_response(err, context))
+                        let mut res = SupergraphResponse::new_from_graphql_response(err, context);
+                        *res.response.status_mut() = StatusCode::BAD_REQUEST;
+                        Ok(res)
                     } else {
                         let operation_name = body.operation_name.clone();
 
