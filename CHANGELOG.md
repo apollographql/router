@@ -166,7 +166,7 @@ Migration example:
  }
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487, https://github.com/apollographql/router/pull/1534, https://github.com/apollographql/router/pull/1555, https://github.com/apollographql/router/pull/1563
 
 ### Some items were removed from the public API ([PR #1487](https://github.com/apollographql/router/pull/1487) [PR #1535](https://github.com/apollographql/router/pull/1535))
 
@@ -220,7 +220,7 @@ This method immediatly starts the server in a new Tokio task.
      .await
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
 ### `router_builder_fn` replaced by `shutdown` in the `Executable` builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
@@ -246,7 +246,7 @@ Since the only possible variation was specifying _when_ the server should shut d
      .await
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
 ### Removed constructors when there is a public builder ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
@@ -266,13 +266,13 @@ If you were using one of these constructors, the migration generally looks like 
 +    .build()
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
 ### Removed deprecated type aliases ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 A few versions ago, some types were moved from the crate root to a new `graphql` module.
 To help the transition, type aliases were left at the old location with a deprecation warning.
-These aliases are now removed, remaining imports must be changed to the new location:
+These aliases are now removed and remaining imports must be changed to the new locations:
 
 ```diff
 -use apollo_router::Error;
@@ -287,13 +287,13 @@ Alternatively, import the module with `use apollo_router::graphql`
 then use qualified paths such as `graphql::Request`.
 This can help disambiguate when multiple types share a name.
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
 ### `RouterRequest::fake_builder` defaults to `Content-Type: application/json` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
 `apollo_router::services::RouterRequest` has a builder for creating a “fake” request during tests.
 When no `Content-Type` header is specified, this builder will now default to `application/json`.
-This will help tests where a request goes through mandatory plugins including CSRF protection.
+This will help tests where a request goes through mandatory plugins, including CSRF protection,
 which makes the request be accepted by CSRF protection.
 
 If a test requires a request specifically *without* a `Content-Type` header,
@@ -304,12 +304,12 @@ let mut router_request = RouterRequest::fake_builder().build();
 router_request.originating_request.headers_mut().remove("content-type");
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
-### Plugins return a service for custom endpoints ([Issue #1481](https://github.com/apollographql/router/issues/1481))
+### Plugins return a `service` to create custom endpoints ([Issue #1481](https://github.com/apollographql/router/issues/1481))
 
 Rust plugins can implement the `Plugin::custom_endpoint` trait method
-to handle some non-GraphQL HTTP requests.
+to handle non-GraphQL HTTP requests.
 
 Previously, the return type of this method was `Option<apollo_router::plugin::Handler>`,
 where a `Handler` could be created with:
@@ -324,11 +324,11 @@ impl Handler {
 }
 ```
 
-`Handler` has been removed from the public API, now plugins return a `BoxService` directly instead.
+`Handler` has been removed from the public API and plugins now return a `BoxService` directly.
 Additionally, the type for HTTP request and response bodies was changed
-from `bytes::Bytes` to `hyper::Body` (which is more flexible, for example can be streamed).
+from `bytes::Bytes` to `hyper::Body` which is more flexible and is compatible with streams (which are necessary in future versions of the Router).
 
-Changes needed if using custom enpoints are:
+The changes needed if using custom endpoints are:
 
 * Replace `Handler::new(service)` with `service`
 * To read the full request body,
@@ -337,7 +337,7 @@ Changes needed if using custom enpoints are:
 * A response `Body` can be created through conversion traits from various types.
   For example: `"string".into()`
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1533
 
 ## 🚀 Features
 
@@ -348,7 +348,7 @@ may now be passed as a logging parameter.
 
 By [@garypen](https://github.com/garypen)
 
-### Reduce initial memory footprint by lazily populating introspection query cache ([#1517](https://github.com/apollographql/router/issues/1517))
+### Reduce initial memory footprint by lazily populating introspection query cache ([Issue #1517](https://github.com/apollographql/router/issues/1517))
 
 In an early alpha release of the Router, we only executed certain "known" introspection queries because of prior technical constraints that prohibited us from doing something more flexible.  Because the set of introspection queries was "known", it made sense to cache them.
 
@@ -358,11 +358,11 @@ We could have kept caching those "known" queries, however we were finding that t
 
 This change removes the cache entirely and allows introspection queries served by the Router to merely be lazily calculated and cached on-demand, thereby reducing the initial memory footprint.  Disabling introspection entirely will prevent any use of this cache since no introspection will be possible.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o)
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1517
 
-### Expose query plan in extensions for GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
+### Expose query plan in extensions of GraphQL response (experimental) ([PR #1470](https://github.com/apollographql/router/pull/1470))
 
-Expose query plan in extensions for GraphQL response. Only experimental for now, no documentation available.
+When enabled in configuration, it is now possible to expose the query plan in the GraphQL response `extensions`. This is only experimental at the moment, and we plan to integrate it into an upcoming version of Apollo Studio.  Currently, no documentation is available.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1470
 
@@ -377,13 +377,13 @@ traffic_shaping:
   router: # Rules applied to requests from clients to the router
     global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
-      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+      interval: 5s # Value in milliseconds must be greater than 0 and less than the max of a 64-bit integer (2^64-1).
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
   subgraphs: # Rules applied to requests from the router to individual subgraphs
     products:
       global_rate_limit: # Accept a maximum of 10 requests per 5 secs from the router. Excess requests must be rejected.
         capacity: 10
-        interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+        interval: 5s # Value in milliseconds must be greater than 0 and less than the max of a 64-bit integer (2^64-1).
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
 ```
 
@@ -406,7 +406,7 @@ to obtain a `Result`:
 +server.shutdown().await.unwrap(); 
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
 ### Added `apollo_router::TestHarness` ([PR #1487](https://github.com/apollographql/router/pull/1487))
 
@@ -416,9 +416,9 @@ This allows tests, benchmarks, etc
 to manipulate request and response objects in memory without going over the network.
 See the API documentation for an example. (It can be built with `cargo doc --open`.)
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1487
 
-### Remove telemetry configuration hot reloading ([PR #1501](https://github.com/apollographql/router/pull/1501))
+### Introduce `map_deferred_response` method for deferred responses ([PR #1501](https://github.com/apollographql/router/pull/1501))
 
 The `map_deferred_response` method is now available for the router service and execution
 service in Rhai. When using the `@defer` directive, we get the data in a serie of graphql
@@ -430,15 +430,9 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Variables validation: return a 400 if variables validation fails ([#1403](https://github.com/apollographql/router/issues/1403))
+### Return HTTP status code 400 when `variables` validation fails ([Issue #1403](https://github.com/apollographql/router/issues/1403))
 
-Failure to validate variables against a query and a schema will now return an HTTP 400.
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o)
-
-### Expose query plan: move the behavior to the execution_service ([#1541](https://github.com/apollographql/router/issues/1541))
-
-There isn't much use for QueryPlanner plugins. Most of the logic done there can be done in `execution_service`. Moreover users could get inconsistent plugin behavior because it depends on whether the QueryPlanner cache hits or not.
+Failure to validate out-of-band `variables` against both the `query` and the corresponding schema will now result in an HTTP status code of 400 being returned to the client.  This instructs the client not to bother retrying without changing something about what it previously sent since subsequent retries would just fail validation again and again.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
@@ -448,22 +442,22 @@ Include usage reporting data in the context even when the query plan has been ca
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1559
 
-### Accept SIGTERM as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
+### Accept `SIGTERM` as shutdown signal ([PR #1497](https://github.com/apollographql/router/pull/1497))
 
-This will make containers stop faster as they will not have to wait until a SIGKILL to stop the router.
+This will make containers stop faster as they will not have to wait until a `SIGKILL` to stop the router (which generally comes several seconds later).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1497
 
-### Set the response path for deferred responses ([PR #1529](https://github.com/apollographql/router/pull/1529))
+### Set the response `path` for deferred responses ([PR #1529](https://github.com/apollographql/router/pull/1529))
 
-Some GraphQL clients rely on the response path to find out which
+Some GraphQL clients rely on the response `path` to find out which
 fragment created a deferred response, and generate code that checks the
 type of the value at that path.
 Previously the router was generating a value that starts at the root
-for every deferred response. Now it checks the path returned by the query
+for every deferred response. Now it checks the `path` returned by the query
 plan execution and creates a response for each value that matches that
 path.
-In particular, for deferred fragments on an ojbect inside an array, it
+In particular, for deferred fragments on an object inside an array, it
 will create a separate response for each element of the array.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1529
@@ -483,7 +477,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### Display licenses.html diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
+These are generally internal improvements to the Router repository on GitHub.
+
+### Display `licenses.html` diff in CI if the check failed ([#1524](https://github.com/apollographql/router/issues/1524))
 
 The CI check that ensures that the `license.html` file is up to date now displays what has changed when the file is out of sync.
 
@@ -494,10 +490,10 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o)
 ### Helm: Rhai script and Istio virtualservice support ([#1478](https://github.com/apollographql/router/issues/1478))
 
 You can now pass a Rhai script file to the helm chart.
-You can also provide an Istio VirtualService configuration, as well as custom Egress rules.
+You can also provide an Istio `VirtualService` configuration, as well as custom `Egress` rules.
 Head over to the helm chart [default values](https://github.com/apollographql/router/blob/main/helm/chart/router/values.yaml) to get started.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o)
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1478
 
 ## 📚 Documentation
 
