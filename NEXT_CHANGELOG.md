@@ -516,3 +516,9 @@ Head over to the helm chart [default values](https://github.com/apollographql/ro
 By [@o0Ignition0o](https://github.com/o0Ignition0o)
 
 ## 📚 Documentation
+
+### Clarify path parameter usage ([PR #1473](https://github.com/apollographql/router/pull/1473))
+
+Add an inline example of path parameter usage to the [section of the docs](https://www.apollographql.com/docs/router/configuration/overview/#endpoint-path) explaining that you cannot specify a wildcard in the middle of a path.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1473
