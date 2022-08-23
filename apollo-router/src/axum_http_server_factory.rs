@@ -95,19 +95,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
 
-            let cors = configuration
-                .server
-                .cors
-                .clone()
-                .into_layer()
-                .map_err(|e| {
-                    ApolloRouterError::ConfigError(
-                        crate::configuration::ConfigurationError::LayerConfiguration {
-                            layer: "Cors".to_string(),
-                            error: e,
-                        },
-                    )
-                })?;
+            let cors = configuration.cors.clone().into_layer().map_err(|e| {
+                ApolloRouterError::ConfigError(
+                    crate::configuration::ConfigurationError::LayerConfiguration {
+                        layer: "Cors".to_string(),
+                        error: e,
+                    },
+                )
+            })?;
             let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
                 // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
                 format!("{}router_extra_path", configuration.server.endpoint)
@@ -1830,14 +1825,14 @@ Content-Type: application/json\r
     async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .landing_page(false)
                     .build(),
             )

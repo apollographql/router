@@ -85,6 +85,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -107,11 +111,13 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -267,10 +273,6 @@ pub(crate) struct Server {
     #[serde(default = "default_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Cors,
-
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
@@ -308,7 +310,6 @@ impl Server {
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
-        cors: Option<Cors>,
         introspection: Option<bool>,
         landing_page: Option<bool>,
         endpoint: Option<String>,
@@ -318,7 +319,6 @@ impl Server {
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
