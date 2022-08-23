@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
+assertion_line: 120
 expression: get_spans()
 ---
 {
@@ -40,6 +41,18 @@ expression: get_spans()
           [
             "otel.kind",
             "internal"
+          ],
+          [
+            "graphql.variables",
+            "{}"
+          ],
+          [
+            "request.id",
+            "[REDACTED]"
+          ],
+          [
+            "operation.signature",
+            "# -\n{topProducts{name name}}"
           ]
         ],
         "metadata": {
@@ -53,7 +66,10 @@ expression: get_spans()
               "graphql.operation.name",
               "client_name",
               "client_version",
-              "otel.kind"
+              "otel.kind",
+              "operation.signature",
+              "graphql.variables",
+              "request.id"
             ]
           }
         }
@@ -155,6 +171,10 @@ expression: get_spans()
                   [
                     "otel.kind",
                     "internal"
+                  ],
+                  [
+                    "service.name",
+                    "products"
                   ]
                 ],
                 "metadata": {
@@ -164,7 +184,8 @@ expression: get_spans()
                   "module_path": "apollo_router::query_planner",
                   "fields": {
                     "names": [
-                      "otel.kind"
+                      "otel.kind",
+                      "service.name"
                     ]
                   }
                 }
@@ -217,7 +238,8 @@ expression: get_spans()
                           "name",
                           "graphql.document",
                           "graphql.operation.name",
-                          "otel.kind"
+                          "otel.kind",
+                          "apollo_private_ftv1"
                         ]
                       }
                     }

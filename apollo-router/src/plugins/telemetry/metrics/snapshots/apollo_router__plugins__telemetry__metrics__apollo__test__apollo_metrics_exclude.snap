@@ -1,10 +1,11 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 322
+assertion_line: 170
 expression: results
 ---
 [
   {
+    "request_id": "[REDACTED]",
     "stats": {},
     "operation_count": 1
   }
