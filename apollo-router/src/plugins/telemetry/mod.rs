@@ -222,7 +222,7 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                         )
                         .await;
-                        apollo_handler.install_apollo_metrics_handler(
+                        apollo_handler.update_apollo_metrics_on_last_response(
                             &request_id,
                             &ctx,
                             config,
@@ -293,14 +293,15 @@ impl Plugin for Telemetry {
                     "apollo_private_ftv1" = field::Empty
                 )
             })
-            .map_request(move |req| apollo_handler.subgraph_request(req))
-            .map_response(move |resp| apollo_handler.subgraph_response(resp))
+            .map_request(move |req| apollo_handler.request_ftv1(req))
+            .map_response(move |resp| apollo_handler.store_ftv1(resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    apollo_handler.populate_subgraph_context_attributes(
+                    apollo_handler.store_subgraph_request_attributes(
                         subgraph_metrics_conf_req.clone(),
                         sub_request,
-                    )
+                    );
+                    sub_request.context.clone()
                 },
                 move |context: Context,
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
@@ -310,14 +311,15 @@ impl Plugin for Telemetry {
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
-                        apollo_handler.add_subgraph_metrics(
+                        apollo_handler.store_subgraph_response_attributes(
                             &context,
                             metrics,
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
-                            result,
-                        )
+                            &result,
+                        );
+                        result
                     })
                 },
             )
@@ -903,6 +905,8 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 
 register_plugin!("apollo", "telemetry", Telemetry);
 
+/// This enum is a partial cleanup of the telemetry plugin logic.
+///
 #[derive(Copy, Clone)]
 enum ApolloHandler {
     Enabled,
@@ -910,7 +914,7 @@ enum ApolloHandler {
 }
 
 impl ApolloHandler {
-    fn subgraph_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
+    fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
         if let ApolloHandler::Enabled = self {
             if Span::current().context().span().span_context().is_sampled() {
                 req.subgraph_request.headers_mut().insert(
@@ -922,7 +926,7 @@ impl ApolloHandler {
         req
     }
 
-    fn subgraph_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
+    fn store_ftv1(&self, resp: SubgraphResponse) -> SubgraphResponse {
         // Stash the FTV1 data
         if let ApolloHandler::Enabled = self {
             if let Some(serde_json_bytes::Value::String(ftv1)) =
@@ -935,15 +939,14 @@ impl ApolloHandler {
         resp
     }
 
-    fn populate_subgraph_context_attributes(
+    fn store_subgraph_request_attributes(
         &self,
-        subgraph_metrics_conf_req: Arc<Option<AttributesForwardConf>>,
+        attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         sub_request: &Request,
-    ) -> Context {
+    ) {
         if let ApolloHandler::Enabled = self {
-            let subgraph_metrics_conf = subgraph_metrics_conf_req;
             let mut attributes = HashMap::new();
-            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+            if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                 attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
                     sub_request.subgraph_request.headers(),
                     sub_request.subgraph_request.body(),
@@ -957,18 +960,17 @@ impl ApolloHandler {
                 .insert(SUBGRAPH_ATTRIBUTES, attributes)
                 .unwrap();
         }
-        sub_request.context.clone()
     }
 
-    fn add_subgraph_metrics(
+    fn store_subgraph_response_attributes(
         &self,
         context: &Context,
         metrics: BasicMetrics,
         subgraph_attribute: KeyValue,
-        subgraph_metrics_conf: Arc<Option<AttributesForwardConf>>,
+        attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
-        result: Result<Response, BoxError>,
-    ) -> Result<Response, BoxError> {
+        result: &Result<Response, BoxError>,
+    ) {
         if let ApolloHandler::Enabled = self {
             let mut metric_attrs = context
                 .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
@@ -983,7 +985,7 @@ impl ApolloHandler {
                 .unwrap_or_default();
             metric_attrs.push(subgraph_attribute);
             // Fill attributes from context
-            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+            if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                 metric_attrs.extend(
                     subgraph_attributes_conf
                         .get_attributes_from_context(context)
@@ -1000,7 +1002,7 @@ impl ApolloHandler {
                     ));
 
                     // Fill attributes from response
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                    if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                         metric_attrs.extend(
                             subgraph_attributes_conf
                                 .get_attributes_from_response(
@@ -1016,7 +1018,7 @@ impl ApolloHandler {
                 }
                 Err(err) => {
                     // Fill attributes from error
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                    if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                         metric_attrs.extend(
                             subgraph_attributes_conf
                                 .get_attributes_from_error(err)
@@ -1032,11 +1034,10 @@ impl ApolloHandler {
                 .http_requests_duration
                 .record(now.elapsed().as_secs_f64(), &metric_attrs);
         }
-        result
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn install_apollo_metrics_handler(
+    fn update_apollo_metrics_on_last_response(
         &self,
         request_id: &RequestId,
         ctx: &Context,
