@@ -517,10 +517,6 @@ where
                 }
                 Ok(response) => {
                     let (mut parts, mut stream) = http::Response::from(response).into_parts();
-                    parts.headers.insert(
-                        "content-type",
-                        HeaderValue::from_static("multipart/mixed;boundary=\"graphql\""),
-                    );
 
                     match stream.next().await {
                         None => {
@@ -534,6 +530,12 @@ where
                         Some(response) => {
                             if response.has_next.unwrap_or(false) {
                                 let stream = once(ready(response)).chain(stream);
+                                parts.headers.insert(
+                                    "content-type",
+                                    HeaderValue::from_static(
+                                        "multipart/mixed;boundary=\"graphql\"",
+                                    ),
+                                );
 
                                 let body = stream
                                     .flat_map(|res| {
@@ -549,6 +551,10 @@ where
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
+                                parts.headers.insert(
+                                    "content-type",
+                                    HeaderValue::from_static("application/json"),
+                                );
                                 tracing::trace_span!("serialize_response").in_scope(|| {
                                     http_ext::Response::from(http::Response::from_parts(
                                         parts, response,
