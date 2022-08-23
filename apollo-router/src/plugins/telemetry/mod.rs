@@ -165,139 +165,6 @@ impl Drop for Telemetry {
     }
 }
 
-#[derive(Copy, Clone)]
-enum ApolloHandler {
-    Enabled,
-    Disabled,
-}
-
-impl ApolloHandler {
-    fn subgraph_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
-        if let ApolloHandler::Enabled = self {
-            if Span::current().context().span().span_context().is_sampled() {
-                req.subgraph_request.headers_mut().insert(
-                    "apollo-federation-include-trace",
-                    HeaderValue::from_static("ftv1"),
-                );
-            }
-        }
-        req
-    }
-
-    fn subgraph_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
-        // Stash the FTV1 data
-        if let ApolloHandler::Enabled = self {
-            if let Some(serde_json_bytes::Value::String(ftv1)) =
-                resp.response.body().extensions.get("ftv1")
-            {
-                // Record the ftv1 trace for processing later
-                Span::current().record("apollo_private_ftv1", &ftv1.as_str());
-            }
-        }
-        resp
-    }
-
-    fn populate_subgraph_context_attributes(
-        &self,
-        subgraph_metrics_conf_req: Arc<Option<AttributesForwardConf>>,
-        sub_request: &Request,
-    ) -> Context {
-        if let ApolloHandler::Enabled = self {
-            let subgraph_metrics_conf = subgraph_metrics_conf_req;
-            let mut attributes = HashMap::new();
-            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
-                    sub_request.subgraph_request.headers(),
-                    sub_request.subgraph_request.body(),
-                ));
-                attributes.extend(
-                    subgraph_attributes_conf.get_attributes_from_context(&sub_request.context),
-                );
-            }
-            sub_request
-                .context
-                .insert(SUBGRAPH_ATTRIBUTES, attributes)
-                .unwrap();
-        }
-        sub_request.context.clone()
-    }
-
-    fn add_subgraph_metrics(
-        &self,
-        context: &Context,
-        metrics: BasicMetrics,
-        subgraph_attribute: KeyValue,
-        subgraph_metrics_conf: Arc<Option<AttributesForwardConf>>,
-        now: Instant,
-        result: Result<Response, BoxError>,
-    ) -> Result<Response, BoxError> {
-        if let ApolloHandler::Enabled = self {
-            let mut metric_attrs = context
-                .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
-                .ok()
-                .flatten()
-                .map(|attrs| {
-                    attrs
-                        .into_iter()
-                        .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                        .collect::<Vec<KeyValue>>()
-                })
-                .unwrap_or_default();
-            metric_attrs.push(subgraph_attribute);
-            // Fill attributes from context
-            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                metric_attrs.extend(
-                    subgraph_attributes_conf
-                        .get_attributes_from_context(context)
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                );
-            }
-
-            match &result {
-                Ok(response) => {
-                    metric_attrs.push(KeyValue::new(
-                        "status",
-                        response.response.status().as_u16().to_string(),
-                    ));
-
-                    // Fill attributes from response
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                        metric_attrs.extend(
-                            subgraph_attributes_conf
-                                .get_attributes_from_response(
-                                    response.response.headers(),
-                                    response.response.body(),
-                                )
-                                .into_iter()
-                                .map(|(k, v)| KeyValue::new(k, v)),
-                        );
-                    }
-
-                    metrics.http_requests_total.add(1, &metric_attrs);
-                }
-                Err(err) => {
-                    // Fill attributes from error
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                        metric_attrs.extend(
-                            subgraph_attributes_conf
-                                .get_attributes_from_error(err)
-                                .into_iter()
-                                .map(|(k, v)| KeyValue::new(k, v)),
-                        );
-                    }
-
-                    metrics.http_requests_error_total.add(1, &metric_attrs);
-                }
-            }
-            metrics
-                .http_requests_duration
-                .record(now.elapsed().as_secs_f64(), &metric_attrs);
-        }
-        result
-    }
-}
-
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -311,6 +178,7 @@ impl Plugin for Telemetry {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
         let config_map_res = config.clone();
+        let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 config.apollo.clone().unwrap_or_default(),
@@ -346,7 +214,7 @@ impl Plugin for Telemetry {
                     let start = Instant::now();
                     async move {
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
-                        result = Self::update_metrics(
+                        result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
                             metrics.clone(),
@@ -354,69 +222,15 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                         )
                         .await;
-                        match result {
-                            Err(e) => {
-                                if !matches!(sender, Sender::Noop) {
-                                    Self::update_apollo_metrics(
-                                        &ctx,
-                                        &request_id,
-                                        sender,
-                                        true,
-                                        start.elapsed(),
-                                    );
-                                }
-                                let mut metric_attrs = Vec::new();
-                                // Fill attributes from error
-                                if let Some(subgraph_attributes_conf) = config
-                                    .metrics
-                                    .as_ref()
-                                    .and_then(|m| m.common.as_ref())
-                                    .and_then(|c| c.attributes.as_ref())
-                                    .and_then(|c| c.router.as_ref())
-                                {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_error(&e)
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_error_total.add(1, &metric_attrs);
-
-                                Err(e)
-                            }
-                            Ok(router_response) => {
-                                let mut has_errors =
-                                    !router_response.response.status().is_success();
-                                Ok(router_response.map(move |response_stream| {
-                                    let sender = sender.clone();
-                                    let ctx = ctx.clone();
-                                    let request_id = request_id.clone();
-
-                                    response_stream
-                                        .map(move |response| {
-                                            if !response.errors.is_empty() {
-                                                has_errors = true;
-                                            }
-
-                                            if !response.has_next.unwrap_or(false)
-                                                && !matches!(sender, Sender::Noop)
-                                            {
-                                                Self::update_apollo_metrics(
-                                                    &ctx,
-                                                    &request_id,
-                                                    sender.clone(),
-                                                    has_errors,
-                                                    start.elapsed(),
-                                                );
-                                            }
-                                            response
-                                        })
-                                        .boxed()
-                                }))
-                            }
-                        }
+                        apollo_handler.install_apollo_metrics_handler(
+                            &request_id,
+                            &ctx,
+                            config,
+                            metrics,
+                            sender,
+                            start,
+                            result,
+                        )
                     }
                 },
             )
@@ -861,77 +675,7 @@ impl Telemetry {
         serde_json::to_string(&variables).expect("variables has already been deserialized")
     }
 
-    fn update_apollo_metrics(
-        context: &Context,
-        request_id: &RequestId,
-        sender: Sender,
-        has_errors: bool,
-        duration: Duration,
-    ) {
-        let metrics = if let Some(usage_reporting) = context
-            .get::<_, UsageReporting>(USAGE_REPORTING)
-            .unwrap_or_default()
-        {
-            let operation_count = operation_count(&usage_reporting.stats_report_key);
-            let persisted_query_hit = context
-                .get::<_, bool>("persisted_query_hit")
-                .unwrap_or_default();
-
-            if context
-                .get(STUDIO_EXCLUDE)
-                .map_or(false, |x| x.unwrap_or_default())
-            {
-                // The request was excluded don't report the details, but do report the operation count
-                SingleStatsReport {
-                    operation_count,
-                    ..Default::default()
-                }
-            } else {
-                metrics::apollo::studio::SingleStatsReport {
-                    request_id: request_id.clone(),
-                    operation_count,
-                    stats: HashMap::from([(
-                        usage_reporting.stats_report_key.to_string(),
-                        SingleStats {
-                            stats_with_context: SingleContextualizedStats {
-                                context: StatsContext {
-                                    client_name: context
-                                        .get(CLIENT_NAME)
-                                        .unwrap_or_default()
-                                        .unwrap_or_default(),
-                                    client_version: context
-                                        .get(CLIENT_VERSION)
-                                        .unwrap_or_default()
-                                        .unwrap_or_default(),
-                                },
-                                query_latency_stats: SingleQueryLatencyStats {
-                                    latency: duration,
-                                    has_errors,
-                                    persisted_query_hit,
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            },
-                            referenced_fields_by_type: usage_reporting
-                                .referenced_fields_by_type
-                                .into_iter()
-                                .map(|(k, v)| (k, convert(v)))
-                                .collect(),
-                        },
-                    )]),
-                }
-            }
-        } else {
-            // Usage reporting was missing, so it counts as one operation.
-            SingleStatsReport {
-                operation_count: 1,
-                ..Default::default()
-            }
-        };
-        sender.send(SingleReport::Stats(metrics.into()));
-    }
-
-    async fn update_metrics(
+    async fn update_otel_metrics(
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
@@ -1158,6 +902,282 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 }
 
 register_plugin!("apollo", "telemetry", Telemetry);
+
+#[derive(Copy, Clone)]
+enum ApolloHandler {
+    Enabled,
+    Disabled,
+}
+
+impl ApolloHandler {
+    fn subgraph_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
+        if let ApolloHandler::Enabled = self {
+            if Span::current().context().span().span_context().is_sampled() {
+                req.subgraph_request.headers_mut().insert(
+                    "apollo-federation-include-trace",
+                    HeaderValue::from_static("ftv1"),
+                );
+            }
+        }
+        req
+    }
+
+    fn subgraph_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
+        // Stash the FTV1 data
+        if let ApolloHandler::Enabled = self {
+            if let Some(serde_json_bytes::Value::String(ftv1)) =
+                resp.response.body().extensions.get("ftv1")
+            {
+                // Record the ftv1 trace for processing later
+                Span::current().record("apollo_private_ftv1", &ftv1.as_str());
+            }
+        }
+        resp
+    }
+
+    fn populate_subgraph_context_attributes(
+        &self,
+        subgraph_metrics_conf_req: Arc<Option<AttributesForwardConf>>,
+        sub_request: &Request,
+    ) -> Context {
+        if let ApolloHandler::Enabled = self {
+            let subgraph_metrics_conf = subgraph_metrics_conf_req;
+            let mut attributes = HashMap::new();
+            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
+                    sub_request.subgraph_request.headers(),
+                    sub_request.subgraph_request.body(),
+                ));
+                attributes.extend(
+                    subgraph_attributes_conf.get_attributes_from_context(&sub_request.context),
+                );
+            }
+            sub_request
+                .context
+                .insert(SUBGRAPH_ATTRIBUTES, attributes)
+                .unwrap();
+        }
+        sub_request.context.clone()
+    }
+
+    fn add_subgraph_metrics(
+        &self,
+        context: &Context,
+        metrics: BasicMetrics,
+        subgraph_attribute: KeyValue,
+        subgraph_metrics_conf: Arc<Option<AttributesForwardConf>>,
+        now: Instant,
+        result: Result<Response, BoxError>,
+    ) -> Result<Response, BoxError> {
+        if let ApolloHandler::Enabled = self {
+            let mut metric_attrs = context
+                .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+                .ok()
+                .flatten()
+                .map(|attrs| {
+                    attrs
+                        .into_iter()
+                        .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                        .collect::<Vec<KeyValue>>()
+                })
+                .unwrap_or_default();
+            metric_attrs.push(subgraph_attribute);
+            // Fill attributes from context
+            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                metric_attrs.extend(
+                    subgraph_attributes_conf
+                        .get_attributes_from_context(context)
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v)),
+                );
+            }
+
+            match &result {
+                Ok(response) => {
+                    metric_attrs.push(KeyValue::new(
+                        "status",
+                        response.response.status().as_u16().to_string(),
+                    ));
+
+                    // Fill attributes from response
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        metric_attrs.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_response(
+                                    response.response.headers(),
+                                    response.response.body(),
+                                )
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        );
+                    }
+
+                    metrics.http_requests_total.add(1, &metric_attrs);
+                }
+                Err(err) => {
+                    // Fill attributes from error
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        metric_attrs.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_error(err)
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        );
+                    }
+
+                    metrics.http_requests_error_total.add(1, &metric_attrs);
+                }
+            }
+            metrics
+                .http_requests_duration
+                .record(now.elapsed().as_secs_f64(), &metric_attrs);
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn install_apollo_metrics_handler(
+        &self,
+        request_id: &RequestId,
+        ctx: &Context,
+        config: Arc<Conf>,
+        metrics: BasicMetrics,
+        sender: Sender,
+        start: Instant,
+        result: Result<supergraph::Response, BoxError>,
+    ) -> Result<supergraph::Response, BoxError> {
+        if let ApolloHandler::Enabled = self {
+            match result {
+                Err(e) => {
+                    if !matches!(sender, Sender::Noop) {
+                        Self::update_apollo_metrics(ctx, request_id, sender, true, start.elapsed());
+                    }
+                    let mut metric_attrs = Vec::new();
+                    // Fill attributes from error
+                    if let Some(subgraph_attributes_conf) = config
+                        .metrics
+                        .as_ref()
+                        .and_then(|m| m.common.as_ref())
+                        .and_then(|c| c.attributes.as_ref())
+                        .and_then(|c| c.router.as_ref())
+                    {
+                        metric_attrs.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_error(&e)
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        );
+                    }
+
+                    metrics.http_requests_error_total.add(1, &metric_attrs);
+
+                    Err(e)
+                }
+                Ok(router_response) => {
+                    let mut has_errors = !router_response.response.status().is_success();
+                    Ok(router_response.map(move |response_stream| {
+                        let sender = sender.clone();
+                        let ctx = ctx.clone();
+                        let request_id = request_id.clone();
+
+                        response_stream
+                            .map(move |response| {
+                                if !response.errors.is_empty() {
+                                    has_errors = true;
+                                }
+
+                                if !response.has_next.unwrap_or(false)
+                                    && !matches!(sender, Sender::Noop)
+                                {
+                                    Self::update_apollo_metrics(
+                                        &ctx,
+                                        &request_id,
+                                        sender.clone(),
+                                        has_errors,
+                                        start.elapsed(),
+                                    );
+                                }
+                                response
+                            })
+                            .boxed()
+                    }))
+                }
+            }
+        } else {
+            result
+        }
+    }
+
+    fn update_apollo_metrics(
+        context: &Context,
+        request_id: &RequestId,
+        sender: Sender,
+        has_errors: bool,
+        duration: Duration,
+    ) {
+        let metrics = if let Some(usage_reporting) = context
+            .get::<_, UsageReporting>(USAGE_REPORTING)
+            .unwrap_or_default()
+        {
+            let operation_count = operation_count(&usage_reporting.stats_report_key);
+            let persisted_query_hit = context
+                .get::<_, bool>("persisted_query_hit")
+                .unwrap_or_default();
+
+            if context
+                .get(STUDIO_EXCLUDE)
+                .map_or(false, |x| x.unwrap_or_default())
+            {
+                // The request was excluded don't report the details, but do report the operation count
+                SingleStatsReport {
+                    operation_count,
+                    ..Default::default()
+                }
+            } else {
+                SingleStatsReport {
+                    request_id: request_id.clone(),
+                    operation_count,
+                    stats: HashMap::from([(
+                        usage_reporting.stats_report_key.to_string(),
+                        SingleStats {
+                            stats_with_context: SingleContextualizedStats {
+                                context: StatsContext {
+                                    client_name: context
+                                        .get(CLIENT_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_version: context
+                                        .get(CLIENT_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                },
+                                query_latency_stats: SingleQueryLatencyStats {
+                                    latency: duration,
+                                    has_errors,
+                                    persisted_query_hit,
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
+                            referenced_fields_by_type: usage_reporting
+                                .referenced_fields_by_type
+                                .into_iter()
+                                .map(|(k, v)| (k, convert(v)))
+                                .collect(),
+                        },
+                    )]),
+                }
+            }
+        } else {
+            // Usage reporting was missing, so it counts as one operation.
+            SingleStatsReport {
+                operation_count: 1,
+                ..Default::default()
+            }
+        };
+        sender.send(SingleReport::Stats(metrics.into()));
+    }
+}
 
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
