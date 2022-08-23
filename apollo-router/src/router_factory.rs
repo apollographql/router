@@ -89,16 +89,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service. Let the plugins know that this is about to happen.
-        // This is needed so that the Telemetry plugin can swap in the new propagator.
-        // The alternative is that we introduce another service on Plugin that wraps the request
-        // at a much earlier stage.
-        for (_, plugin) in builder.plugins_mut() {
-            tracing::debug!("activating plugin {}", plugin.name());
-            plugin.activate();
-            tracing::debug!("activated plugin {}", plugin.name());
-        }
-
+        // We're good to go with the new service.
         let pluggable_router_service = builder.build().await?;
 
         Ok(pluggable_router_service)
