@@ -58,13 +58,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .status(StatusCode::OK)
                 .body(response.clone())
                 .expect("Response is serializable; qed");
-
-            // Create a compatible Response
-            let compat_response = crate::http_ext::Response {
-                inner: http_response,
-            };
-
-            SubgraphResponse::new_from_response(compat_response, req.context)
+            SubgraphResponse::new_from_response(http_response, req.context)
         } else {
             let error = crate::error::Error::builder()
                 .message("couldn't find mock for query".to_string())

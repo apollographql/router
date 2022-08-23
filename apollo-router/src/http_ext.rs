@@ -12,13 +12,9 @@ use std::ops::DerefMut;
 use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures::future::ready;
-use futures::stream::once;
-use futures::stream::BoxStream;
 use http::header::HeaderName;
 use http::header::{self};
 use http::HeaderValue;
-use http::Method;
 use multimap::MultiMap;
 
 use crate::graphql;
@@ -121,10 +117,46 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
     }
 }
 
+pub(crate) fn header_map(
+    from: MultiMap<IntoHeaderName, IntoHeaderValue>,
+) -> Result<http::HeaderMap<http::HeaderValue>, http::Error> {
+    let mut http = http::HeaderMap::new();
+    for (key, values) in from {
+        let name = http::header::HeaderName::try_from(key)?;
+        for value in values {
+            http.append(name.clone(), value.try_into()?);
+        }
+    }
+    Ok(http)
+}
+
+/// Ignores `http::Extensions`
+pub(crate) fn clone_http_request<B: Clone>(request: &http::Request<B>) -> http::Request<B> {
+    let mut new = http::Request::builder()
+        .method(request.method().clone())
+        .uri(request.uri().clone())
+        .version(request.version())
+        .body(request.body().clone())
+        .unwrap();
+    *new.headers_mut() = request.headers().clone();
+    new
+}
+
+/// Ignores `http::Extensions`
+pub(crate) fn clone_http_response<B: Clone>(response: &http::Response<B>) -> http::Response<B> {
+    let mut new = http::Response::builder()
+        .status(response.status())
+        .version(response.version())
+        .body(response.body().clone())
+        .unwrap();
+    *new.headers_mut() = response.headers().clone();
+    new
+}
+
 /// Wrap an http Request.
 #[derive(Debug)]
-pub struct Request<T> {
-    inner: http::Request<T>,
+pub(crate) struct Request<T> {
+    pub(crate) inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
@@ -133,26 +165,25 @@ impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[builder(visibility = "pub")]
-    fn new(
+    #[builder]
+    pub(crate) fn new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: http::Uri,
         method: http::Method,
         body: T,
     ) -> http::Result<Request<T>> {
-        let mut builder = http::request::Builder::new().method(method).uri(uri);
-        for (key, values) in headers {
-            let header_name: HeaderName = key.try_into()?;
-            for value in values {
-                let header_value: HeaderValue = value.try_into()?;
-                builder = builder.header(header_name.clone(), header_value);
-            }
-        }
-        let req = builder.body(body)?;
-
+        let mut req = http::request::Builder::new()
+            .method(method)
+            .uri(uri)
+            .body(body)?;
+        *req.headers_mut() = header_map(headers)?;
         Ok(Self { inner: req })
     }
+}
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a "fake" Request.
     ///
     /// This does not enforce the provision of the uri and method that is required for a fully functional
@@ -160,8 +191,8 @@ impl<T> Request<T> {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
-    #[builder(visibility = "pub")]
-    fn fake_new(
+    #[builder]
+    pub(crate) fn fake_new(
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<http::Method>,
@@ -170,7 +201,7 @@ impl<T> Request<T> {
         Self::new(
             headers,
             uri.unwrap_or_default(),
-            method.unwrap_or(Method::GET),
+            method.unwrap_or(http::Method::GET),
             body,
         )
     }
@@ -196,6 +227,14 @@ impl<T> From<http::Request<T>> for Request<T> {
     }
 }
 
+impl<T: Clone> From<&'_ http::Request<T>> for Request<T> {
+    fn from(req: &'_ http::Request<T>) -> Self {
+        Request {
+            inner: clone_http_request(req),
+        }
+    }
+}
+
 impl<T> From<Request<T>> for http::Request<T> {
     fn from(request: Request<T>) -> http::Request<T> {
         request.inner
@@ -204,23 +243,9 @@ impl<T> From<Request<T>> for http::Request<T> {
 
 impl<T: Clone> Clone for Request<T> {
     fn clone(&self) -> Self {
-        // note: we cannot clone the extensions because we cannot know
-        // which types were stored
-        let mut req = http::Request::builder()
-            .method(self.inner.method().clone())
-            .version(self.inner.version())
-            .uri(self.inner.uri().clone());
-        req.headers_mut().unwrap().extend(
-            self.inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-
-        let req = req
-            .body(self.inner.body().clone())
-            .expect("cloning a valid request creates a valid request");
-        Self { inner: req }
+        Self {
+            inner: clone_http_request(&self.inner),
+        }
     }
 }
 
@@ -272,26 +297,19 @@ impl<T: Eq> Eq for Request<T> {}
 
 /// Wrap an http Response.
 #[derive(Debug, Default)]
-pub struct Response<T> {
-    pub inner: http::Response<T>,
+pub(crate) struct Response<T> {
+    pub(crate) inner: http::Response<T>,
 }
 
-impl<T> Response<T> {
-    pub fn map<F, U>(self, f: F) -> Response<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        self.inner.map(f).into()
-    }
-}
+#[cfg(test)]
+pub(crate) fn from_response_to_stream(
+    http: http::response::Response<graphql::Response>,
+) -> http::Response<futures::stream::BoxStream<'static, graphql::Response>> {
+    use futures::future::ready;
+    use futures::stream::once;
+    use futures::StreamExt;
 
-impl Response<BoxStream<'static, graphql::Response>> {
-    pub fn from_response_to_stream(http: http::response::Response<graphql::Response>) -> Self {
-        let (parts, body) = http.into_parts();
-        Response {
-            inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
-        }
-    }
+    http.map(|body| once(ready(body)).boxed())
 }
 
 impl<T> Deref for Response<T> {
@@ -314,6 +332,14 @@ impl<T> From<http::Response<T>> for Response<T> {
     }
 }
 
+impl<T: Clone> From<&'_ http::Response<T>> for Response<T> {
+    fn from(req: &'_ http::Response<T>) -> Self {
+        Response {
+            inner: clone_http_response(req),
+        }
+    }
+}
+
 impl<T> From<Response<T>> for http::Response<T> {
     fn from(response: Response<T>) -> http::Response<T> {
         response.inner
@@ -322,22 +348,9 @@ impl<T> From<Response<T>> for http::Response<T> {
 
 impl<T: Clone> Clone for Response<T> {
     fn clone(&self) -> Self {
-        // note: we cannot clone the extensions because we cannot know
-        // which types were stored
-        let mut res = http::Response::builder()
-            .status(self.inner.status())
-            .version(self.inner.version());
-        res.headers_mut().unwrap().extend(
-            self.inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-
-        let res = res
-            .body(self.inner.body().clone())
-            .expect("cloning a valid response creates a valid response");
-        Self { inner: res }
+        Self {
+            inner: clone_http_response(&self.inner),
+        }
     }
 }
 
