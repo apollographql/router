@@ -11,7 +11,6 @@ use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
-use ::tracing::span_enabled;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
@@ -29,8 +28,8 @@ use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{SpanKind, TraceContextExt};
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::ByteString;
@@ -41,6 +40,7 @@ use tower::steer::Steer;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::EnvFilter;
@@ -77,6 +77,7 @@ use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::transport;
+use crate::subgraph::{Request, Response};
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::SubgraphRequest;
@@ -165,15 +166,15 @@ impl Drop for Telemetry {
 }
 
 #[derive(Copy, Clone)]
-enum Ftv1Handler {
+enum ApolloHandler {
     Enabled,
     Disabled,
 }
 
-impl Ftv1Handler {
-    fn handle_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
-        if let Ftv1Handler::Enabled = self {
-            if span_enabled!(::tracing::Level::INFO) {
+impl ApolloHandler {
+    fn subgraph_request(&self, mut req: SubgraphRequest) -> SubgraphRequest {
+        if let ApolloHandler::Enabled = self {
+            if Span::current().context().span().span_context().is_sampled() {
                 req.subgraph_request.headers_mut().insert(
                     "apollo-federation-include-trace",
                     HeaderValue::from_static("ftv1"),
@@ -183,15 +184,117 @@ impl Ftv1Handler {
         req
     }
 
-    fn handle_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
+    fn subgraph_response(&self, resp: SubgraphResponse) -> SubgraphResponse {
         // Stash the FTV1 data
-        if let Some(serde_json_bytes::Value::String(ftv1)) =
-            resp.response.body().extensions.get("ftv1")
-        {
-            // Record the ftv1 trace for processing later
-            Span::current().record("apollo_private_ftv1", &ftv1.as_str());
+        if let ApolloHandler::Enabled = self {
+            if let Some(serde_json_bytes::Value::String(ftv1)) =
+                resp.response.body().extensions.get("ftv1")
+            {
+                // Record the ftv1 trace for processing later
+                Span::current().record("apollo_private_ftv1", &ftv1.as_str());
+            }
         }
         resp
+    }
+
+    fn populate_subgraph_context_attributes(
+        &self,
+        subgraph_metrics_conf_req: Arc<Option<AttributesForwardConf>>,
+        sub_request: &Request,
+    ) -> Context {
+        if let ApolloHandler::Enabled = self {
+            let subgraph_metrics_conf = subgraph_metrics_conf_req;
+            let mut attributes = HashMap::new();
+            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
+                    sub_request.subgraph_request.headers(),
+                    sub_request.subgraph_request.body(),
+                ));
+                attributes.extend(
+                    subgraph_attributes_conf.get_attributes_from_context(&sub_request.context),
+                );
+            }
+            sub_request
+                .context
+                .insert(SUBGRAPH_ATTRIBUTES, attributes)
+                .unwrap();
+        }
+        sub_request.context.clone()
+    }
+
+    fn add_subgraph_metrics(
+        &self,
+        context: &Context,
+        metrics: BasicMetrics,
+        subgraph_attribute: KeyValue,
+        subgraph_metrics_conf: Arc<Option<AttributesForwardConf>>,
+        now: Instant,
+        result: Result<Response, BoxError>,
+    ) -> Result<Response, BoxError> {
+        if let ApolloHandler::Enabled = self {
+            let mut metric_attrs = context
+                .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+                .ok()
+                .flatten()
+                .map(|attrs| {
+                    attrs
+                        .into_iter()
+                        .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                        .collect::<Vec<KeyValue>>()
+                })
+                .unwrap_or_default();
+            metric_attrs.push(subgraph_attribute);
+            // Fill attributes from context
+            if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                metric_attrs.extend(
+                    subgraph_attributes_conf
+                        .get_attributes_from_context(context)
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v)),
+                );
+            }
+
+            match &result {
+                Ok(response) => {
+                    metric_attrs.push(KeyValue::new(
+                        "status",
+                        response.response.status().as_u16().to_string(),
+                    ));
+
+                    // Fill attributes from response
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        metric_attrs.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_response(
+                                    response.response.headers(),
+                                    response.response.body(),
+                                )
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        );
+                    }
+
+                    metrics.http_requests_total.add(1, &metric_attrs);
+                }
+                Err(err) => {
+                    // Fill attributes from error
+                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
+                        metric_attrs.extend(
+                            subgraph_attributes_conf
+                                .get_attributes_from_error(err)
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        );
+                    }
+
+                    metrics.http_requests_error_total.add(1, &metric_attrs);
+                }
+            }
+            metrics
+                .http_requests_duration
+                .record(now.elapsed().as_secs_f64(), &metric_attrs);
+        }
+        result
     }
 }
 
@@ -352,7 +455,7 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let name = name.to_owned();
-        let ftv1 = self.ftv1_handler();
+        let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -376,28 +479,14 @@ impl Plugin for Telemetry {
                     "apollo_private_ftv1" = field::Empty
                 )
             })
-            .map_request(move |req| ftv1.handle_request(req))
-            .map_response(move |resp| ftv1.handle_response(resp))
+            .map_request(move |req| apollo_handler.subgraph_request(req))
+            .map_response(move |resp| apollo_handler.subgraph_response(resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    let subgraph_metrics_conf = subgraph_metrics_conf_req.clone();
-                    let mut attributes = HashMap::new();
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                        attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
-                            sub_request.subgraph_request.headers(),
-                            sub_request.subgraph_request.body(),
-                        ));
-                        attributes.extend(
-                            subgraph_attributes_conf
-                                .get_attributes_from_context(&sub_request.context),
-                        );
-                    }
-                    sub_request
-                        .context
-                        .insert(SUBGRAPH_ATTRIBUTES, attributes)
-                        .unwrap();
-
-                    sub_request.context.clone()
+                    apollo_handler.populate_subgraph_context_attributes(
+                        subgraph_metrics_conf_req.clone(),
+                        sub_request,
+                    )
                 },
                 move |context: Context,
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
@@ -406,72 +495,15 @@ impl Plugin for Telemetry {
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
-                    f.map(move |r: Result<SubgraphResponse, BoxError>| {
-                        let subgraph_metrics_conf = subgraph_metrics_conf.clone();
-                        let mut metric_attrs = context
-                            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
-                            .ok()
-                            .flatten()
-                            .map(|attrs| {
-                                attrs
-                                    .into_iter()
-                                    .map(|(attr_name, attr_value)| {
-                                        KeyValue::new(attr_name, attr_value)
-                                    })
-                                    .collect::<Vec<KeyValue>>()
-                            })
-                            .unwrap_or_default();
-                        metric_attrs.push(subgraph_attribute.clone());
-                        // Fill attributes from context
-                        if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                            metric_attrs.extend(
-                                subgraph_attributes_conf
-                                    .get_attributes_from_context(&context)
-                                    .into_iter()
-                                    .map(|(k, v)| KeyValue::new(k, v)),
-                            );
-                        }
-
-                        match &r {
-                            Ok(response) => {
-                                metric_attrs.push(KeyValue::new(
-                                    "status",
-                                    response.response.status().as_u16().to_string(),
-                                ));
-
-                                // Fill attributes from response
-                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_response(
-                                                response.response.headers(),
-                                                response.response.body(),
-                                            )
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_total.add(1, &metric_attrs);
-                            }
-                            Err(err) => {
-                                // Fill attributes from error
-                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_error(err)
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_error_total.add(1, &metric_attrs);
-                            }
-                        }
-                        metrics
-                            .http_requests_duration
-                            .record(now.elapsed().as_secs_f64(), &metric_attrs);
-                        r
+                    f.map(move |result: Result<SubgraphResponse, BoxError>| {
+                        apollo_handler.add_subgraph_metrics(
+                            &context,
+                            metrics,
+                            subgraph_attribute,
+                            subgraph_metrics_conf,
+                            now,
+                            result,
+                        )
                     })
                 },
             )
@@ -1010,7 +1042,7 @@ impl Telemetry {
         }
     }
 
-    fn ftv1_handler(&self) -> Ftv1Handler {
+    fn apollo_handler(&self) -> ApolloHandler {
         if self
             .config
             .apollo
@@ -1018,9 +1050,9 @@ impl Telemetry {
             .unwrap_or_default()
             .field_level_instrumentation
         {
-            Ftv1Handler::Enabled
+            ApolloHandler::Enabled
         } else {
-            Ftv1Handler::Disabled
+            ApolloHandler::Disabled
         }
     }
 
