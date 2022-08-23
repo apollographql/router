@@ -165,10 +165,6 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     /// plugins are registered.
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>;
 
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self) {}
-
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
@@ -216,10 +212,6 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub(crate) trait DynPlugin: Send + Sync + 'static {
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self);
-
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
@@ -253,11 +245,6 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    #[allow(deprecated)]
-    fn activate(&mut self) {
-        self.activate()
-    }
-
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
     }

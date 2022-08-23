@@ -666,10 +666,17 @@ workflows:
           matrix:
             parameters:
               platform: [rust_linux]
-      - check_compliance:
-          matrix:
-            parameters:
-              platform: [rust_linux]
+
+      # check-compliance is disabled for now because it is flaky
+      # `cargo about` seems to be non-deterministic and sometimes
+      # produces a different licenses.html file even though dependencies haven’t changed.
+      # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
+
+      # - check_compliance:
+      #     matrix:
+      #       parameters:
+      #         platform: [rust_linux]
+
       - build:
           matrix:
             parameters:

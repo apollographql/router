@@ -14,7 +14,6 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::http_ext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -79,12 +78,10 @@ impl Service<transport::Request> for PrometheusService {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
-            Ok(http_ext::Response {
-                inner: http::Response::builder()
-                    .status(StatusCode::OK)
-                    .body(result.into())
-                    .map_err(|err| BoxError::from(err.to_string()))?,
-            })
+            http::Response::builder()
+                .status(StatusCode::OK)
+                .body(result.into())
+                .map_err(|err| BoxError::from(err.to_string()))
         })
     }
 }

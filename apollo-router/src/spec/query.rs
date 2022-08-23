@@ -24,7 +24,7 @@ const TYPENAME: &str = "__typename";
 /// A GraphQL query.
 #[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
-pub struct Query {
+pub(crate) struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,

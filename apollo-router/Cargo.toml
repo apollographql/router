@@ -120,7 +120,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha3" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha4" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
 serde = { version = "1.0.143", features = ["derive", "rc"] }

@@ -407,7 +407,7 @@ async fn custom_plugin_handler(
     let (mut head, body) = request.into_parts();
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
-    let req = Request::from_parts(head, body).into();
+    let req = Request::from_parts(head, body);
     handler
         .oneshot(req)
         .await
@@ -544,7 +544,7 @@ where
                                             serde_json::to_vec(&res).unwrap().into(),
                                         )))
                                         .chain(once(ready(Bytes::from_static(b"\r\n"))))
-                                    }).chain(once(ready(Bytes::from_static(b"--graphql--\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}"))))
+                                    })
                                     .map(Ok::<_, BoxError>);
 
                                 (parts, StreamBody::new(body)).into_response()
@@ -1882,12 +1882,12 @@ Content-Type: application/json\r
         let expectations = MockSupergraphService::new();
         let plugin_handler = Handler::new(
             service_fn(|req: transport::Request| async move {
-                Ok::<_, BoxError>(http_ext::Response {
-                    inner: http::Response::builder()
+                Ok::<_, BoxError>(
+                    http::Response::builder()
                         .status(StatusCode::OK)
                         .body(format!("{} + {}", req.method(), req.uri().path()).into())
                         .unwrap(),
-                })
+                )
             })
             .boxed(),
         );
