@@ -337,10 +337,6 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
-        &mut self.plugins
-    }
-
     pub(crate) async fn build(self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse

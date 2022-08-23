@@ -1,7 +1,5 @@
 #![allow(missing_docs)] // FIXME
 
-use std::collections::HashMap;
-
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::BoxStream;
@@ -13,6 +11,7 @@ use http::StatusCode;
 use http::Uri;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
@@ -22,7 +21,6 @@ use crate::graphql;
 use crate::http_ext;
 use crate::http_ext::IntoHeaderName;
 use crate::http_ext::IntoHeaderValue;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::Context;
 
@@ -61,23 +59,14 @@ impl Request {
     fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: HashMap<String, Value>,
-        extensions: HashMap<String, Value>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
         context: Context,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Uri,
         method: Method,
     ) -> Result<Request, BoxError> {
-        let extensions: Object = extensions
-            .into_iter()
-            .map(|(name, value)| (ByteString::from(name), value))
-            .collect();
-
-        let variables: Object = variables
-            .into_iter()
-            .map(|(name, value)| (ByteString::from(name), value))
-            .collect();
-
         let gql_request = graphql::Request::builder()
             .and_query(query)
             .and_operation_name(operation_name)
@@ -109,8 +98,9 @@ impl Request {
     fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: HashMap<String, Value>,
-        extensions: HashMap<String, Value>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
         context: Option<Context>,
         mut headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         method: Option<Method>,
@@ -137,7 +127,8 @@ impl Request {
     #[builder(visibility = "pub")]
     fn canned_new(
         operation_name: Option<String>,
-        extensions: HashMap<String, Value>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
         context: Option<Context>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
     ) -> Result<Request, BoxError> {
@@ -154,8 +145,8 @@ impl Request {
                 } 
             }
         ";
-        let mut variables = HashMap::new();
-        variables.insert("first".to_owned(), 2_usize.into());
+        let mut variables = JsonMap::new();
+        variables.insert("first", 2_usize.into());
         Self::fake_new(
             Some(query.to_owned()),
             operation_name,
@@ -188,15 +179,12 @@ impl Response {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        extensions: HashMap<String, Value>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
-        let extensions: Object = extensions
-            .into_iter()
-            .map(|(name, value)| (ByteString::from(name), value))
-            .collect();
         // Build a response
         let b = graphql::Response::builder()
             .and_path(path)
@@ -243,7 +231,8 @@ impl Response {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        extensions: HashMap<String, Value>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
