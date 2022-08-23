@@ -43,6 +43,16 @@ Let's remove it since it's simple to add back if later required.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1569
 
+### Rename TestHarness methods ([PR #1579](https://github.com/apollographql/router/pull/1579))
+
+Some methods of `apollo_router::TestHarness` were renamed:
+
+* `extra_supergraph_plugin` → `supergraph_hook`
+* `extra_execution_plugin` → `execution_hook`
+* `extra_subgraph_plugin` → `subgraph_hook`
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1579
+
 ### Request and Response types from apollo_router::http_ext are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
 
 These types were wrappers around the `Request` and `Response` types from the `http` crate.
