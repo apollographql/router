@@ -42,7 +42,7 @@ pub(crate) struct Response {
 
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
-pub enum QueryPlannerContent {
+pub(crate) enum QueryPlannerContent {
     Plan {
         query: Arc<Query>,
         plan: Arc<QueryPlan>,

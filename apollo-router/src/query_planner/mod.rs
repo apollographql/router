@@ -48,7 +48,7 @@ pub(crate) type QueryKey = (String, Option<String>);
 /// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {
-    pub usage_reporting: UsageReporting,
+    usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
     options: QueryPlanOptions,
 }

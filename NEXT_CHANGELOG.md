@@ -35,6 +35,12 @@ Let's remove it since it's simple to add back if later required.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1569
 
+### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
+
+These items have been removed from the public API of `apollo_router::services::execution`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
+
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
