@@ -186,6 +186,7 @@ mod test {
             .await
             .unwrap();
 
+        let default_latency = Duration::from_millis(100);
         let results = rx
             .collect::<Vec<_>>()
             .await
@@ -193,10 +194,9 @@ mod test {
             .filter_map(|m| match m {
                 apollo::SingleReport::Stats(mut m) => {
                     m.stats.iter_mut().for_each(|(_k, v)| {
-                        v.stats_with_context.query_latency_stats.latency =
-                            Duration::from_millis(100)
+                        v.stats_with_context.query_latency_stats.latency = default_latency
                     });
-                    Some(m.inner)
+                    Some(m)
                 }
                 apollo::SingleReport::Traces(_) => None,
             })

@@ -62,6 +62,7 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::plugin::Handler;
+use crate::plugins::telemetry::is_span_sampled;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -674,26 +675,34 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
-        let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
-            if name == header::AUTHORIZATION || name == header::COOKIE || name == header::SET_COOKIE
-            {
-                None
-            } else {
-                Some((
-                    name.to_string(),
-                    value.to_str().unwrap_or_default().to_string(),
-                ))
-            }
-        });
-        let mut headers_map: HashMap<String, Vec<String>> = HashMap::new();
-        for (header_name, header_value) in headers_str {
-            let header_value_cloned = header_value.clone();
-            headers_map
-                .entry(header_name)
-                .and_modify(move |e| e.push(header_value_cloned))
-                .or_insert_with(move || vec![header_value]);
-        }
-        let headers_to_str = serde_json::to_string(&headers_map).unwrap_or_default();
+
+        // Only for FTV1
+        let headers_to_str = is_span_sampled()
+            .then(|| {
+                let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
+                    if name == header::AUTHORIZATION
+                        || name == header::COOKIE
+                        || name == header::SET_COOKIE
+                    {
+                        None
+                    } else {
+                        Some((
+                            name.to_string(),
+                            value.to_str().unwrap_or_default().to_string(),
+                        ))
+                    }
+                });
+                let mut headers_map: HashMap<String, Vec<String>> = HashMap::new();
+                for (header_name, header_value) in headers_str {
+                    let header_value_cloned = header_value.clone();
+                    headers_map
+                        .entry(header_name)
+                        .and_modify(move |e| e.push(header_value_cloned))
+                        .or_insert_with(move || vec![header_value]);
+                }
+                serde_json::to_string(&headers_map).unwrap_or_default()
+            })
+            .unwrap_or_default();
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.

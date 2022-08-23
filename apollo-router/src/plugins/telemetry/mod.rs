@@ -30,6 +30,7 @@ use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
@@ -41,6 +42,7 @@ use tower::steer::Steer;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::EnvFilter;
@@ -786,6 +788,10 @@ impl Telemetry {
         variables: &Map<ByteString, Value>,
         forward_rule: &ForwardValues,
     ) -> String {
+        // Only needed for FTV1
+        if !is_span_sampled() {
+            return String::new();
+        }
         #[allow(clippy::mutable_key_type)] // False positive lint
         let variables = match forward_rule {
             ForwardValues::None => HashMap::new(),
@@ -836,6 +842,10 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
+        if is_span_sampled() {
+            ::tracing::debug!("span is sampled then skip the apollo metrics");
+            return;
+        }
         let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
@@ -896,7 +906,7 @@ impl Telemetry {
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics.into()));
+        sender.send(SingleReport::Stats(metrics));
     }
 
     async fn update_metrics(
@@ -1123,6 +1133,10 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
             ::tracing::error!("OpenTelemetry error occurred: {:?}", other)
         }
     }
+}
+
+pub(crate) fn is_span_sampled() -> bool {
+    Span::current().context().span().span_context().is_sampled()
 }
 
 register_plugin!("apollo", "telemetry", Telemetry);
