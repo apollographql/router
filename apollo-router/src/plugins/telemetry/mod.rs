@@ -224,7 +224,7 @@ impl Plugin for Telemetry {
                                 Err(e)
                             }
                             Ok(router_response) => {
-                                let is_not_success =
+                                let mut has_errors =
                                     !router_response.response.status().is_success();
                                 Ok(router_response.map(move |response_stream| {
                                     let sender = sender.clone();
@@ -232,13 +232,17 @@ impl Plugin for Telemetry {
 
                                     response_stream
                                         .map(move |response| {
-                                            let response_has_errors = !response.errors.is_empty();
+                                            if !response.errors.is_empty() {
+                                                has_errors = true;
+                                            }
 
-                                            if !matches!(sender, Sender::Noop) {
+                                            if !response.has_next.unwrap_or(false)
+                                                && !matches!(sender, Sender::Noop)
+                                            {
                                                 Self::update_apollo_metrics(
                                                     &ctx,
                                                     sender.clone(),
-                                                    is_not_success || response_has_errors,
+                                                    has_errors,
                                                     start.elapsed(),
                                                 );
                                             }
