@@ -30,7 +30,7 @@ pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
 pub(crate) struct BridgeQueryPlanner {
-    planner: Arc<Planner<QueryPlan>>,
+    planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
@@ -112,7 +112,11 @@ impl BridgeQueryPlanner {
 
         match planner_result {
             PlanSuccess {
-                data: QueryPlan { node: Some(node) },
+                data:
+                    QueryPlanResult {
+                        query_plan: QueryPlan { node: Some(node) },
+                        formatted_query_plan,
+                    },
                 usage_reporting,
             } => {
                 let subselections = node.parse_subselections(&*self.schema);
@@ -121,6 +125,7 @@ impl BridgeQueryPlanner {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
                         root: node,
+                        formatted_query_plan,
                         options: QueryPlanOptions {
                             enable_deduplicate_variables: self.deduplicate_variables,
                         },
@@ -129,7 +134,11 @@ impl BridgeQueryPlanner {
                 })
             }
             PlanSuccess {
-                data: QueryPlan { node: None },
+                data:
+                    QueryPlanResult {
+                        query_plan: QueryPlan { node: None },
+                        ..
+                    },
                 usage_reporting,
             } => {
                 failfast_debug!("empty query plan");
@@ -183,6 +192,14 @@ impl BridgeQueryPlanner {
 
         self.plan(key.0, key.1, selections).await
     }
+}
+
+/// Data coming from the `plan` method on the router_bridge
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct QueryPlanResult {
+    formatted_query_plan: String,
+    query_plan: QueryPlan,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]

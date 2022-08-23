@@ -43,5 +43,12 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Include formatted query plan when exposing the query plan ([#1557](https://github.com/apollographql/router/issues/1557))
+
+Move the location of the `text` field when exposing the query plan and fill it with a formatted query plan.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
+
 ## 🛠 Maintenance
 ## 📚 Documentation
