@@ -32,6 +32,8 @@ in lieu of an official changelog.
 7. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
 8. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
 9. Update the version in docker-compose files in `dockerfiles` directory.
+10. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
+    You can install `cargo-about` by running `cargo install cargo-about`.
 
 ### Start a release PR
 
