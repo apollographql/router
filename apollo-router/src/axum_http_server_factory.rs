@@ -544,7 +544,7 @@ where
                                             serde_json::to_vec(&res).unwrap().into(),
                                         )))
                                         .chain(once(ready(Bytes::from_static(b"\r\n"))))
-                                    }).chain(once(ready(Bytes::from_static(b"--graphql--\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}"))))
+                                    })
                                     .map(Ok::<_, BoxError>);
 
                                 (parts, StreamBody::new(body)).into_response()

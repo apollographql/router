@@ -238,7 +238,8 @@ where
                                                     .build()
                                             }
                                         }
-                                    })
+                                    }).chain(once(ready(Response::builder().has_next(false).build())))
+
                                     .in_current_span()
                                     .boxed(),
                             )
