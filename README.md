@@ -1,6 +1,7 @@
 <a href="#"><img src="https://raw.githubusercontent.com/apollographql/space-kit/main/src/illustrations/svgs/satellite1.svg" width="100%" height="144"></a>
 
 [![CircleCI](https://circleci.com/gh/apollographql/router/tree/main.svg?style=shield)](https://circleci.com/gh/apollographql/router/tree/main)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fapollographql%2Frouter.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fapollographql%2Frouter?ref=badge_shield)
 
 # Apollo Router
 
@@ -83,3 +84,6 @@ Source code in this repository is covered by the Elastic License 2.0. The
 default throughout the repository is a license under the Elastic License 2.0,
 unless a file header or a license file in a subdirectory specifies another
 license.  [See the LICENSE](./LICENSE) for the full license text.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fapollographql%2Frouter.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fapollographql%2Frouter?ref=badge_large)
