@@ -35,5 +35,13 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Only send one report for a response with deferred responses ([PR #1576](https://github.com/apollographql/router/issues/1576))
+
+The router was sending one report per response (even deferred ones), while Studio was expecting one report for the entire
+response. The router now sends one report, that measures the latency of the entire operation.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1576
+
 ## 🛠 Maintenance
 ## 📚 Documentation
