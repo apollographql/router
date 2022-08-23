@@ -244,7 +244,7 @@ impl Plugin for Telemetry {
                                                     &ctx,
                                                     sender.clone(),
                                                     has_errors,
-                                                    dbg!(start.elapsed()),
+                                                    start.elapsed(),
                                                 );
                                             }
                                             response
