@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Exit the router after logging panic details ([PR #1602](https://github.com/apollographql/router/pull/1602))
+
+If the router panics, it can leave the router in an unuseable state.
+
+Terminating after logging the panic details is the best choice here.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1602
+
 ### Remove `activate()` from the plugin API ([PR #1569](https://github.com/apollographql/router/pull/1569))
 
 Recent changes to configuration reloading means that the only known consumer of this API, telemetry, is no longer using it.
