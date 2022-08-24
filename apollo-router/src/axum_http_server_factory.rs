@@ -52,6 +52,7 @@ use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing::Level;
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
@@ -62,7 +63,6 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::plugin::Handler;
-use crate::plugins::telemetry::is_span_sampled;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -677,7 +677,11 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         });
 
         // Only for FTV1
-        let headers_to_str = is_span_sampled()
+        let headers_to_str = Span::current()
+            .context()
+            .span()
+            .span_context()
+            .is_sampled()
             .then(|| {
                 let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
                     if name == header::AUTHORIZATION

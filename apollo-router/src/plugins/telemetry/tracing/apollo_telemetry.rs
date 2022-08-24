@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
@@ -50,6 +51,9 @@ pub(crate) enum Error {
 
     #[error("duration could not be calculated")]
     SystemTime(#[from] SystemTimeError),
+
+    #[error("this trace should not be sampled")]
+    DoNotSample(Cow<'static, str>),
 }
 
 /// A [`SpanExporter`] that writes to [`Reporter`].
@@ -128,6 +132,7 @@ impl Exporter {
                     None
                 }
             });
+
         let variables = span
             .attributes
             .get(&Key::new("graphql.variables"))
@@ -193,6 +198,13 @@ impl Exporter {
             });
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
+        }
+        if let Some(Value::String(reason)) =
+            span.attributes.get(&Key::new("ftv1_do_not_sample_reason"))
+        {
+            if !reason.is_empty() {
+                return Err(Error::DoNotSample(reason.clone()));
+            }
         }
 
         Ok(match span.name.as_ref() {
@@ -391,7 +403,7 @@ impl SpanExporter for Exporter {
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
-        // We may get spams that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
+        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
         let mut traces_per_query: HashMap<String, TraceWithId> = HashMap::new();
@@ -415,6 +427,19 @@ impl SpanExporter for Exporter {
                                 request_id,
                                 TraceWithId::new(trace_id, trace, operation_signature),
                             );
+                        }
+                        Err(Error::MultipleErrors(errors)) => {
+                            if let Some(Error::DoNotSample(reason)) = errors.first() {
+                                tracing::debug!(
+                                    "sampling is disabled on this trace: {}, skipping",
+                                    reason
+                                );
+                            } else {
+                                tracing::error!(
+                                    "failed to construct trace: {}, skipping",
+                                    Error::MultipleErrors(errors)
+                                );
+                            }
                         }
                         Err(error) => {
                             tracing::error!("failed to construct trace: {}, skipping", error);

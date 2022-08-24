@@ -100,6 +100,7 @@ static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) static FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
@@ -242,6 +243,13 @@ impl Plugin for Telemetry {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
+                // disable ftv1 sampling for defered queries
+                let do_not_sample_reason = if req.query_plan.root.contains_defer() {
+                    req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
+                    "query is defered"
+                } else {
+                    ""
+                };
                 let query = req
                     .originating_request
                     .body()
@@ -257,7 +265,8 @@ impl Plugin for Telemetry {
                 info_span!("execution",
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal
+                    "otel.kind" = %SpanKind::Internal,
+                    ftv1_do_not_sample_reason = do_not_sample_reason
                 )
             })
             .service(service)
@@ -608,6 +617,7 @@ impl Telemetry {
             let variables = Self::filter_variables_values(
                 &request.originating_request.body().variables,
                 &send_variable_values,
+                &request.context,
             );
             let request_id: &RequestId = request
                 .originating_request
@@ -634,9 +644,10 @@ impl Telemetry {
     fn filter_variables_values(
         variables: &Map<ByteString, Value>,
         forward_rule: &ForwardValues,
+        context: &Context,
     ) -> String {
         // Only needed for FTV1
-        if !is_span_sampled() {
+        if !is_span_sampled(context) {
             return String::new();
         }
         #[allow(clippy::mutable_key_type)] // False positive lint
@@ -976,7 +987,7 @@ impl Telemetry {
     ) -> Result<supergraph::Response, BoxError> {
         match result {
             Err(e) => {
-                if !matches!(sender, Sender::Noop) && !is_span_sampled() {
+                if !matches!(sender, Sender::Noop) && is_span_sampled(ctx) {
                     Self::update_apollo_metrics(ctx, request_id, sender, true, start.elapsed());
                 }
                 let mut metric_attrs = Vec::new();
@@ -1039,7 +1050,7 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
-        if is_span_sampled() {
+        if is_span_sampled(context) {
             ::tracing::debug!("span is sampled then skip the apollo metrics");
             return;
         }
@@ -1140,8 +1151,12 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     }
 }
 
-pub(crate) fn is_span_sampled() -> bool {
+pub(crate) fn is_span_sampled(context: &Context) -> bool {
     Span::current().context().span().span_context().is_sampled()
+        && !context
+            .get(FTV1_DO_NOT_SAMPLE)
+            .unwrap_or_default()
+            .unwrap_or(false)
 }
 
 register_plugin!("apollo", "telemetry", Telemetry);
@@ -1157,7 +1172,7 @@ enum ApolloFtv1Handler {
 impl ApolloFtv1Handler {
     fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
         if let ApolloFtv1Handler::Enabled = self {
-            if is_span_sampled() {
+            if is_span_sampled(&req.context) {
                 req.subgraph_request.headers_mut().insert(
                     "apollo-federation-include-trace",
                     HeaderValue::from_static("ftv1"),

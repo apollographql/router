@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 120
 expression: get_spans()
 ---
 {
@@ -147,6 +146,10 @@ expression: get_spans()
               [
                 "otel.kind",
                 "internal"
+              ],
+              [
+                "ftv1_do_not_sample_reason",
+                ""
               ]
             ],
             "metadata": {
@@ -158,7 +161,8 @@ expression: get_spans()
                 "names": [
                   "graphql.document",
                   "graphql.operation.name",
-                  "otel.kind"
+                  "otel.kind",
+                  "ftv1_do_not_sample_reason"
                 ]
               }
             }
