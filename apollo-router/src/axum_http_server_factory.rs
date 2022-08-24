@@ -533,19 +533,31 @@ where
                         }
                         Some(response) => {
                             if response.has_next.unwrap_or(false) {
-                                let stream = once(ready(response)).chain(stream);
+                                // each chunk contains a response and the next delimiter, to let client parsers
+                                // know that they can process the response right away
+                                let mut first_buf = Vec::from(
+                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
+                                );
+                                serde_json::to_writer(&mut first_buf, &response).unwrap();
+                                first_buf.extend_from_slice(b"\r\n--graphql\r\n");
 
-                                let body = stream
-                                    .flat_map(|res| {
-                                        once(ready(Bytes::from_static(
-                                            b"--graphql\r\ncontent-type: application/json\r\n\r\n",
-                                        )))
-                                        .chain(once(ready(
-                                            serde_json::to_vec(&res).unwrap().into(),
-                                        )))
-                                        .chain(once(ready(Bytes::from_static(b"\r\n"))))
-                                    })
-                                    .map(Ok::<_, BoxError>);
+                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(
+                                    stream.map(|res| {
+                                        let mut buf = Vec::from(
+                                            &b"content-type: application/json\r\n\r\n"[..],
+                                        );
+                                        serde_json::to_writer(&mut buf, &res).unwrap();
+
+                                        // the last chunk has a different end delimiter
+                                        if res.has_next.unwrap_or(false) {
+                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                        } else {
+                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                                        }
+
+                                        Ok::<_, BoxError>(buf.into())
+                                    }),
+                                );
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
