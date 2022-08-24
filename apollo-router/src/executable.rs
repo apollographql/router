@@ -346,7 +346,7 @@ fn setup_panic_handler(dispatcher: Dispatch) {
                 tracing::error!("{}", e)
             }
             // Once we've panic'ed the behaviour of the router is non-deterministic
-            // We've loged out the panic details. Terminate with an error code
+            // We've logged out the panic details. Terminate with an error code
             std::process::exit(1);
         });
     }));
