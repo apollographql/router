@@ -107,7 +107,7 @@ fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
-fn default_buffer_size() -> usize {
+const fn default_buffer_size() -> usize {
     10000
 }
 
