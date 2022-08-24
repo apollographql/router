@@ -201,7 +201,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 return Err(BoxError::from(FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: format!(
-                        "subgraph HTTP status error '{}': {})",
+                        "subgraph HTTP status error '{}': {}",
                         parts.status,
                         String::from_utf8_lossy(&body)
                     ),
@@ -475,7 +475,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST)"
+            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST"
         );
     }
 

@@ -63,6 +63,11 @@ We no longer show internal state machine log events at the `info` level since th
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1597
 
+### Fix typo on HTTP errors from subgraph ([#1593](https://github.com/apollographql/router/pull/1593))
+
+Remove the closed parenthesis at the end of error messages resulting from HTTP errors from subgraphs.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/1593
 
 ## 🛠 Maintenance
 ## 📚 Documentation
