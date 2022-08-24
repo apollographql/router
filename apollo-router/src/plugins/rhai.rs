@@ -456,6 +456,7 @@ macro_rules! gen_map_request {
                 move |_request: &$base::Request| {
                     tracing::info_span!(
                         "rhai plugin",
+                        "rhai service" = stringify!($base::Request),
                         "otel.kind" = %SpanKind::Internal
                     )
                 }
@@ -529,6 +530,7 @@ macro_rules! gen_map_deferred_request {
                 move |_request: &$request| {
                     tracing::info_span!(
                         "rhai plugin",
+                        "rhai service" = stringify!($request),
                         "otel.kind" = %SpanKind::Internal
                     )
                 }
