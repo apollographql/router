@@ -18,6 +18,7 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use opentelemetry::trace::SpanKind;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
@@ -451,9 +452,43 @@ pub(crate) enum ServiceStep {
 macro_rules! gen_map_request {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
+            fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
+                // let client_name_header = config.client_name_header;
+                // let client_version_header = config.client_version_header;
+
+                move |request: &$base::Request| {
+                    let http_request = &request.originating_request;
+                    // let headers = http_request.headers();
+                    let query = http_request.body().query.clone().unwrap_or_default();
+                    let operation_name = http_request
+                        .body()
+                        .operation_name
+                        .clone()
+                        .unwrap_or_default();
+                    // let client_name = headers
+                        // .get(&client_name_header)
+                        // .cloned()
+                        // .unwrap_or_else(|| HeaderValue::from_static(""));
+                    // let client_version = headers
+                        // .get(&client_version_header)
+                        // .cloned()
+                        // .unwrap_or_else(|| HeaderValue::from_static(""));
+                    let span = tracing::info_span!(
+                        "rhai span",
+                        graphql.document = query.as_str(),
+                        // TODO add graphql.operation.type
+                        graphql.operation.name = operation_name.as_str(),
+                        // client_name = client_name.to_str().unwrap_or_default(),
+                        // client_version = client_version.to_str().unwrap_or_default(),
+                        "otel.kind" = %SpanKind::Internal
+                    );
+                    span
+                }
+            }
             ServiceBuilder::new()
+                .instrument(rhai_service_span())
                 .checkpoint(move |request: $base::Request| {
-                    let _span = tracing::info_span!("rhai request processing");
+                    // let _span = tracing::info_span!("rhai request processing");
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
@@ -516,9 +551,43 @@ macro_rules! gen_map_request {
 macro_rules! gen_map_deferred_request {
     ($request: ident, $response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
+            fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
+                // let client_name_header = config.client_name_header;
+                // let client_version_header = config.client_version_header;
+
+                move |request: &$request| {
+                    let http_request = &request.originating_request;
+                    // let headers = http_request.headers();
+                    let query = http_request.body().query.clone().unwrap_or_default();
+                    let operation_name = http_request
+                        .body()
+                        .operation_name
+                        .clone()
+                        .unwrap_or_default();
+                    // let client_name = headers
+                        // .get(&client_name_header)
+                        // .cloned()
+                        // .unwrap_or_else(|| HeaderValue::from_static(""));
+                    // let client_version = headers
+                        // .get(&client_version_header)
+                        // .cloned()
+                        // .unwrap_or_else(|| HeaderValue::from_static(""));
+                    let span = tracing::info_span!(
+                        "rhai span",
+                        graphql.document = query.as_str(),
+                        // TODO add graphql.operation.type
+                        graphql.operation.name = operation_name.as_str(),
+                        // client_name = client_name.to_str().unwrap_or_default(),
+                        // client_version = client_version.to_str().unwrap_or_default(),
+                        "otel.kind" = %SpanKind::Internal
+                    );
+                    span
+                }
+            }
             ServiceBuilder::new()
+                .instrument(rhai_service_span())
                 .checkpoint(move |request: $request| {
-                    let _span = tracing::info_span!("rhai request processing");
+                    // let _span = tracing::info_span!("rhai request processing");
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
@@ -562,7 +631,7 @@ macro_rules! gen_map_response {
         $borrow.replace(|service| {
             service
                 .map_response(move |response: $base::Response| {
-                    let _span = tracing::info_span!("rhai response processing");
+                    // let _span = tracing::info_span!("rhai response processing");
                     // Let's define a local function to build an error response
                     // XXX: This isn't ideal. We already have a response, so ideally we'd
                     // like to append this error into the existing response. However,
@@ -630,7 +699,7 @@ macro_rules! gen_map_deferred_response {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
                 |mapped_response: $response| async move {
-                    let _span = tracing::info_span!("rhai response processing");
+                    // let _span = tracing::info_span!("rhai response processing");
                     // Let's define a local function to build an error response
                     // XXX: This isn't ideal. We already have a response, so ideally we'd
                     // like to append this error into the existing response. However,
