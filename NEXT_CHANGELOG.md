@@ -42,6 +42,13 @@ These items have been removed from the public API of `apollo_router::services::e
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
 
 ## 🚀 Features
+
+### instrument the rhai plugin with a tracing span ([PR #1598](https://github.com/apollographql/router/pull/1598))
+
+If you have an active rhai script in your router, you will now see a "rhai plugin" tracing span.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1598
+
 ## 🐛 Fixes
 
 ### Only send one report for a response with deferred responses ([PR #1576](https://github.com/apollographql/router/issues/1576))
