@@ -463,7 +463,6 @@ macro_rules! gen_map_request {
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
                 .checkpoint(move |request: $base::Request| {
-                    // let _span = tracing::info_span!("rhai request processing");
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
@@ -537,7 +536,6 @@ macro_rules! gen_map_deferred_request {
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
                 .checkpoint(move |request: $request| {
-                    // let _span = tracing::info_span!("rhai request processing");
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
@@ -581,7 +579,6 @@ macro_rules! gen_map_response {
         $borrow.replace(|service| {
             service
                 .map_response(move |response: $base::Response| {
-                    // let _span = tracing::info_span!("rhai response processing");
                     // Let's define a local function to build an error response
                     // XXX: This isn't ideal. We already have a response, so ideally we'd
                     // like to append this error into the existing response. However,
@@ -649,7 +646,6 @@ macro_rules! gen_map_deferred_response {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
                 |mapped_response: $response| async move {
-                    // let _span = tracing::info_span!("rhai response processing");
                     // Let's define a local function to build an error response
                     // XXX: This isn't ideal. We already have a response, so ideally we'd
                     // like to append this error into the existing response. However,
