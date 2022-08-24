@@ -121,7 +121,7 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             apollo_sender: Sender::default(),
-            buffer_size: 10000,
+            buffer_size: default_buffer_size(),
             field_level_instrumentation: false,
             send_headers: ForwardValues::None,
             send_variable_values: ForwardValues::None,

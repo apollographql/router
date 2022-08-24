@@ -43,7 +43,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ## 🚀 Features
 
-### Add support of tracing for Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+### Add FTV1 tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
 
 Add support of [FTV1](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio. To fetch traces from subgraphs and have full support of FTV1 you have to configure it:
 

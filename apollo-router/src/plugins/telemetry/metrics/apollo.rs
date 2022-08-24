@@ -77,7 +77,7 @@ mod test {
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: 10000,
+            buffer_size: default_buffer_size(),
             schema_id: "schema_sha".to_string(),
             ..Default::default()
         })
@@ -227,7 +227,7 @@ mod test {
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
-            buffer_size: 10000,
+            buffer_size: default_buffer_size(),
             schema_id: "schema_sha".to_string(),
             ..Default::default()
         })
