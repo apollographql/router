@@ -57,6 +57,13 @@ Move the location of the `text` field when exposing the query plan and fill it w
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
 
+### Only send one report for a response with deferred responses ([PR #1596](https://github.com/apollographql/router/issues/1596))
+
+deferred responses come as multipart elements, send as individual HTTP response chunks. When a client receives one chunk,
+it should contain the next delimiter, so the client knows that the response can be processed, instead of waiting for the
+next chunk to see the delimiter.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
 ## 🛠 Maintenance
 ## 📚 Documentation
