@@ -113,7 +113,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.8"
 prometheus = "0.13"
-rhai = { version = "1.8.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.9.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
@@ -123,9 +123,9 @@ reqwest = { version = "0.11.11", default-features = false, features = [
 router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha4" }
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
-serde = { version = "1.0.143", features = ["derive", "rc"] }
+serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
-serde_json = { version = "1.0.83", features = ["preserve_order"] }
+serde_json = { version = "1.0.85", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 startup = "0.1.1"
@@ -177,7 +177,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.18.2", features = [ "json", "redactions" ] }
+insta = { version = "1.19.0", features = [ "json", "redactions" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 mockall = "0.11.2"
