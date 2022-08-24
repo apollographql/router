@@ -136,11 +136,6 @@ impl ApolloExporter {
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return;
         }
-        println!("report ==== {report:#?}",);
-        println!(
-            "report ==== {}",
-            serde_json::to_string_pretty(&report).unwrap()
-        );
 
         match pool.get().await {
             Ok(mut reporter) => {

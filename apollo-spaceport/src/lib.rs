@@ -202,8 +202,6 @@ where
 {
     match timestamp {
         Some(ts) => {
-            // let mut encoded_ts = Vec::new();
-            // ts.encode(&mut encoded_ts).unwrap();
             let mut ts_strukt = serializer.serialize_struct("Timestamp", 2)?;
             ts_strukt.serialize_field("seconds", &ts.seconds)?;
             ts_strukt.serialize_field("nanos", &ts.nanos)?;
