@@ -57,6 +57,12 @@ Move the location of the `text` field when exposing the query plan and fill it w
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
 
+### Change state machine log messages to `trace` ([#1578](https://github.com/apollographql/router/issues/1578))
+
+We no longer show internal state machine log events at the `info` level since they are unnecessary during normal operation.  They are instead emitted at the `trace` level and can be enabled selectively using the `--log trace` flag.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1597
+
 
 ## 🛠 Maintenance
 ## 📚 Documentation
