@@ -11,7 +11,6 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::query_planner::fetch::OperationKind;
@@ -22,12 +21,11 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
-/// [`Context`], [`OperationKind`] and [`http_ext::Request<Request>`] for the request.
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: Arc<http_ext::Request<graphql::Request>>,
+    pub originating_request: Arc<http::Request<graphql::Request>>,
 
-    pub subgraph_request: http_ext::Request<graphql::Request>,
+    pub subgraph_request: http::Request<graphql::Request>,
 
     pub operation_kind: OperationKind,
 
@@ -41,8 +39,8 @@ impl Request {
     /// Required parameters are required in non-testing code to create a Request.
     #[builder(visibility = "pub")]
     fn new(
-        originating_request: Arc<http_ext::Request<graphql::Request>>,
-        subgraph_request: http_ext::Request<graphql::Request>,
+        originating_request: Arc<http::Request<graphql::Request>>,
+        subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
     ) -> Request {
@@ -61,28 +59,14 @@ impl Request {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
-        originating_request: Option<Arc<http_ext::Request<graphql::Request>>>,
-        subgraph_request: Option<http_ext::Request<graphql::Request>>,
+        originating_request: Option<Arc<http::Request<graphql::Request>>>,
+        subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
     ) -> Request {
         Request::new(
-            originating_request.unwrap_or_else(|| {
-                Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                )
-            }),
-            subgraph_request.unwrap_or_else(|| {
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed")
-            }),
+            originating_request.unwrap_or_default(),
+            subgraph_request.unwrap_or_default(),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
         )
@@ -90,12 +74,9 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
-/// [`Context`] and [`http_ext::Response<graphql::Response>`] for the response.
-///
-/// This consists of the subgraph response and the context.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Response {
-    pub response: http_ext::Response<graphql::Response>,
+    pub response: http::Response<graphql::Response>,
 
     pub context: Context,
 }
@@ -107,7 +88,7 @@ impl Response {
     /// In this case, you already have a valid response and just wish to associate it with a context
     /// and create a Response.
     pub fn new_from_response(
-        response: http_ext::Response<graphql::Response>,
+        response: http::Response<graphql::Response>,
         context: Context,
     ) -> Response {
         Self { response, context }
@@ -137,20 +118,12 @@ impl Response {
             .build();
 
         // Build an http Response
-        let http_response = http::Response::builder()
+        let response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
             .body(res)
             .expect("Response is serializable; qed");
 
-        // Create a compatible Response
-        let compat_response = http_ext::Response {
-            inner: http_response,
-        };
-
-        Self {
-            response: compat_response,
-            context,
-        }
+        Self { response, context }
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" Response.

@@ -18,7 +18,7 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext;
+use crate::http_ext::header_map;
 use crate::http_ext::IntoHeaderName;
 use crate::http_ext::IntoHeaderValue;
 use crate::json_ext::Path;
@@ -34,14 +34,14 @@ assert_impl_all!(Request: Send);
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: http_ext::Request<graphql::Request>,
+    pub originating_request: http::Request<graphql::Request>,
 
     /// Context for extension
     pub context: Context,
 }
 
-impl From<http_ext::Request<graphql::Request>> for Request {
-    fn from(originating_request: http_ext::Request<graphql::Request>) -> Self {
+impl From<http::Request<graphql::Request>> for Request {
+    fn from(originating_request: http::Request<graphql::Request>) -> Self {
         Self {
             originating_request,
             context: Context::new(),
@@ -73,14 +73,11 @@ impl Request {
             .variables(variables)
             .extensions(extensions)
             .build();
-
-        let originating_request = http_ext::Request::builder()
-            .headers(headers)
+        let mut originating_request = http::Request::builder()
             .uri(uri)
             .method(method)
-            .body(gql_request)
-            .build()?;
-
+            .body(gql_request)?;
+        *originating_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             originating_request,
             context,
@@ -160,11 +157,8 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
-/// [`Context`] and [`http_ext::Response<Response>`] for the response.
-///
-/// This consists of the response body and the context.
 pub struct Response {
-    pub response: http_ext::Response<BoxStream<'static, graphql::Response>>,
+    pub response: http::Response<BoxStream<'static, graphql::Response>>,
     pub context: Context,
 }
 
@@ -205,17 +199,9 @@ impl Response {
             }
         }
 
-        let http_response = builder.body(once(ready(res)).boxed())?;
+        let response = builder.body(once(ready(res)).boxed())?;
 
-        // Create a compatible Response
-        let compat_response = http_ext::Response {
-            inner: http_response,
-        };
-
-        Ok(Self {
-            response: compat_response,
-            context,
-        })
+        Ok(Self { response, context })
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" Response.
@@ -271,7 +257,7 @@ impl Response {
 
     pub fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
         Self {
-            response: http::Response::new(once(ready(response)).boxed()).into(),
+            response: http::Response::new(once(ready(response)).boxed()),
             context,
         }
     }
@@ -283,7 +269,7 @@ impl Response {
     }
 
     pub fn new_from_response(
-        response: http_ext::Response<BoxStream<'static, graphql::Response>>,
+        response: http::Response<BoxStream<'static, graphql::Response>>,
         context: Context,
     ) -> Self {
         Self { response, context }

@@ -21,7 +21,7 @@ reqwest = { version = "0.11.11", default_features = false, features = [
     "rustls-tls",
     "json",
 ] }
-serde = { version = "1.0.143", features = ["derive"] }
+serde = { version = "1.0.144", features = ["derive"] }
 sys-info = "0.9.1"
 tonic = "0.6.2"
 tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread"] }

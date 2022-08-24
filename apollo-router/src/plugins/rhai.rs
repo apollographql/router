@@ -118,7 +118,7 @@ mod router_plugin_mod {
     pub(crate) fn get_subgraph(
         obj: &mut SharedMut<subgraph::Request>,
     ) -> Result<http_ext::Request<Request>, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|request| request.subgraph_request.clone()))
+        Ok(obj.with_mut(|request| (&request.subgraph_request).into()))
     }
 
     #[rhai_fn(set = "subgraph", return_raw)]
@@ -127,7 +127,7 @@ mod router_plugin_mod {
         sub: http_ext::Request<Request>,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|request| {
-            request.subgraph_request = sub;
+            request.subgraph_request = sub.inner;
             Ok(())
         })
     }
@@ -838,7 +838,7 @@ impl ServiceStep {
                             // we split the response stream into headers+first response, then a stream of deferred responses
                             // for which we will implement mapping later
                             let SupergraphResponse { response, context } = router_response;
-                            let (parts, stream) = http::Response::from(response).into_parts();
+                            let (parts, stream) = response.into_parts();
                             let (first, rest) = stream.into_future().await;
 
                             if first.is_none() {
@@ -912,8 +912,7 @@ impl ServiceStep {
                             let response = http::Response::from_parts(
                                 parts,
                                 once(ready(body)).chain(mapped_stream).boxed(),
-                            )
-                            .into();
+                            );
                             Ok(SupergraphResponse {
                                 context: ctx,
                                 response,
@@ -951,7 +950,7 @@ impl ServiceStep {
                             // we split the response stream into headers+first response, then a stream of deferred responses
                             // for which we will implement mapping later
                             let ExecutionResponse { response, context } = execution_response;
-                            let (parts, stream) = http::Response::from(response).into_parts();
+                            let (parts, stream) = response.into_parts();
                             let (first, rest) = stream.into_future().await;
 
                             if first.is_none() {
@@ -1024,8 +1023,7 @@ impl ServiceStep {
                             let response = http::Response::from_parts(
                                 parts,
                                 once(ready(body)).chain(mapped_stream).boxed(),
-                            )
-                            .into();
+                            );
                             Ok(ExecutionResponse {
                                 context: ctx,
                                 response,
