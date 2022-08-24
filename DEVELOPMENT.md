@@ -71,7 +71,7 @@ http://localhost:16686/ to reach Jaeger.
 While developing locally doc warnings and other lint checks are disabled.
 This limits the noise generated while exploration is taking place.
 
-When you are ready to create a PR, run a build with strict ch********ecking enabled,
+When you are ready to create a PR, run a build with strict checking enabled,
 and check for license compliance.
 
 Use `cargo xtask all` to run all of the checks the CI will run.
