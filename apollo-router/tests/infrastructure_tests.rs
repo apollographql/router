@@ -1,4 +1,5 @@
 #[tokio::test]
+#[tracing_test::traced_test]
 async fn test_starstuff_supergraph_is_valid() {
     let schema = include_str!("../../examples/graphql/supergraph.graphql");
     apollo_router::TestHarness::builder()
