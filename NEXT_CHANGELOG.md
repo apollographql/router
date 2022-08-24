@@ -42,6 +42,32 @@ These items have been removed from the public API of `apollo_router::services::e
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
 
 ## 🚀 Features
+
+### Add support of tracing for Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+
+Add support of [FTV1](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio. To fetch traces from subgraphs and have full support of FTV1 you have to configure it:
+
+```yaml
+telemetry:
+    apollo:
+        field_level_instrumentation: true
+        # Send headers in apollo usage reporting (except Authorization and Cookies)
+        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all headers except referer
+            - referer
+        # Send variable values in apollo usage reporting
+        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all variable values except for variable named first
+            - first
+    tracing:
+        trace_config:
+            sampler: 0.5 # Do not forget to configure a sampler for traces (a rate or `always_on` or `always_off`)
+
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
+
+
 ## 🐛 Fixes
 
 ### Only send one report for a response with deferred responses ([PR #1576](https://github.com/apollographql/router/issues/1576))

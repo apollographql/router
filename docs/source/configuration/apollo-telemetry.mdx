@@ -27,11 +27,15 @@ To connect the Apollo Router to an external Spaceport instance, specify its endp
 telemetry:
   # Optional Apollo telemetry configuration.
   apollo:
-
     # Optional external Spaceport URL.
     # If not specified, an in-process Spaceport is used.
     endpoint: "https://my-spaceport"
 
+    # Enable apollo FTV1 (federated traces) on subgraphs
+    field_level_instrumentation: true
+  tracing:
+    trace_config:
+      sampler: 0.5 # Traces are sampled then don't forget to configure a sampler for traces (could be a rate or `always_on` or `always_off`)
 ```
 
 ## Running Spaceport externally (not recommended)
