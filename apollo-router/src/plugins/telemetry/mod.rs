@@ -1051,7 +1051,7 @@ impl Telemetry {
         duration: Duration,
     ) {
         if is_span_sampled(context) {
-            ::tracing::debug!("span is sampled then skip the apollo metrics");
+            ::tracing::trace!("span is sampled then skip the apollo metrics");
             return;
         }
         let metrics = if let Some(usage_reporting) = context
