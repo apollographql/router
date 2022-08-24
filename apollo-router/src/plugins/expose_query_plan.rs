@@ -77,7 +77,7 @@ impl Plugin for ExposeQueryPlan {
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {
-                            let (parts, stream) = http::Response::from(res.response).into_parts();
+                            let (parts, stream) = res.response.into_parts();
                             let (mut first, rest) = stream.into_future().await;
 
                             if let Some(first) = &mut first {
@@ -92,8 +92,7 @@ impl Plugin for ExposeQueryPlan {
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                            )
-                            .into();
+                            );
                         }
 
                         Ok(res)
