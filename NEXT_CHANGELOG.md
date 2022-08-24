@@ -57,6 +57,12 @@ Move the location of the `text` field when exposing the query plan and fill it w
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
 
+### Fix typo on HTTP errors from subgraph ([#1593](https://github.com/apollographql/router/pull/1593))
+
+Remove the closed parenthesis at the end of error messages resulting from HTTP errors from subgraphs.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/1593
+
 
 ## 🛠 Maintenance
 ## 📚 Documentation
