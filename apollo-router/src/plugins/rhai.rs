@@ -453,36 +453,11 @@ macro_rules! gen_map_request {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
-                // let client_name_header = config.client_name_header;
-                // let client_version_header = config.client_version_header;
-
-                move |request: &$base::Request| {
-                    let http_request = &request.originating_request;
-                    // let headers = http_request.headers();
-                    let query = http_request.body().query.clone().unwrap_or_default();
-                    let operation_name = http_request
-                        .body()
-                        .operation_name
-                        .clone()
-                        .unwrap_or_default();
-                    // let client_name = headers
-                        // .get(&client_name_header)
-                        // .cloned()
-                        // .unwrap_or_else(|| HeaderValue::from_static(""));
-                    // let client_version = headers
-                        // .get(&client_version_header)
-                        // .cloned()
-                        // .unwrap_or_else(|| HeaderValue::from_static(""));
-                    let span = tracing::info_span!(
-                        "rhai span",
-                        graphql.document = query.as_str(),
-                        // TODO add graphql.operation.type
-                        graphql.operation.name = operation_name.as_str(),
-                        // client_name = client_name.to_str().unwrap_or_default(),
-                        // client_version = client_version.to_str().unwrap_or_default(),
+                move |_request: &$base::Request| {
+                    tracing::info_span!(
+                        "rhai plugin",
                         "otel.kind" = %SpanKind::Internal
-                    );
-                    span
+                    )
                 }
             }
             ServiceBuilder::new()
@@ -552,36 +527,11 @@ macro_rules! gen_map_deferred_request {
     ($request: ident, $response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
             fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
-                // let client_name_header = config.client_name_header;
-                // let client_version_header = config.client_version_header;
-
-                move |request: &$request| {
-                    let http_request = &request.originating_request;
-                    // let headers = http_request.headers();
-                    let query = http_request.body().query.clone().unwrap_or_default();
-                    let operation_name = http_request
-                        .body()
-                        .operation_name
-                        .clone()
-                        .unwrap_or_default();
-                    // let client_name = headers
-                        // .get(&client_name_header)
-                        // .cloned()
-                        // .unwrap_or_else(|| HeaderValue::from_static(""));
-                    // let client_version = headers
-                        // .get(&client_version_header)
-                        // .cloned()
-                        // .unwrap_or_else(|| HeaderValue::from_static(""));
-                    let span = tracing::info_span!(
-                        "rhai span",
-                        graphql.document = query.as_str(),
-                        // TODO add graphql.operation.type
-                        graphql.operation.name = operation_name.as_str(),
-                        // client_name = client_name.to_str().unwrap_or_default(),
-                        // client_version = client_version.to_str().unwrap_or_default(),
+                move |_request: &$request| {
+                    tracing::info_span!(
+                        "rhai plugin",
                         "otel.kind" = %SpanKind::Internal
-                    );
-                    span
+                    )
                 }
             }
             ServiceBuilder::new()
