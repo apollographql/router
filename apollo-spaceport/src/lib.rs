@@ -17,6 +17,7 @@ pub use agent::*;
 pub use prost::*;
 pub use prost_types::Timestamp;
 pub use report::*;
+use serde::ser::SerializeStruct;
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
@@ -201,9 +202,12 @@ where
 {
     match timestamp {
         Some(ts) => {
-            let mut encoded_ts = Vec::new();
-            ts.encode(&mut encoded_ts).unwrap();
-            serializer.serialize_str(&String::from_utf8_lossy(&encoded_ts))
+            // let mut encoded_ts = Vec::new();
+            // ts.encode(&mut encoded_ts).unwrap();
+            let mut ts_strukt = serializer.serialize_struct("Timestamp", 2)?;
+            ts_strukt.serialize_field("seconds", &ts.seconds)?;
+            ts_strukt.serialize_field("nanos", &ts.nanos)?;
+            ts_strukt.end()
         }
         None => serializer.serialize_none(),
     }

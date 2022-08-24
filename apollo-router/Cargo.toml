@@ -177,7 +177,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.18.2", features = [ "json" ] }
+insta = { version = "1.18.2", features = [ "json", "redactions" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 mockall = "0.11.2"

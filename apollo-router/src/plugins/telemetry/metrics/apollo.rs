@@ -97,7 +97,10 @@ mod test {
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query, None, None).await?;
-        insta::with_settings!({sort_maps => true}, {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
             insta::assert_json_snapshot!(results);
         });
         Ok(())
@@ -107,7 +110,10 @@ mod test {
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
         let query = "query {topProducts{name}} query {topProducts{name}}";
         let results = get_metrics_for_request(query, None, None).await?;
-        insta::with_settings!({sort_maps => true}, {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
             insta::assert_json_snapshot!(results);
         });
         Ok(())
@@ -117,7 +123,10 @@ mod test {
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
         let results = get_metrics_for_request(query, None, None).await?;
-        insta::with_settings!({sort_maps => true}, {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
             insta::assert_json_snapshot!(results);
         });
         Ok(())
@@ -127,9 +136,10 @@ mod test {
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query, Some("UNKNOWN"), None).await?;
-        insta::with_settings!({sort_maps => true}, {
-            insta::assert_json_snapshot!(results);
-        });
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| insta::assert_json_snapshot!(results));
         Ok(())
     }
 
@@ -137,7 +147,10 @@ mod test {
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
         let query = "query {topProducts{unknown}}";
         let results = get_metrics_for_request(query, None, None).await?;
-        insta::with_settings!({sort_maps => true}, {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
             insta::assert_json_snapshot!(results);
         });
 
@@ -150,7 +163,10 @@ mod test {
         let context = Context::new();
         context.insert(STUDIO_EXCLUDE, true)?;
         let results = get_metrics_for_request(query, None, Some(context)).await?;
-        insta::with_settings!({sort_maps => true}, {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
             insta::assert_json_snapshot!(results);
         });
 
@@ -186,6 +202,7 @@ mod test {
             .await
             .unwrap();
 
+        let default_latency = Duration::from_millis(100);
         let results = rx
             .collect::<Vec<_>>()
             .await
@@ -193,10 +210,9 @@ mod test {
             .filter_map(|m| match m {
                 apollo::SingleReport::Stats(mut m) => {
                     m.stats.iter_mut().for_each(|(_k, v)| {
-                        v.stats_with_context.query_latency_stats.latency =
-                            Duration::from_millis(100)
+                        v.stats_with_context.query_latency_stats.latency = default_latency
                     });
-                    Some(m.inner)
+                    Some(m)
                 }
                 apollo::SingleReport::Traces(_) => None,
             })

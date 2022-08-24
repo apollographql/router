@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 923
+assertion_line: 932
 expression: "&schema"
 ---
 {
@@ -512,6 +512,90 @@ expression: "&schema"
               "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",
               "default": false,
               "type": "boolean"
+            },
+            "send_headers": {
+              "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "send_variable_values": {
+              "description": "To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "additionalProperties": false,

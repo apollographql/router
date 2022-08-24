@@ -1,7 +1,6 @@
 //! Configuration for apollo telemetry exporter.
 // This entire file is license key functionality
 use std::time::Duration;
-use std::time::Instant;
 
 use apollo_spaceport::ReportHeader;
 use apollo_spaceport::Reporter;
@@ -12,15 +11,13 @@ use deadpool::managed::Pool;
 use deadpool::Runtime;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
-// This entire file is license key functionality
-use serde::Serialize;
 use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
-use crate::plugins::telemetry::apollo::ReportBuilder;
+// use crate::plugins::telemetry::apollo::ReportBuilder;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
@@ -102,8 +99,7 @@ impl ApolloExporter {
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
-            let mut report_builder = ReportBuilder::default();
-            let mut buffer = Vec::new();
+            let mut report = Report::default();
 
             tokio::pin!(timeout);
 
@@ -111,21 +107,18 @@ impl ApolloExporter {
                 tokio::select! {
                     single_report = rx.next() => {
                         if let Some(r) = single_report {
-                            report_builder += r;
+                            report += r;
                         } else {
                             break;
                         }
                        },
                     _ = timeout.tick() => {
-                        std::mem::take(&mut buffer).into_iter().for_each(|orphan| report_builder += orphan);
-                        let (report, orphans)= std::mem::take(&mut report_builder).build();
-                        buffer = orphans;
-                        Self::send_report(&pool, &apollo_key, &header, report).await;
+                        Self::send_report(&pool, &apollo_key, &header, std::mem::take(&mut report)).await;
                     }
                 };
             }
 
-            Self::send_report(&pool, &apollo_key, &header, report_builder.build().0).await;
+            Self::send_report(&pool, &apollo_key, &header, report).await;
         });
         Ok(ApolloExporter { tx })
     }
@@ -143,7 +136,11 @@ impl ApolloExporter {
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return;
         }
-        println!("==== {}", serde_json::to_string_pretty(&report).unwrap());
+        println!("report ==== {report:#?}",);
+        println!(
+            "report ==== {}",
+            serde_json::to_string_pretty(&report).unwrap()
+        );
 
         match pool.get().await {
             Ok(mut reporter) => {
@@ -211,50 +208,4 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
         "{}, {}, {}, {}, {}",
         sysname, nodename, release, version, machine
     ))
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct EntryTTL<T> {
-    pub(crate) inner: T,
-    #[serde(skip)]
-    pub(crate) created: Instant,
-}
-
-impl<T> EntryTTL<T> {
-    pub(crate) fn new(inner: T, created: Instant) -> Self {
-        Self { inner, created }
-    }
-
-    pub(crate) fn map<F, N>(self, f: F) -> EntryTTL<N>
-    where
-        F: Fn(T) -> N,
-    {
-        EntryTTL {
-            created: self.created,
-            inner: f(self.inner),
-        }
-    }
-}
-
-impl<T> std::ops::Deref for EntryTTL<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> std::ops::DerefMut for EntryTTL<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl<T> From<T> for EntryTTL<T> {
-    fn from(inner: T) -> Self {
-        Self {
-            inner,
-            created: Instant::now(),
-        }
-    }
 }

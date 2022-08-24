@@ -2,7 +2,6 @@
 // This entire file is license key functionality
 use std::collections::HashMap;
 use std::ops::AddAssign;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use apollo_spaceport::ReferencedFieldsForType;
@@ -15,21 +14,14 @@ use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use ulid::Ulid;
 use url::Url;
 
-use super::apollo_exporter::EntryTTL;
 use super::apollo_exporter::Sender;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
-use crate::http_ext::RequestId;
 use crate::plugin::serde::deserialize_header_name;
-
-// TTL for orphan traces/metrics
-// An orphan is a metric without an associated trace or contrary
-const ORPHANS_TTL: Duration = Duration::from_secs(13);
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -154,119 +146,8 @@ impl Default for ForwardValues {
 
 #[derive(Debug, Serialize)]
 pub(crate) enum SingleReport {
-    Stats(EntryTTL<SingleStatsReport>),
-    Traces(EntryTTL<TracesReport>),
-}
-
-#[derive(Default)]
-pub(crate) struct ReportBuilder {
-    // signature / trace by request_id
-    pub(crate) traces: HashMap<String, EntryTTL<(String, Trace)>>,
-    // Buffer all (signatures and stats) by request_id to not have both traces and stats
-    pub(crate) stats: HashMap<String, EntryTTL<HashMap<String, SingleStats>>>,
-    pub(crate) report: Report,
-}
-
-impl ReportBuilder {
-    pub(crate) fn build(mut self) -> (Report, Vec<SingleReport>) {
-        // implement merge strategy
-        let duplicated_keys_for_reqs: Vec<String> = self
-            .traces
-            .keys()
-            .chain(self.stats.keys())
-            .duplicates()
-            .cloned()
-            .collect();
-
-        for duplicated_key in duplicated_keys_for_reqs {
-            let (operation_signature, trace) = self
-                .traces
-                .remove(&duplicated_key)
-                .expect("must exist because it's a duplicate key")
-                .inner;
-            let _stats = self
-                .stats
-                .remove(&duplicated_key)
-                .expect("must exist because it's a duplicate key")
-                .inner;
-
-            let entry = self
-                .report
-                .traces_per_query
-                .entry(operation_signature)
-                .or_default();
-
-            // Because if we have traces we can't also provide metrics because it's computed as 2 requests in Studio
-            self.report.operation_count += 1;
-            entry.traces.push(trace);
-        }
-
-        // This part is to handle orphans, which means metrics that has been added without traces
-        // If we have metrics without corresponding traces we put them in an orphans vec
-        // It stored in an EntryTTL to set a TTL on elements, once it has reached the TTL
-        // it means we can send the metrics because we know there isn't any associated trace
-        let mut orphans = Vec::new();
-        for (request_id, entry) in self.stats {
-            // These stats reached TTL without finding corresponding traces then send it
-            if entry.created.elapsed() > ORPHANS_TTL {
-                for (key, stats) in entry.inner {
-                    *self.report.traces_per_query.entry(key).or_default() += stats;
-                }
-                self.report.operation_count += 1;
-            } else {
-                orphans.push(SingleReport::Stats(entry.map(|e| SingleStatsReport {
-                    request_id: RequestId(
-                        Ulid::from_string(&request_id).expect("has already been parsed before"),
-                    ),
-                    stats: e,
-                    operation_count: 1,
-                })));
-            }
-        }
-
-        for (request_id, entry) in self.traces {
-            // This trace reached TTL without finding corresponding metrics then send it
-            if entry.created.elapsed() > ORPHANS_TTL {
-                self.report += TracesReport {
-                    traces: HashMap::from([(request_id, entry.inner)]),
-                };
-            } else {
-                orphans.push(SingleReport::Traces(entry.map(|e| TracesReport {
-                    traces: HashMap::from([(request_id.clone(), e)]),
-                })));
-            }
-        }
-
-        (self.report, orphans)
-    }
-}
-
-impl AddAssign<SingleReport> for ReportBuilder {
-    fn add_assign(&mut self, report: SingleReport) {
-        match report {
-            SingleReport::Stats(stats) => self.add_assign(stats),
-            SingleReport::Traces(traces) => self.add_assign(traces),
-        }
-    }
-}
-
-impl AddAssign<EntryTTL<SingleStatsReport>> for ReportBuilder {
-    fn add_assign(&mut self, report: EntryTTL<SingleStatsReport>) {
-        self.stats
-            .insert(report.request_id.to_string(), report.map(|r| r.stats));
-    }
-}
-
-impl AddAssign<EntryTTL<TracesReport>> for ReportBuilder {
-    fn add_assign(&mut self, report: EntryTTL<TracesReport>) {
-        self.traces.extend(
-            report
-                .inner
-                .traces
-                .into_iter()
-                .map(|(k, v)| (k, EntryTTL::new(v, report.created))),
-        );
-    }
+    Stats(SingleStatsReport),
+    Traces(TracesReport),
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -297,6 +178,15 @@ impl Report {
             report.traces_per_query.insert(key, traces_and_stats.into());
         }
         report
+    }
+}
+
+impl AddAssign<SingleReport> for Report {
+    fn add_assign(&mut self, report: SingleReport) {
+        match report {
+            SingleReport::Stats(stats) => self.add_assign(stats),
+            SingleReport::Traces(traces) => self.add_assign(traces),
+        }
     }
 }
 

@@ -442,15 +442,12 @@ impl SpanExporter for Exporter {
             }
         }
 
-        self.apollo_sender.send(SingleReport::Traces(
-            TracesReport {
-                traces: traces_per_query
-                    .into_iter()
-                    .map(|(k, v)| (k, (v.signature, v.trace)))
-                    .collect(),
-            }
-            .into(),
-        ));
+        self.apollo_sender.send(SingleReport::Traces(TracesReport {
+            traces: traces_per_query
+                .into_iter()
+                .map(|(k, v)| (k, (v.signature, v.trace)))
+                .collect(),
+        }));
 
         return ExportResult::Ok(());
     }
