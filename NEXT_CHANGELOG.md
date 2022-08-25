@@ -76,6 +76,53 @@ The release tarballs now contain the full target triplet in their name along wit
 
 By [@abernix](https://github.com/abernix) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1433 (which re-lands work done in https://github.com/apollographql/router/pull/1393)
 
+### Many structs and enums are now `#[non_exhaustive]` ([Issue #1550](https://github.com/apollographql/router/issues/1550))
+
+This means we may add struct fields or enum variants in the future.
+To prepare for that eventuality:
+
+When using a struct pattern (such as for deconstructing a value into its fields),
+use `..` to allow further fields:
+
+```diff
+-let PluginInit { config, supergraph_sdl } = init;
++let PluginInit { config, supergraph_sdl, .. } = init;
+```
+
+Or use field access instead:
+
+```diff
+-let PluginInit { config, supergraph_sdl } = init;
++let config = init.config;
++let supergraph_sdl = init.supergraph_sdl;
+```
+
+When constructing a struct, use a builder or constructor method instead of struct literal syntax:
+
+```diff
+-let error = graphql::Error {
+-    message: "something went wrong".to_string(),
+-    ..Default::default()
+-};
++let error = graphql::Error::builder()
++    .message("something went wrong")
++    .build();
+```
+
+When matching on an enum, add a wildcard match arm:
+
+```diff
+ match error {
+     SpecError::RecursionLimitExceeded => "recursion limit exceeded",
+     SpecError::InvalidType(_) => "invalid type",
+     SpecError::ParsingError(_) => "paring error",
+     SpecError::SubscriptionNotSupported => "subscription not supported",
++    _ => "other error",
+}
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1614
+
 ## 🚀 Features
 
 ### instrument the rhai plugin with a tracing span ([PR #1598](https://github.com/apollographql/router/pull/1598))

@@ -30,6 +30,7 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);
+#[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
     pub originating_request: http::Request<graphql::Request>,
@@ -78,6 +79,7 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
+#[non_exhaustive]
 pub struct Response {
     pub response: http::Response<BoxStream<'static, graphql::Response>>,
 

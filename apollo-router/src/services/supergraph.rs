@@ -32,6 +32,7 @@ assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
 ///
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
+#[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
     pub originating_request: http::Request<graphql::Request>,
@@ -157,6 +158,7 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
+#[non_exhaustive]
 pub struct Response {
     pub response: http::Response<BoxStream<'static, graphql::Response>>,
     pub context: Context,

@@ -66,10 +66,11 @@ impl Plugin for AllowClientIdFromFile {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     supergraph::Response::error_builder()
-                        .error(graphql::Error {
-                            message: format!("Missing '{header_key}' header"),
-                            ..Default::default()
-                        })
+                        .error(
+                            graphql::Error::builder()
+                                .message(format!("Missing '{header_key}' header"))
+                                .build(),
+                        )
                         .status_code(StatusCode::UNAUTHORIZED)
                         .context(req.context.clone())
                         .build()
@@ -100,10 +101,11 @@ impl Plugin for AllowClientIdFromFile {
                             res = Some(
                                 supergraph::Response::builder()
                                     .data(Value::default())
-                                    .error(graphql::Error {
-                                        message: "client-id is not allowed".to_string(),
-                                        ..Default::default()
-                                    })
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message("client-id is not allowed")
+                                            .build(),
+                                    )
                                     .status_code(StatusCode::FORBIDDEN)
                                     .context(req.context.clone())
                                     .build()
@@ -115,10 +117,11 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         res = Some(
                             supergraph::Response::error_builder()
-                                .error(graphql::Error {
-                                    message: format!("'{header_key}' value is not a string"),
-                                    ..Default::default()
-                                })
+                                .error(
+                                    graphql::Error::builder()
+                                        .message(format!("'{header_key}' value is not a string"))
+                                        .build(),
+                                )
                                 .status_code(StatusCode::BAD_REQUEST)
                                 .context(req.context.clone())
                                 .build()

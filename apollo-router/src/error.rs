@@ -32,6 +32,7 @@ pub use crate::spec::SpecError;
 #[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
+#[non_exhaustive]
 #[allow(missing_docs)] // FIXME
 pub enum FetchError {
     /// query references unknown service '{service}'
@@ -256,6 +257,7 @@ impl From<QueryPlannerError> for Response {
 
 /// Error in the schema.
 #[derive(Debug, Error, Display)]
+#[non_exhaustive]
 pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
