@@ -53,12 +53,24 @@ Some methods of `apollo_router::TestHarness` were renamed:
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1579
 
-### Request and Response types from apollo_router::http_ext are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
+### `Request` and `Response` types from `apollo_router::http_ext` are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
 
 These types were wrappers around the `Request` and `Response` types from the `http` crate.
 Now the latter are used directly instead.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1589
+
+### Changes to `IntoHeaderName` and `IntoHeaderValue` ([PR #1607](https://github.com/apollographql/router/pull/1607))
+
+Note: these types are typically not use directly, so we expect most user code to require no change.
+
+* Move from `apollo_router::http_ext` to `apollo_router::services`
+* Rename to `TryIntoHeaderName` and `TryIntoHeaderValue`
+* Make contents opaque
+* Replace generic `From<T: Display>` conversion with multiple specific conversions
+  that are implemented by `http::headers::Header{Name,Value}`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1607
 
 ### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
 

@@ -60,7 +60,7 @@ pub mod error;
 mod executable;
 mod files;
 pub mod graphql;
-pub mod http_ext;
+mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
