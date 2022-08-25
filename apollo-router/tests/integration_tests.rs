@@ -178,13 +178,11 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error = graphql::Error {
-        message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-        Please either specify a 'content-type' header \
-        (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
-        or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight".to_string(),
-        ..Default::default()
-    };
+    let message = "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+    Please either specify a 'content-type' header \
+    (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
+    or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
+    let expected_error = graphql::Error::builder().message(message).build();
 
     let mut request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
@@ -256,10 +254,10 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error = apollo_router::graphql::Error {
-        message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
-        ..Default::default()
-    };
+    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let expected_error = apollo_router::graphql::Error::builder()
+        .message(message)
+        .build();
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name } }"#)

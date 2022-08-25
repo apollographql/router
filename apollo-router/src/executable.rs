@@ -151,6 +151,7 @@ pub fn main() -> Result<()> {
 }
 
 /// Entry point into creating a router executable.
+#[non_exhaustive]
 pub struct Executable {}
 
 #[buildstructor::buildstructor]

@@ -236,10 +236,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError> {
                     let res = supergraph::Response::error_builder()
-                        .errors(vec![graphql::Error {
-                            message: msg,
-                            ..Default::default()
-                        }])
+                        .error(graphql::Error::builder().message(msg).build())
                         .status_code(status)
                         .context(context)
                         .build()?;

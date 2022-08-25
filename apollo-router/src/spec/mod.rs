@@ -14,6 +14,7 @@ use thiserror::Error;
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone)]
+#[non_exhaustive]
 pub enum SpecError {
     /// selection processing recursion limit exceeded
     RecursionLimitExceeded,
