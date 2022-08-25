@@ -2252,11 +2252,7 @@ Content-Type: application/json\r
                     graphql::Response::builder().has_next(false).build(),
                 ])
                 .boxed();
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(body)
-                    .unwrap()
-                    .into())
+                Ok(http::Response::builder().status(200).body(body).unwrap())
             });
         let (server, client) = init(expectations).await;
         let query = json!(
