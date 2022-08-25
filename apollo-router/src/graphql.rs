@@ -15,6 +15,7 @@ use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::request::Request;
+pub use crate::response::IncrementalResponse;
 pub use crate::response::Response;
 
 /// Any GraphQL error.

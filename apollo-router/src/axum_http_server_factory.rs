@@ -751,6 +751,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
 
@@ -2240,23 +2241,15 @@ Content-Type: application/json\r
                         .has_next(true)
                         .build(),
                     graphql::Response::builder()
-                        .data(json!({
-                            "incremental": [
-                                {
-                                    "data": {
-                                        "other": "world"
-                                    },
-                                    "path": "/"
-                                }
-                            ],
-                            "hasNext": "true"
-                        }))
+                        .incremental(vec![graphql::IncrementalResponse::builder()
+                            .data(json!({
+                                "other": "world"
+                            }))
+                            .path(Path::default())
+                            .build()])
+                        .has_next(true)
                         .build(),
-                    graphql::Response::builder()
-                        .data(json!({
-                            "hasNext": "false"
-                        }))
-                        .build(),
+                    graphql::Response::builder().has_next(false).build(),
                 ])
                 .boxed();
                 Ok(http::Response::builder()
@@ -2290,19 +2283,19 @@ Content-Type: application/json\r
         let first = response.chunk().await.unwrap().unwrap();
         assert_eq!(
             std::str::from_utf8(&*first).unwrap(),
-            r#"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{"data":{"test":"hello"},"hasNext:true}\r\n--graphql\r\n"#
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
         );
 
         let second = response.chunk().await.unwrap().unwrap();
         assert_eq!(
             std::str::from_utf8(&*second).unwrap(),
-            r#"content-type: application/json\r\n\r\n{"data":{"other":"world"},"path":["/"],"hasNext":true}\r\n--graphql\r\n"#
+        "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
         );
 
         let third = response.chunk().await.unwrap().unwrap();
         assert_eq!(
             std::str::from_utf8(&*third).unwrap(),
-            r#"content-type: application/json\r\n\r\n{"hasNext":false}\r\n--graphql--\r\n"#
+            "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
         );
 
         server.shutdown().await
