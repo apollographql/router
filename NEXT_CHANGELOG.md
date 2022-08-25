@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Exit the router after logging panic details ([PR #1602](https://github.com/apollographql/router/pull/1602))
+
+If the router panics, it can leave the router in an unuseable state.
+
+Terminating after logging the panic details is the best choice here.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1602
+
 ### Remove `activate()` from the plugin API ([PR #1569](https://github.com/apollographql/router/pull/1569))
 
 Recent changes to configuration reloading means that the only known consumer of this API, telemetry, is no longer using it.
@@ -35,6 +43,13 @@ Let's remove it since it's simple to add back if later required.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1569
 
+### Request and Response types from apollo_router::http_ext are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
+
+These types were wrappers around the `Request` and `Response` types from the `http` crate.
+Now the latter are used directly instead.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1589
+
 ### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
 
 These items have been removed from the public API of `apollo_router::services::execution`.
@@ -42,6 +57,13 @@ These items have been removed from the public API of `apollo_router::services::e
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
 
 ## 🚀 Features
+
+### instrument the rhai plugin with a tracing span ([PR #1598](https://github.com/apollographql/router/pull/1598))
+
+If you have an active rhai script in your router, you will now see a "rhai plugin" tracing span.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1598
+
 ## 🐛 Fixes
 
 ### Only send one report for a response with deferred responses ([PR #1576](https://github.com/apollographql/router/issues/1576))
@@ -56,6 +78,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 Move the location of the `text` field when exposing the query plan and fill it with a formatted query plan.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
+
+### Fix typo on HTTP errors from subgraph ([#1593](https://github.com/apollographql/router/pull/1593))
+
+Remove the closed parenthesis at the end of error messages resulting from HTTP errors from subgraphs.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/1593
 
 ### Only send one report for a response with deferred responses ([PR #1596](https://github.com/apollographql/router/issues/1596))
 

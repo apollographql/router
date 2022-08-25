@@ -287,7 +287,7 @@ impl AttributesForwardConf {
                 };
             }
         }
-        let (parts, stream) = http::Response::from(response.response).into_parts();
+        let (parts, stream) = response.response.into_parts();
         let (first, rest) = stream.into_future().await;
         // Fill from response
         if let Some(from_response) = &self.response {
@@ -322,8 +322,7 @@ impl AttributesForwardConf {
         let response = http::Response::from_parts(
             parts,
             once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-        )
-        .into();
+        );
 
         (SupergraphResponse { context, response }, attributes)
     }
