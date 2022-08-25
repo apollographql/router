@@ -93,6 +93,14 @@ next chunk to see the delimiter.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
+### Queries with defer must have the Accept: multipart/mixed header ([PR #1610](https://github.com/apollographql/router/issues/1610))
+
+Since deferred responses can come back as multipart responses, we must check that the client supports that content type.
+This will allow older clients to show a meaningful error message instead of a parsing error if the `@defer` directive is
+used but they don't support it.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1610
+
 ## 🛠 Maintenance
 
 
