@@ -85,6 +85,13 @@ Remove the closed parenthesis at the end of error messages resulting from HTTP e
 
 By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/1593
 
+### Only send one report for a response with deferred responses ([PR #1596](https://github.com/apollographql/router/issues/1596))
+
+deferred responses come as multipart elements, send as individual HTTP response chunks. When a client receives one chunk,
+it should contain the next delimiter, so the client knows that the response can be processed, instead of waiting for the
+next chunk to see the delimiter.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
 ## 🛠 Maintenance
 ## 📚 Documentation
