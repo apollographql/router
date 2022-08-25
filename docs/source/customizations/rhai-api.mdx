@@ -273,15 +273,19 @@ response.body.errors
 response.body.extensions
 ```
 
-The following 
-
 All of the above fields are read/write.
 
-Many of these variables are identical in behaviour to their `request` counterparts: context, headers, body.extensions. In addition, responses contain:
+The following fields are identical in behavior to their `request` counterparts:
+
+* [`context`](#requestcontext)
+* [`headers`](#requestheaders)
+* [`body.extensions`](#requestbodyextensions)
+
+Other fields are described below.
 
 ### `response.body.label`
 
-A response may contain a label and this may be read/written as a String.
+A response may contain a label and this may be read/written as a string.
 
 ```javascript
 print(`${response.body.label}`); // logs the response label
