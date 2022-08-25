@@ -14,12 +14,15 @@ use crate::error::FetchError;
 use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+pub use crate::json_ext::Path as JsonPath;
+pub use crate::json_ext::PathElement as JsonPathElement;
 pub use crate::request::Request;
 pub use crate::response::Response;
 
 /// Any GraphQL error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Error {
     /// The error message.
     pub message: String,

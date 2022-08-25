@@ -38,6 +38,7 @@ use crate::plugin::plugins;
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[allow(missing_docs)] // FIXME
+#[non_exhaustive]
 pub enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
