@@ -16,8 +16,8 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::IntoHeaderName;
-use crate::http_ext::IntoHeaderValue;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::Context;
@@ -153,7 +153,7 @@ impl Response {
     fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         Ok(Response::new(

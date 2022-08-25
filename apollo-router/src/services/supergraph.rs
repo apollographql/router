@@ -19,8 +19,8 @@ use tower::BoxError;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::header_map;
-use crate::http_ext::IntoHeaderName;
-use crate::http_ext::IntoHeaderValue;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Path;
 use crate::Context;
 
@@ -63,7 +63,7 @@ impl Request {
         variables: JsonMap<ByteString, Value>,
         extensions: JsonMap<ByteString, Value>,
         context: Context,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: Uri,
         method: Method,
     ) -> Result<Request, BoxError> {
@@ -99,15 +99,13 @@ impl Request {
         variables: JsonMap<ByteString, Value>,
         extensions: JsonMap<ByteString, Value>,
         context: Option<Context>,
-        mut headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         method: Option<Method>,
     ) -> Result<Request, BoxError> {
         // Avoid testing requests getting blocked by the CSRF-prevention plugin
         headers
-            .entry(IntoHeaderName::HeaderName(http::header::CONTENT_TYPE))
-            .or_insert(IntoHeaderValue::HeaderValue(HeaderValue::from_static(
-                "application/json",
-            )));
+            .entry(http::header::CONTENT_TYPE.into())
+            .or_insert(HeaderValue::from_static("application/json").into());
         Request::new(
             query,
             operation_name,
@@ -127,7 +125,7 @@ impl Request {
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         context: Option<Context>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
     ) -> Result<Request, BoxError> {
         let query = "
             query TopProducts($first: Int) { 
@@ -176,7 +174,7 @@ impl Response {
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         // Build a response
@@ -220,7 +218,7 @@ impl Response {
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
         Response::new(
@@ -241,7 +239,7 @@ impl Response {
     fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         Response::new(
