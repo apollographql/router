@@ -58,7 +58,7 @@ impl Package {
             self.output.to_owned()
         } else if self.output.is_dir() {
             self.output
-                .join(format!("router-{}-{}.tar.gz", *PKG_VERSION, self.target))
+                .join(format!("router-v{}-{}.tar.gz", *PKG_VERSION, self.target))
         } else {
             self.output.to_owned()
         };
