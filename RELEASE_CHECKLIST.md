@@ -33,6 +33,7 @@ in lieu of an official changelog.
     (release) or "#.#.#-rc.#" (release candidate)
 3. Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
    - Be certain to also update the ones in the `scaffold` templates
+4. Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
 4. Update `docker.mdx` and `kubernetes.mdx` with the release version.
 5. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
    - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
