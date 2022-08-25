@@ -259,8 +259,6 @@ impl From<QueryPlannerError> for Response {
 #[derive(Debug, Error, Display)]
 #[non_exhaustive]
 pub enum SchemaError {
-    /// IO error: {0}
-    IoError(#[from] std::io::Error),
     /// URL parse error for subgraph {0}: {1}
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}

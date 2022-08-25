@@ -44,26 +44,10 @@ pub enum ConfigurationError {
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
-    /// missing environment variable: {0}
-    MissingEnvironmentVariable(String),
-    /// invalid environment variable: {0}
-    InvalidEnvironmentVariable(String),
-    /// could not setup OTLP tracing: {0}
-    OtlpTracing(opentelemetry::trace::TraceError),
-    /// could not setup OTLP metrics: {0}
-    Metrics(#[from] opentelemetry::metrics::MetricsError),
-    /// the configuration could not be loaded because it requires the feature {0:?}
-    MissingFeature(&'static str),
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// plugin {plugin} could not be started: {error}
-    PluginStartup { plugin: String, error: String },
-    /// plugin {plugin} could not be stopped: {error}
-    PluginShutdown { plugin: String, error: String },
-    /// unknown layer {0}
-    LayerUnknown(String),
     /// layer {layer} could not be configured: {error}
     LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
