@@ -11,7 +11,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 
 Your Rhai script's [main file](./rhai/#main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
 
-```javascript
+```rhai
 fn supergraph_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
@@ -19,7 +19,7 @@ fn subgraph_service(service, subgraph) {}
 
 Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](./rhai/#service-callbacks), like so:
 
-```javascript title="main.rhai"
+```rhai title="main.rhai"
 fn supergraph_service(service) {
   let request_callback = |request| {
       print("Supergraph service: Client request received");
@@ -38,13 +38,13 @@ fn supergraph_service(service) {
 
 If your script logs a message with Rhai's built-in `print()` function, it's logged to the Apollo Router's logs at the "info" level:
 
-```javascript
+```rhai
 print("logged at the info level");
 ```
 
 For more control over a message's log level, you can use the following functions:
 
-```javascript
+```rhai
 log_error("error-level log message");
 log_warn("warn-level log message");
 log_info("info-level log message");
@@ -57,7 +57,7 @@ log_trace("trace-level log message");
 Your Rhai script can terminate the associated client request that triggered it. To do so, it throws an exception. This returns an `Internal Server Error` to the client with a `500` response code.
 
 For example:
-```javascript
+```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -73,7 +73,7 @@ fn supergraph_service(service) {
 
 Your Rhai customization can use the global `apollo_start` variable to calculate durations. This is similar to `Epoch` in Unix environments.
 
-```javascript
+```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -130,7 +130,7 @@ Keys must be strings, but values can be any Rhai object.
 
 For more information, see [Define necessary context](./native#5-define-necessary-context).
 
-```javascript
+```rhai
 // You can interact with request.context as an indexed variable
 request.context["contextual"] = 42; // Adds value 42 to the context with key "contextual"
 print(`${request.context["contextual"]}`); // Writes 42 to the router log at info level
@@ -144,7 +144,7 @@ The context provides an `upsert()` function for resolving situations where one o
 
 To use `upsert()`, you define a callback function that receives a key's existing value (if any) and makes changes as required before returning the final value to set.
 
-```javascript
+```rhai
 // Get a reference to a cache-key
 let my_cache_key = response.headers["cache-key"];
 
@@ -172,7 +172,7 @@ response.context.upsert("surrogate-cache-key", resolver);
 
 The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
 
-```javascript
+```rhai
 // You can interact with request.headers as an indexed variable
 request.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-my-new-header" with value "42"
 print(`${request.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
@@ -188,7 +188,7 @@ To modify this value _before_ query planning occurs, you must do so within a `su
 
 The following example modifies an incoming query and transforms it into a completely invalid query:
 
-```javascript
+```rhai
 print(`${request.body.query}`); // Log the query string before modification
 request.body.query="query invalid { _typnam }}"; // Update the query string (in this case to an invalid query)
 print(`${request.body.query}`); // Log the query string after modification
@@ -200,7 +200,7 @@ This is the name of the GraphQL operation to execute, if a name is provided in t
 
 For an example of interacting with `operation_name`, see the [examples/op-name-to-header directory](https://github.com/apollographql/router/tree/main/examples/op-name-to-header).
 
-```javascript
+```rhai
 print(`${request.body.operation_name}`); // Log the operation_name before modification
 request.body.operation_name +="-my-suffix"; // Append "-my-suffix" to the operation_name
 print(`${request.body.operation_name}`); // Log the operation_name after modification
@@ -210,7 +210,7 @@ print(`${request.body.operation_name}`); // Log the operation_name after modific
 
 These are the values of any GraphQL variables provided for the operation. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
-```javascript
+```rhai
 print(`${request.body.variables}`); // Log all GraphQL variables
 ```
 
@@ -218,7 +218,7 @@ print(`${request.body.variables}`); // Log all GraphQL variables
 
 Request extensions may be read or modified. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
-```javascript
+```rhai
 print(`${request.body.extensions}`); // Log all extensions
 ```
 
@@ -228,7 +228,7 @@ This is the host component of the request's URI, as a string.
 
 Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.host` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
 
-```javascript
+```rhai
 print(`${request.uri.host}`); // Log the request host
 ```
 
@@ -238,7 +238,7 @@ This is the path component of the request's URI, as a string.
 
 Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.path` in a `subgraph_service` callback _does_ modify the URI that the router uses to communicate with the corresponding subgraph.
 
-```javascript
+```rhai
 print(`${request.uri.path}`); // log the request path
 request.uri.path += "/added-context"; // Add an extra element to the query path
 ```
@@ -247,7 +247,7 @@ request.uri.path += "/added-context"; // Add an extra element to the query path
 
 The `request.subgraph` object is available _only_ for `map_request` callbacks registered in `subgraph_service`. This object has the exact same fields as `request` itself, but these fields apply to the HTTP request that the router will send to the corresponding subgraph.
 
-```javascript
+```rhai
 // You can interact with request.subgraph.headers as an indexed variable
 request.subgraph.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-my-new-header" with value "42"
 print(`${request.subgraph.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
@@ -287,7 +287,7 @@ Other fields are described below.
 
 A response may contain a label and this may be read/written as a string.
 
-```javascript
+```rhai
 print(`${response.body.label}`); // logs the response label
 ```
 
@@ -297,7 +297,7 @@ A response may contain data (some responses with errors do not contain data). Be
 
 There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
 
-```javascript
+```rhai
 print(`${response.body.data}`); // logs the response data
 ```
 
@@ -315,7 +315,7 @@ Optionally, an error may also contain extensions, which are represented as an Ob
 
 There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
 
-```javascript
+```rhai
 // Create an error with our message
 let error_to_add = #{
     message: "this is an added error",
