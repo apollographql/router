@@ -129,6 +129,7 @@ pub enum ApolloRouterError {
 /// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
     #[display(fmt = "String")]
@@ -245,6 +246,7 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 /// The user supplied config. Either a static instance or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ConfigurationSource {
     /// A static configuration.
     ///
@@ -347,6 +349,7 @@ type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// Specifies when the Router’s HTTP server should gracefully shutdown
 #[derive(Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ShutdownSource {
     /// No graceful shutdown
     #[display(fmt = "None")]
