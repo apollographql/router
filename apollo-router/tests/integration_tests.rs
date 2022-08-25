@@ -485,7 +485,7 @@ async fn missing_variables() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 12_usize}
+        "graphql": {"experimental_parser_recursion_limit": 12_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -506,7 +506,7 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 11_usize}
+        "graphql": {"experimental_parser_recursion_limit": 11_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -527,7 +527,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path() {
     let config = serde_json::json!({
-        "server": {
+        "graphql": {
             "experimental_defer_support": true
         },
         "plugins": {
@@ -564,7 +564,7 @@ async fn defer_path() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_in_array() {
     let config = serde_json::json!({
-        "server": {
+        "graphql": {
             "experimental_defer_support": true
         },
         "plugins": {
