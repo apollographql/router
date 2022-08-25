@@ -2158,4 +2158,140 @@ Content-Type: application/json\r
             .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
             .unwrap_or_default()
     }
+
+    #[test(tokio::test)]
+    async fn response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                Ok(http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({
+                                    "test": "hello"
+                                }))
+                                .build(),
+                        )
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+
+        assert_eq!(
+            response.text().await.unwrap(),
+            serde_json::to_string(&json!({
+                "data": {
+                    "test": "hello"
+                },
+            }))
+            .unwrap()
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                let body = stream::iter(vec![
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello",
+                        }))
+                        .has_next(true)
+                        .build(),
+                    graphql::Response::builder()
+                        .data(json!({
+                            "incremental": [
+                                {
+                                    "data": {
+                                        "other": "world"
+                                    },
+                                    "path": "/"
+                                }
+                            ],
+                            "hasNext": "true"
+                        }))
+                        .build(),
+                    graphql::Response::builder()
+                        .data(json!({
+                            "hasNext": "false"
+                        }))
+                        .build(),
+                ])
+                .boxed();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(body)
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test ... @defer { other } }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let mut response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "multipart/mixed;boundary=\"graphql\""
+            ))
+        );
+
+        let first = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*first).unwrap(),
+            r#"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{"data":{"test":"hello"},"hasNext:true}\r\n--graphql\r\n"#
+        );
+
+        let second = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*second).unwrap(),
+            r#"content-type: application/json\r\n\r\n{"data":{"other":"world"},"path":["/"],"hasNext":true}\r\n--graphql\r\n"#
+        );
+
+        let third = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*third).unwrap(),
+            r#"content-type: application/json\r\n\r\n{"hasNext":false}\r\n--graphql--\r\n"#
+        );
+
+        server.shutdown().await
+    }
 }
