@@ -28,6 +28,7 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
@@ -531,7 +532,7 @@ where
                             if response.has_next.unwrap_or(false) {
                                 let stream = once(ready(response)).chain(stream);
                                 parts.headers.insert(
-                                    "content-type",
+                                    CONTENT_TYPE,
                                     HeaderValue::from_static(
                                         "multipart/mixed;boundary=\"graphql\"",
                                     ),
@@ -552,7 +553,7 @@ where
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
                                 parts.headers.insert(
-                                    "content-type",
+                                    CONTENT_TYPE,
                                     HeaderValue::from_static("application/json"),
                                 );
                                 tracing::trace_span!("serialize_response").in_scope(|| {
