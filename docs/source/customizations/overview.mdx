@@ -111,6 +111,8 @@ Handles communication between the Apollo Router and your subgraphs.
 
 Define `subgraph_service` to configure this communication (for example, to dynamically add HTTP headers to pass to a subgraph).
 
+Whereas other services are called once per client request, this service is called once per _subgraph_ that's required to resolve the client's request. Each call is passed a `subgraph` parameter that indicates the name of the corresponding subgraph
+
 </td>
 </tr>
 
