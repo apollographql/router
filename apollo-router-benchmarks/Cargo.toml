@@ -6,8 +6,6 @@ edition = "2021"
 license = "LicenseRef-ELv2"
 publish = false
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
 criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
@@ -19,7 +17,8 @@ tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 async-trait = "0.1"
 tower = "0.4"
-
+tracing = "0.1"
+tracing-test = "0.2.3"
 
 [[bench]]
 name = "basic_composition"

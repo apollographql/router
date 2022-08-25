@@ -12,3 +12,5 @@ http = "0.2"
 serde_json = "1"
 tokio = { version = "1.17", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
+tracing = "0.1"
+tracing-test = "0.2.3"

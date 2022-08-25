@@ -85,6 +85,7 @@ mod tests {
     // If we run this test as follows: cargo test -- --nocapture
     // we will see the message "Hello Bob" printed to standard out
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn display_message() {
         let config = serde_json::json!({
             "plugins": {

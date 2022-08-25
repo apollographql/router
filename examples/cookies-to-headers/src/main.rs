@@ -39,6 +39,7 @@ mod tests {
     use tower::util::ServiceExt;
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_subgraph_processes_cookies() {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSubgraphService::new();

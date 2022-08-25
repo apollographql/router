@@ -189,6 +189,7 @@ mod tests {
     // and deserialize an empty yml configuration containing a path
     // see router.yaml for more information
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn plugin_registered() {
         let config = json!({
             "plugins": {
@@ -207,6 +208,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_no_client_id() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -251,6 +253,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_client_id_not_allowed() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -296,6 +299,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_client_id_allowed() {
         let valid_client_id = "jeremy";
 

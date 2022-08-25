@@ -3,6 +3,7 @@ pub mod tests {
     include!("shared.rs");
 
     #[test]
+    #[tracing_test::traced_test]
     fn test() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
 

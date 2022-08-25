@@ -106,6 +106,7 @@ mod tests {
     // and deserialize an empty yml configuration into it
     // see router.yml for more information
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn plugin_registered() {
         let config = json!({
             "plugins": {
@@ -121,6 +122,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_no_operation_name() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -156,6 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_empty_operation_name() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -192,6 +195,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_valid_operation_name() {
         let operation_name = "validOperationName";
 

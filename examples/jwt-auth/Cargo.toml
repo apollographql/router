@@ -19,3 +19,5 @@ strum = { version = "0.24", features = ["derive"] }
 strum_macros = "0.24"
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
+tracing = "0.1"
+tracing-test = "0.2.3"

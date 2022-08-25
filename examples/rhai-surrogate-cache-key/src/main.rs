@@ -18,6 +18,7 @@ mod tests {
     use tower::util::ServiceExt;
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_surrogate_cache_key_created() {
         let config = serde_json::json!({
             "rhai": {

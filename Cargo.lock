@@ -25,6 +25,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -247,7 +249,9 @@ dependencies = [
  "serde_json_bytes",
  "tokio",
  "tower",
+ "tracing",
  "tracing-subscriber",
+ "tracing-test",
 ]
 
 [[package]]
@@ -348,6 +352,8 @@ dependencies = [
  "serde_json_bytes",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -1134,6 +1140,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -1838,6 +1846,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -2313,6 +2322,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -2774,6 +2784,8 @@ dependencies = [
  "strum_macros",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -3472,6 +3484,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4078,6 +4092,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4390,6 +4406,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4403,6 +4421,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4416,6 +4436,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4429,6 +4451,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]
@@ -4442,6 +4466,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]

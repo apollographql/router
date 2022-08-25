@@ -18,6 +18,7 @@ mod tests {
     use tower::util::ServiceExt;
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_router_service_adds_timestamp_header() {
         let mut mock_service = test::MockSupergraphService::new();
         // create a mock service we will use to test our plugin

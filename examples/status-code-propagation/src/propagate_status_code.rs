@@ -105,6 +105,7 @@ mod tests {
     // and deserialize an yml configuration with a list of status_codes into it
     // see `router.yaml` for more information
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn plugin_registered() {
         let config = serde_json::json!({
             "plugins": {
@@ -128,6 +129,7 @@ mod tests {
     // into the relevant http response status.
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
         let mut mock_service = test::MockSubgraphService::new();
 
@@ -165,6 +167,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
         let mut mock_service = test::MockSubgraphService::new();
 
@@ -204,6 +207,7 @@ mod tests {
     // we can unit test the SupergraphService part of our plugin
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn router_service_override_status_code() {
         let mut mock_service = test::MockSupergraphService::new();
 
@@ -249,6 +253,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn router_service_do_not_override_status_code() {
         let mut mock_service = test::MockSupergraphService::new();
 

@@ -397,6 +397,7 @@ mod tests {
     // and deserialize an hmac configured yml configuration into it
     // see `router.yaml` for more information
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn plugin_registered() {
         let config = serde_json::json!({
             "plugins": {
@@ -415,6 +416,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_no_authorization_header() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -449,6 +451,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_authorization_header_should_start_with_bearer() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -484,6 +487,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_authorization_header_should_start_with_bearer_with_one_space() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -519,6 +523,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_default_jwtauth_requires_at_least_hmac_configuration() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -558,6 +563,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_hmac_jwtauth_accepts_valid_tokens() {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
@@ -636,6 +642,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_hmac_jwtauth_does_not_accept_long_lived_tokens() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
@@ -688,6 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_hmac_jwtauth_does_not_accept_expired_tokens() {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
