@@ -258,7 +258,7 @@ impl From<QueryPlannerError> for Response {
 /// Error in the schema.
 #[derive(Debug, Error, Display)]
 #[non_exhaustive]
-pub enum SchemaError {
+pub(crate) enum SchemaError {
     /// URL parse error for subgraph {0}: {1}
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
@@ -271,7 +271,7 @@ pub enum SchemaError {
 
 /// Collection of schema parsing errors.
 #[derive(Debug)]
-pub struct ParseErrors {
+pub(crate) struct ParseErrors {
     pub(crate) raw_schema: String,
     pub(crate) errors: Vec<apollo_parser::Error>,
 }
