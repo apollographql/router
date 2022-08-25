@@ -752,6 +752,7 @@ pub(crate) mod fetch {
     /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
+    #[non_exhaustive]
     pub enum OperationKind {
         Query,
         Mutation,

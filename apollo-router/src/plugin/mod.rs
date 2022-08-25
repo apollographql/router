@@ -50,6 +50,7 @@ type InstanceFactory =
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
 /// Initialise details for a plugin
+#[non_exhaustive]
 pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
