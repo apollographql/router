@@ -17,9 +17,6 @@
 //!
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
-//!
-//! Ultimately, you might want to be interested in all aspects of the implementation, in which case
-//! you'll want to become familiar with all of the code.
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
