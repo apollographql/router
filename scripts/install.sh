@@ -7,8 +7,15 @@
 
 set -u
 
+BINARY_DOWNLOAD_PREFIX="https://github.com/apollographql/router/releases/download"
+
+# Router version defined in apollo-router's Cargo.toml
+# Note: Change this line manually during the release steps.
+PACKAGE_VERSION="v0.16.0"
+
 download_binary() {
-    need_cmd curl
+    downloader --check
+    need_cmd mktemp
     need_cmd chmod
     need_cmd mkdir
     need_cmd rm
@@ -19,16 +26,17 @@ download_binary() {
     need_cmd awk
     need_cmd cut
 
-    ARG_VERSION=${1:-"latest"}
-
+    # if $VERSION isn't provided or has 0 length, use version apollo-router's cargo.toml
     # ${VERSION:-} checks if version exists, and if doesn't uses the default
+    # which is after the :-, which in this case is empty. -z checks for empty str
     if [ -z "${VERSION:-}" ]; then
         # VERSION is either not set or empty
-        DOWNLOAD_VERSION=$ARG_VERSION
+        DOWNLOAD_VERSION=$PACKAGE_VERSION
     else
         # VERSION set and not empty
         DOWNLOAD_VERSION=$VERSION
     fi
+
 
     get_architecture || return 1
     _arch="$RETVAL"
@@ -41,44 +49,16 @@ download_binary() {
             ;;
     esac
 
-    ARG_ARCH=${2:-"$_arch"}
-
-    ARG_OUT_FILE=${3:-"./router"}
-
-    GITHUB_REPO="https://github.com/apollographql/router"
-
-    # Validate token.
-    curl -o /dev/null -s $GITHUB_REPO || { echo "Error: Invalid repo, token or network issue!";  exit 1; }
-
-    #_tardir="router-$DOWNLOAD_VERSION-${_arch}"
-    #_url="$BINARY_DOWNLOAD_PREFIX/$DOWNLOAD_VERSION/${_tardir}.tar.gz"
+    _tardir="router-$DOWNLOAD_VERSION-${_arch}"
+    _url="$BINARY_DOWNLOAD_PREFIX/$DOWNLOAD_VERSION/${_tardir}.tar.gz"
     _dir="$(mktemp -d 2>/dev/null || ensure mktemp -d -t router)"
     _file="$_dir/input.tar.gz"
     _router="$_dir/router$_ext"
 
-    _release_download_url="$GITHUB_REPO/releases"
-    _router_version=$DOWNLOAD_VERSION
-    if [ "$DOWNLOAD_VERSION" = "latest" ]; then
-        _response=$(curl -Ls -o /dev/null -w '%{url_effective}' $GITHUB_REPO/releases/latest)
-        _router_version=$(echo "$_response" | cut -d'/' -f 8)
-        [ "$_router_version" ] || { echo "Error: Failed to get asset version for '$ARG_ARCH', response: $_response" | awk 'length($0)<100' >&2; exit 1; }
-    fi;
-
-    say "Downloading release info for '$_release_download_url'"
-
-    # Cut the 'v' prefix
-    _name="router-$(echo "$_router_version" | cut -c2-)-$ARG_ARCH.tar.gz"
-
-    _url="$GITHUB_REPO/releases/download/$_router_version/$_name"
-
-    say "Found $_name" 1>&2
+    say "Downloading router from $_url ..." 1>&2
 
     ensure mkdir -p "$_dir"
-
-    # Download asset file.
-    say "Downloading router from $_url"
-
-    curl -sSfL -H 'Accept: application/octet-stream' "$_url" -o "$_file"
+    downloader "$_url" "$_file"
     if [ $? != 0 ]; then
       say "Failed to download $_url"
       say "This may be a standard network error, but it may also indicate"
@@ -87,20 +67,19 @@ download_binary() {
       say "https://github.com/apollographql/router/issues/new/choose"
       exit 1
     fi
+
     ensure tar xf "$_file" --strip-components 1 -C "$_dir"
 
-    say "Moving $_router to $ARG_OUT_FILE"
-    mv "$_router" "$ARG_OUT_FILE"
+    outfile="./router"
 
-    _version="$($ARG_OUT_FILE --version)"
+    say "Moving $_router to $outfile ..."
+    mv "$_router" "$outfile"
+
+    _version="$($outfile --version)"
     _retval=$?
 
-    say "Moved router version: $_version to $ARG_OUT_FILE"
     say ""
-    say "You can now run the Apollo Router using '$ARG_OUT_FILE'"
-
-
-    chmod +x "$ARG_OUT_FILE"
+    say "You can now run the Apollo Router using '$outfile'"
 
     ignore rm -rf "$_dir"
 
@@ -169,7 +148,7 @@ get_architecture() {
 say() {
     green=$(tput setaf 2 2>/dev/null || echo '')
     reset=$(tput sgr0 2>/dev/null || echo '')
-    echo "$1" 1>&2
+    echo "$1"
 }
 
 err() {
@@ -211,6 +190,26 @@ ensure() {
 # as part of error handling.
 ignore() {
     "$@"
+}
+
+# This wraps curl or wget. Try curl first, if not installed,
+# use wget instead.
+downloader() {
+    if check_cmd curl
+    then _dld=curl
+    elif check_cmd wget
+    then _dld=wget
+    else _dld='curl or wget' # to be used in error message of need_cmd
+    fi
+
+    if [ "$1" = --check ]
+    then need_cmd "$_dld"
+    elif [ "$_dld" = curl ]
+    then curl -sSfL "$1" -o "$2"
+    elif [ "$_dld" = wget ]
+    then wget "$1" -O "$2"
+    else err "Unknown downloader"   # should not reach here
+    fi
 }
 
 download_binary "$@" || exit 1
