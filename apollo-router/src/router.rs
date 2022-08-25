@@ -97,9 +97,6 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not read configuration: {0}
-    ReadConfigError(std::io::Error),
-
     /// {0}
     ConfigError(crate::configuration::ConfigurationError),
 
@@ -320,12 +317,20 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
-        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
+    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = fs::read_to_string(path)?;
+        let config = validate_configuration(&config)?;
 
         Ok(config)
     }
+}
+
+#[derive(From, Display)]
+enum ReadConfigError {
+    /// could not read configuration: {0}
+    Io(std::io::Error),
+    /// {0}
+    Validation(crate::configuration::ConfigurationError),
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
