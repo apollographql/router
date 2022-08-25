@@ -48,7 +48,7 @@ If you used this option, the necessary change would look like:
 +   graphql_path: /graphql
 ```
 
-By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1609
 
 ### Remove `activate()` from the plugin API ([PR #1569](https://github.com/apollographql/router/pull/1569))
 
