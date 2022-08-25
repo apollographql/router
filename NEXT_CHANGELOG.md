@@ -94,4 +94,12 @@ next chunk to see the delimiter.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
 ## 🛠 Maintenance
+
+
+### Re-organize our release steps checklist ([PR #1605](https://github.com/apollographql/router/pull/1605))
+
+We've got a lot of manual steps we need to do in order to release the Router binarys, but we can at least organize them meaningfuly for ourselves to follow!  This is only a Router-team concern today!
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1605)
+
 ## 📚 Documentation
