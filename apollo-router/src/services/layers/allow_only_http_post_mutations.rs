@@ -46,7 +46,7 @@ where
                         .status_code(StatusCode::METHOD_NOT_ALLOWED)
                         .context(req.context)
                         .build();
-                    res.response.inner.headers_mut().insert(
+                    res.response.headers_mut().insert(
                         "Allow".parse::<HeaderName>().unwrap(),
                         "POST".parse().unwrap(),
                     );

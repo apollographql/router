@@ -5,9 +5,11 @@ use derivative::Derivative;
 use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 
 use crate::json_ext::Object;
-use crate::json_ext::Value;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
@@ -51,14 +53,15 @@ impl Request {
     fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Object>,
-        extensions: Option<Object>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
     ) -> Self {
         Self {
             query,
             operation_name,
-            variables: variables.unwrap_or_default(),
-            extensions: extensions.unwrap_or_default(),
+            variables,
+            extensions,
         }
     }
 
@@ -66,14 +69,15 @@ impl Request {
     fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Object>,
-        extensions: Option<Object>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
     ) -> Self {
         Self {
             query,
             operation_name,
-            variables: variables.unwrap_or_default(),
-            extensions: extensions.unwrap_or_default(),
+            variables,
+            extensions,
         }
     }
 

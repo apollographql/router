@@ -406,7 +406,7 @@ async fn custom_plugin_handler(
     let (mut head, body) = request.into_parts();
     head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
         .expect("if the authority is some then the URL is valid; qed");
-    let req = Request::from_parts(head, body).into();
+    let req = Request::from_parts(head, body);
     handler
         .oneshot(req)
         .await
@@ -417,8 +417,8 @@ async fn custom_plugin_handler(
 async fn handle_get(
     Host(host): Host,
     service: BoxService<
-        http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, graphql::Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     http_request: Request<Body>,
@@ -455,8 +455,8 @@ async fn handle_post(
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
     service: BoxService<
-        http_ext::Request<graphql::Request>,
-        http_ext::Response<BoxStream<'static, graphql::Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, graphql::Response>>,
         BoxError,
     >,
     header_map: HeaderMap,
@@ -489,8 +489,8 @@ async fn run_graphql_request<RS>(
 ) -> impl IntoResponse
 where
     RS: Service<
-            http_ext::Request<graphql::Request>,
-            Response = http_ext::Response<BoxStream<'static, graphql::Response>>,
+            http::Request<graphql::Request>,
+            Response = http::Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
         > + Send,
 {
@@ -498,7 +498,7 @@ where
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
 
-            match service.call(Request::from_parts(head, body).into()).await {
+            match service.call(Request::from_parts(head, body)).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
                         if source_err.is::<RateLimited>() {
@@ -516,7 +516,7 @@ where
                         .into_response()
                 }
                 Ok(response) => {
-                    let (mut parts, mut stream) = http::Response::from(response).into_parts();
+                    let (mut parts, mut stream) = response.into_parts();
 
                     match stream.next().await {
                         None => {
@@ -546,7 +546,7 @@ where
                                             serde_json::to_vec(&res).unwrap().into(),
                                         )))
                                         .chain(once(ready(Bytes::from_static(b"\r\n"))))
-                                    }).chain(once(ready(Bytes::from_static(b"--graphql--\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}"))))
+                                    })
                                     .map(Ok::<_, BoxError>);
 
                                 (parts, StreamBody::new(body)).into_response()
@@ -737,7 +737,6 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
-    use crate::http_ext::Request;
     use crate::services::new_service::NewService;
     use crate::services::transport;
 
@@ -783,13 +782,13 @@ mod tests {
     mock! {
         #[derive(Debug)]
         SupergraphService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_ext::Response<BoxStream<'static, graphql::Response>>, BoxError>;
+            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<BoxStream<'static, graphql::Response>>, BoxError>;
         }
     }
 
     type MockSupergraphServiceType = tower_test::mock::Mock<
-        http_ext::Request<graphql::Request>,
-        http_ext::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
+        http::Request<graphql::Request>,
+        http::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
     >;
 
     #[derive(Clone)]
@@ -797,7 +796,7 @@ mod tests {
         inner: MockSupergraphServiceType,
     }
 
-    impl NewService<Request<graphql::Request>> for TestSupergraphServiceFactory {
+    impl NewService<http::Request<graphql::Request>> for TestSupergraphServiceFactory {
         type Service = MockSupergraphServiceType;
 
         fn new_service(&self) -> Self::Service {
@@ -809,8 +808,8 @@ mod tests {
         type SupergraphService = MockSupergraphServiceType;
 
         type Future = <<TestSupergraphServiceFactory as NewService<
-            http_ext::Request<graphql::Request>,
-        >>::Service as Service<http_ext::Request<graphql::Request>>>::Future;
+            http::Request<graphql::Request>,
+        >>::Service as Service<http::Request<graphql::Request>>>::Future;
 
         fn custom_endpoints(&self) -> HashMap<String, Handler> {
             HashMap::new()
@@ -986,7 +985,7 @@ mod tests {
             .times(2)
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1077,7 +1076,7 @@ mod tests {
             })
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1139,7 +1138,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1241,7 +1240,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1310,7 +1309,7 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1379,7 +1378,7 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1471,7 +1470,7 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1531,7 +1530,7 @@ mod tests {
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1570,7 +1569,7 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1674,7 +1673,7 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
@@ -1866,12 +1865,12 @@ Content-Type: application/json\r
         let expectations = MockSupergraphService::new();
         let plugin_handler = Handler::new(
             service_fn(|req: transport::Request| async move {
-                Ok::<_, BoxError>(http_ext::Response {
-                    inner: http::Response::builder()
+                Ok::<_, BoxError>(
+                    http::Response::builder()
                         .status(StatusCode::OK)
                         .body(format!("{} + {}", req.method(), req.uri().path()).into())
                         .unwrap(),
-                })
+                )
             })
             .boxed(),
         );
@@ -1946,7 +1945,7 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(http_ext::Response::from_response_to_stream(
+                Ok(http_ext::from_response_to_stream(
                     http::Response::builder()
                         .status(200)
                         .body(

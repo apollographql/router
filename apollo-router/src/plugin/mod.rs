@@ -150,7 +150,7 @@ pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
-pub trait Plugin: Send + Sync + 'static + Sized {
+pub trait Plugin: Send + Sync + 'static {
     /// The configuration for this plugin.
     /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
     ///
@@ -163,11 +163,9 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>;
-
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self) {}
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized;
 
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
@@ -200,7 +198,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     }
 
     /// Return the name of the plugin.
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
         get_type_of(self)
     }
 }
@@ -216,10 +217,6 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub(crate) trait DynPlugin: Send + Sync + 'static {
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self);
-
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
@@ -253,11 +250,6 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    #[allow(deprecated)]
-    fn activate(&mut self) {
-        self.activate()
-    }
-
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
     }

@@ -16,6 +16,7 @@ use crate::services::supergraph;
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
 const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
+const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.formatted_plan";
 const ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,12 @@ impl Plugin for ExposeQueryPlan {
                     req.context
                         .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
                         .unwrap();
+                    req.context
+                        .insert(
+                            FORMATTED_QUERY_PLAN_CONTEXT_KEY,
+                            req.query_plan.formatted_query_plan.clone(),
+                        )
+                        .unwrap();
                 }
 
                 req
@@ -62,29 +69,30 @@ impl Plugin for ExposeQueryPlan {
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
-                (req.originating_request.body().query.clone(), is_enabled)
-            }, move |(query, is_enabled): (Option<String>, bool), f| async move {
+
+                is_enabled
+            }, move | is_enabled: bool, f| async move {
                 let mut res: supergraph::ServiceResult = f.await;
+
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {
-                            let (parts, stream) = http::Response::from(res.response).into_parts();
+                            let (parts, stream) = res.response.into_parts();
                             let (mut first, rest) = stream.into_future().await;
 
                             if let Some(first) = &mut first {
-                                if let Some(plan) =
-                                    res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
+                                if let (Some(plan), Some(formatted_query_plan)) =
+                                    (res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY), res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY))
                                 {
                                     first
                                         .extensions
-                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan, "text": query } }));
+                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": formatted_query_plan }));
                                 }
                             }
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                            )
-                            .into();
+                            );
                         }
 
                         Ok(res)

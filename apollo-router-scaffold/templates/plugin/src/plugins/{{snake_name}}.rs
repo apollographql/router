@@ -174,8 +174,12 @@ mod tests {
 
         assert!(first_response.data.is_some());
 
+        println!("first response: {:?}", first_response);
+        let next = streamed_response.next_response().await;
+        println!("next response: {:?}", next);
+
         // You could keep calling .next_response() until it yields None if you're expexting more parts.
-        assert!(streamed_response.next_response().await.is_none());
+        assert!(next.is_none());
         Ok(())
     }
 }

@@ -47,7 +47,6 @@ use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
-use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -225,7 +224,7 @@ impl Plugin for Telemetry {
                                 Err(e)
                             }
                             Ok(router_response) => {
-                                let is_not_success =
+                                let mut has_errors =
                                     !router_response.response.status().is_success();
                                 Ok(router_response.map(move |response_stream| {
                                     let sender = sender.clone();
@@ -233,13 +232,17 @@ impl Plugin for Telemetry {
 
                                     response_stream
                                         .map(move |response| {
-                                            let response_has_errors = !response.errors.is_empty();
+                                            if !response.errors.is_empty() {
+                                                has_errors = true;
+                                            }
 
-                                            if !matches!(sender, Sender::Noop) {
+                                            if !response.has_next.unwrap_or(false)
+                                                && !matches!(sender, Sender::Noop)
+                                            {
                                                 Self::update_apollo_metrics(
                                                     &ctx,
                                                     sender.clone(),
-                                                    is_not_success || response_has_errors,
+                                                    has_errors,
                                                     start.elapsed(),
                                                 );
                                             }
@@ -713,12 +716,12 @@ impl Telemetry {
     fn not_found_endpoint() -> Handler {
         Handler::new(
             service_fn(|_req: transport::Request| async {
-                Ok::<_, BoxError>(http_ext::Response {
-                    inner: http::Response::builder()
+                Ok::<_, BoxError>(
+                    http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .body("Not found".into())
                         .unwrap(),
-                })
+                )
             })
             .boxed(),
         )
@@ -982,10 +985,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use bytes::Bytes;
-    use http::Method;
     use http::StatusCode;
-    use http::Uri;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -1382,26 +1382,18 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let http_req_prom = http_ext::Request::fake_builder()
-            .uri(Uri::from_static(
-                "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
-            ))
-            .method(Method::GET)
-            .body(Bytes::new().into())
-            .build()
-            .unwrap();
+        let http_req_prom =
+            http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
+                .body(Default::default())
+                .unwrap();
         let handler = dyn_plugin.custom_endpoint().unwrap();
         let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom = http_ext::Request::fake_builder()
-            .uri(Uri::from_static(
-                "http://localhost:4000/plugins/apollo.telemetry/prometheus",
-            ))
-            .method(Method::GET)
-            .body(Bytes::new().into())
-            .build()
-            .unwrap();
+        let http_req_prom =
+            http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
+                .body(Default::default())
+                .unwrap();
         let handler = dyn_plugin.custom_endpoint().unwrap();
         let mut resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

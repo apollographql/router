@@ -11,8 +11,6 @@ use tower_service::Service;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
-use crate::http_ext::Request;
-use crate::http_ext::Response;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::services::new_service::NewService;
@@ -26,15 +24,15 @@ use crate::Schema;
 /// Instances of this traits are used by the HTTP server to generate a new
 /// SupergraphService on each request
 pub(crate) trait SupergraphServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::SupergraphService>
+    NewService<http::Request<graphql::Request>, Service = Self::SupergraphService>
     + Clone
     + Send
     + Sync
     + 'static
 {
     type SupergraphService: Service<
-            Request<graphql::Request>,
-            Response = Response<BoxStream<'static, graphql::Response>>,
+            http::Request<graphql::Request>,
+            Response = http::Response<BoxStream<'static, graphql::Response>>,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -89,16 +87,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service. Let the plugins know that this is about to happen.
-        // This is needed so that the Telemetry plugin can swap in the new propagator.
-        // The alternative is that we introduce another service on Plugin that wraps the request
-        // at a much earlier stage.
-        for (_, plugin) in builder.plugins_mut() {
-            tracing::debug!("activating plugin {}", plugin.name());
-            plugin.activate();
-            tracing::debug!("activated plugin {}", plugin.name());
-        }
-
+        // We're good to go with the new service.
         let pluggable_router_service = builder.build().await?;
 
         Ok(pluggable_router_service)
