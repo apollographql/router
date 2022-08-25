@@ -9,8 +9,8 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::StatusCode;
 use http::header::ACCEPT;
+use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use opentelemetry::trace::SpanKind;
@@ -153,6 +153,7 @@ where
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
+
                     if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')
                     .map(|a| a.trim())).any(|value| {
                         println!("testing value {:?}", value);
@@ -169,112 +170,108 @@ where
                                 .boxed(),
                             );
                             *resp.status_mut() = StatusCode::BAD_REQUEST;
-        
                             Ok(SupergraphResponse {
                                 response: resp,
                                 context,
                             })
-            
-                    
-                    } else{
-
-                    if let Some(err) = query.validate_variables(body, &schema).err() {
-                        let mut res = SupergraphResponse::new_from_graphql_response(err, context);
-                        *res.response.status_mut() = StatusCode::BAD_REQUEST;
-                        Ok(res)
                     } else {
-                        let operation_name = body.operation_name.clone();
+                        if let Some(err) = query.validate_variables(body, &schema).err() {
+                            let mut res = SupergraphResponse::new_from_graphql_response(err, context);
+                            *res.response.status_mut() = StatusCode::BAD_REQUEST;
+                            Ok(res)
+                        } else {
+                            let operation_name = body.operation_name.clone();
 
-                        let ExecutionResponse { response, context } = execution
-                            .oneshot(
-                                ExecutionRequest::builder()
-                                    .originating_request(req.originating_request)
-                                    .query_plan(plan)
-                                    .context(context)
-                                    .build(),
-                            )
-                            .await?;
-
-                        let (parts, response_stream) = response.into_parts();
-
-                        let stream = response_stream
-                        .map(move |mut response: Response| {
-                            tracing::debug_span!("format_response").in_scope(|| {
-                                query.format_response(
-                                    &mut response,
-                                    operation_name.as_deref(),
-                                    variables.clone(),
-                                    schema.api_schema(),
+                            let ExecutionResponse { response, context } = execution
+                                .oneshot(
+                                    ExecutionRequest::builder()
+                                        .originating_request(req.originating_request)
+                                        .query_plan(plan)
+                                        .context(context)
+                                        .build(),
                                 )
+                                .await?;
+
+                            let (parts, response_stream) = response.into_parts();
+
+                            let stream = response_stream
+                            .map(move |mut response: Response| {
+                                tracing::debug_span!("format_response").in_scope(|| {
+                                    query.format_response(
+                                        &mut response,
+                                        operation_name.as_deref(),
+                                        variables.clone(),
+                                        schema.api_schema(),
+                                    )
+                                });
+
+                                match (response.path.as_ref(), response.data.as_ref()) {
+                                    (None, _) | (_, None) => {
+                                        if can_be_deferred {
+                                            response.has_next = Some(true);
+                                        }
+
+                                        response
+                                    }
+                                    // if the deferred response specified a path, we must extract the
+                                    //values matched by that path and create a separate response for
+                                    //each of them.
+                                    // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+                                    // would merge in the same ways, some clients will generate code
+                                    // that checks the specific type of the deferred response at that
+                                    // path, instead of starting from the root object, so to support
+                                    // this, we extract the value at that path.
+                                    // In particular, that means that a deferred fragment in an object
+                                    // under an array would generate one response par array element
+                                    (Some(response_path), Some(response_data)) => {
+                                        let mut sub_responses = Vec::new();
+                                        response_data.select_values_and_paths(
+                                            response_path,
+                                            |path, value| {
+                                                sub_responses
+                                                    .push((path.clone(), value.clone()));
+                                            },
+                                        );
+
+                                        Response::builder()
+                                            .has_next(true)
+                                            .incremental(
+                                                sub_responses
+                                                    .into_iter()
+                                                    .map(move |(path, data)| {
+                                                        IncrementalResponse::builder()
+                                                            .and_label(
+                                                                response.label.clone(),
+                                                            )
+                                                            .data(data)
+                                                            .path(path)
+                                                            .errors(response.errors.clone())
+                                                            .extensions(
+                                                                response.extensions.clone(),
+                                                            )
+                                                            .build()
+                                                    })
+                                                    .collect(),
+                                            )
+                                            .build()
+                                    }
+                                }
                             });
 
-                            match (response.path.as_ref(), response.data.as_ref()) {
-                                (None, _) | (_, None) => {
+                            Ok(SupergraphResponse {
+                                context,
+                                response: http::Response::from_parts(
+                                    parts,
                                     if can_be_deferred {
-                                        response.has_next = Some(true);
-                                    }
-
-                                    response
-                                }
-                                // if the deferred response specified a path, we must extract the
-                                //values matched by that path and create a separate response for
-                                //each of them.
-                                // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
-                                // would merge in the same ways, some clients will generate code
-                                // that checks the specific type of the deferred response at that
-                                // path, instead of starting from the root object, so to support
-                                // this, we extract the value at that path.
-                                // In particular, that means that a deferred fragment in an object
-                                // under an array would generate one response par array element
-                                (Some(response_path), Some(response_data)) => {
-                                    let mut sub_responses = Vec::new();
-                                    response_data.select_values_and_paths(
-                                        response_path,
-                                        |path, value| {
-                                            sub_responses
-                                                .push((path.clone(), value.clone()));
-                                        },
-                                    );
-
-                                    Response::builder()
-                                        .has_next(true)
-                                        .incremental(
-                                            sub_responses
-                                                .into_iter()
-                                                .map(move |(path, data)| {
-                                                    IncrementalResponse::builder()
-                                                        .and_label(
-                                                            response.label.clone(),
-                                                        )
-                                                        .data(data)
-                                                        .path(path)
-                                                        .errors(response.errors.clone())
-                                                        .extensions(
-                                                            response.extensions.clone(),
-                                                        )
-                                                        .build()
-                                                })
-                                                .collect(),
-                                        )
-                                        .build()
-                                }
-                            }
-                        });
-
-                        Ok(SupergraphResponse {
-                            context,
-                            response: http::Response::from_parts(
-                                parts,
-                                if can_be_deferred {
-                                    stream.chain(once(ready(Response::builder().has_next(false).build()))).left_stream()
-                                } else {
-                                    stream.right_stream()
-                                }.in_current_span()
-                                .boxed(),
-                            )
-                        })
+                                        stream.chain(once(ready(Response::builder().has_next(false).build()))).left_stream()
+                                    } else {
+                                        stream.right_stream()
+                                    }.in_current_span()
+                                    .boxed(),
+                                )
+                            })
+                        }
                     }
-                }
                 }
             }
         }
