@@ -2,21 +2,21 @@
 title: Moving to the Apollo Router from @apollo/gateway
 ---
 
-The Apollo Router is a graph router for federated supergraphs that's written in the Rust programming language. It's a new, higher-performance alternative to the Node.js-based `@apollo/gateway` library.
+If you have a federated supergraph that currently uses the Node.js `@apollo/gateway` library, this article describes how to move that supergraph to the Rust-based Apollo Router. We recommend the Apollo Router over `@apollo/gateway` for all supergraphs, because it provides significant performance improvements.
 
-If you're currently using the `@apollo/gateway` library in your federated graph, this article walks you through the steps to move over to the Apollo Router.
+> Moving to the Apollo Router from `@apollo/gateway` requires zero changes to your subgraphs! 
 
 ## What's different?
 
-Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. To customize its behavior, you can pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even _modify_ that configuration without a restart.
+Unlike `@apollo/gateway`, the Apollo Router is packaged as a _static, standalone binary_. To customize its behavior, you pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even modify that configuration without a restart.
 
-You _can_ use the Apollo Router as a library in a larger project, but our goal is to remove the need to write custom code in your graph router (which is necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
+You _can_ download the Apollo Router source and use it as a library in a larger project. However, our goal is to remove the need to write custom code in your graph router (which is always necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
 
 ## Take inventory of your gateway configuration
 
 The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
 
-Because the Apollo Router is an entirely new tool with a different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
+Because the Apollo Router uses an entirely different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
 
 Start by looking for configuration and customizations in these places:
 
@@ -109,25 +109,24 @@ The Apollo Router provides [similar functionality](./customizations/native#5-def
 
 ### `plugins`
 
-This constructor option is an array of built-in or custom `plugins` that extend Apollo Server's functionality.
+This constructor option is an array of built-in or custom `plugins` that extend Apollo Server's functionality. If you provide `plugins` to your `ApolloServer` instance, take note of each plugin's functionality and add it to your migration checklist.
 
-If you provide `plugins` to your `ApolloServer` instance, take note of each plugin's functionality and add it to your migration checklist. Then, before attempting to replicate a plugin's functionality via an _Apollo Router_ plugin, check whether any router [configuration options](./configuration/overview/) can achieve the same behavior. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
+Before you attempt to replicate a plugin's functionality via an Apollo Router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
-> In general, the Apollo Router seeks to minimize the number of cases where custom plugins are necessary. Before you re-implement existing `@apollo/gateway` plugin behavior in a new language (Rust), we encourage you to communicate about your desired customizations in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box, and we'd like help to discuss their design.
-
-For less common use cases, we also want to help build an ecosystem of plugins for the Apollo Router, allowing users to enable custom behaviors and ship the functionality they need before native support is available.
+> If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
+>
+> For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
 
 #### Supported customizations
 
-The Apollo Router currently supports two types of customizations that hook into its request pipeline:
+The Apollo Router currently supports two types of customizations that hook into the request-handling pipeline:
 
-* [Native Rust plugins](./customizations/native/)
 * [Rhai scripts](./customizations/rhai/)
+    * Rhai is a scripting language designed for use with Rust applications.
+* [Native Rust plugins](./customizations/native/)
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
 
-In the future, we expect to offer the ability to enable functionality in other languages, in the supergraph itself, or by communicating with services alongside the Router (e.g., gRPC).
-
 ## Reporting migration issues
 
-If you don't find the migration answers you need in these docs, we'd love to know. Please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.
+If you encounter a migration issue that isn't resolved by this article, please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.
