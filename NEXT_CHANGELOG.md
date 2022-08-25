@@ -115,15 +115,23 @@ When matching on an enum, add a wildcard match arm:
 
 ```diff
  match error {
-     SpecError::RecursionLimitExceeded => "recursion limit exceeded",
-     SpecError::InvalidType(_) => "invalid type",
-     SpecError::ParsingError(_) => "paring error",
-     SpecError::SubscriptionNotSupported => "subscription not supported",
+     ApolloRouterError::StartupError => "StartupError",
+     ApolloRouterError::HttpServerLifecycleError => "HttpServerLifecycleError",
+     ApolloRouterError::NoConfiguration => "NoConfiguration",
+     ApolloRouterError::NoSchema => "NoSchema",
+     ApolloRouterError::ServiceCreationError(_) => "ServiceCreationError",
+     ApolloRouterError::ServerCreationError(_) => "ServerCreationError",
 +    _ => "other error",
 }
 ```
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1614
+
+### Some error enums or variants were removed ([Issue #81](https://github.com/apollographql/router/issues/81))
+
+They were not used anymore in the public API (or at all).
+
+By [@SimonSapin](https://github.com/SimonSapin) in FIXME
 
 ## 🚀 Features
 
