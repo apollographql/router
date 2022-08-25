@@ -23,7 +23,7 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 pub use crate::router::ApolloRouterError;
-pub use crate::spec::SpecError;
+use crate::spec::SpecError;
 
 /// Error types for execution.
 ///
