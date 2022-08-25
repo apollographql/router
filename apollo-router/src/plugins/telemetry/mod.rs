@@ -1,5 +1,5 @@
 //! Telemetry plugin.
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;

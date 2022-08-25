@@ -20,7 +20,9 @@ failfast = []
 access-json = "0.1.0"
 anyhow = "1.0.62"
 apollo-parser = "0.2.10"
+# ELv2 licensing: The apollo-spaceport crate is license key functionality
 apollo-spaceport = { path = "../apollo-spaceport" }
+# ELv2 licensing: The apollo-uplink crate is license key functionality
 apollo-uplink = { path = "../uplink" }
 async-compression = { version = "0.3.14", features = [
     "tokio",
