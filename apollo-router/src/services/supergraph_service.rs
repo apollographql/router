@@ -111,87 +111,106 @@ where
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = async move {
-            let context = req.context;
-            let body = req.originating_request.body();
-            let variables = body.variables.clone();
-            let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
-
-            match content {
-                QueryPlannerContent::Introspection { response } => Ok(
-                    SupergraphResponse::new_from_graphql_response(*response, context),
-                ),
-                QueryPlannerContent::IntrospectionDisabled => {
-                    let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
-                        .errors(vec![crate::error::Error::builder()
-                            .message(String::from("introspection has been disabled"))
-                            .build()])
-                        .build(), context);
-                        *response.response.status_mut() = StatusCode::BAD_REQUEST;
-                        Ok(response)
-                }
-                QueryPlannerContent::Plan { query, plan } => {
-                    let can_be_deferred = plan.root.contains_defer();
-
-                    if can_be_deferred && !check_accept_header(&req.originating_request  ) {
-                        let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
-                        .errors(vec![crate::error::Error::builder()
-                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
-                            .build()])
-                        .build(), context);
-                        *response.response.status_mut() = StatusCode::BAD_REQUEST;
-                        Ok(response)
-
-                    } else  if let Some(err) = query.validate_variables(body, &schema).err() {
-                        let mut res = SupergraphResponse::new_from_graphql_response(err, context);
-                        *res.response.status_mut() = StatusCode::BAD_REQUEST;
-                        Ok(res)
-                    } else {
-                        let operation_name = body.operation_name.clone();
-
-                        let execution_response = execution
-                        .oneshot(
-                                ExecutionRequest::builder()
-                                    .originating_request(req.originating_request)
-                                    .query_plan(plan)
-                                    .context(context)
-                                    .build(),
-                            )
-                            .await?;
-
-                     process_execution_response(execution_response, query, operation_name, variables, schema, can_be_deferred)
-
+        let fut =
+            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
+                let errors = vec![crate::error::Error {
+                    message: error.to_string(),
+                    ..Default::default()
+                }];
+                let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
+                    Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
+                        if matches!(
+                            retrieval_error.deref().downcast_ref::<QueryPlannerError>(),
+                            Some(QueryPlannerError::SpecError(_))
+                                | Some(QueryPlannerError::SchemaValidationErrors(_))
+                        ) =>
+                    {
+                        StatusCode::BAD_REQUEST
                     }
-                }
-            }
-        }
-        .or_else(|error: BoxError| async move {
-            let errors = vec![crate::error::Error {
-                message: error.to_string(),
-                ..Default::default()
-            }];
-            let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
-                Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
-                    if matches!(
-                        retrieval_error.deref().downcast_ref::<QueryPlannerError>(),
-                        Some(QueryPlannerError::SpecError(_))
-                            | Some(QueryPlannerError::SchemaValidationErrors(_))
-                    ) =>
-                {
-                    StatusCode::BAD_REQUEST
-                }
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
 
-            Ok(SupergraphResponse::builder()
-                .errors(errors)
-                .status_code(status_code)
-                .context(context_cloned)
-                .build()
-                .expect("building a response like this should not fail"))
-        });
+                Ok(SupergraphResponse::builder()
+                    .errors(errors)
+                    .status_code(status_code)
+                    .context(context_cloned)
+                    .build()
+                    .expect("building a response like this should not fail"))
+            });
 
         Box::pin(fut)
+    }
+}
+
+async fn service_call<ExecutionService>(
+    planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    execution: ExecutionService,
+    schema: Arc<Schema>,
+    req: SupergraphRequest,
+) -> Result<SupergraphResponse, BoxError>
+where
+    ExecutionService:
+        Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
+{
+    let context = req.context;
+    let body = req.originating_request.body();
+    let variables = body.variables.clone();
+    let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
+
+    match content {
+        QueryPlannerContent::Introspection { response } => Ok(
+            SupergraphResponse::new_from_graphql_response(*response, context),
+        ),
+        QueryPlannerContent::IntrospectionDisabled => {
+            let mut response = SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .errors(vec![crate::error::Error::builder()
+                        .message(String::from("introspection has been disabled"))
+                        .build()])
+                    .build(),
+                context,
+            );
+            *response.response.status_mut() = StatusCode::BAD_REQUEST;
+            Ok(response)
+        }
+        QueryPlannerContent::Plan { query, plan } => {
+            let can_be_deferred = plan.root.contains_defer();
+
+            if can_be_deferred && !check_accept_header(&req.originating_request) {
+                let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
+                    .errors(vec![crate::error::Error::builder()
+                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                        .build()])
+                    .build(), context);
+                *response.response.status_mut() = StatusCode::BAD_REQUEST;
+                Ok(response)
+            } else if let Some(err) = query.validate_variables(body, &schema).err() {
+                let mut res = SupergraphResponse::new_from_graphql_response(err, context);
+                *res.response.status_mut() = StatusCode::BAD_REQUEST;
+                Ok(res)
+            } else {
+                let operation_name = body.operation_name.clone();
+
+                let execution_response = execution
+                    .oneshot(
+                        ExecutionRequest::builder()
+                            .originating_request(req.originating_request)
+                            .query_plan(plan)
+                            .context(context)
+                            .build(),
+                    )
+                    .await?;
+
+                process_execution_response(
+                    execution_response,
+                    query,
+                    operation_name,
+                    variables,
+                    schema,
+                    can_be_deferred,
+                )
+            }
+        }
     }
 }
 
