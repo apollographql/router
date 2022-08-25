@@ -154,7 +154,7 @@ where
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
-                    if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')
+                    if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(';')
                     .map(|a| a.trim())).any(|value|
                         value == "multipart/mixed") {
                             tracing::error!("tried to send a defer request without accept: multipart/mixed");
