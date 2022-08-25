@@ -39,7 +39,7 @@ use crate::plugin::plugins;
 #[derive(Debug, Error, Display)]
 #[allow(missing_docs)] // FIXME
 #[non_exhaustive]
-pub enum ConfigurationError {
+pub(crate) enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
@@ -151,16 +151,12 @@ impl Configuration {
     }
 }
 
+/// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
-    type Err = ConfigurationError;
+    type Err = serde_yaml::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let config =
-            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "failed to parse configuration",
-                error: e.to_string(),
-            })?;
-        Ok(config)
+        serde_yaml::from_str(s)
     }
 }
 

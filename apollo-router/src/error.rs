@@ -17,7 +17,7 @@ use tokio::task::JoinError;
 use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
-pub use crate::configuration::ConfigurationError;
+pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::Response;
 use crate::json_ext::Path;
