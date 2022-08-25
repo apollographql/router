@@ -34,7 +34,7 @@ use crate::spec::SpecError;
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
-pub enum FetchError {
+pub(crate) enum FetchError {
     /// query references unknown service '{service}'
     ValidationUnknownServiceError {
         /// The service that was unknown.
@@ -113,7 +113,7 @@ pub enum FetchError {
 
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
-    pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+    pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
         let value: Value = serde_json::to_value(self).unwrap().into();
         Error {
             message: self.to_string(),
@@ -124,7 +124,7 @@ impl FetchError {
     }
 
     /// Convert the error to an appropriate response.
-    pub fn to_response(&self) -> Response {
+    pub(crate) fn to_response(&self) -> Response {
         Response {
             errors: vec![self.to_graphql_error(None)],
             ..Response::default()
