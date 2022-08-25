@@ -94,8 +94,8 @@ where
         .into_layer()
         .map_err(|e| {
             ApolloRouterError::ConfigError(
-                crate::configuration::ConfigurationError::LayerConfiguration {
-                    layer: "Cors".to_string(),
+                crate::configuration::ConfigurationError::PluginConfiguration {
+                    plugin: "Cors".to_string(),
                     error: e,
                 },
             )

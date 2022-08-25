@@ -48,8 +48,6 @@ pub enum ConfigurationError {
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// layer {layer} could not be configured: {error}
-    LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
     InvalidConfiguration {
         message: &'static str,
