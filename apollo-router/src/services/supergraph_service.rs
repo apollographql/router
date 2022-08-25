@@ -14,6 +14,9 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use opentelemetry::trace::SpanKind;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -42,7 +45,9 @@ use crate::response::IncrementalResponse;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::spec::Query;
 use crate::Configuration;
+use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
@@ -100,7 +105,7 @@ where
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let mut planning = self.ready_query_planner_service.take().unwrap();
+        let planning = self.ready_query_planner_service.take().unwrap();
         let execution = self.execution_service_factory.new_service();
 
         let schema = self.schema.clone();
@@ -110,69 +115,33 @@ where
             let context = req.context;
             let body = req.originating_request.body();
             let variables = body.variables.clone();
-            let QueryPlannerResponse { content, context } = planning
-                .call(
-                    QueryPlannerRequest::builder()
-                        .query(
-                            body.query
-                                .clone()
-                                .expect("the query presence was already checked by a plugin"),
-                        )
-                        .and_operation_name(body.operation_name.clone())
-                        .context(context)
-                        .build(),
-                )
-                .instrument(tracing::info_span!("query_planning",
-                    graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
-                    graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-                    "otel.kind" = %SpanKind::Internal
-                ))
-                .await?;
+            let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
 
             match content {
                 QueryPlannerContent::Introspection { response } => Ok(
                     SupergraphResponse::new_from_graphql_response(*response, context),
                 ),
                 QueryPlannerContent::IntrospectionDisabled => {
-                    let mut resp = http::Response::new(
-                        once(ready(
-                            graphql::Response::builder()
-                                .errors(vec![crate::error::Error::builder()
-                                    .message(String::from("introspection has been disabled"))
-                                    .build()])
-                                .build(),
-                        ))
-                        .boxed(),
-                    );
-                    *resp.status_mut() = StatusCode::BAD_REQUEST;
-
-                    Ok(SupergraphResponse {
-                        response: resp,
-                        context,
-                    })
+                    let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
+                        .errors(vec![crate::error::Error::builder()
+                            .message(String::from("introspection has been disabled"))
+                            .build()])
+                        .build(), context);
+                        *response.response.status_mut() = StatusCode::BAD_REQUEST;
+                        Ok(response)
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
-                    if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')
-                    .map(|a| a.trim())).any(|value|
-                        value == "multipart/mixed") {
-                            tracing::error!("tried to send a defer request without accept: multipart/mixed");
-                            let mut resp = http::Response::new(
-                                once(ready(
-                                    graphql::Response::builder()
-                                        .errors(vec![crate::error::Error::builder()
-                                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
-                                            .build()])
-                                        .build(),
-                                ))
-                                .boxed(),
-                            );
-                            *resp.status_mut() = StatusCode::BAD_REQUEST;
-                            Ok(SupergraphResponse {
-                                response: resp,
-                                context,
-                            })
+                    if can_be_deferred && !check_accept_header(&req.originating_request  ) {
+                        let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
+                        .errors(vec![crate::error::Error::builder()
+                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                            .build()])
+                        .build(), context);
+                        *response.response.status_mut() = StatusCode::BAD_REQUEST;
+                        Ok(response)
+
                     } else  if let Some(err) = query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                         *res.response.status_mut() = StatusCode::BAD_REQUEST;
@@ -180,8 +149,8 @@ where
                     } else {
                         let operation_name = body.operation_name.clone();
 
-                        let ExecutionResponse { response, context } = execution
-                            .oneshot(
+                        let execution_response = execution
+                        .oneshot(
                                 ExecutionRequest::builder()
                                     .originating_request(req.originating_request)
                                     .query_plan(plan)
@@ -190,84 +159,8 @@ where
                             )
                             .await?;
 
-                        let (parts, response_stream) = response.into_parts();
+                     process_execution_response(execution_response, query, operation_name, variables, schema, can_be_deferred)
 
-                        let stream = response_stream
-                        .map(move |mut response: Response| {
-                            tracing::debug_span!("format_response").in_scope(|| {
-                                query.format_response(
-                                    &mut response,
-                                    operation_name.as_deref(),
-                                    variables.clone(),
-                                    schema.api_schema(),
-                                )
-                            });
-
-                            match (response.path.as_ref(), response.data.as_ref()) {
-                                (None, _) | (_, None) => {
-                                    if can_be_deferred {
-                                        response.has_next = Some(true);
-                                    }
-
-                                    response
-                                }
-                                // if the deferred response specified a path, we must extract the
-                                //values matched by that path and create a separate response for
-                                //each of them.
-                                // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
-                                // would merge in the same ways, some clients will generate code
-                                // that checks the specific type of the deferred response at that
-                                // path, instead of starting from the root object, so to support
-                                // this, we extract the value at that path.
-                                // In particular, that means that a deferred fragment in an object
-                                // under an array would generate one response par array element
-                                (Some(response_path), Some(response_data)) => {
-                                    let mut sub_responses = Vec::new();
-                                    response_data.select_values_and_paths(
-                                        response_path,
-                                        |path, value| {
-                                            sub_responses
-                                                .push((path.clone(), value.clone()));
-                                        },
-                                    );
-
-                                    Response::builder()
-                                        .has_next(true)
-                                        .incremental(
-                                            sub_responses
-                                                .into_iter()
-                                                .map(move |(path, data)| {
-                                                    IncrementalResponse::builder()
-                                                        .and_label(
-                                                            response.label.clone(),
-                                                        )
-                                                        .data(data)
-                                                        .path(path)
-                                                        .errors(response.errors.clone())
-                                                        .extensions(
-                                                            response.extensions.clone(),
-                                                        )
-                                                        .build()
-                                                })
-                                                .collect(),
-                                        )
-                                        .build()
-                                }
-                            }
-                        });
-
-                        Ok(SupergraphResponse {
-                            context,
-                            response: http::Response::from_parts(
-                                parts,
-                                if can_be_deferred {
-                                    stream.chain(once(ready(Response::builder().has_next(false).build()))).left_stream()
-                                } else {
-                                    stream.right_stream()
-                                }.in_current_span()
-                                .boxed(),
-                            )
-                        })
                     }
                 }
             }
@@ -302,6 +195,124 @@ where
     }
 }
 
+async fn plan_query(
+    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    body: &graphql::Request,
+    context: Context,
+) -> Result<QueryPlannerResponse, BoxError> {
+    planning
+        .call(
+            QueryPlannerRequest::builder()
+                .query(
+                    body.query
+                        .clone()
+                        .expect("the query presence was already checked by a plugin"),
+                )
+                .and_operation_name(body.operation_name.clone())
+                .context(context)
+                .build(),
+        )
+        .instrument(tracing::info_span!("query_planning",
+            graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
+            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
+            "otel.kind" = %SpanKind::Internal
+        ))
+        .await
+}
+
+fn check_accept_header(originating_request: &http::Request<graphql::Request>) -> bool {
+    originating_request
+        .headers()
+        .get_all(ACCEPT)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(',').map(|a| a.trim()))
+        .any(|value| value == "multipart/mixed")
+}
+
+fn process_execution_response(
+    execution_response: ExecutionResponse,
+    query: Arc<Query>,
+    operation_name: Option<String>,
+    variables: Map<ByteString, Value>,
+    schema: Arc<Schema>,
+    can_be_deferred: bool,
+) -> Result<SupergraphResponse, BoxError> {
+    let ExecutionResponse { response, context } = execution_response;
+
+    let (parts, response_stream) = response.into_parts();
+
+    let stream = response_stream.map(move |mut response: Response| {
+        tracing::debug_span!("format_response").in_scope(|| {
+            query.format_response(
+                &mut response,
+                operation_name.as_deref(),
+                variables.clone(),
+                schema.api_schema(),
+            )
+        });
+
+        match (response.path.as_ref(), response.data.as_ref()) {
+            (None, _) | (_, None) => {
+                if can_be_deferred {
+                    response.has_next = Some(true);
+                }
+
+                response
+            }
+            // if the deferred response specified a path, we must extract the
+            //values matched by that path and create a separate response for
+            //each of them.
+            // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+            // would merge in the same ways, some clients will generate code
+            // that checks the specific type of the deferred response at that
+            // path, instead of starting from the root object, so to support
+            // this, we extract the value at that path.
+            // In particular, that means that a deferred fragment in an object
+            // under an array would generate one response par array element
+            (Some(response_path), Some(response_data)) => {
+                let mut sub_responses = Vec::new();
+                response_data.select_values_and_paths(response_path, |path, value| {
+                    sub_responses.push((path.clone(), value.clone()));
+                });
+
+                Response::builder()
+                    .has_next(true)
+                    .incremental(
+                        sub_responses
+                            .into_iter()
+                            .map(move |(path, data)| {
+                                IncrementalResponse::builder()
+                                    .and_label(response.label.clone())
+                                    .data(data)
+                                    .path(path)
+                                    .errors(response.errors.clone())
+                                    .extensions(response.extensions.clone())
+                                    .build()
+                            })
+                            .collect(),
+                    )
+                    .build()
+            }
+        }
+    });
+
+    Ok(SupergraphResponse {
+        context,
+        response: http::Response::from_parts(
+            parts,
+            if can_be_deferred {
+                stream
+                    .chain(once(ready(Response::builder().has_next(false).build())))
+                    .left_stream()
+            } else {
+                stream.right_stream()
+            }
+            .in_current_span()
+            .boxed(),
+        ),
+    })
+}
 /// Builder which generates a plugin pipeline.
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
