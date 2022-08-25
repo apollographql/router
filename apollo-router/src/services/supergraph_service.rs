@@ -10,6 +10,7 @@ use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
+use http::header::ACCEPT;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
 use opentelemetry::trace::SpanKind;
@@ -152,6 +153,30 @@ where
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
+                    if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')
+                    .map(|a| a.trim())).any(|value| {
+                        println!("testing value {:?}", value);
+                        value == "multipart/mixed"}) {
+                            tracing::error!("tried to send a defer request without accept: multipart/mixed");
+                            let mut resp = http::Response::new(
+                                once(ready(
+                                    graphql::Response::builder()
+                                        .errors(vec![crate::error::Error::builder()
+                                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                                            .build()])
+                                        .build(),
+                                ))
+                                .boxed(),
+                            );
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
+        
+                            Ok(SupergraphResponse {
+                                response: resp,
+                                context,
+                            })
+            
+                    
+                    } else{
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
@@ -249,6 +274,7 @@ where
                             )
                         })
                     }
+                }
                 }
             }
         }
