@@ -22,7 +22,6 @@ pub(crate) use crate::graphql::Error;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-pub use crate::router::ApolloRouterError;
 use crate::spec::SpecError;
 
 /// Error types for execution.

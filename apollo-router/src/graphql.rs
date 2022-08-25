@@ -11,7 +11,7 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
 use crate::error::FetchError;
-use crate::error::Location;
+pub use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
