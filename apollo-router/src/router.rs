@@ -97,9 +97,6 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// {0}
-    ConfigError(crate::configuration::ConfigurationError),
-
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(BoxError),
 
