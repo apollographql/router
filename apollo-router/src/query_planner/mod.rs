@@ -18,7 +18,7 @@ use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
-pub use self::fetch::OperationKind;
+pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
