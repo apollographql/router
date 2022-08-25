@@ -1,2 +1,2 @@
-server:
-  listen: /tmp/router.sock
+listeners:
+  data: /tmp/router.sock

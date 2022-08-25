@@ -100,7 +100,7 @@ impl HttpServerHandle {
         tracing::debug!("previous server stopped");
 
         // we keep the TCP listener if it is compatible with the new configuration
-        let listener = if self.listen_address != configuration.server.listen {
+        let listener = if self.listen_address != configuration.listeners.data {
             None
         } else {
             match listener {

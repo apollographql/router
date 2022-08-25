@@ -132,7 +132,7 @@ impl Query {
 
         let parser = apollo_parser::Parser::with_recursion_limit(
             string.as_str(),
-            configuration.server.experimental_parser_recursion_limit,
+            configuration.graphql.experimental_parser_recursion_limit,
         );
         let tree = parser.parse();
 

@@ -214,45 +214,45 @@ The Apollo Router takes an optional YAML configuration file as input via the `--
 
 This file enables you to customize the router's behavior in many ways:
 
-### Listen address
+### Data Listen address
 
 By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address like so:
 
 ```yaml title="router_unix.yaml"
 #
-# server: Configuration of the HTTP server
+# listeners: Configuration of the HTTP server
 #
-server:
+listeners:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1
+  data: 127.0.0.1
 ```
 
 The router can also listen on a Unix socket (not supported on Windows):
 
 ```yaml title="router_unix.yaml"
-server:
+listeners:
   # Absolute path to a Unix socket
-  listen: /tmp/router.sock
+  data: /tmp/router.sock
 ```
 
-### Endpoint path
+### GraphQL path
 
-By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
+By default, the router starts an HTTP server that exposes a data `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.endpoint`:
+You can change this path by setting `graphql.path`:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# paths: Configuration of the HTTP server paths
 #
-server:
-  # The exposed endpoint to answer to GraphQL queries
+paths:
+  # The exposed path to answer to GraphQL queries
   # (Defaults to /)
-  endpoint: /graphql
+  graphql: /graphql
 ```
 
-The endpoint path must start with `/`.
+The path must start with `/`.
 
 Path parameters and wildcards are supported. For example:
 
@@ -267,22 +267,22 @@ By default, the router answers to some introspection queries. You can override t
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# graphql: Configuration of the graphql processing
 #
-server:
+graphql:
   introspection: false
 ```
 
 ### Landing page
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
+By default, the router displays a sandbox if you access its graphql path via your browser. You can override this behavior to disable the sandbox page like so:
 
 ```yaml title="router.yaml"
 #
 # server: Configuration of the HTTP server
 #
 server:
-  landing_page: false
+  sandbox: false
 ```
 
 ### Subgraph routing URLs

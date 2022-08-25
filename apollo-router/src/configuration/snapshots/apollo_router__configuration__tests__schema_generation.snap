@@ -34,6 +34,35 @@ expression: "&schema"
     "forbid_mutations": {
       "type": "boolean"
     },
+    "graphql": {
+      "description": "Configuration options pertaining to graphql processing.",
+      "default": {
+        "introspection": true,
+        "experimental_defer_support": false,
+        "experimental_parser_recursion_limit": 4096
+      },
+      "type": "object",
+      "properties": {
+        "experimental_defer_support": {
+          "description": "Experimental @defer directive support default: false",
+          "default": false,
+          "type": "boolean"
+        },
+        "experimental_parser_recursion_limit": {
+          "description": "Experimental limitation of query depth default: 4096",
+          "default": 4096,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "introspection": {
+          "description": "introspection queries enabled by default",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "headers": {
       "type": "object",
       "properties": {
@@ -271,12 +300,72 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "listeners": {
+      "description": "Configuration options pertaining to the server listeners.",
+      "default": {
+        "data": "127.0.0.1:4000",
+        "admin": "127.0.0.1:5000"
+      },
+      "type": "object",
+      "properties": {
+        "admin": {
+          "description": "The socket address and port to listen on for the admin plane Defaults to 127.0.0.1:5000",
+          "default": "127.0.0.1:5000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "data": {
+          "description": "The socket address and port to listen on for the data plane Defaults to 127.0.0.1:4000",
+          "default": "127.0.0.1:4000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
         "type": "string",
         "format": "uri"
       }
+    },
+    "paths": {
+      "description": "Configuration options pertaining to the listening paths.",
+      "default": {
+        "graphql": "/",
+        "health_check": "/.well-known/apollo/server-health"
+      },
+      "type": "object",
+      "properties": {
+        "graphql": {
+          "description": "GraphQL path default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
+        "health_check": {
+          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
+          "default": "/.well-known/apollo/server-health",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "plugins": {
       "description": "Plugin configuration",
@@ -323,7 +412,6 @@ expression: "&schema"
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "listen": "127.0.0.1:4000",
         "cors": {
           "allow_any_origin": false,
           "allow_credentials": false,
@@ -339,12 +427,7 @@ expression: "&schema"
             "OPTIONS"
           ]
         },
-        "introspection": true,
-        "landing_page": true,
-        "endpoint": "/",
-        "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false,
-        "experimental_parser_recursion_limit": 4096
+        "sandbox": true
       },
       "type": "object",
       "properties": {
@@ -428,51 +511,10 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
-        "endpoint": {
-          "description": "GraphQL endpoint default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "experimental_defer_support": {
-          "description": "Experimental @defer directive support default: false",
-          "default": false,
-          "type": "boolean"
-        },
-        "experimental_parser_recursion_limit": {
-          "description": "Experimental limitation of query depth default: 4096",
-          "default": 4096,
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
-          "type": "string"
-        },
-        "introspection": {
-          "description": "introspection queries enabled by default",
+        "sandbox": {
+          "description": "display sandbox enabled by default",
           "default": true,
           "type": "boolean"
-        },
-        "landing_page": {
-          "description": "display landing page enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
         }
       },
       "additionalProperties": false

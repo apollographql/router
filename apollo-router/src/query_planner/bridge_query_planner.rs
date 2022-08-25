@@ -52,7 +52,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         defer_stream_support: Some(DeferStreamSupport {
-                            enable_defer: Some(configuration.server.experimental_defer_support),
+                            enable_defer: Some(configuration.graphql.experimental_defer_support),
                         }),
                     },
                 )

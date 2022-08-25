@@ -1,16 +1,15 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 737
 expression: error.to_string()
 ---
 configuration had errors: 
 1. /server
 
-
+listeners:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  data: 127.0.0.1:4000
 server:
-┌   # The socket address and port to listen on
-|   # Defaults to 127.0.0.1:4000
-|   listen: 127.0.0.1:4000
-|   bad: "donotwork"
+┌   bad: "donotwork"
 |   another_one: true
 └-----> Additional properties are not allowed ('bad', 'another_one' were unexpected)

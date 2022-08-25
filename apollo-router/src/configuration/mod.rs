@@ -81,6 +81,18 @@ pub enum ConfigurationError {
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
+    /// Configuration options pertaining to the server listeners.
+    #[serde(default)]
+    pub(crate) listeners: Listeners,
+
+    /// Configuration options pertaining to the listening paths.
+    #[serde(default)]
+    pub(crate) paths: Paths,
+
+    /// Configuration options pertaining to graphql processing.
+    #[serde(default)]
+    pub(crate) graphql: GraphQL,
+
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
@@ -98,19 +110,29 @@ pub struct Configuration {
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 const TELEMETRY_KEY: &str = "telemetry";
 
-fn default_listen() -> ListenAddr {
+fn default_data_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
+
+fn default_admin_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:5000").unwrap().into()
 }
 
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
     pub(crate) fn new(
+        listeners: Option<Listeners>,
+        paths: Option<Paths>,
+        graphql: Option<GraphQL>,
         server: Option<Server>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
     ) -> Self {
         Self {
+            listeners: listeners.unwrap_or_default(),
+            paths: paths.unwrap_or_default(),
+            graphql: graphql.unwrap_or_default(),
             server: server.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -258,38 +280,44 @@ impl JsonSchema for UserPlugins {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the server listeners.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Server {
-    /// The socket address and port to listen on
+pub(crate) struct Listeners {
+    /// The socket address and port to listen on for the data plane
     /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_listen")]
-    pub(crate) listen: ListenAddr,
+    #[serde(default = "default_data_listen")]
+    pub(crate) data: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Cors,
+    /// The socket address and port to listen on for the admin plane
+    /// Defaults to 127.0.0.1:5000
+    #[serde(default = "default_admin_listen")]
+    pub(crate) admin: ListenAddr,
+}
 
-    /// introspection queries
-    /// enabled by default
-    #[serde(default = "default_introspection")]
-    pub(crate) introspection: bool,
-
-    /// display landing page
-    /// enabled by default
-    #[serde(default = "default_landing_page")]
-    pub(crate) landing_page: bool,
-
-    /// GraphQL endpoint
+/// Configuration options pertaining to the listening paths.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Paths {
+    /// GraphQL path
     /// default: "/"
-    #[serde(default = "default_endpoint")]
-    pub(crate) endpoint: String,
+    #[serde(default = "default_graphql_path")]
+    pub(crate) graphql: String,
 
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
-    pub(crate) health_check_path: String,
+    pub(crate) health_check: String,
+}
+
+/// Configuration options pertaining to graphql processing.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GraphQL {
+    /// introspection queries
+    /// enabled by default
+    #[serde(default = "default_introspection")]
+    pub(crate) introspection: bool,
 
     /// Experimental @defer directive support
     /// default: false
@@ -302,30 +330,67 @@ pub(crate) struct Server {
     pub(crate) experimental_parser_recursion_limit: usize,
 }
 
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Server {
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
+
+    /// display sandbox
+    /// enabled by default
+    #[serde(default = "default_sandbox")]
+    pub(crate) sandbox: bool,
+}
+
 #[buildstructor::buildstructor]
-impl Server {
+impl Listeners {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
+    pub(crate) fn new(data: Option<ListenAddr>, admin: Option<ListenAddr>) -> Self {
+        Self {
+            data: data.unwrap_or_else(default_data_listen),
+            admin: admin.unwrap_or_else(default_admin_listen),
+        }
+    }
+}
+
+#[buildstructor::buildstructor]
+impl Paths {
+    #[builder]
+    pub(crate) fn new(graphql: Option<String>, health_check: Option<String>) -> Self {
+        Self {
+            graphql: graphql.unwrap_or_else(default_graphql_path),
+            health_check: health_check.unwrap_or_else(default_health_check_path),
+        }
+    }
+}
+
+#[buildstructor::buildstructor]
+impl GraphQL {
+    #[builder]
     pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        cors: Option<Cors>,
         introspection: Option<bool>,
-        landing_page: Option<bool>,
-        endpoint: Option<String>,
-        health_check_path: Option<String>,
         defer_support: Option<bool>,
         parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_listen),
-            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
-            landing_page: landing_page.unwrap_or_else(default_landing_page),
-            endpoint: endpoint.unwrap_or_else(default_endpoint),
-            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
+        }
+    }
+}
+
+#[buildstructor::buildstructor]
+impl Server {
+    #[builder]
+    #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
+    pub(crate) fn new(cors: Option<Cors>, sandbox: Option<bool>) -> Self {
+        Self {
+            cors: cors.unwrap_or_default(),
+            sandbox: sandbox.unwrap_or_else(default_sandbox),
         }
     }
 }
@@ -450,11 +515,11 @@ fn default_introspection() -> bool {
     true
 }
 
-fn default_landing_page() -> bool {
+fn default_sandbox() -> bool {
     true
 }
 
-fn default_endpoint() -> String {
+fn default_graphql_path() -> String {
     String::from("/")
 }
 
@@ -471,6 +536,24 @@ fn default_parser_recursion_limit() -> usize {
     // but is still very high for "reasonable" queries.
     // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
     4096
+}
+
+impl Default for Listeners {
+    fn default() -> Self {
+        Listeners::builder().build()
+    }
+}
+
+impl Default for Paths {
+    fn default() -> Self {
+        Paths::builder().build()
+    }
+}
+
+impl Default for GraphQL {
+    fn default() -> Self {
+        GraphQL::builder().build()
+    }
 }
 
 impl Default for Server {
@@ -827,32 +910,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.server.endpoint.starts_with('/') {
+    if !config.paths.graphql.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'paths.graphql' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.endpoint,
-                config.server.endpoint
+                config.paths.graphql,
+                config.paths.graphql
             ),
         });
     }
-    if config.server.endpoint.ends_with('*') && !config.server.endpoint.ends_with("/*") {
+    if config.paths.graphql.ends_with('*') && !config.paths.graphql.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'paths.graphql' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.endpoint
+                config.paths.graphql
             ),
         });
     }
-    if config.server.endpoint.contains("/*/") {
+    if config.paths.graphql.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.endpoint' configuration",
+                    message: "invalid 'paths.graphql' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.endpoint
+                        config.paths.graphql
                     ),
                 },
             );
@@ -1045,32 +1128,32 @@ mod tests {
     fn bad_endpoint_configuration_without_slash() {
         let error = validate_configuration(
             r#"
-server:
-  endpoint: test
+paths:
+  graphql: test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+        assert_eq!(error.to_string(), String::from("invalid 'paths.graphql' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
     }
 
     #[test]
     fn bad_endpoint_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
-server:
-  endpoint: /*/test
+paths:
+  graphql: /*/test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+        assert_eq!(error.to_string(), String::from("invalid 'paths.graphql' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
     #[test]
     fn unknown_fields() {
         let error = validate_configuration(
             r#"
-server:
-  endpoint: /
+paths:
+  graphql: /
 subgraphs:
   account: true
   "#,
@@ -1104,12 +1187,12 @@ unknown:
     fn bad_endpoint_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
-server:
-  endpoint: /test*
+paths:
+  graphql: /test*
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
+        assert_eq!(error.to_string(), String::from("invalid 'paths.graphql' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
     }
 
     #[test]
@@ -1132,10 +1215,11 @@ telemetry:
     fn line_precise_config_errors_with_errors_after_first_field() {
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   bad: "donotwork"
   another_one: true
         "#,
@@ -1148,10 +1232,10 @@ server:
     fn line_precise_config_errors_bad_type() {
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: true
+  data: true
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1162,10 +1246,11 @@ server:
     fn line_precise_config_errors_with_inline_sequence() {
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   cors:
     allow_headers: [ Content-Type, 5 ]
         "#,
@@ -1178,10 +1263,11 @@ server:
     fn line_precise_config_errors_with_sequence() {
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   cors:
     allow_headers:
       - Content-Type
@@ -1311,7 +1397,7 @@ server:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+graphql:
   introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
         "#,
         )
@@ -1324,10 +1410,11 @@ server:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   cors:
     allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
@@ -1342,10 +1429,11 @@ server:
 
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   cors:
     allow_headers:
       - Content-Type
@@ -1360,10 +1448,11 @@ server:
     fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
         let error = validate_configuration(
             r#"
-server:
+listeners:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  data: 127.0.0.1:4000
+server:
   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
   another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
         "#,
