@@ -78,6 +78,106 @@ impl AxumHttpServerFactory {
     }
 }
 
+pub(crate) fn make_axum_router<RF>(
+    service_factory: RF,
+    configuration: &Configuration,
+    plugin_handlers: HashMap<String, Handler>,
+) -> Result<Router, ApolloRouterError>
+where
+    RF: SupergraphServiceFactory,
+{
+    let cors = configuration
+        .server
+        .cors
+        .clone()
+        .into_layer()
+        .map_err(|e| {
+            ApolloRouterError::ConfigError(
+                crate::configuration::ConfigurationError::LayerConfiguration {
+                    layer: "Cors".to_string(),
+                    error: e,
+                },
+            )
+        })?;
+    let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
+        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+        format!("{}router_extra_path", configuration.server.endpoint)
+    } else {
+        configuration.server.endpoint.clone()
+    };
+    let mut router = Router::<hyper::Body>::new()
+        .route(
+            &graphql_endpoint,
+            get({
+                let display_landing_page = configuration.server.landing_page;
+                move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                    handle_get(
+                        host,
+                        service.new_service().boxed(),
+                        http_request,
+                        display_landing_page,
+                    )
+                }
+            })
+            .post({
+                move |host: Host,
+                      uri: OriginalUri,
+                      request: Json<graphql::Request>,
+                      Extension(service): Extension<RF>,
+                      header_map: HeaderMap| {
+                    handle_post(
+                        host,
+                        uri,
+                        request,
+                        service.new_service().boxed(),
+                        header_map,
+                    )
+                }
+            }),
+        )
+        .layer(middleware::from_fn(decompress_request_body))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(PropagatingMakeSpan::new())
+                .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                    if resp.status() >= StatusCode::BAD_REQUEST {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Error.as_str(),
+                        );
+                    } else {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Ok.as_str(),
+                        );
+                    }
+                }),
+        )
+        .route(&configuration.server.health_check_path, get(health_check))
+        .layer(Extension(service_factory))
+        .layer(cors)
+        .layer(CompressionLayer::new()); // To compress response body
+
+    for (plugin_name, handler) in plugin_handlers {
+        router = router.route(
+            &format!("/plugins/{}/*path", plugin_name),
+            get({
+                let new_handler = handler.clone();
+                move |host: Host, request_parts: Request<Body>| {
+                    custom_plugin_handler(host, request_parts, new_handler)
+                }
+            })
+            .post({
+                let new_handler = handler.clone();
+                move |host: Host, request_parts: Request<Body>| {
+                    custom_plugin_handler(host, request_parts, new_handler)
+                }
+            }),
+        );
+    }
+    Ok(router)
+}
+
 impl HttpServerFactory for AxumHttpServerFactory {
     type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
@@ -95,97 +195,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
 
-            let cors = configuration
-                .server
-                .cors
-                .clone()
-                .into_layer()
-                .map_err(|e| {
-                    ApolloRouterError::ConfigError(
-                        crate::configuration::ConfigurationError::LayerConfiguration {
-                            layer: "Cors".to_string(),
-                            error: e,
-                        },
-                    )
-                })?;
-            let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
-                // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-                format!("{}router_extra_path", configuration.server.endpoint)
-            } else {
-                configuration.server.endpoint.clone()
-            };
-            let mut router = Router::new()
-                .route(
-                    &graphql_endpoint,
-                    get({
-                        let display_landing_page = configuration.server.landing_page;
-                        move |host: Host,
-                              Extension(service): Extension<RF>,
-                              http_request: Request<Body>| {
-                            handle_get(
-                                host,
-                                service.new_service().boxed(),
-                                http_request,
-                                display_landing_page,
-                            )
-                        }
-                    })
-                    .post({
-                        move |host: Host,
-                              uri: OriginalUri,
-                              request: Json<graphql::Request>,
-                              Extension(service): Extension<RF>,
-                              header_map: HeaderMap| {
-                            handle_post(
-                                host,
-                                uri,
-                                request,
-                                service.new_service().boxed(),
-                                header_map,
-                            )
-                        }
-                    }),
-                )
-                .layer(middleware::from_fn(decompress_request_body))
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(PropagatingMakeSpan::new())
-                        .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
-                            if resp.status() >= StatusCode::BAD_REQUEST {
-                                span.record(
-                                    "otel.status_code",
-                                    &opentelemetry::trace::StatusCode::Error.as_str(),
-                                );
-                            } else {
-                                span.record(
-                                    "otel.status_code",
-                                    &opentelemetry::trace::StatusCode::Ok.as_str(),
-                                );
-                            }
-                        }),
-                )
-                .route(&configuration.server.health_check_path, get(health_check))
-                .layer(Extension(service_factory))
-                .layer(cors)
-                .layer(CompressionLayer::new()); // To compress response body
-
-            for (plugin_name, handler) in plugin_handlers {
-                router = router.route(
-                    &format!("/plugins/{}/*path", plugin_name),
-                    get({
-                        let new_handler = handler.clone();
-                        move |host: Host, request_parts: Request<Body>| {
-                            custom_plugin_handler(host, request_parts, new_handler)
-                        }
-                    })
-                    .post({
-                        let new_handler = handler.clone();
-                        move |host: Host, request_parts: Request<Body>| {
-                            custom_plugin_handler(host, request_parts, new_handler)
-                        }
-                    }),
-                );
-            }
+            let router = make_axum_router(service_factory, &configuration, plugin_handlers)?;
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -240,7 +250,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                                         max_open_file_warning = None;
                                     }
 
-                                    tokio::task::spawn(async move{
+                                    tokio::task::spawn(async move {
                                         match res {
                                             NetworkStream::Tcp(stream) => {
                                                 stream
