@@ -111,7 +111,7 @@ cp ../router.yaml "${BUILD_DIR}" || terminate "Couldn't copy ../router.yaml to $
 
 # Change to our build directory
 cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
- 
+
 # If we are building, clone our repo
 if [ "${BUILD_IMAGE}" = true ]; then
     git clone https://github.com/apollographql/router.git > /dev/null 2>&1 || terminate "Couldn't clone repository"
@@ -131,9 +131,8 @@ if [ "${BUILD_IMAGE}" = true ]; then
 else
     # Let the user know what we are going to do
     echo "Building image: ${ROUTER_VERSION}" from released tarballs""
-    ROUTER_RELEASE="$(echo "${ROUTER_VERSION}" | cut -c2-)"
     docker build -q -t "router:${ROUTER_VERSION}" \
-        --build-arg ROUTER_RELEASE="${ROUTER_RELEASE}" \
+        --build-arg ROUTER_RELEASE="${ROUTER_VERSION}" \
         --no-cache -f Dockerfile.release . \
         || terminate "Couldn't build router image"
 fi

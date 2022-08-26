@@ -68,6 +68,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -90,11 +94,13 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -246,10 +252,6 @@ pub(crate) struct Server {
     #[serde(default = "default_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Cors,
-
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
@@ -260,10 +262,10 @@ pub(crate) struct Server {
     #[serde(default = "default_landing_page")]
     pub(crate) landing_page: bool,
 
-    /// GraphQL endpoint
+    /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
-    #[serde(default = "default_endpoint")]
-    pub(crate) endpoint: String,
+    #[serde(default = "default_graphql_path")]
+    pub(crate) graphql_path: String,
 
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
@@ -287,20 +289,18 @@ impl Server {
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
-        cors: Option<Cors>,
         introspection: Option<bool>,
         landing_page: Option<bool>,
-        endpoint: Option<String>,
+        graphql_path: Option<String>,
         health_check_path: Option<String>,
         defer_support: Option<bool>,
         parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
-            endpoint: endpoint.unwrap_or_else(default_endpoint),
+            graphql_path: graphql_path.unwrap_or_else(default_graphql_path),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
@@ -433,7 +433,7 @@ fn default_landing_page() -> bool {
     true
 }
 
-fn default_endpoint() -> String {
+fn default_graphql_path() -> String {
     String::from("/")
 }
 
@@ -806,32 +806,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.server.endpoint.starts_with('/') {
+    if !config.server.graphql_path.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.endpoint,
-                config.server.endpoint
+                config.server.graphql_path,
+                config.server.graphql_path
             ),
         });
     }
-    if config.server.endpoint.ends_with('*') && !config.server.endpoint.ends_with("/*") {
+    if config.server.graphql_path.ends_with('*') && !config.server.graphql_path.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.endpoint
+                config.server.graphql_path
             ),
         });
     }
-    if config.server.endpoint.contains("/*/") {
+    if config.server.graphql_path.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.endpoint' configuration",
+                    message: "invalid 'server.graphql_path' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.endpoint
+                        config.server.graphql_path
                     ),
                 },
             );
@@ -1021,27 +1021,27 @@ mod tests {
     }
 
     #[test]
-    fn bad_endpoint_configuration_without_slash() {
+    fn bad_graphql_path_configuration_without_slash() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: test
+  graphql_path: test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
     }
 
     #[test]
-    fn bad_endpoint_configuration_with_wildcard_as_prefix() {
+    fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /*/test
+  graphql_path: /*/test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
     #[test]
@@ -1049,7 +1049,7 @@ server:
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /
+  graphql_path: /
 subgraphs:
   account: true
   "#,
@@ -1080,15 +1080,15 @@ unknown:
     }
 
     #[test]
-    fn bad_endpoint_configuration_with_bad_ending_wildcard() {
+    fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /test*
+  graphql_path: /test*
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
     }
 
     #[test]
@@ -1145,8 +1145,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, 5 ]
+cors:
+  allow_headers: [ Content-Type, 5 ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1161,10 +1161,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
+cors:
+  allow_headers:
+    - Content-Type
+    - 5
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1175,15 +1175,13 @@ server:
     fn it_does_not_allow_invalid_cors_headers() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_headers: [ "*" ]
+cors:
+  allow_credentials: true
+  allow_headers: [ "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1194,15 +1192,13 @@ server:
     fn it_does_not_allow_invalid_cors_methods() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    methods: [ GET, "*" ]
+cors:
+  allow_credentials: true
+  methods: [ GET, "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1213,15 +1209,13 @@ server:
     fn it_does_not_allow_invalid_cors_origins() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_any_origin: true
+cors:
+  allow_credentials: true
+  allow_any_origin: true
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1307,8 +1301,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+cors:
+  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1325,10 +1319,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+cors:
+  allow_headers:
+    - Content-Type
+    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
         "#,
         )
         .expect_err("should have resulted in an error");

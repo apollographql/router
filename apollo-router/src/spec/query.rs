@@ -244,7 +244,7 @@ impl Query {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
-                    *output = input.take();
+                    *output = input.clone();
                     return Ok(());
                 } else if let Some(enum_type) = schema.enums.get(type_name) {
                     return match input.as_str() {
@@ -1334,6 +1334,32 @@ mod tests {
                 "get": {
                     "array": [1,2,3,4],
                     "stuff": [1,2,3,4],
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_array_of_scalar_duplicate_key() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [Int]
+            }
+
+            ",
+            "{get {array array}}",
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "array": [1,2,3,4],
                 },
             }},
         );
