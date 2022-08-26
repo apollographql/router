@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Move cors configuration from `server` to top level ([PR #1586](https://github.com/apollographql/router/pull/1586))
+
+The cors configuration is now located at the top level of the configuration file.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1586
+
 ### Exit the router after logging panic details ([PR #1602](https://github.com/apollographql/router/pull/1602))
 
 If the router panics, it can leave the router in an unuseable state.
@@ -92,6 +98,16 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 These items have been removed from the public API of `apollo_router::services::execution`.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
+
+### Insert the full target triplet in the package name, and prefix with `v` ([Issue #1385](https://github.com/apollographql/router/issues/1385))
+
+The release tarballs now contain the full target triplet in their name along with a `v` prefix to be consistent with our other packaging techniques (e.g., Rover):
+
+* `router-0.16.0-x86_64-linux.tar.gz` -> `router-v0.16.0-x86_64-unknown-linux-gnu.tar.gz`
+* `router-0.16.0-x86_64-macos.tar.gz` -> `router-v0.16.0-x86_64-apple-darwin.tar.gz`
+* `router-0.16.0-x86_64-windows.tar.gz` -> `router-v0.16.0-x86_64-pc-windows-msvc.tar.gz`
+
+By [@abernix](https://github.com/abernix) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1433 (which re-lands work done in https://github.com/apollographql/router/pull/1393)
 
 ### Many structs and enums are now `#[non_exhaustive]` ([Issue #1550](https://github.com/apollographql/router/issues/1550))
 
@@ -171,6 +187,12 @@ Move the location of the `text` field when exposing the query plan and fill it w
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
 
+### Formatting problem fix of scalar fields selected several times ([PR #1583](https://github.com/apollographql/router/issues/1583))
+
+Fixed a bug where querying scalar fields several times would put `null`s instead of expected values.
+
+By [@eole1712](https://github.com/eole1712) in https://github.com/apollographql/router/pull/1585
+
 ### Fix typo on HTTP errors from subgraph ([#1593](https://github.com/apollographql/router/pull/1593))
 
 Remove the closed parenthesis at the end of error messages resulting from HTTP errors from subgraphs.
@@ -185,8 +207,21 @@ next chunk to see the delimiter.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
+### Patch async-compression to compress responses in streaming ([PR #1604](https://github.com/apollographql/router/issues/1604))
+
+async-compression is a dependency used for response compression. Its implementation accumulates the entire compressed response
+in memory before sending it, which creates problems for deferred responses, where we want the responses to come as soon as
+possible, and not all at once after a while.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1604
+
 ## 🛠 Maintenance
 
+### Depend on published `router-bridge` ([PR #1613](https://github.com/apollographql/router/issues/1613))
+
+We have published the `router-bridge` to crates.io, which removes the need for router developers to have nodejs installed.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1613
 
 ### Re-organize our release steps checklist ([PR #1605](https://github.com/apollographql/router/pull/1605))
 
