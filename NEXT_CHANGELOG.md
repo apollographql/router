@@ -41,6 +41,21 @@ Terminating after logging the panic details is the best choice here.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1602
 
+### Rename the `endpoint` parameter to `graphql_path` ([#1606](https://github.com/apollographql/router/issues/1606))
+
+The `endpoint` parameter within the `server` portion of the YAML configuration has been renamed to `graphql_path` to more accurately reflect its behavior.
+
+If you used this option, the necessary change would look like:
+
+```diff
+- server:
+-   endpoint: /graphql
++ server:
++   graphql_path: /graphql
+```
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1609
+
 ### Remove `activate()` from the plugin API ([PR #1569](https://github.com/apollographql/router/pull/1569))
 
 Recent changes to configuration reloading means that the only known consumer of this API, telemetry, is no longer using it.
@@ -199,6 +214,14 @@ in memory before sending it, which creates problems for deferred responses, wher
 possible, and not all at once after a while.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1604
+
+### Queries with defer must have the Accept: multipart/mixed header ([PR #1610](https://github.com/apollographql/router/issues/1610))
+
+Since deferred responses can come back as multipart responses, we must check that the client supports that content type.
+This will allow older clients to show a meaningful error message instead of a parsing error if the `@defer` directive is
+used but they don't support it.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1610
 
 ## 🛠 Maintenance
 

@@ -9,9 +9,15 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
+use http::header::ACCEPT;
+use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
+use mediatype::names::MIXED;
+use mediatype::names::MULTIPART;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -153,7 +159,24 @@ where
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
-                    if let Some(err) = query.validate_variables(body, &schema).err() {
+                    if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
+                            tracing::error!("tried to send a defer request without accept: multipart/mixed");
+                            let mut resp = http::Response::new(
+                                once(ready(
+                                    graphql::Response::builder()
+                                        .errors(vec![crate::error::Error::builder()
+                                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                                            .build()])
+                                        .build(),
+                                ))
+                                .boxed(),
+                            );
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
+                            Ok(SupergraphResponse {
+                                response: resp,
+                                context,
+                            })
+                    } else  if let Some(err) = query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                         *res.response.status_mut() = StatusCode::BAD_REQUEST;
                         Ok(res)
@@ -280,6 +303,21 @@ where
 
         Box::pin(fut)
     }
+}
+
+fn accepts_multipart(headers: &HeaderMap) -> bool {
+    let multipart_mixed = MediaType::new(MULTIPART, MIXED);
+
+    headers.get_all(ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// Builder which generates a plugin pipeline.

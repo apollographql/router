@@ -34,6 +34,10 @@ use http::Request;
 use http::Uri;
 use hyper::server::conn::Http;
 use hyper::Body;
+use mediatype::names::HTML;
+use mediatype::names::TEXT;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -90,15 +94,15 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
+    let graphql_path = if configuration.server.graphql_path.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        format!("{}router_extra_path", configuration.server.endpoint)
+        format!("{}router_extra_path", configuration.server.graphql_path)
     } else {
-        configuration.server.endpoint.clone()
+        configuration.server.graphql_path.clone()
     };
     let mut router = Router::<hyper::Body>::new()
         .route(
-            &graphql_endpoint,
+            &graphql_path,
             get({
                 let display_landing_page = configuration.server.landing_page;
                 move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
@@ -212,7 +216,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
                 actual_listen_address,
-                configuration.server.endpoint
+                configuration.server.graphql_path
             );
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
@@ -425,13 +429,7 @@ async fn handle_get(
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
-    if http_request
-        .headers()
-        .get(&http::header::ACCEPT)
-        .map(prefers_html)
-        .unwrap_or_default()
-        && display_landing_page
-    {
+    if prefers_html(http_request.headers()) && display_landing_page {
         return display_home_page().into_response();
     }
 
@@ -601,16 +599,19 @@ where
     }
 }
 
-fn prefers_html(accept_header: &HeaderValue) -> bool {
-    accept_header
-        .to_str()
-        .map(|accept_str| {
-            accept_str
-                .split(',')
-                .map(|a| a.trim())
-                .any(|a| a == "text/html")
-        })
-        .unwrap_or_default()
+fn prefers_html(headers: &HeaderMap) -> bool {
+    let text_html = MediaType::new(TEXT, HTML);
+
+    headers.get_all(&http::header::ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&text_html))
+            })
+            .unwrap_or(false)
+    })
 }
 
 async fn decompress_request_body(
@@ -1271,7 +1272,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql"))
+                    .graphql_path(String::from("/graphql"))
                     .build(),
             )
             .build();
@@ -1340,7 +1341,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/:my_prefix/graphql"))
+                    .graphql_path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
             .build();
@@ -1409,7 +1410,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql/*"))
+                    .graphql_path(String::from("/graphql/*"))
                     .build(),
             )
             .build();
@@ -1628,7 +1629,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql/*"))
+                    .graphql_path(String::from("/graphql/*"))
                     .build(),
             )
             .build();

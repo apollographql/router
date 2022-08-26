@@ -177,6 +177,7 @@ dependencies = [
  "libc",
  "lru",
  "maplit",
+ "mediatype",
  "miette 5.3.0",
  "mime",
  "mockall",
@@ -3014,6 +3015,12 @@ name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
+name = "mediatype"
+version = "0.19.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac0db9ec602cd88b078efab731831a15461f90eb100c4a7da457d8cd6a917d2f"
 
 [[package]]
 name = "memchr"
