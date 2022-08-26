@@ -1,8 +1,9 @@
 [package]
 name = "apollo-uplink"
-version = "0.15.1"
+version = "0.16.0"
 edition = "2021"
 build = "build.rs"
+license = "Elastic-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,7 +14,7 @@ reqwest = { version = "0.11.11", default_features = false, features = [
     "rustls-tls",
     "json",
 ] }
-serde = { version = "1.0.143", features = ["derive", "rc"] }
+serde = { version = "1.0.144", features = ["derive", "rc"] }
 tokio = "1.20.1"
 tokio-stream = "0.1.9"
 tracing = "=0.1.34"

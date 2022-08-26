@@ -31,13 +31,10 @@ Most plugins should start by including the following set of `use` declarations:
 
 ```rust title="hello_world.rs"
 use apollo_router::plugin::Plugin;
-use apollo_router::{
-    register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
-};
+use apollo_router::register_plugin;
+use apollo_router::services::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 ```
 
@@ -77,7 +74,7 @@ The trait also provides a default implementations for each hook, which returns t
 // This is a bare-bones plugin that you can duplicate when creating your own.
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::Plugin;
-use apollo_router::stages::*;
+use apollo_router::services::*;
 
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
@@ -89,23 +86,12 @@ impl Plugin for HelloWorld {
         Ok(HelloWorld { configuration: init.config })
     }
 
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self);
-
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
-    fn router_service(
+    fn supergraph_service(
         &mut self,
         service: router::BoxService,
     ) -> router::BoxService {
-        service
-    }
-
-    fn query_planning_service(
-        &mut self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
         service
     }
 
@@ -140,7 +126,7 @@ To define custom logic for a service hook, you can use [`ServiceBuilder`](https:
 use tower::ServiceBuilderExt;
 use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
-fn router_service(
+fn supergraph_service(
     &mut self,
     service: router::BoxService,
 ) -> router::BoxService {
@@ -174,8 +160,8 @@ Before implementing a layer yourself, always check whether an existing layer imp
 
 Sometimes you might need to pass custom information between services. For example:
 
-* Authentication information obtained by the `RouterService` might be required by `SubgraphService`s.
-* Cache control headers from `SubgraphService`s might be aggregated and returned to the client by the `RouterService`.
+* Authentication information obtained by the `SupergraphService` might be required by `SubgraphService`s.
+* Cache control headers from `SubgraphService`s might be aggregated and returned to the client by the `SupergraphService`.
 
 Whenever the Apollo Router receives a request, it creates a corresponding `context` object and passes it along to each service. This object can store anything that's Serde-compatible (e.g., all simple types or a custom type).
 
@@ -249,7 +235,7 @@ There is no sequencing for plugin registration, and registrations might even exe
 
 ### Activate
 
-When the router is ready to start serving requests, it calls each plugin's `activate` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
+Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
 
 Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
 

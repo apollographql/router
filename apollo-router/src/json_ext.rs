@@ -1,4 +1,7 @@
 //! Performance oriented JSON manipulation.
+
+#![allow(missing_docs)] // FIXME
+
 use std::cmp::min;
 use std::fmt;
 

@@ -7,14 +7,15 @@ mod selection;
 use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
-pub use query::Query;
+pub(crate) use query::Query;
 pub(crate) use schema::Schema;
 pub(crate) use selection::*;
 use thiserror::Error;
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone)]
-pub enum SpecError {
+#[non_exhaustive]
+pub(crate) enum SpecError {
     /// selection processing recursion limit exceeded
     RecursionLimitExceeded,
     /// invalid type error, expected another type than '{0}'

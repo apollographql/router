@@ -1,4 +1,4 @@
-use apollo_router::stages::router;
+use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
 
@@ -26,7 +26,7 @@ async fn all_rhai_callbacks_are_invoked() {
         .build()
         .await
         .unwrap();
-    let request = router::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query("{ topProducts { name } }")
         .build()
         .unwrap();
@@ -39,12 +39,9 @@ async fn all_rhai_callbacks_are_invoked() {
         .unwrap();
     dbg!(_response);
     for expected_log in [
-        "router_service setup",
+        "supergraph_service setup",
         "from_router_request",
         "from_router_response",
-        "query_planner_service setup",
-        "from_query_planner_response",
-        "from_query_planner_request",
         "execution_service setup",
         "from_execution_request",
         "from_execution_response",

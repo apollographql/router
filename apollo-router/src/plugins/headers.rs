@@ -32,7 +32,7 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::subgraph;
+use crate::services::subgraph;
 use crate::SubgraphRequest;
 
 register_plugin!("apollo", "headers", Headers);
@@ -254,8 +254,6 @@ mod test {
 
     use super::*;
     use crate::graphql::Request;
-    use crate::graphql::Response;
-    use crate::http_ext;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::Config;
     use crate::plugins::headers::HeadersLayer;
@@ -525,10 +523,7 @@ mod test {
 
     fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new_from_response(
-            http::Response::builder()
-                .body(Response::builder().build())
-                .unwrap()
-                .into(),
+            http::Response::default(),
             Context::new(),
         ))
     }
@@ -536,7 +531,7 @@ mod test {
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
-                http_ext::Request::fake_builder()
+                http::Request::builder()
                     .header("da", "vda")
                     .header("db", "vdb")
                     .header("db", "vdb")
@@ -544,10 +539,9 @@ mod test {
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
                     .body(Request::builder().query("query").build())
-                    .build()
                     .expect("expecting valid request"),
             ),
-            subgraph_request: http_ext::Request::fake_builder()
+            subgraph_request: http::Request::builder()
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
@@ -555,7 +549,6 @@ mod test {
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
-                .build()
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),

@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
-use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -20,19 +19,18 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
-use tower::util::BoxService;
 use tower::BoxError;
 
 use crate::error::FetchError;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::services::RouterResponse;
+use crate::services::transport;
+use crate::services::SupergraphResponse;
 use crate::Context;
 
 pub(crate) mod apollo;
@@ -40,8 +38,6 @@ pub(crate) mod otlp;
 pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
-pub(crate) type CustomEndpoint =
-    BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -257,8 +253,8 @@ impl ErrorsForward {
 impl AttributesForwardConf {
     pub(crate) async fn get_attributes_from_router_response(
         &self,
-        response: RouterResponse,
-    ) -> (RouterResponse, HashMap<String, String>) {
+        response: SupergraphResponse,
+    ) -> (SupergraphResponse, HashMap<String, String>) {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -291,7 +287,7 @@ impl AttributesForwardConf {
                 };
             }
         }
-        let (parts, stream) = http::Response::from(response.response).into_parts();
+        let (parts, stream) = response.response.into_parts();
         let (first, rest) = stream.into_future().await;
         // Fill from response
         if let Some(from_response) = &self.response {
@@ -326,10 +322,9 @@ impl AttributesForwardConf {
         let response = http::Response::from_parts(
             parts,
             once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-        )
-        .into();
+        );
 
-        (RouterResponse { context, response }, attributes)
+        (SupergraphResponse { context, response }, attributes)
     }
 
     /// Get attributes from context
@@ -498,7 +493,7 @@ impl MetricsBuilder {
         self
     }
 
-    fn with_custom_endpoint(mut self, path: &str, endpoint: CustomEndpoint) -> Self {
+    fn with_custom_endpoint(mut self, path: &str, endpoint: transport::BoxService) -> Self {
         self.custom_endpoints
             .insert(path.to_string(), Handler::new(endpoint));
         self

@@ -12,7 +12,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
-use tower::buffer::Buffer;
+use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -31,46 +31,46 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
-use crate::http_ext::Request;
 use crate::introspection::Introspection;
-use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
+use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::router_factory::RouterServiceFactory;
+use crate::response::IncrementalResponse;
+use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::stages::query_planner;
 use crate::Configuration;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::Schema;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<QueryPlannerService, ExecutionFactory> {
-    query_planner_service: QueryPlannerService,
+pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
-    ready_query_planner_service: Option<QueryPlannerService>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, ExecutionFactory> {
+impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: QueryPlannerService,
+        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
     ) -> Self {
-        RouterService {
+        SupergraphService {
             query_planner_service,
             execution_service_factory,
             ready_query_planner_service: None,
@@ -79,31 +79,25 @@ impl<QueryPlannerService, ExecutionFactory> RouterService<QueryPlannerService, E
     }
 }
 
-impl<QueryPlannerService, ExecutionFactory> Service<RouterRequest>
-    for RouterService<QueryPlannerService, ExecutionFactory>
+impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
 where
-    QueryPlannerService: Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
-    QueryPlannerService::Future: Send + 'static,
     ExecutionFactory: ExecutionServiceFactory,
 {
-    type Response = RouterResponse;
+    type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // We need to obtain references to two hot services for use in call.
         // The reason for us to clone here is that the async block needs to own the hot services,
-        // and cloning will produce a cold service. Therefore cloning in `RouterService#call` is not
+        // and cloning will produce a cold service. Therefore cloning in `SupergraphService#call` is not
         // a valid course of action.
         self.ready_query_planner_service
             .get_or_insert_with(|| self.query_planner_service.clone())
             .poll_ready(cx)
     }
 
-    fn call(&mut self, req: RouterRequest) -> Self::Future {
+    fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let execution = self.execution_service_factory.new_service();
@@ -127,11 +121,16 @@ where
                         .context(context)
                         .build(),
                 )
+                .instrument(tracing::info_span!("query_planning",
+                    graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
+                    graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
+                    "otel.kind" = %SpanKind::Internal
+                ))
                 .await?;
 
             match content {
                 QueryPlannerContent::Introspection { response } => Ok(
-                    RouterResponse::new_from_graphql_response(*response, context),
+                    SupergraphResponse::new_from_graphql_response(*response, context),
                 ),
                 QueryPlannerContent::IntrospectionDisabled => {
                     let mut resp = http::Response::new(
@@ -146,59 +145,108 @@ where
                     );
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
-                    Ok(RouterResponse {
-                        response: resp.into(),
+                    Ok(SupergraphResponse {
+                        response: resp,
                         context,
                     })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
-                    let is_deferred = plan.root.contains_defer();
+                    let can_be_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
-                        Ok(RouterResponse::new_from_graphql_response(err, context))
+                        let mut res = SupergraphResponse::new_from_graphql_response(err, context);
+                        *res.response.status_mut() = StatusCode::BAD_REQUEST;
+                        Ok(res)
                     } else {
                         let operation_name = body.operation_name.clone();
 
                         let ExecutionResponse { response, context } = execution
                             .oneshot(
                                 ExecutionRequest::builder()
-                                    .originating_request(req.originating_request.clone())
+                                    .originating_request(req.originating_request)
                                     .query_plan(plan)
                                     .context(context)
                                     .build(),
                             )
                             .await?;
 
-                        let (parts, response_stream) = http::Response::from(response).into_parts();
-                        Ok(RouterResponse {
+                        let (parts, response_stream) = response.into_parts();
+
+                        let stream = response_stream
+                        .map(move |mut response: Response| {
+                            tracing::debug_span!("format_response").in_scope(|| {
+                                query.format_response(
+                                    &mut response,
+                                    operation_name.as_deref(),
+                                    variables.clone(),
+                                    schema.api_schema(),
+                                )
+                            });
+
+                            match (response.path.as_ref(), response.data.as_ref()) {
+                                (None, _) | (_, None) => {
+                                    if can_be_deferred {
+                                        response.has_next = Some(true);
+                                    }
+
+                                    response
+                                }
+                                // if the deferred response specified a path, we must extract the
+                                //values matched by that path and create a separate response for
+                                //each of them.
+                                // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+                                // would merge in the same ways, some clients will generate code
+                                // that checks the specific type of the deferred response at that
+                                // path, instead of starting from the root object, so to support
+                                // this, we extract the value at that path.
+                                // In particular, that means that a deferred fragment in an object
+                                // under an array would generate one response par array element
+                                (Some(response_path), Some(response_data)) => {
+                                    let mut sub_responses = Vec::new();
+                                    response_data.select_values_and_paths(
+                                        response_path,
+                                        |path, value| {
+                                            sub_responses
+                                                .push((path.clone(), value.clone()));
+                                        },
+                                    );
+
+                                    Response::builder()
+                                        .has_next(true)
+                                        .incremental(
+                                            sub_responses
+                                                .into_iter()
+                                                .map(move |(path, data)| {
+                                                    IncrementalResponse::builder()
+                                                        .and_label(
+                                                            response.label.clone(),
+                                                        )
+                                                        .data(data)
+                                                        .path(path)
+                                                        .errors(response.errors.clone())
+                                                        .extensions(
+                                                            response.extensions.clone(),
+                                                        )
+                                                        .build()
+                                                })
+                                                .collect(),
+                                        )
+                                        .build()
+                                }
+                            }
+                        });
+
+                        Ok(SupergraphResponse {
                             context,
                             response: http::Response::from_parts(
                                 parts,
-                                response_stream
-                                    .map(move |mut response: Response| {
-                                        tracing::debug_span!("format_response").in_scope(|| {
-                                            query.format_response(
-                                                &mut response,
-                                                operation_name.as_deref(),
-                                                variables.clone(),
-                                                schema.api_schema(),
-                                            )
-                                        });
-
-                                        // we use the path to look up the subselections, but the generated response
-                                        // is an object starting at the root so the path should be empty
-                                        response.path = None;
-
-                                        if is_deferred {
-                                            response.has_next = Some(true);
-                                        }
-
-                                        response
-                                    })
-                                    .in_current_span()
-                                    .boxed(),
+                                if can_be_deferred {
+                                    stream.chain(once(ready(Response::builder().has_next(false).build()))).left_stream()
+                                } else {
+                                    stream.right_stream()
+                                }.in_current_span()
+                                .boxed(),
                             )
-                            .into(),
                         })
                     }
                 }
@@ -222,7 +270,7 @@ where
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
 
-            Ok(RouterResponse::builder()
+            Ok(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(status_code)
                 .context(context_cloned)
@@ -240,14 +288,14 @@ where
 /// collection of plugins, collection of subgraph services are assembled to generate a
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
-pub(crate) struct PluggableRouterServiceBuilder {
+pub(crate) struct PluggableSupergraphServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
 }
 
-impl PluggableRouterServiceBuilder {
+impl PluggableSupergraphServiceBuilder {
     pub(crate) fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
@@ -261,7 +309,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
         plugin_name: String,
         plugin: Box<dyn DynPlugin>,
-    ) -> PluggableRouterServiceBuilder {
+    ) -> PluggableSupergraphServiceBuilder {
         self.plugins.insert(plugin_name, plugin);
         self
     }
@@ -270,7 +318,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
         name: &str,
         service_maker: S,
-    ) -> PluggableRouterServiceBuilder
+    ) -> PluggableSupergraphServiceBuilder
     where
         S: MakeSubgraphService,
     {
@@ -282,16 +330,12 @@ impl PluggableRouterServiceBuilder {
     pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,
-    ) -> PluggableRouterServiceBuilder {
+    ) -> PluggableSupergraphServiceBuilder {
         self.configuration = Some(configuration);
         self
     }
 
-    pub(crate) fn plugins_mut(&mut self) -> &mut Plugins {
-        &mut self.plugins
-    }
-
-    pub(crate) async fn build(mut self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -307,7 +351,7 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         let introspection = if configuration.server.introspection {
-            Some(Arc::new(Introspection::new().await))
+            Some(Arc::new(Introspection::new(&configuration).await))
         } else {
             None
         };
@@ -317,21 +361,8 @@ impl PluggableRouterServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service = ServiceBuilder::new().service(
-            CachingQueryPlanner::new(
-                Buffer::new(
-                    self.plugins
-                        .iter_mut()
-                        .rev()
-                        .fold(bridge_query_planner.boxed(), |acc, (_, e)| {
-                            e.query_planning_service(acc)
-                        }),
-                    DEFAULT_BUFFER_SIZE,
-                ),
-                plan_cache_limit,
-            )
-            .await,
-        );
+        let query_planner_service =
+            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
 
         let plugins = Arc::new(self.plugins);
 
@@ -355,46 +386,45 @@ impl PluggableRouterServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    query_planner_service:
-        CachingQueryPlanner<Buffer<query_planner::BoxService, QueryPlannerRequest>>,
+    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
     apq: APQLayer,
 }
 
-impl NewService<Request<graphql::Request>> for RouterCreator {
+impl NewService<http::Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
-        BoxService::new(
-            self.make()
-                .map_request(|http_request: Request<graphql::Request>| http_request.into())
-                .map_response(|response| response.response),
-        )
+        self.make()
+            .map_request(|http_request: http::Request<graphql::Request>| http_request.into())
+            .map_response(|response| response.response)
+            .boxed()
     }
 }
 
-impl RouterServiceFactory for RouterCreator {
-    type RouterService = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+impl SupergraphServiceFactory for RouterCreator {
+    type SupergraphService = BoxService<
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
 
-    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
-        Request<graphql::Request>,
-    >>::Future;
+    type Future =
+        <<RouterCreator as NewService<http::Request<graphql::Request>>>::Service as Service<
+            http::Request<graphql::Request>,
+        >>::Future;
 
     fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
         self.plugins
             .iter()
             .filter_map(|(plugin_name, plugin)| {
                 (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint())
+                    .then(|| plugin.custom_endpoint().map(Handler::new))
                     .flatten()
                     .map(|h| (plugin_name.clone(), h))
             })
@@ -406,10 +436,10 @@ impl RouterCreator {
     pub(crate) fn make(
         &self,
     ) -> impl Service<
-        RouterRequest,
-        Response = RouterResponse,
+        SupergraphRequest,
+        Response = SupergraphResponse,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
+        Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
             .layer(self.apq.clone())
@@ -417,7 +447,7 @@ impl RouterCreator {
             .service(
                 self.plugins.iter().rev().fold(
                     BoxService::new(
-                        RouterService::builder()
+                        SupergraphService::builder()
                             .query_planner_service(self.query_planner_service.clone())
                             .execution_service_factory(ExecutionCreator {
                                 schema: self.schema.clone(),
@@ -427,7 +457,7 @@ impl RouterCreator {
                             .schema(self.schema.clone())
                             .build(),
                     ),
-                    |acc, (_, e)| e.router_service(acc),
+                    |acc, (_, e)| e.supergraph_service(acc),
                 ),
             )
     }
@@ -436,7 +466,9 @@ impl RouterCreator {
     #[cfg(test)]
     pub(crate) fn test_service(
         &self,
-    ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> tower::util::BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+        use tower::buffer::Buffer;
+
         Buffer::new(self.make(), 512).boxed_clone()
     }
 }

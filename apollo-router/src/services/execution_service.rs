@@ -19,7 +19,7 @@ use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::Response;
-use crate::stages::execution;
+use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::Schema;
@@ -73,7 +73,7 @@ where
             let stream = once(ready(first)).chain(rest).boxed();
 
             Ok(ExecutionResponse::new_from_response(
-                http::Response::new(stream as BoxStream<'static, Response>).into(),
+                http::Response::new(stream as BoxStream<'static, Response>),
                 ctx,
             ))
         }

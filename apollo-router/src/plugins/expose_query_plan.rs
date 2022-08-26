@@ -3,7 +3,6 @@ use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
 use serde_json_bytes::json;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
 
@@ -11,15 +10,13 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::QueryPlannerContent;
-use crate::services::QueryPlannerRequest;
-use crate::services::QueryPlannerResponse;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
+use crate::services::execution;
+use crate::services::supergraph;
 
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
 const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
+const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.formatted_plan";
 const ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
 
 #[derive(Debug, Clone)]
@@ -38,65 +35,64 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn query_planning_service(
-        &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         service
-            .map_response(move |res| {
-                if res
+            .map_request(move |req: execution::Request| {
+                if req
                     .context
                     .get::<_, bool>(ENABLED_CONTEXT_KEY)
                     .ok()
                     .flatten()
                     .is_some()
                 {
-                    if let QueryPlannerContent::Plan { plan, .. } = &res.content {
-                        res.context
-                            .insert(QUERY_PLAN_CONTEXT_KEY, plan.root.clone())
-                            .unwrap();
-                    }
+                    req.context
+                        .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
+                        .unwrap();
+                    req.context
+                        .insert(
+                            FORMATTED_QUERY_PLAN_CONTEXT_KEY,
+                            req.query_plan.formatted_query_plan.clone(),
+                        )
+                        .unwrap();
                 }
 
-                res
+                req
             })
             .boxed()
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let conf_enabled = self.enabled;
         service
-            .map_future_with_context(move |req: &RouterRequest| {
+            .map_future_with_request_data(move |req: &supergraph::Request| {
                 let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
-                (req.originating_request.body().query.clone(), is_enabled)
-            }, move |(query, is_enabled): (Option<String>, bool), f| async move {
-                let mut res: Result<RouterResponse, BoxError>  = f.await;
+
+                is_enabled
+            }, move | is_enabled: bool, f| async move {
+                let mut res: supergraph::ServiceResult = f.await;
+
                 res = match res {
                     Ok(mut res) => {
                         if is_enabled {
-                            let (parts, stream) = http::Response::from(res.response).into_parts();
+                            let (parts, stream) = res.response.into_parts();
                             let (mut first, rest) = stream.into_future().await;
 
                             if let Some(first) = &mut first {
-                                if let Some(plan) =
-                                    res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
+                                if let (Some(plan), Some(formatted_query_plan)) =
+                                    (res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY), res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY))
                                 {
                                     first
                                         .extensions
-                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan, "text": query } }));
+                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": formatted_query_plan }));
                                 }
                             }
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                            )
-                            .into();
+                            );
                         }
 
                         Ok(res)
@@ -120,7 +116,6 @@ mod tests {
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::util::BoxCloneService;
     use tower::Service;
 
     use super::*;
@@ -128,7 +123,7 @@ mod tests {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::services::PluggableRouterServiceBuilder;
+    use crate::services::PluggableSupergraphServiceBuilder;
     use crate::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
@@ -146,9 +141,7 @@ mod tests {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    async fn build_mock_router(
-        plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxCloneService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -185,7 +178,7 @@ mod tests {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
             .with_dyn_plugin("experimental.expose_query_plan".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
@@ -206,19 +199,19 @@ mod tests {
             .expect("Plugin not created")
     }
 
-    async fn execute_router_test(
+    async fn execute_supergraph_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut supergraph_service: supergraph::BoxCloneService,
     ) {
-        let request = RouterRequest::fake_builder()
+        let request = supergraph::Request::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .header(EXPOSE_QUERY_PLAN_HEADER_NAME, "true")
             .build()
             .expect("expecting valid request");
 
-        let response = router_service
+        let response = supergraph_service
             .ready()
             .await
             .unwrap()
@@ -235,14 +228,26 @@ mod tests {
     #[tokio::test]
     async fn it_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(true)).await;
-        let router = build_mock_router(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, router).await;
+        let supergraph = build_mock_supergraph(plugin).await;
+        execute_supergraph_test(
+            VALID_QUERY,
+            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            supergraph.clone(),
+        )
+        .await;
+        // let's try that again
+        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
     }
 
     #[tokio::test]
     async fn it_doesnt_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(false)).await;
-        let router = build_mock_router(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN, router).await;
+        let supergraph = build_mock_supergraph(plugin).await;
+        execute_supergraph_test(
+            VALID_QUERY,
+            &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
+            supergraph,
+        )
+        .await;
     }
 }

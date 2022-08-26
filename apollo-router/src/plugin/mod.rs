@@ -28,24 +28,21 @@ use std::task::Poll;
 use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
-use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
-use crate::stages::execution;
-use crate::stages::query_planner;
-use crate::stages::router;
-use crate::stages::subgraph;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::transport;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -53,6 +50,7 @@ type InstanceFactory =
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
 /// Initialise details for a plugin
+#[non_exhaustive]
 pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
@@ -153,34 +151,27 @@ pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
-pub trait Plugin: Send + Sync + 'static + Sized {
+pub trait Plugin: Send + Sync + 'static {
+    /// The configuration for this plugin.
+    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    ///
+    /// If a plugin is [registered][register_plugin!],
+    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// by having a sub-section named after the plugin.
+    /// The contents of this section are deserialized into this `Config` type
+    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
     type Config: JsonSchema + DeserializeOwned + Send;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>;
-
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self) {}
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized;
 
     /// This service runs at the very beginning and very end of the request lifecycle.
-    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        service
-    }
-
-    /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
-    ///
-    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
-    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
-    /// must be performed on the query, they should be done in router service plugins.
-    fn query_planning_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
     }
 
@@ -203,12 +194,15 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         None
     }
 
     /// Return the name of the plugin.
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &'static str
+    where
+        Self: Sized,
+    {
         get_type_of(self)
     }
 }
@@ -224,26 +218,11 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub(crate) trait DynPlugin: Send + Sync + 'static {
-    /// This is invoked after all plugins have been created and we're ready to go live.
-    /// This method MUST not panic.
-    fn activate(&mut self);
-
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
-
-    /// This service handles generating the query plan for each incoming request.
-    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
-    ///
-    /// Query planning uses a cache that will store the result of the query planner and query planning plugins execution, so if the same query is
-    /// performed twice, the query planner plugins will onyl see it once. The caching key contains the query and operation name. If modifications
-    /// must be performed on the query, they should be done in router service plugins.
-    fn query_planning_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService;
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
@@ -260,7 +239,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<Handler>;
+    fn custom_endpoint(&self) -> Option<transport::BoxService>;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -272,20 +251,8 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    #[allow(deprecated)]
-    fn activate(&mut self) {
-        self.activate()
-    }
-
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        self.router_service(service)
-    }
-
-    fn query_planning_service(
-        &self,
-        service: query_planner::BoxService,
-    ) -> query_planner::BoxService {
-        self.query_planning_service(service)
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        self.supergraph_service(service)
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
@@ -296,7 +263,7 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         self.custom_endpoint()
     }
 
@@ -326,25 +293,20 @@ macro_rules! register_plugin {
 
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
-pub struct Handler {
-    service: Buffer<
-        BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-        http_ext::Request<Bytes>,
-    >,
+pub(crate) struct Handler {
+    service: Buffer<transport::BoxService, transport::Request>,
 }
 
 impl Handler {
-    pub fn new(
-        service: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-    ) -> Self {
+    pub(crate) fn new(service: transport::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<http_ext::Request<Bytes>> for Handler {
-    type Response = http_ext::Response<Bytes>;
+impl Service<transport::Request> for Handler {
+    type Response = transport::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -352,15 +314,13 @@ impl Service<http_ext::Request<Bytes>> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http_ext::Request<Bytes>) -> Self::Future {
+    fn call(&mut self, req: transport::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>> for Handler {
-    fn from(
-        original: BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>,
-    ) -> Self {
+impl From<transport::BoxService> for Handler {
+    fn from(original: transport::BoxService) -> Self {
         Self::new(original)
     }
 }

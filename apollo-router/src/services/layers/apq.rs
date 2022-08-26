@@ -19,8 +19,8 @@ use tower::Service;
 use crate::cache::DeduplicatingCache;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::RouterRequest;
-use crate::RouterResponse;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -45,16 +45,19 @@ impl APQLayer {
 
 impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Send + 'static,
-    <S as Service<RouterRequest>>::Future: Send + 'static,
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send + 'static,
+    <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
     type Service = AsyncCheckpointService<
-        Buffer<S, RouterRequest>,
+        Buffer<S, SupergraphRequest>,
         BoxFuture<
             'static,
-            Result<ControlFlow<<S as Service<RouterRequest>>::Response, RouterRequest>, BoxError>,
+            Result<
+                ControlFlow<<S as Service<SupergraphRequest>>::Response, SupergraphRequest>,
+                BoxError,
+            >,
         >,
-        RouterRequest,
+        SupergraphRequest,
     >;
 
     fn layer(&self, service: S) -> Self::Service {
@@ -112,7 +115,7 @@ where
                                     }))
                                     .unwrap(),
                                 }];
-                                let res = RouterResponse::builder()
+                                let res = SupergraphResponse::builder()
                                     .data(Value::default())
                                     .errors(errors)
                                     .context(req.context)
@@ -128,7 +131,10 @@ where
                     as BoxFuture<
                         'static,
                         Result<
-                            ControlFlow<<S as Service<RouterRequest>>::Response, RouterRequest>,
+                            ControlFlow<
+                                <S as Service<SupergraphRequest>>::Response,
+                                SupergraphRequest,
+                            >,
                             BoxError,
                         >,
                     >
@@ -147,7 +153,6 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use std::borrow::Cow;
-    use std::collections::HashMap;
 
     use serde_json_bytes::json;
     use tower::ServiceExt;
@@ -155,7 +160,7 @@ mod apq_tests {
     use super::*;
     use crate::error::Error;
     use crate::graphql::Response;
-    use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSupergraphService;
     use crate::Context;
 
     #[tokio::test]
@@ -179,7 +184,7 @@ mod apq_tests {
             .unwrap(),
         };
 
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
         // it should have not been forwarded to our mock service
@@ -197,7 +202,7 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::fake_builder()
+            Ok(SupergraphResponse::fake_builder()
                 .build()
                 .expect("expecting valid request"))
         });
@@ -224,7 +229,7 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::fake_builder()
+                Ok(SupergraphResponse::fake_builder()
                     .build()
                     .expect("expecting valid request"))
             });
@@ -232,26 +237,23 @@ mod apq_tests {
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);
 
-        let extensions = HashMap::from([(
-            "persistedQuery".to_string(),
-            json!({
-                "version" : 1,
-                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
-            }),
-        )]);
+        let persisted = json!({
+            "version" : 1,
+            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+        });
 
-        let hash_only = RouterRequest::fake_builder()
-            .extensions(extensions.clone())
+        let hash_only = SupergraphRequest::fake_builder()
+            .extension("persistedQuery", persisted.clone())
             .build()
             .expect("expecting valid request");
 
-        let second_hash_only = RouterRequest::fake_builder()
-            .extensions(extensions.clone())
+        let second_hash_only = SupergraphRequest::fake_builder()
+            .extension("persistedQuery", persisted.clone())
             .build()
             .expect("expecting valid request");
 
-        let with_query = RouterRequest::fake_builder()
-            .extensions(extensions)
+        let with_query = SupergraphRequest::fake_builder()
+            .extension("persistedQuery", persisted.clone())
             .query("{__typename}".to_string())
             .build()
             .expect("expecting valid request");
@@ -294,7 +296,7 @@ mod apq_tests {
             .unwrap(),
         };
 
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
         // it should have not been forwarded to our mock service
@@ -311,7 +313,7 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::fake_builder()
+            Ok(SupergraphResponse::fake_builder()
                 .build()
                 .expect("expecting valid request"))
         });
@@ -322,29 +324,29 @@ mod apq_tests {
         let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
         let mut service_stack = apq.layer(mock_service);
 
-        let extensions = HashMap::from([(
-            "persistedQuery".to_string(),
-            json!({
-                "version" : 1,
-                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
-            }),
-        )]);
+        let persisted = json!({
+            "version" : 1,
+            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+        });
 
-        let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let hash_only = request_builder
             .context(Context::new())
             .build()
             .expect("expecting valid request");
 
-        let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let second_hash_only = request_builder
             .context(Context::new())
             .build()
             .expect("expecting valid request");
 
-        let request_builder = RouterRequest::fake_builder().extensions(extensions);
+        let request_builder =
+            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let with_query = request_builder
             .query("{__typename}".to_string())
