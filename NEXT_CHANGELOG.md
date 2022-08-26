@@ -192,6 +192,14 @@ next chunk to see the delimiter.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
+### Patch async-compression to compress responses in streaming ([PR #1604](https://github.com/apollographql/router/issues/1604))
+
+async-compression is a dependency used for response compression. Its implementation accumulates the entire compressed response
+in memory before sending it, which creates problems for deferred responses, where we want the responses to come as soon as
+possible, and not all at once after a while.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1604
+
 ## 🛠 Maintenance
 
 ### Depend on published `router-bridge` ([PR #1613](https://github.com/apollographql/router/issues/1613))
