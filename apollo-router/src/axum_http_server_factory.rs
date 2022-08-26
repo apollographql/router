@@ -28,6 +28,7 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
@@ -82,6 +83,101 @@ impl AxumHttpServerFactory {
     }
 }
 
+pub(crate) fn make_axum_router<RF>(
+    service_factory: RF,
+    configuration: &Configuration,
+    plugin_handlers: HashMap<String, Handler>,
+) -> Result<Router, ApolloRouterError>
+where
+    RF: SupergraphServiceFactory,
+{
+    let cors = configuration
+        .server
+        .cors
+        .clone()
+        .into_layer()
+        .map_err(|e| {
+            ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
+        })?;
+    let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
+        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+        format!("{}router_extra_path", configuration.server.endpoint)
+    } else {
+        configuration.server.endpoint.clone()
+    };
+    let mut router = Router::<hyper::Body>::new()
+        .route(
+            &graphql_endpoint,
+            get({
+                let display_landing_page = configuration.server.landing_page;
+                move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                    handle_get(
+                        host,
+                        service.new_service().boxed(),
+                        http_request,
+                        display_landing_page,
+                    )
+                }
+            })
+            .post({
+                move |host: Host,
+                      uri: OriginalUri,
+                      request: Json<graphql::Request>,
+                      Extension(service): Extension<RF>,
+                      header_map: HeaderMap| {
+                    handle_post(
+                        host,
+                        uri,
+                        request,
+                        service.new_service().boxed(),
+                        header_map,
+                    )
+                }
+            }),
+        )
+        .layer(middleware::from_fn(decompress_request_body))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(PropagatingMakeSpan::new())
+                .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                    if resp.status() >= StatusCode::BAD_REQUEST {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Error.as_str(),
+                        );
+                    } else {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Ok.as_str(),
+                        );
+                    }
+                }),
+        )
+        .route(&configuration.server.health_check_path, get(health_check))
+        .layer(Extension(service_factory))
+        .layer(cors)
+        .layer(CompressionLayer::new()); // To compress response body
+
+    for (plugin_name, handler) in plugin_handlers {
+        router = router.route(
+            &format!("/plugins/{}/*path", plugin_name),
+            get({
+                let new_handler = handler.clone();
+                move |host: Host, request_parts: Request<Body>| {
+                    custom_plugin_handler(host, request_parts, new_handler)
+                }
+            })
+            .post({
+                let new_handler = handler.clone();
+                move |host: Host, request_parts: Request<Body>| {
+                    custom_plugin_handler(host, request_parts, new_handler)
+                }
+            }),
+        );
+    }
+    Ok(router)
+}
+
 impl HttpServerFactory for AxumHttpServerFactory {
     type Future = Pin<Box<dyn Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send>>;
 
@@ -99,97 +195,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
 
-            let cors = configuration
-                .server
-                .cors
-                .clone()
-                .into_layer()
-                .map_err(|e| {
-                    ApolloRouterError::ConfigError(
-                        crate::configuration::ConfigurationError::LayerConfiguration {
-                            layer: "Cors".to_string(),
-                            error: e,
-                        },
-                    )
-                })?;
-            let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
-                // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-                format!("{}router_extra_path", configuration.server.endpoint)
-            } else {
-                configuration.server.endpoint.clone()
-            };
-            let mut router = Router::new()
-                .route(
-                    &graphql_endpoint,
-                    get({
-                        let display_landing_page = configuration.server.landing_page;
-                        move |host: Host,
-                              Extension(service): Extension<RF>,
-                              http_request: Request<Body>| {
-                            handle_get(
-                                host,
-                                service.new_service().boxed(),
-                                http_request,
-                                display_landing_page,
-                            )
-                        }
-                    })
-                    .post({
-                        move |host: Host,
-                              uri: OriginalUri,
-                              request: Json<graphql::Request>,
-                              Extension(service): Extension<RF>,
-                              header_map: HeaderMap| {
-                            handle_post(
-                                host,
-                                uri,
-                                request,
-                                service.new_service().boxed(),
-                                header_map,
-                            )
-                        }
-                    }),
-                )
-                .layer(middleware::from_fn(decompress_request_body))
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(PropagatingMakeSpan::new())
-                        .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
-                            if resp.status() >= StatusCode::BAD_REQUEST {
-                                span.record(
-                                    "otel.status_code",
-                                    &opentelemetry::trace::StatusCode::Error.as_str(),
-                                );
-                            } else {
-                                span.record(
-                                    "otel.status_code",
-                                    &opentelemetry::trace::StatusCode::Ok.as_str(),
-                                );
-                            }
-                        }),
-                )
-                .route(&configuration.server.health_check_path, get(health_check))
-                .layer(Extension(service_factory))
-                .layer(cors)
-                .layer(CompressionLayer::new()); // To compress response body
-
-            for (plugin_name, handler) in plugin_handlers {
-                router = router.route(
-                    &format!("/plugins/{}/*path", plugin_name),
-                    get({
-                        let new_handler = handler.clone();
-                        move |host: Host, request_parts: Request<Body>| {
-                            custom_plugin_handler(host, request_parts, new_handler)
-                        }
-                    })
-                    .post({
-                        let new_handler = handler.clone();
-                        move |host: Host, request_parts: Request<Body>| {
-                            custom_plugin_handler(host, request_parts, new_handler)
-                        }
-                    }),
-                );
-            }
+            let router = make_axum_router(service_factory, &configuration, plugin_handlers)?;
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -244,7 +250,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                                         max_open_file_warning = None;
                                     }
 
-                                    tokio::task::spawn(async move{
+                                    tokio::task::spawn(async move {
                                         match res {
                                             NetworkStream::Tcp(stream) => {
                                                 stream
@@ -515,10 +521,6 @@ where
                 }
                 Ok(response) => {
                     let (mut parts, mut stream) = response.into_parts();
-                    parts.headers.insert(
-                        "content-type",
-                        HeaderValue::from_static("multipart/mixed;boundary=\"graphql\""),
-                    );
 
                     match stream.next().await {
                         None => {
@@ -531,6 +533,13 @@ where
                         }
                         Some(response) => {
                             if response.has_next.unwrap_or(false) {
+                                parts.headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static(
+                                        "multipart/mixed;boundary=\"graphql\"",
+                                    ),
+                                );
+
                                 // each chunk contains a response and the next delimiter, to let client parsers
                                 // know that they can process the response right away
                                 let mut first_buf = Vec::from(
@@ -559,6 +568,10 @@ where
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
+                                parts.headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static("application/json"),
+                                );
                                 tracing::trace_span!("serialize_response").in_scope(|| {
                                     http_ext::Response::from(http::Response::from_parts(
                                         parts, response,
@@ -744,6 +757,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
 
@@ -2163,5 +2177,129 @@ Content-Type: application/json\r
             .get("access-control-allow-origin")
             .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
             .unwrap_or_default()
+    }
+
+    #[test(tokio::test)]
+    async fn response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                Ok(http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({
+                                    "test": "hello"
+                                }))
+                                .build(),
+                        )
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+
+        assert_eq!(
+            response.text().await.unwrap(),
+            serde_json::to_string(&json!({
+                "data": {
+                    "test": "hello"
+                },
+            }))
+            .unwrap()
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                let body = stream::iter(vec![
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello",
+                        }))
+                        .has_next(true)
+                        .build(),
+                    graphql::Response::builder()
+                        .incremental(vec![graphql::IncrementalResponse::builder()
+                            .data(json!({
+                                "other": "world"
+                            }))
+                            .path(Path::default())
+                            .build()])
+                        .has_next(true)
+                        .build(),
+                    graphql::Response::builder().has_next(false).build(),
+                ])
+                .boxed();
+                Ok(http::Response::builder().status(200).body(body).unwrap())
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test ... @defer { other } }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let mut response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "multipart/mixed;boundary=\"graphql\""
+            ))
+        );
+
+        let first = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*first).unwrap(),
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
+        );
+
+        let second = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*second).unwrap(),
+        "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
+        );
+
+        let third = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*third).unwrap(),
+            "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
+        );
+
+        server.shutdown().await
     }
 }

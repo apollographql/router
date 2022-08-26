@@ -7,8 +7,6 @@
 //!
 //! * [`self`] - this module (apollo_router) contains high level building blocks for a federated GraphQL router
 //!
-//! * [`error`] - the various errors that the router is expected to handle
-//!
 //! * [`graphql`] - graphql specific functionality for requests, responses, errors
 //!
 //! * [`layers`] - examples of tower layers used to implement plugins
@@ -17,9 +15,6 @@
 //!
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
-//!
-//! Ultimately, you might want to be interested in all aspects of the implementation, in which case
-//! you'll want to become familiar with all of the code.
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
@@ -56,16 +51,16 @@ mod axum_http_server_factory;
 mod cache;
 mod configuration;
 mod context;
-pub mod error;
+mod error;
 mod executable;
 mod files;
 pub mod graphql;
-pub mod http_ext;
+mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
 mod plugins;
-pub mod query_planner;
+mod query_planner;
 mod request;
 mod response;
 mod router;
@@ -80,6 +75,7 @@ pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
+pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;

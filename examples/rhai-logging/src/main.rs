@@ -50,7 +50,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .extra_supergraph_plugin(move |_| mock_service.clone().boxed())
+            .supergraph_hook(move |_| mock_service.clone().boxed())
             .build()
             .await
             .unwrap();
