@@ -33,6 +33,10 @@ use http::Request;
 use http::Uri;
 use hyper::server::conn::Http;
 use hyper::Body;
+use mediatype::names::HTML;
+use mediatype::names::TEXT;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -424,13 +428,7 @@ async fn handle_get(
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
-    if http_request
-        .headers()
-        .get(&http::header::ACCEPT)
-        .map(prefers_html)
-        .unwrap_or_default()
-        && display_landing_page
-    {
+    if prefers_html(&http_request.headers()) && display_landing_page {
         return display_home_page().into_response();
     }
 
@@ -593,16 +591,19 @@ where
     }
 }
 
-fn prefers_html(accept_header: &HeaderValue) -> bool {
-    accept_header
-        .to_str()
-        .map(|accept_str| {
-            accept_str
-                .split(',')
-                .map(|a| a.trim())
-                .any(|a| a == "text/html")
-        })
-        .unwrap_or_default()
+fn prefers_html(headers: &HeaderMap) -> bool {
+    let text_html = MediaType::new(TEXT, HTML);
+
+    headers.get_all(&http::header::ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&text_html))
+            })
+            .unwrap_or(false)
+    })
 }
 
 async fn decompress_request_body(

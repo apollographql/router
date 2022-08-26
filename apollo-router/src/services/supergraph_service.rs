@@ -10,9 +10,14 @@ use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
+use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
+use mediatype::names::MIXED;
+use mediatype::names::MULTIPART;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -154,9 +159,7 @@ where
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
-                    if can_be_deferred && !req.originating_request.headers().get_all(ACCEPT).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')
-                    .map(|a| a.trim())).any(|value|
-                        value == "multipart/mixed") {
+                    if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
                             tracing::error!("tried to send a defer request without accept: multipart/mixed");
                             let mut resp = http::Response::new(
                                 once(ready(
@@ -300,6 +303,21 @@ where
 
         Box::pin(fut)
     }
+}
+
+fn accepts_multipart(headers: &HeaderMap) -> bool {
+    let multipart_mixed = MediaType::new(MULTIPART, MIXED);
+
+    headers.get_all(ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// Builder which generates a plugin pipeline.

@@ -167,6 +167,7 @@ url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
 pin-project-lite = "0.2.9"
+mediatype = "0.19.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
