@@ -178,6 +178,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Depend on published `router-bridge` ([PR #1613](https://github.com/apollographql/router/issues/1613))
+
+We have published the `router-bridge` to crates.io, which removes the need for router developers to have nodejs installed.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1613
 
 ### Re-organize our release steps checklist ([PR #1605](https://github.com/apollographql/router/pull/1605))
 
