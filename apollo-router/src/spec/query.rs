@@ -190,6 +190,7 @@ impl Query {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn format_value(
         &self,
         parameters: &mut FormatParameters,
