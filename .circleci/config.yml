@@ -492,12 +492,11 @@ jobs:
       - run:
           name: Docker build
           command: |
-            ROUTER_RELEASE=${VERSION:1}
             ROUTER_TAG=ghcr.io/apollographql/router
             # Build debug image
-            docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug .
+            docker build --build-arg ROUTER_RELEASE=${VERSION} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
             # Build release image
-            docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+            docker build --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
             # Note: GH Token owned by apollo-bot2, no expire
             echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
             # Push debug image
