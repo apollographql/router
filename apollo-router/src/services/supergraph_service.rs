@@ -31,7 +31,6 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
-use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
@@ -147,12 +146,12 @@ where
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
                     Ok(SupergraphResponse {
-                        response: resp.into(),
+                        response: resp,
                         context,
                     })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
-                    let is_deferred = plan.root.contains_defer();
+                    let can_be_deferred = plan.root.contains_defer();
 
                     if let Some(err) = query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
@@ -164,85 +163,90 @@ where
                         let ExecutionResponse { response, context } = execution
                             .oneshot(
                                 ExecutionRequest::builder()
-                                    .originating_request(req.originating_request.clone())
+                                    .originating_request(req.originating_request)
                                     .query_plan(plan)
                                     .context(context)
                                     .build(),
                             )
                             .await?;
 
-                        let (parts, response_stream) = http::Response::from(response).into_parts();
+                        let (parts, response_stream) = response.into_parts();
+
+                        let stream = response_stream
+                        .map(move |mut response: Response| {
+                            tracing::debug_span!("format_response").in_scope(|| {
+                                query.format_response(
+                                    &mut response,
+                                    operation_name.as_deref(),
+                                    variables.clone(),
+                                    schema.api_schema(),
+                                )
+                            });
+
+                            match (response.path.as_ref(), response.data.as_ref()) {
+                                (None, _) | (_, None) => {
+                                    if can_be_deferred {
+                                        response.has_next = Some(true);
+                                    }
+
+                                    response
+                                }
+                                // if the deferred response specified a path, we must extract the
+                                //values matched by that path and create a separate response for
+                                //each of them.
+                                // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+                                // would merge in the same ways, some clients will generate code
+                                // that checks the specific type of the deferred response at that
+                                // path, instead of starting from the root object, so to support
+                                // this, we extract the value at that path.
+                                // In particular, that means that a deferred fragment in an object
+                                // under an array would generate one response par array element
+                                (Some(response_path), Some(response_data)) => {
+                                    let mut sub_responses = Vec::new();
+                                    response_data.select_values_and_paths(
+                                        response_path,
+                                        |path, value| {
+                                            sub_responses
+                                                .push((path.clone(), value.clone()));
+                                        },
+                                    );
+
+                                    Response::builder()
+                                        .has_next(true)
+                                        .incremental(
+                                            sub_responses
+                                                .into_iter()
+                                                .map(move |(path, data)| {
+                                                    IncrementalResponse::builder()
+                                                        .and_label(
+                                                            response.label.clone(),
+                                                        )
+                                                        .data(data)
+                                                        .path(path)
+                                                        .errors(response.errors.clone())
+                                                        .extensions(
+                                                            response.extensions.clone(),
+                                                        )
+                                                        .build()
+                                                })
+                                                .collect(),
+                                        )
+                                        .build()
+                                }
+                            }
+                        });
+
                         Ok(SupergraphResponse {
                             context,
                             response: http::Response::from_parts(
                                 parts,
-                                response_stream
-                                    .map(move |mut response: Response| {
-                                        tracing::debug_span!("format_response").in_scope(|| {
-                                            query.format_response(
-                                                &mut response,
-                                                operation_name.as_deref(),
-                                                variables.clone(),
-                                                schema.api_schema(),
-                                            )
-                                        });
-
-                                        match (response.path.as_ref(), response.data.as_ref()) {
-                                            (None, _) | (_, None) => {
-                                                if is_deferred {
-                                                    response.has_next = Some(true);
-                                                }
-
-                                                response
-                                            }
-                                            // if the deferred response specified a path, we must extract the
-                                            //values matched by that path and create a separate response for
-                                            //each of them.
-                                            // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
-                                            // would merge in the same ways, some clients will generate code
-                                            // that checks the specific type of the deferred response at that
-                                            // path, instead of starting from the root object, so to support
-                                            // this, we extract the value at that path.
-                                            // In particular, that means that a deferred fragment in an object
-                                            // under an array would generate one response par array element
-                                            (Some(response_path), Some(response_data)) => {
-                                                let mut sub_responses = Vec::new();
-                                                response_data.select_values_and_paths(
-                                                    response_path,
-                                                    |path, value| {
-                                                        sub_responses
-                                                            .push((path.clone(), value.clone()));
-                                                    },
-                                                );
-
-                                                Response::builder()
-                                                    .has_next(true)
-                                                    .incremental(
-                                                        sub_responses
-                                                            .into_iter()
-                                                            .map(move |(path, data)| {
-                                                                IncrementalResponse::builder()
-                                                                    .and_label(
-                                                                        response.label.clone(),
-                                                                    )
-                                                                    .data(data)
-                                                                    .path(path)
-                                                                    .errors(response.errors.clone())
-                                                                    .extensions(
-                                                                        response.extensions.clone(),
-                                                                    )
-                                                                    .build()
-                                                            })
-                                                            .collect(),
-                                                    )
-                                                    .build()
-                                            }
-                                        }
-                                    })
-                                    .in_current_span()
-                                    .boxed(),
+                                if can_be_deferred {
+                                    stream.chain(once(ready(Response::builder().has_next(false).build()))).left_stream()
+                                } else {
+                                    stream.right_stream()
+                                }.in_current_span()
+                                .boxed(),
                             )
-                            .into(),
                         })
                     }
                 }
@@ -389,31 +393,31 @@ pub(crate) struct RouterCreator {
     apq: APQLayer,
 }
 
-impl NewService<Request<graphql::Request>> for RouterCreator {
+impl NewService<http::Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
-        BoxService::new(
-            self.make()
-                .map_request(|http_request: Request<graphql::Request>| http_request.into())
-                .map_response(|response| response.response),
-        )
+        self.make()
+            .map_request(|http_request: http::Request<graphql::Request>| http_request.into())
+            .map_response(|response| response.response)
+            .boxed()
     }
 }
 
 impl SupergraphServiceFactory for RouterCreator {
     type SupergraphService = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
 
-    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
-        Request<graphql::Request>,
-    >>::Future;
+    type Future =
+        <<RouterCreator as NewService<http::Request<graphql::Request>>>::Service as Service<
+            http::Request<graphql::Request>,
+        >>::Future;
 
     fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
         self.plugins

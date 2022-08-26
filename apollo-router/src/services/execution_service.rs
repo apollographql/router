@@ -73,7 +73,7 @@ where
             let stream = once(ready(first)).chain(rest).boxed();
 
             Ok(ExecutionResponse::new_from_response(
-                http::Response::new(stream as BoxStream<'static, Response>).into(),
+                http::Response::new(stream as BoxStream<'static, Response>),
                 ctx,
             ))
         }

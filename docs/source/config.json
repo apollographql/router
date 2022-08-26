@@ -1,6 +1,8 @@
 {
   "title": "Router",
-  "algoliaFilters": ["docset:router"],
+  "algoliaFilters": [
+    "docset:router"
+  ],
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
@@ -39,9 +41,10 @@
     },
     "Customizations": {
       "Overview": "/customizations/overview",
+      "Rhai scripts": "/customizations/rhai",
+      "Rhai API reference": "/customizations/rhai-api",
       "Native Rust plugins": "/customizations/native",
-      "Custom binary": "/customizations/custom-binary",
-      "Rhai scripts": "/customizations/rhai"
+      "Custom router binary": "/customizations/custom-binary"
     },
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",

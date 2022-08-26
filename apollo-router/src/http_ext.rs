@@ -12,119 +12,239 @@ use std::ops::DerefMut;
 use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures::future::ready;
-use futures::stream::once;
-use futures::stream::BoxStream;
-use http::header::HeaderName;
-use http::header::{self};
+use http::header;
 use http::HeaderValue;
-use http::Method;
 use multimap::MultiMap;
 
 use crate::graphql;
 
-/// Temporary holder of header name while for use while building requests and responses. Required
-/// because header name creation is fallible.
-#[derive(Eq)]
-pub enum IntoHeaderName {
-    String(String),
-    HeaderName(HeaderName),
+/// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
+///
+/// `buildstructor` builders allow doing implict conversions for convenience,
+/// but only infallible ones.
+/// `HeaderName` can be converted from various types but the conversions is often fallible,
+/// with `TryFrom` or `TryInto` instead of `From` or `Into`.
+/// This types splits conversion in two steps:
+/// it implements infallible conversion from various types like `&str` (that builders can rely on)
+/// and fallible conversion to `HeaderName` (called later where we can handle errors).
+///
+/// See for example [`supergraph::Request::builder`][crate::services::supergraph::Request::builder]
+/// which can be used like this:
+///
+/// ```
+/// # fn main() -> Result<(), tower::BoxError> {
+/// use apollo_router::services::supergraph;
+/// let request = supergraph::Request::fake_builder()
+///     .header("accept-encoding", "gzip")
+///     // Other parameters
+///     .build()?;
+/// # Ok(()) }
+/// ```
+pub struct TryIntoHeaderName {
+    /// The fallible conversion result
+    result: Result<header::HeaderName, header::InvalidHeaderName>,
 }
 
-/// Temporary holder of header value while for use while building requests and responses. Required
-/// because header value creation is fallible.
-#[derive(Eq)]
-pub enum IntoHeaderValue {
-    String(String),
-    HeaderValue(HeaderValue),
+/// Delayed-fallibility wrapper for conversion to [`http::header::HeaderValue`].
+///
+/// `buildstructor` builders allow doing implict conversions for convenience,
+/// but only infallible ones.
+/// `HeaderValue` can be converted from various types but the conversions is often fallible,
+/// with `TryFrom` or `TryInto` instead of `From` or `Into`.
+/// This types splits conversion in two steps:
+/// it implements infallible conversion from various types like `&str` (that builders can rely on)
+/// and fallible conversion to `HeaderValue` (called later where we can handle errors).
+///
+/// See for example [`supergraph::Request::builder`][crate::services::supergraph::Request::builder]
+/// which can be used like this:
+///
+/// ```
+/// # fn main() -> Result<(), tower::BoxError> {
+/// use apollo_router::services::supergraph;
+/// let request = supergraph::Request::fake_builder()
+///     .header("accept-encoding", "gzip")
+///     // Other parameters
+///     .build()?;
+/// # Ok(()) }
+/// ```
+pub struct TryIntoHeaderValue {
+    /// The fallible conversion result
+    result: Result<header::HeaderValue, header::InvalidHeaderValue>,
 }
 
-impl PartialEq for IntoHeaderName {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
+impl TryFrom<TryIntoHeaderName> for header::HeaderName {
+    type Error = header::InvalidHeaderName;
+
+    fn try_from(value: TryIntoHeaderName) -> Result<Self, Self::Error> {
+        value.result
     }
 }
 
-impl PartialEq for IntoHeaderValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
+impl TryFrom<TryIntoHeaderValue> for header::HeaderValue {
+    type Error = header::InvalidHeaderValue;
+
+    fn try_from(value: TryIntoHeaderValue) -> Result<Self, Self::Error> {
+        value.result
     }
 }
 
-impl Hash for IntoHeaderName {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_bytes().hash(state);
+impl From<header::HeaderName> for TryIntoHeaderName {
+    fn from(value: header::HeaderName) -> Self {
+        Self { result: Ok(value) }
     }
 }
 
-impl Hash for IntoHeaderValue {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_bytes().hash(state);
-    }
-}
-
-impl IntoHeaderName {
-    fn as_bytes(&self) -> &[u8] {
-        match self {
-            IntoHeaderName::String(s) => s.as_bytes(),
-            IntoHeaderName::HeaderName(h) => h.as_str().as_bytes(),
+impl From<&'_ header::HeaderName> for TryIntoHeaderName {
+    fn from(value: &'_ header::HeaderName) -> Self {
+        Self {
+            result: Ok(value.clone()),
         }
     }
 }
 
-impl IntoHeaderValue {
-    fn as_bytes(&self) -> &[u8] {
-        match self {
-            IntoHeaderValue::String(s) => s.as_bytes(),
-            IntoHeaderValue::HeaderValue(v) => v.as_bytes(),
+impl From<&'_ [u8]> for TryIntoHeaderName {
+    fn from(value: &'_ [u8]) -> Self {
+        Self {
+            result: value.try_into(),
         }
     }
 }
 
-impl<T> From<T> for IntoHeaderName
-where
-    T: std::fmt::Display,
-{
-    fn from(name: T) -> Self {
-        IntoHeaderName::String(name.to_string())
+impl From<&'_ str> for TryIntoHeaderName {
+    fn from(value: &'_ str) -> Self {
+        Self {
+            result: value.try_into(),
+        }
     }
 }
 
-impl<T> From<T> for IntoHeaderValue
-where
-    T: std::fmt::Display,
-{
-    fn from(name: T) -> Self {
-        IntoHeaderValue::String(name.to_string())
+impl From<Vec<u8>> for TryIntoHeaderName {
+    fn from(value: Vec<u8>) -> Self {
+        Self {
+            result: value.try_into(),
+        }
     }
 }
 
-impl TryFrom<IntoHeaderName> for HeaderName {
-    type Error = http::Error;
-
-    fn try_from(value: IntoHeaderName) -> Result<Self, Self::Error> {
-        Ok(match value {
-            IntoHeaderName::String(name) => HeaderName::try_from(name)?,
-            IntoHeaderName::HeaderName(name) => name,
-        })
+impl From<String> for TryIntoHeaderName {
+    fn from(value: String) -> Self {
+        Self {
+            result: value.try_into(),
+        }
     }
 }
 
-impl TryFrom<IntoHeaderValue> for HeaderValue {
-    type Error = http::Error;
-
-    fn try_from(value: IntoHeaderValue) -> Result<Self, Self::Error> {
-        Ok(match value {
-            IntoHeaderValue::String(value) => HeaderValue::try_from(value)?,
-            IntoHeaderValue::HeaderValue(value) => value,
-        })
+impl From<header::HeaderValue> for TryIntoHeaderValue {
+    fn from(value: header::HeaderValue) -> Self {
+        Self { result: Ok(value) }
     }
+}
+
+impl From<&'_ header::HeaderValue> for TryIntoHeaderValue {
+    fn from(value: &'_ header::HeaderValue) -> Self {
+        Self {
+            result: Ok(value.clone()),
+        }
+    }
+}
+
+impl From<&'_ [u8]> for TryIntoHeaderValue {
+    fn from(value: &'_ [u8]) -> Self {
+        Self {
+            result: value.try_into(),
+        }
+    }
+}
+
+impl From<&'_ str> for TryIntoHeaderValue {
+    fn from(value: &'_ str) -> Self {
+        Self {
+            result: value.try_into(),
+        }
+    }
+}
+
+impl From<Vec<u8>> for TryIntoHeaderValue {
+    fn from(value: Vec<u8>) -> Self {
+        Self {
+            result: value.try_into(),
+        }
+    }
+}
+
+impl From<String> for TryIntoHeaderValue {
+    fn from(value: String) -> Self {
+        Self {
+            result: value.try_into(),
+        }
+    }
+}
+
+impl Eq for TryIntoHeaderName {}
+
+impl PartialEq for TryIntoHeaderName {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.result, &other.result) {
+            (Ok(a), Ok(b)) => a == b,
+            (Err(_), Err(_)) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for TryIntoHeaderName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match &self.result {
+            Ok(value) => value.hash(state),
+            Err(_) => {}
+        }
+    }
+}
+
+pub(crate) fn header_map(
+    from: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+) -> Result<http::HeaderMap<http::HeaderValue>, http::Error> {
+    let mut http = http::HeaderMap::new();
+    for (key, values) in from {
+        let name = key.result?;
+        let mut values = values.into_iter();
+        if let Some(last) = values.next_back() {
+            for value in values {
+                http.append(name.clone(), value.result?);
+            }
+            http.append(name, last.result?);
+        }
+    }
+    Ok(http)
+}
+
+/// Ignores `http::Extensions`
+pub(crate) fn clone_http_request<B: Clone>(request: &http::Request<B>) -> http::Request<B> {
+    let mut new = http::Request::builder()
+        .method(request.method().clone())
+        .uri(request.uri().clone())
+        .version(request.version())
+        .body(request.body().clone())
+        .unwrap();
+    *new.headers_mut() = request.headers().clone();
+    new
+}
+
+/// Ignores `http::Extensions`
+pub(crate) fn clone_http_response<B: Clone>(response: &http::Response<B>) -> http::Response<B> {
+    let mut new = http::Response::builder()
+        .status(response.status())
+        .version(response.version())
+        .body(response.body().clone())
+        .unwrap();
+    *new.headers_mut() = response.headers().clone();
+    new
 }
 
 /// Wrap an http Request.
 #[derive(Debug)]
-pub struct Request<T> {
-    inner: http::Request<T>,
+pub(crate) struct Request<T> {
+    pub(crate) inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
@@ -133,26 +253,25 @@ impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[builder(visibility = "pub")]
-    fn new(
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+    #[builder]
+    pub(crate) fn new(
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: http::Uri,
         method: http::Method,
         body: T,
     ) -> http::Result<Request<T>> {
-        let mut builder = http::request::Builder::new().method(method).uri(uri);
-        for (key, values) in headers {
-            let header_name: HeaderName = key.try_into()?;
-            for value in values {
-                let header_value: HeaderValue = value.try_into()?;
-                builder = builder.header(header_name.clone(), header_value);
-            }
-        }
-        let req = builder.body(body)?;
-
+        let mut req = http::request::Builder::new()
+            .method(method)
+            .uri(uri)
+            .body(body)?;
+        *req.headers_mut() = header_map(headers)?;
         Ok(Self { inner: req })
     }
+}
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a "fake" Request.
     ///
     /// This does not enforce the provision of the uri and method that is required for a fully functional
@@ -160,9 +279,9 @@ impl<T> Request<T> {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
-    #[builder(visibility = "pub")]
-    fn fake_new(
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+    #[builder]
+    pub(crate) fn fake_new(
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<http::Method>,
         body: T,
@@ -170,7 +289,7 @@ impl<T> Request<T> {
         Self::new(
             headers,
             uri.unwrap_or_default(),
-            method.unwrap_or(Method::GET),
+            method.unwrap_or(http::Method::GET),
             body,
         )
     }
@@ -196,6 +315,14 @@ impl<T> From<http::Request<T>> for Request<T> {
     }
 }
 
+impl<T: Clone> From<&'_ http::Request<T>> for Request<T> {
+    fn from(req: &'_ http::Request<T>) -> Self {
+        Request {
+            inner: clone_http_request(req),
+        }
+    }
+}
+
 impl<T> From<Request<T>> for http::Request<T> {
     fn from(request: Request<T>) -> http::Request<T> {
         request.inner
@@ -204,23 +331,9 @@ impl<T> From<Request<T>> for http::Request<T> {
 
 impl<T: Clone> Clone for Request<T> {
     fn clone(&self) -> Self {
-        // note: we cannot clone the extensions because we cannot know
-        // which types were stored
-        let mut req = http::Request::builder()
-            .method(self.inner.method().clone())
-            .version(self.inner.version())
-            .uri(self.inner.uri().clone());
-        req.headers_mut().unwrap().extend(
-            self.inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-
-        let req = req
-            .body(self.inner.body().clone())
-            .expect("cloning a valid request creates a valid request");
-        Self { inner: req }
+        Self {
+            inner: clone_http_request(&self.inner),
+        }
     }
 }
 
@@ -272,26 +385,19 @@ impl<T: Eq> Eq for Request<T> {}
 
 /// Wrap an http Response.
 #[derive(Debug, Default)]
-pub struct Response<T> {
-    pub inner: http::Response<T>,
+pub(crate) struct Response<T> {
+    pub(crate) inner: http::Response<T>,
 }
 
-impl<T> Response<T> {
-    pub fn map<F, U>(self, f: F) -> Response<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        self.inner.map(f).into()
-    }
-}
+#[cfg(test)]
+pub(crate) fn from_response_to_stream(
+    http: http::response::Response<graphql::Response>,
+) -> http::Response<futures::stream::BoxStream<'static, graphql::Response>> {
+    use futures::future::ready;
+    use futures::stream::once;
+    use futures::StreamExt;
 
-impl Response<BoxStream<'static, graphql::Response>> {
-    pub fn from_response_to_stream(http: http::response::Response<graphql::Response>) -> Self {
-        let (parts, body) = http.into_parts();
-        Response {
-            inner: http::Response::from_parts(parts, Box::pin(once(ready(body)))),
-        }
-    }
+    http.map(|body| once(ready(body)).boxed())
 }
 
 impl<T> Deref for Response<T> {
@@ -314,6 +420,14 @@ impl<T> From<http::Response<T>> for Response<T> {
     }
 }
 
+impl<T: Clone> From<&'_ http::Response<T>> for Response<T> {
+    fn from(req: &'_ http::Response<T>) -> Self {
+        Response {
+            inner: clone_http_response(req),
+        }
+    }
+}
+
 impl<T> From<Response<T>> for http::Response<T> {
     fn from(response: Response<T>) -> http::Response<T> {
         response.inner
@@ -322,22 +436,9 @@ impl<T> From<Response<T>> for http::Response<T> {
 
 impl<T: Clone> Clone for Response<T> {
     fn clone(&self) -> Self {
-        // note: we cannot clone the extensions because we cannot know
-        // which types were stored
-        let mut res = http::Response::builder()
-            .status(self.inner.status())
-            .version(self.inner.version());
-        res.headers_mut().unwrap().extend(
-            self.inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-
-        let res = res
-            .body(self.inner.body().clone())
-            .expect("cloning a valid response creates a valid response");
-        Self { inner: res }
+        Self {
+            inner: clone_http_response(&self.inner),
+        }
     }
 }
 

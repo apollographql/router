@@ -6,18 +6,24 @@ use std::fmt;
 
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 
 use crate::error::FetchError;
 use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::json_ext::Value;
+pub use crate::json_ext::Path as JsonPath;
+pub use crate::json_ext::PathElement as JsonPathElement;
 pub use crate::request::Request;
+pub use crate::response::IncrementalResponse;
 pub use crate::response::Response;
 
 /// Any GraphQL error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Error {
     /// The error message.
     pub message: String,
@@ -40,13 +46,14 @@ impl Error {
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
-        extensions: Option<Object>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
     ) -> Self {
         Self {
             message,
             locations,
             path,
-            extensions: extensions.unwrap_or_default(),
+            extensions,
         }
     }
 
