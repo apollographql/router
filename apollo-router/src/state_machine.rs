@@ -227,7 +227,7 @@ where
                 }
             };
 
-            tracing::info!("transitioned to {}", &new_state);
+            tracing::trace!("transitioned to {}", &new_state);
             state = new_state;
 
             // If we're running then let those waiting proceed.
