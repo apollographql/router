@@ -16,6 +16,7 @@ use crate::json_ext::Object;
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Request {
     /// The graphql query.
     pub query: Option<String>,

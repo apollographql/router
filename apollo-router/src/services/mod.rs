@@ -8,6 +8,8 @@ pub(crate) use self::subgraph_service::*;
 pub(crate) use self::supergraph_service::*;
 use crate::graphql::Request;
 use crate::http_ext;
+pub use crate::http_ext::TryIntoHeaderName;
+pub use crate::http_ext::TryIntoHeaderValue;
 pub(crate) use crate::services::execution::Request as ExecutionRequest;
 pub(crate) use crate::services::execution::Response as ExecutionResponse;
 pub(crate) use crate::services::query_planner::Request as QueryPlannerRequest;

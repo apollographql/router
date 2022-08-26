@@ -88,22 +88,23 @@ pub(crate) struct Propagation {
 
 #[derive(Default, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Trace {
-    pub service_name: Option<String>,
-    pub service_namespace: Option<String>,
-    pub sampler: Option<SamplerOption>,
-    pub parent_based_sampler: Option<bool>,
-    pub max_events_per_span: Option<u32>,
-    pub max_attributes_per_span: Option<u32>,
-    pub max_links_per_span: Option<u32>,
-    pub max_attributes_per_event: Option<u32>,
-    pub max_attributes_per_link: Option<u32>,
-    pub attributes: Option<BTreeMap<String, AttributeValue>>,
+#[non_exhaustive]
+pub(crate) struct Trace {
+    pub(crate) service_name: Option<String>,
+    pub(crate) service_namespace: Option<String>,
+    pub(crate) sampler: Option<SamplerOption>,
+    pub(crate) parent_based_sampler: Option<bool>,
+    pub(crate) max_events_per_span: Option<u32>,
+    pub(crate) max_attributes_per_span: Option<u32>,
+    pub(crate) max_links_per_span: Option<u32>,
+    pub(crate) max_attributes_per_event: Option<u32>,
+    pub(crate) max_attributes_per_link: Option<u32>,
+    pub(crate) attributes: Option<BTreeMap<String, AttributeValue>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum AttributeValue {
+pub(crate) enum AttributeValue {
     /// bool values
     Bool(bool),
     /// i64 values
@@ -130,7 +131,7 @@ impl From<AttributeValue> for opentelemetry::Value {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum AttributeArray {
+pub(crate) enum AttributeArray {
     /// Array of bools
     Bool(Vec<bool>),
     /// Array of integers
@@ -154,7 +155,7 @@ impl From<AttributeArray> for opentelemetry::Array {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
-pub enum SamplerOption {
+pub(crate) enum SamplerOption {
     /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
     /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
     /// zero, but spans may still be sampled if their parent is.
@@ -164,7 +165,7 @@ pub enum SamplerOption {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Sampler {
+pub(crate) enum Sampler {
     /// Always sample the trace
     AlwaysOn,
     /// Never sample the trace
