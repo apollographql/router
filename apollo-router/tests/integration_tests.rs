@@ -13,6 +13,7 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use http::header::ACCEPT;
 use http::Method;
 use http::StatusCode;
 use maplit::hashmap;
@@ -545,6 +546,7 @@ async fn defer_path() {
             }
         }"#,
         )
+        .header(ACCEPT, "multipart/mixed")
         .build()
         .expect("expecting valid request");
 
@@ -587,6 +589,7 @@ async fn defer_path_in_array() {
                 }
             }"#,
         )
+        .header(ACCEPT, "multipart/mixed")
         .build()
         .expect("expecting valid request");
 
@@ -599,6 +602,46 @@ async fn defer_path_in_array() {
 
     let second = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(second);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_query_without_accept() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"{
+                me {
+                    reviews {
+                        id
+                        author {
+                            id
+                            ... @defer(label: "author name") {
+                            name
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .header(ACCEPT, "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
