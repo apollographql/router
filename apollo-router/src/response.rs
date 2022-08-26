@@ -16,6 +16,7 @@ use crate::json_ext::Value;
 /// Used for federated and subgraph queries.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Response {
     /// The label that was passed to the defer or stream directive for this patch.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -87,7 +88,7 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+    pub(crate) fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
@@ -170,6 +171,7 @@ impl Response {
 /// Used with `@defer`
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct IncrementalResponse {
     /// The label that was passed to the defer or stream directive for this patch.
     #[serde(skip_serializing_if = "Option::is_none", default)]

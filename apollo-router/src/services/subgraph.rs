@@ -21,6 +21,7 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
+#[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
     pub originating_request: Arc<http::Request<graphql::Request>>,
@@ -75,6 +76,7 @@ impl Request {
 
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
 

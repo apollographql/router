@@ -58,18 +58,95 @@ Let's remove it since it's simple to add back if later required.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1569
 
-### Request and Response types from apollo_router::http_ext are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
+### Rename TestHarness methods ([PR #1579](https://github.com/apollographql/router/pull/1579))
+
+Some methods of `apollo_router::TestHarness` were renamed:
+
+* `extra_supergraph_plugin` → `supergraph_hook`
+* `extra_execution_plugin` → `execution_hook`
+* `extra_subgraph_plugin` → `subgraph_hook`
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1579
+
+### `Request` and `Response` types from `apollo_router::http_ext` are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
 
 These types were wrappers around the `Request` and `Response` types from the `http` crate.
 Now the latter are used directly instead.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1589
 
+### Changes to `IntoHeaderName` and `IntoHeaderValue` ([PR #1607](https://github.com/apollographql/router/pull/1607))
+
+Note: these types are typically not use directly, so we expect most user code to require no change.
+
+* Move from `apollo_router::http_ext` to `apollo_router::services`
+* Rename to `TryIntoHeaderName` and `TryIntoHeaderValue`
+* Make contents opaque
+* Replace generic `From<T: Display>` conversion with multiple specific conversions
+  that are implemented by `http::headers::Header{Name,Value}`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1607
+
 ### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
 
 These items have been removed from the public API of `apollo_router::services::execution`.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1568
+
+### Many structs and enums are now `#[non_exhaustive]` ([Issue #1550](https://github.com/apollographql/router/issues/1550))
+
+This means we may add struct fields or enum variants in the future.
+To prepare for that eventuality:
+
+When using a struct pattern (such as for deconstructing a value into its fields),
+use `..` to allow further fields:
+
+```diff
+-let PluginInit { config, supergraph_sdl } = init;
++let PluginInit { config, supergraph_sdl, .. } = init;
+```
+
+Or use field access instead:
+
+```diff
+-let PluginInit { config, supergraph_sdl } = init;
++let config = init.config;
++let supergraph_sdl = init.supergraph_sdl;
+```
+
+When constructing a struct, use a builder or constructor method instead of struct literal syntax:
+
+```diff
+-let error = graphql::Error {
+-    message: "something went wrong".to_string(),
+-    ..Default::default()
+-};
++let error = graphql::Error::builder()
++    .message("something went wrong")
++    .build();
+```
+
+When matching on an enum, add a wildcard match arm:
+
+```diff
+ match error {
+     ApolloRouterError::StartupError => "StartupError",
+     ApolloRouterError::HttpServerLifecycleError => "HttpServerLifecycleError",
+     ApolloRouterError::NoConfiguration => "NoConfiguration",
+     ApolloRouterError::NoSchema => "NoSchema",
+     ApolloRouterError::ServiceCreationError(_) => "ServiceCreationError",
+     ApolloRouterError::ServerCreationError(_) => "ServerCreationError",
++    _ => "other error",
+}
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1614
+
+### Some error enums or variants were removed ([Issue #81](https://github.com/apollographql/router/issues/81))
+
+They were not used anymore in the public API (or at all).
+
+By [@SimonSapin](https://github.com/SimonSapin) in FIXME
 
 ## 🚀 Features
 

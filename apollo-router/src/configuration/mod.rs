@@ -38,33 +38,16 @@ use crate::plugin::plugins;
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[allow(missing_docs)] // FIXME
-pub enum ConfigurationError {
+#[non_exhaustive]
+pub(crate) enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
-    /// missing environment variable: {0}
-    MissingEnvironmentVariable(String),
-    /// invalid environment variable: {0}
-    InvalidEnvironmentVariable(String),
-    /// could not setup OTLP tracing: {0}
-    OtlpTracing(opentelemetry::trace::TraceError),
-    /// could not setup OTLP metrics: {0}
-    Metrics(#[from] opentelemetry::metrics::MetricsError),
-    /// the configuration could not be loaded because it requires the feature {0:?}
-    MissingFeature(&'static str),
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// plugin {plugin} could not be started: {error}
-    PluginStartup { plugin: String, error: String },
-    /// plugin {plugin} could not be stopped: {error}
-    PluginShutdown { plugin: String, error: String },
-    /// unknown layer {0}
-    LayerUnknown(String),
-    /// layer {layer} could not be configured: {error}
-    LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
     InvalidConfiguration {
         message: &'static str,
@@ -168,16 +151,12 @@ impl Configuration {
     }
 }
 
+/// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
-    type Err = ConfigurationError;
+    type Err = serde_yaml::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let config =
-            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "failed to parse configuration",
-                error: e.to_string(),
-            })?;
-        Ok(config)
+        serde_yaml::from_str(s)
     }
 }
 
