@@ -151,6 +151,7 @@ pub fn main() -> Result<()> {
 }
 
 /// Entry point into creating a router executable.
+#[non_exhaustive]
 pub struct Executable {}
 
 #[buildstructor::buildstructor]
@@ -345,6 +346,9 @@ fn setup_panic_handler(dispatcher: Dispatch) {
             } else {
                 tracing::error!("{}", e)
             }
+            // Once we've panic'ed the behaviour of the router is non-deterministic
+            // We've logged out the panic details. Terminate with an error code
+            std::process::exit(1);
         });
     }));
 }

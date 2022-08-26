@@ -38,33 +38,16 @@ use crate::plugin::plugins;
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[allow(missing_docs)] // FIXME
-pub enum ConfigurationError {
+#[non_exhaustive]
+pub(crate) enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
-    /// missing environment variable: {0}
-    MissingEnvironmentVariable(String),
-    /// invalid environment variable: {0}
-    InvalidEnvironmentVariable(String),
-    /// could not setup OTLP tracing: {0}
-    OtlpTracing(opentelemetry::trace::TraceError),
-    /// could not setup OTLP metrics: {0}
-    Metrics(#[from] opentelemetry::metrics::MetricsError),
-    /// the configuration could not be loaded because it requires the feature {0:?}
-    MissingFeature(&'static str),
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// plugin {plugin} could not be started: {error}
-    PluginStartup { plugin: String, error: String },
-    /// plugin {plugin} could not be stopped: {error}
-    PluginShutdown { plugin: String, error: String },
-    /// unknown layer {0}
-    LayerUnknown(String),
-    /// layer {layer} could not be configured: {error}
-    LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
     InvalidConfiguration {
         message: &'static str,
@@ -84,6 +67,10 @@ pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
+
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
 
     /// Plugin configuration
     #[serde(default)]
@@ -107,11 +94,13 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -168,16 +157,12 @@ impl Configuration {
     }
 }
 
+/// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
-    type Err = ConfigurationError;
+    type Err = serde_yaml::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let config =
-            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "failed to parse configuration",
-                error: e.to_string(),
-            })?;
-        Ok(config)
+        serde_yaml::from_str(s)
     }
 }
 
@@ -267,10 +252,6 @@ pub(crate) struct Server {
     #[serde(default = "default_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Cors,
-
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
@@ -308,7 +289,6 @@ impl Server {
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
-        cors: Option<Cors>,
         introspection: Option<bool>,
         landing_page: Option<bool>,
         endpoint: Option<String>,
@@ -318,7 +298,6 @@ impl Server {
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             endpoint: endpoint.unwrap_or_else(default_endpoint),
@@ -1166,8 +1145,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, 5 ]
+cors:
+  allow_headers: [ Content-Type, 5 ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1182,10 +1161,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
+cors:
+  allow_headers:
+    - Content-Type
+    - 5
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1196,15 +1175,13 @@ server:
     fn it_does_not_allow_invalid_cors_headers() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_headers: [ "*" ]
+cors:
+  allow_credentials: true
+  allow_headers: [ "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1215,15 +1192,13 @@ server:
     fn it_does_not_allow_invalid_cors_methods() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    methods: [ GET, "*" ]
+cors:
+  allow_credentials: true
+  methods: [ GET, "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1234,15 +1209,13 @@ server:
     fn it_does_not_allow_invalid_cors_origins() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_any_origin: true
+cors:
+  allow_credentials: true
+  allow_any_origin: true
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1328,8 +1301,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+cors:
+  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1346,10 +1319,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+cors:
+  allow_headers:
+    - Content-Type
+    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
         "#,
         )
         .expect_err("should have resulted in an error");

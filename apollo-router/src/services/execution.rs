@@ -16,9 +16,8 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext;
-use crate::http_ext::IntoHeaderName;
-use crate::http_ext::IntoHeaderValue;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::Context;
@@ -31,10 +30,10 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);
-/// [`Context`] and [`QueryPlan`] for the request.
+#[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: http_ext::Request<graphql::Request>,
+    pub originating_request: http::Request<graphql::Request>,
 
     pub query_plan: Arc<QueryPlan>,
 
@@ -49,7 +48,7 @@ impl Request {
     /// set and be correct to create a ExecutionRequest.
     #[builder(visibility = "pub")]
     fn new(
-        originating_request: http_ext::Request<graphql::Request>,
+        originating_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
@@ -67,18 +66,12 @@ impl Request {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
-        originating_request: Option<http_ext::Request<graphql::Request>>,
+        originating_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
     ) -> Request {
         Request::new(
-            originating_request.unwrap_or_else(|| {
-                http_ext::Request::fake_builder()
-                    .headers(Default::default())
-                    .body(Default::default())
-                    .build()
-                    .expect("fake builds should always work; qed")
-            }),
+            originating_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
@@ -86,11 +79,9 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
-/// [`Context`] and [`http_ext::Response<Response>`] for the response.
-///
-/// This consists of the execution response and the context.
+#[non_exhaustive]
 pub struct Response {
-    pub response: http_ext::Response<BoxStream<'static, graphql::Response>>,
+    pub response: http::Response<BoxStream<'static, graphql::Response>>,
 
     pub context: Context,
 }
@@ -121,20 +112,12 @@ impl Response {
             .build();
 
         // Build an http Response
-        let http_response = http::Response::builder()
+        let response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
             .body(once(ready(res)).boxed())
             .expect("Response is serializable; qed");
 
-        // Create a compatible Response
-        let compat_response = http_ext::Response {
-            inner: http_response,
-        };
-
-        Self {
-            response: compat_response,
-            context,
-        }
+        Self { response, context }
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" ExecutionResponse.
@@ -172,7 +155,7 @@ impl Response {
     fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         Ok(Response::new(
@@ -193,7 +176,7 @@ impl Response {
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
     pub fn new_from_response(
-        response: http_ext::Response<BoxStream<'static, graphql::Response>>,
+        response: http::Response<BoxStream<'static, graphql::Response>>,
         context: Context,
     ) -> Self {
         Self { response, context }

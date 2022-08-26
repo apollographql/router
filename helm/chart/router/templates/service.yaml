@@ -4,6 +4,10 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -13,3 +17,4 @@ spec:
       name: http
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
+
