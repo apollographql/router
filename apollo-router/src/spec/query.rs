@@ -691,8 +691,7 @@ impl Query {
                         input,
                         output,
                         path,
-                        //FIXME
-                        &FieldType::Boolean,
+                        &FieldType::Named(type_condition.clone()),
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -723,8 +722,7 @@ impl Query {
                             input,
                             output,
                             path,
-                            //FIXME
-                            &FieldType::Boolean,
+                            &FieldType::Named(operation_type_name.into()),
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
