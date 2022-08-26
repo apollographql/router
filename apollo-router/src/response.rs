@@ -88,7 +88,7 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+    pub(crate) fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),

@@ -28,6 +28,7 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
@@ -92,12 +93,7 @@ where
         .clone()
         .into_layer()
         .map_err(|e| {
-            ApolloRouterError::ConfigError(
-                crate::configuration::ConfigurationError::LayerConfiguration {
-                    layer: "Cors".to_string(),
-                    error: e,
-                },
-            )
+            ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
         })?;
     let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
@@ -527,10 +523,6 @@ where
                 }
                 Ok(response) => {
                     let (mut parts, mut stream) = response.into_parts();
-                    parts.headers.insert(
-                        "content-type",
-                        HeaderValue::from_static("multipart/mixed;boundary=\"graphql\""),
-                    );
 
                     match stream.next().await {
                         None => {
@@ -543,6 +535,13 @@ where
                         }
                         Some(response) => {
                             if response.has_next.unwrap_or(false) {
+                                parts.headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static(
+                                        "multipart/mixed;boundary=\"graphql\"",
+                                    ),
+                                );
+
                                 // each chunk contains a response and the next delimiter, to let client parsers
                                 // know that they can process the response right away
                                 let mut first_buf = Vec::from(
@@ -571,6 +570,10 @@ where
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
+                                parts.headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static("application/json"),
+                                );
                                 tracing::trace_span!("serialize_response").in_scope(|| {
                                     http_ext::Response::from(http::Response::from_parts(
                                         parts, response,
@@ -753,6 +756,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
 
@@ -2172,5 +2176,129 @@ Content-Type: application/json\r
             .get("access-control-allow-origin")
             .map(|h| h.to_str().map(|o| o == origin).unwrap_or_default())
             .unwrap_or_default()
+    }
+
+    #[test(tokio::test)]
+    async fn response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                Ok(http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({
+                                    "test": "hello"
+                                }))
+                                .build(),
+                        )
+                        .unwrap(),
+                ))
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+
+        assert_eq!(
+            response.text().await.unwrap(),
+            serde_json::to_string(&json!({
+                "data": {
+                    "test": "hello"
+                },
+            }))
+            .unwrap()
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
+        let mut expectations = MockSupergraphService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                let body = stream::iter(vec![
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello",
+                        }))
+                        .has_next(true)
+                        .build(),
+                    graphql::Response::builder()
+                        .incremental(vec![graphql::IncrementalResponse::builder()
+                            .data(json!({
+                                "other": "world"
+                            }))
+                            .path(Path::default())
+                            .build()])
+                        .has_next(true)
+                        .build(),
+                    graphql::Response::builder().has_next(false).build(),
+                ])
+                .boxed();
+                Ok(http::Response::builder().status(200).body(body).unwrap())
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query { test ... @defer { other } }",
+        });
+        let url = format!("{}/", server.listen_address());
+        let mut response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
+
+        println!("response: {:?}", response);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "multipart/mixed;boundary=\"graphql\""
+            ))
+        );
+
+        let first = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*first).unwrap(),
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
+        );
+
+        let second = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*second).unwrap(),
+        "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
+        );
+
+        let third = response.chunk().await.unwrap().unwrap();
+        assert_eq!(
+            std::str::from_utf8(&*third).unwrap(),
+            "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
+        );
+
+        server.shutdown().await
     }
 }

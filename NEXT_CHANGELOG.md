@@ -53,12 +53,24 @@ Some methods of `apollo_router::TestHarness` were renamed:
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1579
 
-### Request and Response types from apollo_router::http_ext are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
+### `Request` and `Response` types from `apollo_router::http_ext` are private ([Issue #1589](https://github.com/apollographql/router/issues/1589))
 
 These types were wrappers around the `Request` and `Response` types from the `http` crate.
 Now the latter are used directly instead.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1589
+
+### Changes to `IntoHeaderName` and `IntoHeaderValue` ([PR #1607](https://github.com/apollographql/router/pull/1607))
+
+Note: these types are typically not use directly, so we expect most user code to require no change.
+
+* Move from `apollo_router::http_ext` to `apollo_router::services`
+* Rename to `TryIntoHeaderName` and `TryIntoHeaderValue`
+* Make contents opaque
+* Replace generic `From<T: Display>` conversion with multiple specific conversions
+  that are implemented by `http::headers::Header{Name,Value}`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1607
 
 ### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
 
@@ -103,15 +115,23 @@ When matching on an enum, add a wildcard match arm:
 
 ```diff
  match error {
-     SpecError::RecursionLimitExceeded => "recursion limit exceeded",
-     SpecError::InvalidType(_) => "invalid type",
-     SpecError::ParsingError(_) => "paring error",
-     SpecError::SubscriptionNotSupported => "subscription not supported",
+     ApolloRouterError::StartupError => "StartupError",
+     ApolloRouterError::HttpServerLifecycleError => "HttpServerLifecycleError",
+     ApolloRouterError::NoConfiguration => "NoConfiguration",
+     ApolloRouterError::NoSchema => "NoSchema",
+     ApolloRouterError::ServiceCreationError(_) => "ServiceCreationError",
+     ApolloRouterError::ServerCreationError(_) => "ServerCreationError",
 +    _ => "other error",
 }
 ```
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1614
+
+### Some error enums or variants were removed ([Issue #81](https://github.com/apollographql/router/issues/81))
+
+They were not used anymore in the public API (or at all).
+
+By [@SimonSapin](https://github.com/SimonSapin) in FIXME
 
 ## 🚀 Features
 
@@ -158,6 +178,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Depend on published `router-bridge` ([PR #1613](https://github.com/apollographql/router/issues/1613))
+
+We have published the `router-bridge` to crates.io, which removes the need for router developers to have nodejs installed.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1613
 
 ### Re-organize our release steps checklist ([PR #1605](https://github.com/apollographql/router/pull/1605))
 
