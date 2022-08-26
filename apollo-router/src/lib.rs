@@ -65,7 +65,7 @@ mod http_server_factory;
 mod introspection;
 pub mod layers;
 mod plugins;
-pub mod query_planner;
+mod query_planner;
 mod request;
 mod response;
 mod router;
