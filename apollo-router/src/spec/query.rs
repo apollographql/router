@@ -69,23 +69,25 @@ impl Query {
                     Some(subselection_query) => {
                         let mut output = Object::default();
                         let operation = &subselection_query.operations[0];
-                        let mut errors = Vec::new();
+                        let mut parameters = FormatParameters {
+                            variables: &variables,
+                            schema,
+                            errors: Vec::new(),
+                        };
                         response.data = Some(
                             match self.apply_root_selection_set(
                                 operation,
-                                &variables,
+                                &mut parameters,
                                 &mut input,
                                 &mut output,
                                 &mut Path::default(),
-                                &mut errors,
-                                schema,
                             ) {
                                 Ok(()) => output.into(),
                                 Err(InvalidValue) => Value::Null,
                             },
                         );
 
-                        response.errors.extend(errors.into_iter());
+                        response.errors.extend(parameters.errors.into_iter());
 
                         return;
                     }
@@ -106,23 +108,25 @@ impl Query {
                         .collect()
                 };
 
-                let mut errors = Vec::new();
+                let mut parameters = FormatParameters {
+                    variables: &all_variables,
+                    schema,
+                    errors: Vec::new(),
+                };
 
                 response.data = Some(
                     match self.apply_root_selection_set(
                         operation,
-                        &all_variables,
+                        &mut parameters,
                         &mut input,
                         &mut output,
                         &mut Path::default(),
-                        &mut errors,
-                        schema,
                     ) {
                         Ok(()) => output.into(),
                         Err(InvalidValue) => Value::Null,
                     },
                 );
-                response.errors.extend(errors.into_iter());
+                response.errors.extend(parameters.errors.into_iter());
 
                 return;
             } else {
@@ -188,16 +192,13 @@ impl Query {
 
     fn format_value(
         &self,
+        parameters: &mut FormatParameters,
         field_type: &FieldType,
-        variables: &Object,
         input: &mut Value,
         output: &mut Value,
         path: &mut Path,
         parent_type: &FieldType,
-        errors: &mut Vec<Error>,
-
         selection_set: &[Selection],
-        schema: &Schema,
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
@@ -207,15 +208,13 @@ impl Query {
             // want the error to go up until the next nullable parent
             FieldType::NonNull(inner_type) => {
                 match self.format_value(
+                    parameters,
                     inner_type,
-                    variables,
                     input,
                     output,
                     path,
                     field_type,
-                    errors,
                     selection_set,
-                    schema,
                 ) {
                     Err(_) => Err(InvalidValue),
                     Ok(_) => {
@@ -231,7 +230,7 @@ impl Query {
                                 ),
                                 _ => todo!(),
                             };
-                            errors.push(Error {
+                            parameters.errors.push(Error {
                                 message,
                                 path: Some(path.clone()),
                                 ..Error::default()
@@ -265,15 +264,13 @@ impl Query {
                         .try_for_each(|(i, element)| {
                             path.push(PathElement::Index(i));
                             let res = self.format_value(
+                                parameters,
                                 inner_type,
-                                variables,
                                 element,
                                 &mut output_array[i],
                                 path,
                                 field_type,
-                                errors,
                                 selection_set,
-                                schema,
                             );
                             path.pop();
                             res
@@ -291,10 +288,10 @@ impl Query {
             FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                if schema.custom_scalars.contains(type_name) {
+                if parameters.schema.custom_scalars.contains(type_name) {
                     *output = input.clone();
                     return Ok(());
-                } else if let Some(enum_type) = schema.enums.get(type_name) {
+                } else if let Some(enum_type) = parameters.schema.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
@@ -317,7 +314,7 @@ impl Query {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            if !schema.object_types.contains_key(input_type) {
+                            if !parameters.schema.object_types.contains_key(input_type) {
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -330,13 +327,11 @@ impl Query {
 
                         match self.apply_selection_set(
                             selection_set,
-                            variables,
+                            parameters,
                             input_object,
                             output_object,
                             path,
                             &FieldType::Named(type_name.to_string()),
-                            errors,
-                            schema,
                         ) {
                             Ok(()) => Ok(()),
                             Err(InvalidValue) => {
@@ -409,13 +404,11 @@ impl Query {
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
-        variables: &Object,
+        parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Path,
         parent_type: &FieldType,
-        errors: &mut Vec<Error>,
-        schema: &Schema,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -431,11 +424,11 @@ impl Query {
                     include,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip.should_skip(variables).unwrap_or(false) {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include.should_include(variables).unwrap_or(true) {
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -460,15 +453,13 @@ impl Query {
                         } else {
                             path.push(PathElement::Key(field_name.as_str().to_string()));
                             let res = self.format_value(
+                                parameters,
                                 field_type,
-                                variables,
                                 input_value,
                                 output_value,
                                 path,
                                 parent_type,
-                                errors,
                                 selection_set,
-                                schema,
                             );
                             path.pop();
                             res?
@@ -478,7 +469,7 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            errors.push(Error {
+                            parameters.errors.push(Error {
                                 message: format!(
                                     "Cannot return null for non-nullable field {parent_type}.{}",
                                     field_name.as_str()
@@ -498,11 +489,11 @@ impl Query {
                     include,
                     known_type,
                 } => {
-                    if skip.should_skip(variables).unwrap_or(false) {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include.should_include(variables).unwrap_or(true) {
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -512,7 +503,7 @@ impl Query {
                         // check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
-                            || schema.is_subtype(type_condition, input_type)
+                            || parameters.schema.is_subtype(type_condition, input_type)
                     } else {
                         // known_type = true means that from the query's shape, we know
                         // we should get the right type here. But in the case we get a
@@ -521,7 +512,7 @@ impl Query {
                         // If the type condition is an interface and the current known type implements it
                         known_type
                             .as_ref()
-                            .map(|k| schema.is_subtype(type_condition, k))
+                            .map(|k| parameters.schema.is_subtype(type_condition, k))
                             .unwrap_or_default()
                             || known_type.as_deref() == Some(type_condition.as_str())
                     };
@@ -529,13 +520,11 @@ impl Query {
                     if is_apply {
                         self.apply_selection_set(
                             selection_set,
-                            variables,
+                            parameters,
                             input,
                             output,
                             path,
                             parent_type,
-                            errors,
-                            schema,
                         )?;
                     }
                 }
@@ -545,19 +534,27 @@ impl Query {
                     skip,
                     include,
                 } => {
-                    if skip.should_skip(variables).unwrap_or(false) {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include.should_include(variables).unwrap_or(true) {
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.skip.should_skip(variables).unwrap_or(false) {
+                        if fragment
+                            .skip
+                            .should_skip(parameters.variables)
+                            .unwrap_or(false)
+                        {
                             continue;
                         }
-                        if !fragment.include.should_include(variables).unwrap_or(true) {
+                        if !fragment
+                            .include
+                            .should_include(parameters.variables)
+                            .unwrap_or(true)
+                        {
                             continue;
                         }
 
@@ -567,12 +564,14 @@ impl Query {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
                             input_type == fragment.type_condition.as_str()
-                                || schema.is_subtype(&fragment.type_condition, input_type)
+                                || parameters
+                                    .schema
+                                    .is_subtype(&fragment.type_condition, input_type)
                         } else {
                             // If the type condition is an interface and the current known type implements it
                             known_type
                                 .as_ref()
-                                .map(|k| schema.is_subtype(&fragment.type_condition, k))
+                                .map(|k| parameters.schema.is_subtype(&fragment.type_condition, k))
                                 .unwrap_or_default()
                                 || known_type.as_deref() == Some(fragment.type_condition.as_str())
                         };
@@ -580,13 +579,11 @@ impl Query {
                         if is_apply {
                             self.apply_selection_set(
                                 &fragment.selection_set,
-                                variables,
+                                parameters,
                                 input,
                                 output,
                                 path,
                                 parent_type,
-                                errors,
-                                schema,
                             )?;
                         }
                     } else {
@@ -603,12 +600,10 @@ impl Query {
     fn apply_root_selection_set(
         &self,
         operation: &Operation,
-        variables: &Object,
+        parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Path,
-        errors: &mut Vec<Error>,
-        schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in &operation.selection_set {
             match selection {
@@ -623,11 +618,11 @@ impl Query {
                     // Using .unwrap_or is legit here because
                     // validate_variables should have already checked that
                     // the variable is present and it is of the correct type
-                    if skip.should_skip(variables).unwrap_or(false) {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
                         continue;
                     }
 
-                    if !include.should_include(variables).unwrap_or(true) {
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
                         continue;
                     }
 
@@ -649,15 +644,13 @@ impl Query {
                             output.entry((*field_name).clone()).or_insert(Value::Null);
                         path.push(PathElement::Key(field_name_str.to_string()));
                         let res = self.format_value(
+                            parameters,
                             field_type,
-                            variables,
                             input_value,
                             output_value,
                             path,
                             field_type,
-                            errors,
                             selection_set,
-                            schema,
                         );
                         path.pop();
                         res?
@@ -669,7 +662,7 @@ impl Query {
                             );
                         }
                     } else if field_type.is_non_null() {
-                        errors.push(Error {
+                        parameters.errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 operation.kind
@@ -686,20 +679,20 @@ impl Query {
                     ..
                 } => {
                     // top level objects will not provide a __typename field
-                    if type_condition.as_str() != schema.root_operation_name(operation.kind) {
+                    if type_condition.as_str()
+                        != parameters.schema.root_operation_name(operation.kind)
+                    {
                         return Err(InvalidValue);
                     }
 
                     self.apply_selection_set(
                         selection_set,
-                        variables,
+                        parameters,
                         input,
                         output,
                         path,
                         //FIXME
                         &FieldType::Boolean,
-                        errors,
-                        schema,
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -709,12 +702,15 @@ impl Query {
                     include: _,
                 } => {
                     if let Some(fragment) = self.fragments.get(name) {
-                        let operation_type_name = schema.root_operation_name(operation.kind);
+                        let operation_type_name =
+                            parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
                             operation_type_name == fragment.type_condition.as_str()
-                                || schema.is_subtype(&fragment.type_condition, operation_type_name)
+                                || parameters
+                                    .schema
+                                    .is_subtype(&fragment.type_condition, operation_type_name)
                         };
 
                         if !is_apply {
@@ -723,14 +719,12 @@ impl Query {
 
                         self.apply_selection_set(
                             &fragment.selection_set,
-                            variables,
+                            parameters,
                             input,
                             output,
                             path,
                             //FIXME
                             &FieldType::Boolean,
-                            errors,
-                            schema,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -802,6 +796,13 @@ impl Query {
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
+}
+
+/// Intermediate structure for arguments passed through the entire formatting
+struct FormatParameters<'a> {
+    variables: &'a Object,
+    errors: Vec<Error>,
+    schema: &'a Schema,
 }
 
 #[derive(Debug)]
