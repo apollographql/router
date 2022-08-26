@@ -33,23 +33,24 @@ in lieu of an official changelog.
     (release) or "#.#.#-rc.#" (release candidate)
 3. Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
    - Be certain to also update the ones in the `scaffold` templates
-4. Update `docker.mdx` and `kubernetes.mdx` with the release version.
-5. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
+4. Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
+5. Update `docker.mdx` and `kubernetes.mdx` with the release version.
+6. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
    - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
    - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
-6. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
-7. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
-8. Update the `version` in `docker-compose*` files in the `dockerfiles` directory.
-9. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
+7. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
+8. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+9. Update the `version` in `docker-compose*` files in the `dockerfiles` directory.
+10. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
     You can install `cargo-about` by running `cargo install cargo-about`.
-10. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
-11. Put a Release date and the version number on the new `CHANGELOG.md` section
-12. Update the version in `NEXT_CHANGELOG.md`.
-13. Clear `NEXT_CHANGELOG.md` leaving only the template.
-14. Run `cargo check` so the lock file gets updated.
-15. Run `cargo xtask check-compliance`.
-16. Push up a commit with all the changes. The commit message should be "release: v#.#.#" or "release: v#.#.#-rc.#"
-17. Request review from the Router team.
+11. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
+12. Put a Release date and the version number on the new `CHANGELOG.md` section
+13. Update the version in `NEXT_CHANGELOG.md`.
+14. Clear `NEXT_CHANGELOG.md` leaving only the template.
+15. Run `cargo check` so the lock file gets updated.
+16. Run `cargo xtask check-compliance`.
+17. Push up a commit with all the changes. The commit message should be "release: v#.#.#" or "release: v#.#.#-rc.#"
+18. Request review from the Router team.
 
 ### Review
 
