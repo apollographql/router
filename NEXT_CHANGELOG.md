@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Move cors configuration from `server` to top level ([PR #1586](https://github.com/apollographql/router/pull/1586))
+
+The cors configuration is now located at the top level of the configuration file.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1586
+
 ### Exit the router after logging panic details ([PR #1602](https://github.com/apollographql/router/pull/1602))
 
 If the router panics, it can leave the router in an unuseable state.
