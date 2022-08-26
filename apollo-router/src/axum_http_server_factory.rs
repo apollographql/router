@@ -90,15 +90,15 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
+    let graphql_path = if configuration.server.graphql_path.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        format!("{}router_extra_path", configuration.server.endpoint)
+        format!("{}router_extra_path", configuration.server.graphql_path)
     } else {
-        configuration.server.endpoint.clone()
+        configuration.server.graphql_path.clone()
     };
     let mut router = Router::<hyper::Body>::new()
         .route(
-            &graphql_endpoint,
+            &graphql_path,
             get({
                 let display_landing_page = configuration.server.landing_page;
                 move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
@@ -212,7 +212,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
                 actual_listen_address,
-                configuration.server.endpoint
+                configuration.server.graphql_path
             );
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
@@ -1271,7 +1271,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql"))
+                    .graphql_path(String::from("/graphql"))
                     .build(),
             )
             .build();
@@ -1340,7 +1340,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/:my_prefix/graphql"))
+                    .graphql_path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
             .build();
@@ -1409,7 +1409,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql/*"))
+                    .graphql_path(String::from("/graphql/*"))
                     .build(),
             )
             .build();
@@ -1628,7 +1628,7 @@ mod tests {
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .endpoint(String::from("/graphql/*"))
+                    .graphql_path(String::from("/graphql/*"))
                     .build(),
             )
             .build();

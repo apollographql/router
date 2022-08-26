@@ -406,18 +406,13 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "introspection": true,
         "landing_page": true,
-        "endpoint": "/",
+        "graphql_path": "/",
         "health_check_path": "/.well-known/apollo/server-health",
         "experimental_defer_support": false,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
-        "endpoint": {
-          "description": "GraphQL endpoint default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
         "experimental_defer_support": {
           "description": "Experimental @defer directive support default: false",
           "default": false,
@@ -429,6 +424,11 @@ expression: "&schema"
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "graphql_path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
