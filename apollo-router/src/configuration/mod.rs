@@ -1167,8 +1167,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, 5 ]
+cors:
+  allow_headers: [ Content-Type, 5 ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1183,10 +1183,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
+cors:
+  allow_headers:
+    - Content-Type
+    - 5
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1197,15 +1197,13 @@ server:
     fn it_does_not_allow_invalid_cors_headers() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_headers: [ "*" ]
+cors:
+  allow_credentials: true
+  allow_headers: [ "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1216,15 +1214,13 @@ server:
     fn it_does_not_allow_invalid_cors_methods() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    methods: [ GET, "*" ]
+cors:
+  allow_credentials: true
+  methods: [ GET, "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1235,15 +1231,13 @@ server:
     fn it_does_not_allow_invalid_cors_origins() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_any_origin: true
+cors:
+  allow_credentials: true
+  allow_any_origin: true
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1329,8 +1323,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+cors:
+  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1347,10 +1341,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+cors:
+  allow_headers:
+    - Content-Type
+    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
         "#,
         )
         .expect_err("should have resulted in an error");
