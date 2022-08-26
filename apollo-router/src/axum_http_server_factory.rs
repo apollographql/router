@@ -434,7 +434,7 @@ async fn handle_get(
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
-    if prefers_html(&http_request.headers()) && display_landing_page {
+    if prefers_html(http_request.headers()) && display_landing_page {
         return display_home_page().into_response();
     }
 
