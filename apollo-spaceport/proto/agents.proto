@@ -1,4 +1,4 @@
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 syntax = "proto3";
 
 import "proto/reports.proto";

@@ -1,5 +1,5 @@
-// This entire file is license key functionality
 //! Apollo metrics
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;

@@ -20,7 +20,9 @@ failfast = []
 access-json = "0.1.0"
 anyhow = "1.0.62"
 apollo-parser = "0.2.10"
+# ELv2 licensing: The apollo-spaceport crate is license key functionality
 apollo-spaceport = { path = "../apollo-spaceport" }
+# ELv2 licensing: The apollo-uplink crate is license key functionality
 apollo-uplink = { path = "../uplink" }
 async-compression = { version = "0.3.14", features = [
     "tokio",
@@ -119,7 +121,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", tag = "defer-alpha4" }
+router-bridge = "0.1.0-alpha.1"
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.2"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
@@ -167,6 +169,7 @@ url = { version = "2.2.2", features = ["serde"] }
 urlencoding = "2.1.0"
 yaml-rust = "0.4.5"
 pin-project-lite = "0.2.9"
+mediatype = "0.19.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

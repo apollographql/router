@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
 use futures::stream::BoxStream;

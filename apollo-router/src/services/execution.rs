@@ -16,8 +16,8 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::IntoHeaderName;
-use crate::http_ext::IntoHeaderValue;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::Context;
@@ -30,6 +30,7 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);
+#[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
     pub originating_request: http::Request<graphql::Request>,
@@ -78,6 +79,7 @@ impl Request {
 }
 
 assert_impl_all!(Response: Send);
+#[non_exhaustive]
 pub struct Response {
     pub response: http::Response<BoxStream<'static, graphql::Response>>,
 
@@ -153,7 +155,7 @@ impl Response {
     fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
-        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         Ok(Response::new(

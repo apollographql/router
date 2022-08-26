@@ -1,5 +1,5 @@
 //! Tracing configuration for apollo telemetry.
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use opentelemetry::sdk::trace::Builder;
 use tower::BoxError;
 

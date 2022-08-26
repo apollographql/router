@@ -10,9 +10,14 @@ use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
+use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
+use mediatype::names::MIXED;
+use mediatype::names::MULTIPART;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -176,7 +181,7 @@ where
         QueryPlannerContent::Plan { query, plan } => {
             let can_be_deferred = plan.root.contains_defer();
 
-            if can_be_deferred && !check_accept_header(&req.originating_request) {
+            if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
@@ -239,14 +244,19 @@ async fn plan_query(
         .await
 }
 
-fn check_accept_header(originating_request: &http::Request<graphql::Request>) -> bool {
-    originating_request
-        .headers()
-        .get_all(ACCEPT)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(',').map(|a| a.trim()))
-        .any(|value| value == "multipart/mixed")
+fn accepts_multipart(headers: &HeaderMap) -> bool {
+    let multipart_mixed = MediaType::new(MULTIPART, MIXED);
+
+    headers.get_all(ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn process_execution_response(
@@ -332,6 +342,7 @@ fn process_execution_response(
         ),
     })
 }
+
 /// Builder which generates a plugin pipeline.
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
