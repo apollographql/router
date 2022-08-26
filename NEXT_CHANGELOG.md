@@ -172,6 +172,12 @@ Move the location of the `text` field when exposing the query plan and fill it w
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1557
 
+### Formatting problem fix of scalar fields selected several times ([PR #1583](https://github.com/apollographql/router/issues/1583))
+
+Fixed a bug where querying scalar fields several times would put `null`s instead of expected values.
+
+By [@eole1712](https://github.com/eole1712) in https://github.com/apollographql/router/pull/1585
+
 ### Fix typo on HTTP errors from subgraph ([#1593](https://github.com/apollographql/router/pull/1593))
 
 Remove the closed parenthesis at the end of error messages resulting from HTTP errors from subgraphs.
