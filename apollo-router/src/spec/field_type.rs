@@ -13,11 +13,11 @@ pub(crate) struct InvalidValue;
 pub(crate) enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
-    /// Named type {0}_
+    /// Named type {0}
     Named(String),
-    /// List type {0}_
+    /// List type {0}
     List(Box<FieldType>),
-    /// Non null type {0}_
+    /// Non null type {0}
     NonNull(Box<FieldType>),
     /// String
     String,
