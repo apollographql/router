@@ -87,14 +87,9 @@ pub(crate) fn make_axum_router<RF>(
 where
     RF: SupergraphServiceFactory,
 {
-    let cors = configuration
-        .server
-        .cors
-        .clone()
-        .into_layer()
-        .map_err(|e| {
-            ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
-        })?;
+    let cors = configuration.cors.clone().into_layer().map_err(|e| {
+        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
+    })?;
     let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
         format!("{}router_extra_path", configuration.server.endpoint)
@@ -1268,14 +1263,14 @@ mod tests {
                 ))
             });
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .endpoint(String::from("/graphql"))
                     .build(),
             )
@@ -1337,14 +1332,14 @@ mod tests {
                 ))
             });
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .endpoint(String::from("/:my_prefix/graphql"))
                     .build(),
             )
@@ -1406,14 +1401,14 @@ mod tests {
                 ))
             });
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )
@@ -1629,10 +1624,10 @@ mod tests {
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
+            .cors(Cors::builder().build())
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Cors::builder().build())
                     .endpoint(String::from("/graphql/*"))
                     .build(),
             )
@@ -1855,14 +1850,14 @@ Content-Type: application/json\r
     async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .landing_page(false)
                     .build(),
             )
@@ -1901,14 +1896,14 @@ Content-Type: application/json\r
         );
 
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["http://studio".to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["http://studio".to_string()])
-                            .build(),
-                    )
                     .build(),
             )
             .build();
@@ -2044,10 +2039,10 @@ Content-Type: application/json\r
     #[tokio::test]
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         let conf = Configuration::builder()
+            .cors(Cors::builder().allow_any_origin(true).build())
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(Cors::builder().allow_any_origin(true).build())
                     .build(),
             )
             .build();
@@ -2067,14 +2062,14 @@ Content-Type: application/json\r
         let valid_origin = "https://thisoriginisallowed.com";
 
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec![valid_origin.to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec![valid_origin.to_string()])
-                            .build(),
-                    )
                     .build(),
             )
             .build();
@@ -2097,15 +2092,15 @@ Content-Type: application/json\r
         let apollo_subdomains = "https://([a-z0-9]+[.])*apollographql[.]com";
 
         let conf = Configuration::builder()
+            .cors(
+                Cors::builder()
+                    .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                    .match_origins(vec![apollo_subdomains.to_string()])
+                    .build(),
+            )
             .server(
                 crate::configuration::Server::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .cors(
-                        Cors::builder()
-                            .origins(vec!["https://anexactmatchorigin.com".to_string()])
-                            .match_origins(vec![apollo_subdomains.to_string()])
-                            .build(),
-                    )
                     .build(),
             )
             .build();

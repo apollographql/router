@@ -1,8 +1,8 @@
 server:
   listen: "127.0.0.1:4001"
-  cors:
-    origins:
-      - studio.apollographql.com
-    methods:
-      - GET
-      - PUT
+cors:
+  origins:
+    - studio.apollographql.com
+  methods:
+    - GET
+    - PUT
