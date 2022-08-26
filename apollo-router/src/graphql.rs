@@ -11,7 +11,7 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
 use crate::error::FetchError;
-use crate::error::Location;
+pub use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
@@ -57,7 +57,7 @@ impl Error {
         }
     }
 
-    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),

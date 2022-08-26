@@ -18,6 +18,7 @@ Common use cases for Apollo Router Rhai scripts include:
     * Headers
     * Status codes
     * Request context
+* Logging various information throughout the request lifecycle
 * Performing `checkpoint`-style short circuiting of requests
 
 ## Configuration
@@ -53,7 +54,7 @@ Your Rhai script's main file defines whichever combination of supported entry po
 
 <ExpansionPanel title="Click to expand">
 
-```javascript title="main.rhai"
+```rhai title="main.rhai"
 // You don't need to define all of these hooks! Just define
 // whichever ones your customization needs.
 
@@ -104,7 +105,7 @@ You can provide _exactly one_ main Rhai file to the Apollo Router. This means th
 
 To organize unrelated functionality within your Rhai customization, your main file can import and use symbols from any number of _other_ Rhai files (known as **modules**) in your script directory:
 
-```javascript title="my_module.rhai"
+```rhai title="my_module.rhai"
 // Module file
 
 fn process_request(request) {
@@ -112,7 +113,7 @@ fn process_request(request) {
 }
 ```
 
-```javascript title="main.rhai"
+```rhai title="main.rhai"
 // Main file
 
 import "my_module" as my_mod;
@@ -189,7 +190,7 @@ In addition to the examples below, see more examples in the Router repo's [examp
 
 This example illustrates how to register router request handling.
 
-```javascript
+```rhai
 
 // At the supergraph_service stage, register callbacks for processing requests
 fn supergraph_service(service) {
@@ -207,7 +208,7 @@ fn process_request(request) {
 
 This example manipulates headers and the request context:
 
-```javascript
+```rhai
 // At the supergraph_service stage, register callbacks for processing requests and
 // responses.
 fn supergraph_service(service) {
@@ -246,7 +247,7 @@ fn process_response(response) {
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
 
-```javascript
+```rhai
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
 fn subgraph_service(service, subgraph) {

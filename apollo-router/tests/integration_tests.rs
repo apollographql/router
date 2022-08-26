@@ -462,22 +462,22 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let response = http_response.next_response().await.unwrap();
-    let expected = vec![
-        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
-            name: "yetAnotherMissingVariable".to_string(),
-        }
-        .to_graphql_error(None),
-        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
-            name: "missingVariable".to_string(),
-        }
-        .to_graphql_error(None),
+    let mut response = http_response.next_response().await.unwrap();
+    let mut expected = vec![
+        graphql::Error::builder()
+            .message("invalid type for variable: 'missingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "missingVariable")
+            .build(),
+        graphql::Error::builder()
+            .message("invalid type for variable: 'yetAnotherMissingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "yetAnotherMissingVariable")
+            .build(),
     ];
-    assert!(
-        response.errors.iter().all(|x| expected.contains(x)),
-        "{:?}",
-        response.errors
-    );
+    response.errors.sort_by_key(|e| e.message.clone());
+    expected.sort_by_key(|e| e.message.clone());
+    assert_eq!(response.errors, expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -601,28 +601,16 @@ async fn defer_path_in_array() {
     insta::assert_json_snapshot!(second);
 }
 
-async fn query_node(
-    request: &supergraph::Request,
-) -> Result<graphql::Response, apollo_router::error::FetchError> {
+async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request.originating_request.body())
         .send()
         .await
-        .map_err(
-            |err| apollo_router::error::FetchError::SubrequestHttpError {
-                service: "test node".to_string(),
-                reason: err.to_string(),
-            },
-        )?
+        .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
         .json()
         .await
-        .map_err(
-            |err| apollo_router::error::FetchError::SubrequestMalformedResponse {
-                service: "test node".to_string(),
-                reason: err.to_string(),
-            },
-        )
+        .map_err(|err| format!("service 'test node' response was malformed: {err}"))
 }
 
 async fn http_query_rust(

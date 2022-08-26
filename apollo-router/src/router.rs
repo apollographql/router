@@ -23,7 +23,6 @@ use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing::subscriber::SetGlobalDefaultError;
 use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
@@ -98,32 +97,11 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_yaml::Error),
-
-    /// could not read configuration: {0}
-    ReadConfigError(std::io::Error),
-
-    /// {0}
-    ConfigError(crate::configuration::ConfigurationError),
-
-    /// could not read schema: {0}
-    ReadSchemaError(crate::error::SchemaError),
-
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
-
-    /// could not configure spaceport
-    ServerSpaceportError,
-
-    /// no reload handle available
-    NoReloadTracingHandleError,
-
-    /// could not set global subscriber: {0}
-    SetGlobalSubscriberError(SetGlobalDefaultError),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
@@ -336,12 +314,20 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
-        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
+    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = fs::read_to_string(path)?;
+        let config = validate_configuration(&config)?;
 
         Ok(config)
     }
+}
+
+#[derive(From, Display)]
+enum ReadConfigError {
+    /// could not read configuration: {0}
+    Io(std::io::Error),
+    /// {0}
+    Validation(crate::configuration::ConfigurationError),
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;

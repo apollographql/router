@@ -88,12 +88,7 @@ where
     RF: SupergraphServiceFactory,
 {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
-        ApolloRouterError::ConfigError(
-            crate::configuration::ConfigurationError::LayerConfiguration {
-                layer: "Cors".to_string(),
-                error: e,
-            },
-        )
+        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
     let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
