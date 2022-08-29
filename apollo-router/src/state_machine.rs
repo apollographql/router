@@ -438,6 +438,8 @@ mod tests {
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -656,10 +658,10 @@ mod tests {
 
         impl SupergraphServiceFactory for MyRouterFactory {
             type SupergraphService = MockMyRouter;
-            type Future = <Self::SupergraphService as Service<http::Request<graphql::Request>>>::Future;
+            type Future = <Self::SupergraphService as Service<SupergraphRequest>>::Future;
             fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler>;
         }
-        impl  NewService<http::Request<graphql::Request>> for MyRouterFactory {
+        impl  NewService<SupergraphRequest> for MyRouterFactory {
             type Service = MockMyRouter;
             fn new_service(&self) -> MockMyRouter;
         }
@@ -673,7 +675,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: http::Request<crate::graphql::Request>) -> <MockMyRouter as Service<http::Request<crate::graphql::Request>>>::Future;
+            fn service_call(&mut self, req: SupergraphRequest) -> <MockMyRouter as Service<SupergraphRequest>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -682,15 +684,15 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<http::Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = http::Response<BoxStream<'static, graphql::Response>>;
+    impl Service<SupergraphRequest> for MockMyRouter {
+        type Response = SupergraphResponse;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: http::Request<crate::graphql::Request>) -> Self::Future {
+        fn call(&mut self, req: SupergraphRequest) -> Self::Future {
             self.service_call(req)
         }
     }

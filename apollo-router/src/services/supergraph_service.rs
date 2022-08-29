@@ -454,31 +454,22 @@ pub(crate) struct RouterCreator {
     apq: APQLayer,
 }
 
-impl NewService<http::Request<graphql::Request>> for RouterCreator {
-    type Service = BoxService<
-        http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
-        BoxError,
-    >;
+impl NewService<SupergraphRequest> for RouterCreator {
+    type Service = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
     fn new_service(&self) -> Self::Service {
         self.make()
-            .map_request(|http_request: http::Request<graphql::Request>| http_request.into())
-            .map_response(|response| response.response)
+            //.map_request(|http_request: http::Request<graphql::Request>| http_request.into())
+            //.map_response(|response| response.response)
             .boxed()
     }
 }
 
 impl SupergraphServiceFactory for RouterCreator {
-    type SupergraphService = BoxService<
-        http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
-        BoxError,
-    >;
+    type SupergraphService = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
 
-    type Future =
-        <<RouterCreator as NewService<http::Request<graphql::Request>>>::Service as Service<
-            http::Request<graphql::Request>,
-        >>::Future;
+    type Future = <<RouterCreator as NewService<SupergraphRequest>>::Service as Service<
+        SupergraphRequest,
+    >>::Future;
 
     fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
         self.plugins

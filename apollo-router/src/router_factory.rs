@@ -16,6 +16,8 @@ use crate::plugin::Handler;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
@@ -24,15 +26,11 @@ use crate::Schema;
 /// Instances of this traits are used by the HTTP server to generate a new
 /// SupergraphService on each request
 pub(crate) trait SupergraphServiceFactory:
-    NewService<http::Request<graphql::Request>, Service = Self::SupergraphService>
-    + Clone
-    + Send
-    + Sync
-    + 'static
+    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
 {
     type SupergraphService: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            SupergraphRequest,
+            Response = SupergraphResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;

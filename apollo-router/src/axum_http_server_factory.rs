@@ -70,6 +70,9 @@ use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -755,6 +758,9 @@ mod tests {
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
+    use crate::Context;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -798,21 +804,18 @@ mod tests {
     mock! {
         #[derive(Debug)]
         SupergraphService {
-            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<BoxStream<'static, graphql::Response>>, BoxError>;
+            fn service_call(&mut self, req: SupergraphRequest) -> Result<SupergraphResponse, BoxError>;
         }
     }
 
-    type MockSupergraphServiceType = tower_test::mock::Mock<
-        http::Request<graphql::Request>,
-        http::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
-    >;
+    type MockSupergraphServiceType = tower_test::mock::Mock<SupergraphRequest, SupergraphResponse>;
 
     #[derive(Clone)]
     struct TestSupergraphServiceFactory {
         inner: MockSupergraphServiceType,
     }
 
-    impl NewService<http::Request<graphql::Request>> for TestSupergraphServiceFactory {
+    impl NewService<SupergraphRequest> for TestSupergraphServiceFactory {
         type Service = MockSupergraphServiceType;
 
         fn new_service(&self) -> Self::Service {
@@ -823,9 +826,10 @@ mod tests {
     impl SupergraphServiceFactory for TestSupergraphServiceFactory {
         type SupergraphService = MockSupergraphServiceType;
 
-        type Future = <<TestSupergraphServiceFactory as NewService<
-            http::Request<graphql::Request>,
-        >>::Service as Service<http::Request<graphql::Request>>>::Future;
+        type Future =
+            <<TestSupergraphServiceFactory as NewService<SupergraphRequest>>::Service as Service<
+                SupergraphRequest,
+            >>::Future;
 
         fn custom_endpoints(&self) -> HashMap<String, Handler> {
             HashMap::new()
@@ -1001,11 +1005,12 @@ mod tests {
             .times(2)
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
+                Ok(SupergraphResponse::new_from_response(
                     http::Response::builder()
                         .status(200)
                         .body(example_response)
                         .unwrap(),
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
