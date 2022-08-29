@@ -36,7 +36,7 @@ axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
 bytes = "1.2.1"
-clap = { version = "3.2.17", default-features = false, features = [
+clap = { version = "3.2.18", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -114,7 +114,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.8"
 prometheus = "0.13"
-rhai = { version = "1.9.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.9.1", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",

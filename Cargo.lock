@@ -150,7 +150,7 @@ dependencies = [
  "backtrace",
  "buildstructor 0.4.1",
  "bytes",
- "clap 3.2.17",
+ "clap 3.2.18",
  "dashmap 5.3.4",
  "deadpool",
  "derivative",
@@ -257,7 +257,7 @@ version = "1.0.0-alpha.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.2.17",
+ "clap 3.2.18",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -282,7 +282,7 @@ name = "apollo-spaceport"
 version = "1.0.0-alpha.0"
 dependencies = [
  "bytes",
- "clap 3.2.17",
+ "clap 3.2.18",
  "flate2",
  "prost",
  "prost-types",
@@ -751,7 +751,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.2.17",
+ "clap 3.2.18",
  "crates-io",
  "crossbeam-utils",
  "curl",
@@ -933,9 +933,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.17"
+version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29e724a68d9319343bb3328c9cc2dfde263f4b3142ee1059a9980580171c954b"
+checksum = "b15f2ea93df33549dbe2e8eecd1ca55269d63ae0b3ba1f55db030817d1c2867f"
 dependencies = [
  "atty",
  "bitflags",
@@ -950,9 +950,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.2.17"
+version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13547f7012c01ab4a0e8f8967730ada8f9fdf419e8b6c792788f39cf4e46eefa"
+checksum = "ea0c8bce528c4be4da13ea6fead8965e95b6073585a2f05204bd8f4119f82a65"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -4372,9 +4372,9 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.9.0"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07b85aefd80c317c18dc1bad3e6293602da1f8958dea2017f0d793dddfe69590"
+checksum = "3819cc705765a6def80466451e5e20053a536f940fa8c7ea3688a7e554a7dc89"
 dependencies = [
  "ahash 0.8.0",
  "bitflags",
