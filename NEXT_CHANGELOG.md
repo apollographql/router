@@ -29,4 +29,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Refactor `SupergraphService` ([PR #1615](https://github.com/apollographql/router/issues/1615))
+
+The `SupergrapHService` code became too complex, so much that `rsutfmt` could not modify it anymore.
+This breaks up the code in more manageable functions.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1615
+
+
 ## 📚 Documentation
