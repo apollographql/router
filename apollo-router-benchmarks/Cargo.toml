@@ -1,9 +1,9 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "0.15.1"
+version = "1.0.0-alpha.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
-license = "Elastic-2.0"
+license = "LicenseRef-ELv2"
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

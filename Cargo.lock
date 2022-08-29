@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.16.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.15.1"
+version = "1.0.0-alpha.0"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "0.16.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.16.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "bytes",
  "clap 3.2.17",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.16.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "futures",
  "graphql_client",
@@ -365,7 +365,7 @@ dependencies = [
 [[package]]
 name = "async-compression"
 version = "0.3.14"
-source = "git+https://github.com/geal/async-compression?branch=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
+source = "git+https://github.com/geal/async-compression?tag=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
 dependencies = [
  "brotli",
  "flate2",
@@ -3018,9 +3018,9 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "mediatype"
-version = "0.19.7"
+version = "0.19.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac0db9ec602cd88b078efab731831a15461f90eb100c4a7da457d8cd6a917d2f"
+checksum = "90da6e15720cff55898a02a2ed6e9a21b152f0283a5ad89465f8d8f80c9750ca"
 
 [[package]]
 name = "memchr"
@@ -6479,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.16.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "ansi_term",
  "anyhow",
