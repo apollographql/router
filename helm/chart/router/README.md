@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 0.1.20](https://img.shields.io/badge/Version-0.1.20-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.16.0](https://img.shields.io/badge/AppVersion-v0.16.0-informational?style=flat-square)
+![Version: 0.1.21](https://img.shields.io/badge/Version-0.1.21-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.0-alpha.0](https://img.shields.io/badge/AppVersion-v1.0.0--alpha.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -73,6 +73,7 @@ helm show values apollographql/router
 | rhai.input_file | string | `""` | input rhai file, contents will be stored in a ConfigMap |
 | router | object | `{"args":["--hot-reload"],"configuration":{"server":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
+| service.annotations | object | `{}` |  |
 | service.port | int | `80` |  |
 | service.type | string | `"ClusterIP"` |  |
 | serviceAccount.annotations | object | `{}` |  |
