@@ -77,28 +77,3 @@ impl Plugin for HelloWorld {
 }
 
 declare_plugin!(HelloWorld::new, Conf);
-
-#[cfg(test)]
-mod tests {
-    // If we run this test as follows: cargo test -- --nocapture
-    // we will see the message "Hello Bob" printed to standard out
-    #[tokio::test]
-    async fn display_message() {
-        let config = serde_json::json!({
-            "plugins": {
-                "example.hello_world": {
-                    "name": "Bob"
-                }
-            }
-        });
-        // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
-        let _test_harness = apollo_router::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build()
-            .await
-            .unwrap();
-    }
-}

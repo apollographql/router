@@ -103,29 +103,9 @@ mod tests {
     use apollo_router::plugin::Plugin;
     use apollo_router::services::supergraph;
     use http::StatusCode;
-    use serde_json::json;
     use tower::ServiceExt;
 
     use super::ForbidAnonymousOperations;
-
-    // This test ensures the router will be able to
-    // find our `forbid_anonymous_operations` plugin,
-    // and deserialize an empty yml configuration into it
-    // see router.yml for more information
-    #[tokio::test]
-    async fn plugin_registered() {
-        let config = json!({
-            "plugins": {
-                "example.forbid_anonymous_operations": null
-            }
-        });
-        apollo_router::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build()
-            .await
-            .unwrap();
-    }
 
     #[tokio::test]
     async fn test_no_operation_name() {
