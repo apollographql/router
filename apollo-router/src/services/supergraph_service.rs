@@ -156,7 +156,7 @@ where
                         context,
                     })
                 }
-                QueryPlannerContent::Plan { query, plan } => {
+                QueryPlannerContent::Plan {  plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
                     if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
@@ -176,7 +176,7 @@ where
                                 response: resp,
                                 context,
                             })
-                    } else  if let Some(err) = query.validate_variables(body, &schema).err() {
+                    } else  if let Some(err) = plan.query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                         *res.response.status_mut() = StatusCode::BAD_REQUEST;
                         Ok(res)
@@ -187,7 +187,7 @@ where
                             .oneshot(
                                 ExecutionRequest::builder()
                                     .originating_request(req.originating_request)
-                                    .query_plan(plan)
+                                    .query_plan(plan.clone())
                                     .context(context)
                                     .build(),
                             )
@@ -198,7 +198,7 @@ where
                         let stream = response_stream
                         .map(move |mut response: Response| {
                             tracing::debug_span!("format_response").in_scope(|| {
-                                query.format_response(
+                                plan.query.format_response(
                                     &mut response,
                                     operation_name.as_deref(),
                                     variables.clone(),

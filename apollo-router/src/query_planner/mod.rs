@@ -51,6 +51,7 @@ pub struct QueryPlan {
     pub(crate) root: PlanNode,
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: String,
+    pub(crate) query: Arc<Query>,
     options: QueryPlanOptions,
 }
 
@@ -70,6 +71,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: String::new(),
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         }
     }
@@ -287,6 +289,7 @@ impl QueryPlan {
                     schema,
                     originating_request,
                     deferred_fetches: &deferred_fetches,
+                    query: &self.query,
                     options: &self.options,
                 },
                 &root,
@@ -314,6 +317,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     schema: &'a Schema,
     originating_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    query: &'a Arc<Query>,
     options: &'a QueryPlanOptions,
 }
 
@@ -468,6 +472,7 @@ impl PlanNode {
                         let sf = parameters.service_factory.clone();
                         let ctx = parameters.context.clone();
                         let opt = parameters.options.clone();
+                        let query = parameters.query.clone();
                         let mut primary_receiver = primary_sender.subscribe();
                         let mut value = parent_value.clone();
                         let fut = async move {
@@ -502,6 +507,7 @@ impl PlanNode {
                                             schema: &sc,
                                             originating_request: &orig,
                                             deferred_fetches: &deferred_fetches,
+                                            query: &query,
                                             options: &opt,
                                         },
                                         &Path::default(),
@@ -585,6 +591,7 @@ impl PlanNode {
                                     originating_request: parameters.originating_request,
                                     deferred_fetches: &deferred_fetches,
                                     options: parameters.options,
+                                    query: parameters.query,
                                 },
                                 current_dir,
                                 &value,
@@ -1246,6 +1253,7 @@ mod tests {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
             formatted_query_plan: String::new(),
             options: QueryPlanOptions::default(),
+            query: Arc::new(Query::default()),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1299,6 +1307,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1353,6 +1362,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1466,6 +1476,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1616,6 +1627,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 

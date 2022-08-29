@@ -126,11 +126,11 @@ impl BridgeQueryPlanner {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
+                        query: Arc::new(selections),
                         options: QueryPlanOptions {
                             enable_deduplicate_variables: self.deduplicate_variables,
                         },
                     }),
-                    query: Arc::new(selections),
                 })
             }
             PlanSuccess {
