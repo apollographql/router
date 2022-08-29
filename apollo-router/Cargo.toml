@@ -3,7 +3,7 @@ name = "apollo-router"
 version = "0.16.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
-license = "Elastic-2.0"
+license = "LicenseRef-ELv2"
 publish = false
 
 [[bin]]
