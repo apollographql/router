@@ -50,8 +50,8 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.2"
-futures = { version = "0.3.23", features = ["thread-pool"] }
+envmnt = "0.10.4"
+futures = { version = "0.3.24", features = ["thread-pool"] }
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
