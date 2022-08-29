@@ -365,7 +365,7 @@ dependencies = [
 [[package]]
 name = "async-compression"
 version = "0.3.14"
-source = "git+https://github.com/geal/async-compression?branch=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
+source = "git+https://github.com/geal/async-compression?tag=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
 dependencies = [
  "brotli",
  "flate2",
