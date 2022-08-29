@@ -622,12 +622,15 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    if let Some(&Value::Bool(true)) = parameters
-                        .originating_request
-                        .body()
-                        .variables
-                        .get(condition.as_str())
-                    {
+                    let v: &Value = parameters
+                    .originating_request
+                    .body()
+                    .variables
+                    .get(condition.as_str()).or_else(|| parameters.query.default_variable_value(parameters
+                        .originating_request.body().operation_name.as_deref(),condition.as_str()))
+                    .expect("defer expects a `Boolean!` so the variable should be non null too and present or with a default value");
+
+                    if let &Value::Bool(true) = v {
                         //FIXME: should we show an error if the if_node was not present?
                         if let Some(node) = if_clause {
                             let span = tracing::info_span!("condition_if");

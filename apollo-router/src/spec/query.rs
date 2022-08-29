@@ -691,6 +691,23 @@ impl Query {
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
+
+    pub(crate) fn default_variable_value(
+        &self,
+        operation_name: Option<&str>,
+        variable_name: &str,
+    ) -> Option<&Value> {
+        let operation = self
+            .operations
+            .iter()
+            .find(|op| op.name.as_deref() == operation_name);
+
+        operation.and_then(|op| {
+            op.variables
+                .get(variable_name)
+                .and_then(|(_, value)| value.as_ref())
+        })
+    }
 }
 
 #[derive(Debug)]
