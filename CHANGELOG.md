@@ -8,17 +8,27 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## ❗ BREAKING ❗
 
-### Move cors configuration from `server` to top level ([PR #1586](https://github.com/apollographql/router/pull/1586))
+### Move `cors` configuration from `server` to root-level ([PR #1586](https://github.com/apollographql/router/pull/1586))
 
-The cors configuration is now located at the top level of the configuration file.
+The `cors` configuration is now located at the root-level of the configuration file, rather than inside `server`.
+
+For example:
+
+```diff
+- server:
+-   cors:
+-     origins:
+-       - https://yourdomain.com
++ cors:
++   origins:
++     - https://yourdomain.com
+```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1586
 
 ### Exit the router after logging panic details ([PR #1602](https://github.com/apollographql/router/pull/1602))
 
-If the router panics, it can leave the router in an unuseable state.
-
-Terminating after logging the panic details is the best choice here.
+The Router will now terminate in the (unlikely) case where it panics.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1602
 
@@ -64,7 +74,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Changes to `IntoHeaderName` and `IntoHeaderValue` ([PR #1607](https://github.com/apollographql/router/pull/1607))
 
-Note: these types are typically not use directly, so we expect most user code to require no change.
+> Note: These types are typically not used directly, so we expect most user code to require no changes.
 
 * Move from `apollo_router::http_ext` to `apollo_router::services`
 * Rename to `TryIntoHeaderName` and `TryIntoHeaderValue`
@@ -74,7 +84,7 @@ Note: these types are typically not use directly, so we expect most user code to
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1607
 
-### QueryPlan::usage_reporting and QueryPlannerContent are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
+### `QueryPlan::usage_reporting` and `QueryPlannerContent` are private ([Issue #1556](https://github.com/apollographql/router/issues/1556))
 
 These items have been removed from the public API of `apollo_router::services::execution`.
 
@@ -82,60 +92,61 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Insert the full target triplet in the package name, and prefix with `v` ([Issue #1385](https://github.com/apollographql/router/issues/1385))
 
-The release tarballs now contain the full target triplet in their name along with a `v` prefix to be consistent with our other packaging techniques (e.g., Rover):
+The release tarballs now contain the full target triplet in their name along with a `v` prefix to be consistent with our other packaging techniques (e.g., Rover).
 
-* `router-0.16.0-x86_64-linux.tar.gz` -> `router-v0.16.0-x86_64-unknown-linux-gnu.tar.gz`
-* `router-0.16.0-x86_64-macos.tar.gz` -> `router-v0.16.0-x86_64-apple-darwin.tar.gz`
-* `router-0.16.0-x86_64-windows.tar.gz` -> `router-v0.16.0-x86_64-pc-windows-msvc.tar.gz`
+For example:
+
+- `router-0.16.0-x86_64-linux.tar.gz` becomes `router-v0.16.0-x86_64-unknown-linux-gnu.tar.gz`
+- `router-0.16.0-x86_64-macos.tar.gz` becomes` router-v0.16.0-x86_64-apple-darwin.tar.gz`
+- `router-0.16.0-x86_64-windows.tar.gz` becomes` router-v0.16.0-x86_64-pc-windows-msvc.tar.gz`
 
 By [@abernix](https://github.com/abernix) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1433 (which re-lands work done in https://github.com/apollographql/router/pull/1393)
 
 ### Many structs and enums are now `#[non_exhaustive]` ([Issue #1550](https://github.com/apollographql/router/issues/1550))
 
-This means we may add struct fields or enum variants in the future.
-To prepare for that eventuality:
+This means we may adjust `struct` fields or `enum` variants in additive ways in the future without breaking changes.  To prepare for that eventuality:
 
-When using a struct pattern (such as for deconstructing a value into its fields),
+1. When using a struct pattern (such as for deconstructing a value into its fields),
 use `..` to allow further fields:
 
-```diff
--let PluginInit { config, supergraph_sdl } = init;
-+let PluginInit { config, supergraph_sdl, .. } = init;
-```
+  ```diff
+  -let PluginInit { config, supergraph_sdl } = init;
+  +let PluginInit { config, supergraph_sdl, .. } = init;
+  ```
 
-Or use field access instead:
+2. Use field access instead:
 
-```diff
--let PluginInit { config, supergraph_sdl } = init;
-+let config = init.config;
-+let supergraph_sdl = init.supergraph_sdl;
-```
+  ```diff
+  -let PluginInit { config, supergraph_sdl } = init;
+  +let config = init.config;
+  +let supergraph_sdl = init.supergraph_sdl;
+  ```
 
-When constructing a struct, use a builder or constructor method instead of struct literal syntax:
+3. When constructing a struct, use a builder or constructor method instead of struct literal syntax:
 
-```diff
--let error = graphql::Error {
--    message: "something went wrong".to_string(),
--    ..Default::default()
--};
-+let error = graphql::Error::builder()
-+    .message("something went wrong")
-+    .build();
-```
+  ```diff
+  -let error = graphql::Error {
+  -    message: "something went wrong".to_string(),
+  -    ..Default::default()
+  -};
+  +let error = graphql::Error::builder()
+  +    .message("something went wrong")
+  +    .build();
+  ```
 
-When matching on an enum, add a wildcard match arm:
+4. When matching on an enum, add a wildcard match arm:
 
-```diff
- match error {
-     ApolloRouterError::StartupError => "StartupError",
-     ApolloRouterError::HttpServerLifecycleError => "HttpServerLifecycleError",
-     ApolloRouterError::NoConfiguration => "NoConfiguration",
-     ApolloRouterError::NoSchema => "NoSchema",
-     ApolloRouterError::ServiceCreationError(_) => "ServiceCreationError",
-     ApolloRouterError::ServerCreationError(_) => "ServerCreationError",
-+    _ => "other error",
-}
-```
+  ```diff
+  match error {
+      ApolloRouterError::StartupError => "StartupError",
+      ApolloRouterError::HttpServerLifecycleError => "HttpServerLifecycleError",
+      ApolloRouterError::NoConfiguration => "NoConfiguration",
+      ApolloRouterError::NoSchema => "NoSchema",
+      ApolloRouterError::ServiceCreationError(_) => "ServiceCreationError",
+      ApolloRouterError::ServerCreationError(_) => "ServerCreationError",
+  +    _ => "other error",
+  }
+  ```
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1614
 
@@ -143,13 +154,13 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 They were not used anymore in the public API (or at all).
 
-By [@SimonSapin](https://github.com/SimonSapin) in FIXME
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1621
 
 ## 🚀 Features
 
-### instrument the rhai plugin with a tracing span ([PR #1598](https://github.com/apollographql/router/pull/1598))
+### Instrument the rhai plugin with a tracing span ([PR #1598](https://github.com/apollographql/router/pull/1598))
 
-If you have an active rhai script in your router, you will now see a "rhai plugin" tracing span.
+If you have an active rhai script in your router, you will now see a "rhai plugin" span in tracing.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1598
 
@@ -158,7 +169,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Only send one report for a response with deferred responses ([PR #1576](https://github.com/apollographql/router/issues/1576))
 
 The router was sending one report per response (even deferred ones), while Studio was expecting one report for the entire
-response. The router now sends one report, that measures the latency of the entire operation.
+response. The router now sends one report which is inclusive of the latency of the entire operation.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1576
 
@@ -188,23 +199,22 @@ By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollograp
 
 ### Only send one report for a response with deferred responses ([PR #1596](https://github.com/apollographql/router/issues/1596))
 
-deferred responses come as multipart elements, send as individual HTTP response chunks. When a client receives one chunk,
-it should contain the next delimiter, so the client knows that the response can be processed, instead of waiting for the
-next chunk to see the delimiter.
+Deferred responses come as `multipart/mixed` elements and are sent as individual HTTP response chunks. When a client receives one chunk,
+that chunk should contain the next delimiter.  This gives the client the ability to start processing the response instead of waiting for the
+next chunk just for the delimiter.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1596
 
-### Patch async-compression to compress responses in streaming ([PR #1604](https://github.com/apollographql/router/issues/1604))
+### Patch `async-compression` to compress responses in streaming ([PR #1604](https://github.com/apollographql/router/issues/1604))
 
-async-compression is a dependency used for response compression. Its implementation accumulates the entire compressed response
-in memory before sending it, which creates problems for deferred responses, where we want the responses to come as soon as
-possible, and not all at once after a while.
+The `async-compression` crate is a dependency used for HTTP response compression. Its implementation accumulates the entire compressed response in memory before sending it.  However, this created problems for `@defer` responses since we want those responses to come as soon as
+possible, rather than waiting until the _entire_ total response has been received and compressed.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1604
 
-### Queries with defer must have the Accept: multipart/mixed header ([PR #1610](https://github.com/apollographql/router/issues/1610))
+### Queries with `@defer` must have the `accept: multipart/mixed` header ([PR #1610](https://github.com/apollographql/router/issues/1610))
 
-Since deferred responses can come back as multipart responses, we must check that the client supports that content type.
+Since deferred responses can come back as multipart responses, we must check that the client supports that `content-type`.
 This will allow older clients to show a meaningful error message instead of a parsing error if the `@defer` directive is
 used but they don't support it.
 
@@ -214,7 +224,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Depend on published `router-bridge` ([PR #1613](https://github.com/apollographql/router/issues/1613))
 
-We have published the `router-bridge` to crates.io, which removes the need for router developers to have nodejs installed.
+The `router-bridge` package is now published which means the `router` repository no longer depends on having Node.js installed to build.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1613
 
