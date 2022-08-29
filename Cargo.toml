@@ -39,4 +39,4 @@ incremental = false
 # entire compressed response in memory before sending it, which creates issues with
 # deferred responses getting received too late
 [patch.crates-io]
-async-compression = { git = 'https://github.com/geal/async-compression', branch = 'encoder-flush' }
+async-compression = { git = 'https://github.com/geal/async-compression', tag = 'encoder-flush' }
