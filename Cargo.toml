@@ -7,6 +7,8 @@ members = [
     "apollo-router-scaffold",
     "examples/add-timestamp-header",
     "examples/async-auth",
+    "examples/bin-hello-world",
+    "examples/bin-forbid-anonymous-operations",
     "examples/cookies-to-headers",
     "examples/embedded",
     "examples/context",

@@ -30,6 +30,7 @@ async-compression = { version = "0.3.14", features = [
     "gzip",
     "deflate",
 ] }
+async-ffi = "0.4.0"
 async-trait = "0.1.57"
 atty = "0.2.14"
 axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
@@ -66,6 +67,7 @@ itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.132"
+libloading = "0.7"
 lru = "0.7.8"
 mockall = "0.11.2"
 moka = { version = "0.9.3", features = ["future", "futures-util"] }

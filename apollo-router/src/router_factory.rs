@@ -74,6 +74,8 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
+
+        let bin_plugins = crate::plugin::binary_plugins::scan_plugins().await?;
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
@@ -84,6 +86,11 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         }
 
         for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
+        }
+
+        for (plugin_name, plugin) in bin_plugins {
+            tracing::info!("adding binary plugin: {}", plugin_name);
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 

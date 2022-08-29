@@ -1,0 +1,20 @@
+[package]
+name = "bin-forbid-anonymous-operations"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+apollo-router = { path = "../../apollo-router"}
+async-ffi = "0.4.0"
+async-trait = "0.1"
+http = "0.2"
+serde_json = "1"
+tower = { version = "0.4", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
