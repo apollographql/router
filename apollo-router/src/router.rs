@@ -33,12 +33,14 @@ use Event::UpdateSchema;
 
 use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
 use crate::spec::Schema;
 use crate::state_machine::StateMachine;
@@ -59,27 +61,31 @@ async fn make_transport_service<RF>(
     let service_factory = YamlSupergraphServiceFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
+    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
     let extra = Default::default();
-    Ok(make_axum_router(service_factory, &configuration, extra)?
-        .map_response(|response| {
-            response.map(|body| {
-                // Axum makes this `body` have type:
-                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                let mut body = Box::pin(body);
-                // We make a stream based on its `poll_data` method
-                // in order to create a `hyper::Body`.
-                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                // … but we ignore the `poll_trailers` method:
-                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                // Apparently HTTP/2 trailers are like headers, except after the response body.
-                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                // so ignoring `poll_trailers` is fine.
-                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+
+    Ok(
+        make_axum_router(service_factory, &configuration, apq, extra)?
+            .map_response(|response| {
+                response.map(|body| {
+                    // Axum makes this `body` have type:
+                    // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                    let mut body = Box::pin(body);
+                    // We make a stream based on its `poll_data` method
+                    // in order to create a `hyper::Body`.
+                    Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                    // … but we ignore the `poll_trailers` method:
+                    // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                    // Apparently HTTP/2 trailers are like headers, except after the response body.
+                    // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                    // so ignoring `poll_trailers` is fine.
+                    // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                    // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+                })
             })
-        })
-        .map_err(|error| match error {})
-        .boxed_clone())
+            .map_err(|error| match error {})
+            .boxed_clone(),
+    )
 }
 
 /// Error types for FederatedServer.

@@ -494,7 +494,7 @@ impl RouterCreator {
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
-            .layer(self.apq.clone())
+            //.layer(self.apq.clone())
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins.iter().rev().fold(

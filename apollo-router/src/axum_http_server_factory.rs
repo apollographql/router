@@ -57,6 +57,7 @@ use tower_service::Service;
 use tracing::Level;
 use tracing::Span;
 
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::graphql;
@@ -89,6 +90,7 @@ impl AxumHttpServerFactory {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
+    apq: APQLayer,
     plugin_handlers: HashMap<String, Handler>,
 ) -> Result<Router, ApolloRouterError>
 where
@@ -103,6 +105,8 @@ where
     } else {
         configuration.server.graphql_path.clone()
     };
+
+    let apq2 = apq.clone();
     let mut router = Router::<hyper::Body>::new()
         .route(
             &graphql_path,
@@ -111,6 +115,7 @@ where
                 move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                     handle_get(
                         host,
+                        apq.clone(),
                         service.new_service().boxed(),
                         http_request,
                         display_landing_page,
@@ -127,6 +132,7 @@ where
                         host,
                         uri,
                         request,
+                        apq2.clone(),
                         service.new_service().boxed(),
                         header_map,
                     )
@@ -192,8 +198,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
+            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
 
-            let router = make_axum_router(service_factory, &configuration, plugin_handlers)?;
+            let router = make_axum_router(service_factory, &configuration, apq, plugin_handlers)?;
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -424,11 +431,8 @@ async fn custom_plugin_handler(
 
 async fn handle_get(
     Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
@@ -444,7 +448,7 @@ async fn handle_get(
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
             .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
+        return run_graphql_request(service, apq, http_request)
             .await
             .into_response();
     }
@@ -456,11 +460,8 @@ async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     let mut http_request = Request::post(
@@ -471,7 +472,7 @@ async fn handle_post(
     .expect("body has already been parsed; qed");
     *http_request.headers_mut() = header_map;
 
-    run_graphql_request(service, http_request)
+    run_graphql_request(service, apq, http_request)
         .await
         .into_response()
 }
@@ -487,20 +488,37 @@ async fn health_check() -> impl IntoResponse {
 
 async fn run_graphql_request<RS>(
     service: RS,
+    apq: APQLayer,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse
 where
-    RS: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
-            Error = BoxError,
-        > + Send,
+    RS: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send,
 {
+    let (head, body) = http_request.into_parts();
+    let mut req: SupergraphRequest = Request::from_parts(head, body).into();
+    req = match apq.apq_request(req).await {
+        Ok(req) => req,
+        Err(res) => {
+            let (parts, mut stream) = res.response.into_parts();
+
+            return match stream.next().await {
+                None => {
+                    tracing::error!("router service is not available to process request",);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "router service is not available to process request",
+                    )
+                        .into_response()
+                }
+                Some(body) => http_ext::Response::from(http::Response::from_parts(parts, body))
+                    .into_response(),
+            };
+        }
+    };
+
     match service.ready_oneshot().await {
         Ok(mut service) => {
-            let (head, body) = http_request.into_parts();
-
-            match service.call(Request::from_parts(head, body)).await {
+            match service.call(req).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
                         if source_err.is::<RateLimited>() {
@@ -518,7 +536,7 @@ where
                         .into_response()
                 }
                 Ok(response) => {
-                    let (mut parts, mut stream) = response.into_parts();
+                    let (mut parts, mut stream) = response.response.into_parts();
 
                     match stream.next().await {
                         None => {
