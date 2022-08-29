@@ -16,7 +16,8 @@ path = "src/main.rs"
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
 # Enables usage of tokio-console with the router
-# tokio-console also requires at build time the environment variable RUSTFLAGS="--cfg tokio_unstable"
+# tokio-console also requires at build time the environment variable
+# RUSTFLAGS="--cfg tokio_unstable"
 console = ["tokio/tracing", "console-subscriber"]
 
 [dependencies]
