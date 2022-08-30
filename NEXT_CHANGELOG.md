@@ -36,7 +36,7 @@ The helm chart never used to have a registry, so our docs were really just place
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1649
 
 
-### Update router-bridge to `query-planner` v2.1.0 ([PR #1650](https://github.com/apollographql/router/issues/1650))
+### Update router-bridge to `query-planner` v2.1.0 ([PR #1650](https://github.com/apollographql/router/pull/1650))
 
 The 2.1.0 release of the query planner comes with fixes to fragment interpretation and reduced memory usage.
 
