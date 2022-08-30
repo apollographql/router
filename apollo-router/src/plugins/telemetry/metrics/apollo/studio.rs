@@ -8,7 +8,7 @@ use apollo_spaceport::StatsContext;
 use serde::Serialize;
 
 use super::duration_histogram::DurationHistogram;
-use crate::http_ext::RequestId;
+use crate::request::RequestId;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {

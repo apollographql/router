@@ -13,6 +13,7 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use http::header::ACCEPT;
 use http::Method;
 use http::StatusCode;
 use insta::internals::Content;
@@ -184,13 +185,11 @@ async fn queries_should_work_over_get() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_queries_should_not_work() {
-    let expected_error = graphql::Error {
-        message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-        Please either specify a 'content-type' header \
-        (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
-        or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight".to_string(),
-        ..Default::default()
-    };
+    let message = "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+    Please either specify a 'content-type' header \
+    (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
+    or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
+    let expected_error = graphql::Error::builder().message(message).build();
 
     let mut request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
@@ -262,10 +261,10 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let expected_error = apollo_router::graphql::Error {
-        message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
-        ..Default::default()
-    };
+    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let expected_error = apollo_router::graphql::Error::builder()
+        .message(message)
+        .build();
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name } }"#)
@@ -470,22 +469,22 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let response = http_response.next_response().await.unwrap();
-    let expected = vec![
-        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
-            name: "yetAnotherMissingVariable".to_string(),
-        }
-        .to_graphql_error(None),
-        apollo_router::error::FetchError::ValidationInvalidTypeVariable {
-            name: "missingVariable".to_string(),
-        }
-        .to_graphql_error(None),
+    let mut response = http_response.next_response().await.unwrap();
+    let mut expected = vec![
+        graphql::Error::builder()
+            .message("invalid type for variable: 'missingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "missingVariable")
+            .build(),
+        graphql::Error::builder()
+            .message("invalid type for variable: 'yetAnotherMissingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "yetAnotherMissingVariable")
+            .build(),
     ];
-    assert!(
-        response.errors.iter().all(|x| expected.contains(x)),
-        "{:?}",
-        response.errors
-    );
+    response.errors.sort_by_key(|e| e.message.clone());
+    expected.sort_by_key(|e| e.message.clone());
+    assert_eq!(response.errors, expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -553,6 +552,7 @@ async fn defer_path() {
             }
         }"#,
         )
+        .header(ACCEPT, "multipart/mixed")
         .build()
         .expect("expecting valid request");
 
@@ -595,6 +595,7 @@ async fn defer_path_in_array() {
                 }
             }"#,
         )
+        .header(ACCEPT, "multipart/mixed")
         .build()
         .expect("expecting valid request");
 
@@ -609,28 +610,56 @@ async fn defer_path_in_array() {
     insta::assert_json_snapshot!(second);
 }
 
-async fn query_node(
-    request: &supergraph::Request,
-) -> Result<graphql::Response, apollo_router::error::FetchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_query_without_accept() {
+    let config = serde_json::json!({
+        "server": {
+            "experimental_defer_support": true
+        },
+        "plugins": {
+            "experimental.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"{
+                me {
+                    reviews {
+                        id
+                        author {
+                            id
+                            ... @defer(label: "author name") {
+                            name
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .header(ACCEPT, "application/json")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+}
+
+async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
         .json(request.originating_request.body())
         .send()
         .await
-        .map_err(
-            |err| apollo_router::error::FetchError::SubrequestHttpError {
-                service: "test node".to_string(),
-                reason: err.to_string(),
-            },
-        )?
+        .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
         .json()
         .await
-        .map_err(
-            |err| apollo_router::error::FetchError::SubrequestMalformedResponse {
-                service: "test node".to_string(),
-                reason: err.to_string(),
-            },
-        )
+        .map_err(|err| format!("service 'test node' response was malformed: {err}"))
 }
 
 async fn http_query_rust(

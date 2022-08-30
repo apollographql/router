@@ -1,10 +1,9 @@
 //! Tracing configuration for apollo telemetry.
-use std::collections::HashMap;
-
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use apollo_spaceport::Trace;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
+use std::collections::HashMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;

@@ -32,3 +32,11 @@ members = [
 # debug = false
 strip = "debuginfo"
 incremental = false
+
+# Temporary patch to async-compression
+# It is used by tower-http's CompressionLayer. The compression code was not handling
+# the Poll::Pending result from the underlying stream, so it was accumulating the
+# entire compressed response in memory before sending it, which creates issues with
+# deferred responses getting received too late
+[patch.crates-io]
+async-compression = { git = 'https://github.com/geal/async-compression', tag = 'encoder-flush' }

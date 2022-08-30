@@ -85,8 +85,8 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .extra_subgraph_plugin(move |_, _| mock_service.clone().boxed())
-            .extra_supergraph_plugin(|service| {
+            .subgraph_hook(move |_, _| mock_service.clone().boxed())
+            .supergraph_hook(|service| {
                 service
                     .map_response(|response| {
                         let mock_data = response.context.get("mock_data").unwrap();

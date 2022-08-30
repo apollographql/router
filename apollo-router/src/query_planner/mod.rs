@@ -18,7 +18,7 @@ use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
-pub use self::fetch::OperationKind;
+pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -267,7 +267,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
-        originating_request: &'a Arc<http_ext::Request<Request>>,
+        originating_request: &'a Arc<http::Request<Request>>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response
@@ -312,7 +312,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     context: &'a Context,
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
-    originating_request: &'a Arc<http_ext::Request<Request>>,
+    originating_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
@@ -753,6 +753,7 @@ pub(crate) mod fetch {
     /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
+    #[non_exhaustive]
     pub enum OperationKind {
         Query,
         Mutation,
@@ -815,7 +816,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &Arc<http_ext::Request<Request>>,
+            request: &Arc<http::Request<Request>>,
             schema: &Schema,
             enable_deduplicate_variables: bool,
         ) -> Option<Variables> {
@@ -980,22 +981,20 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = http::Response::from(
-                service
-                    .oneshot(subgraph_request)
-                    .instrument(tracing::trace_span!("subfetch_stream"))
-                    .await
-                    // TODO this is a problem since it restores details about failed service
-                    // when errors have been redacted in the include_subgraph_errors module.
-                    // Unfortunately, not easy to fix here, because at this point we don't
-                    // know if we should be redacting errors for this subgraph...
-                    .map_err(|e| FetchError::SubrequestHttpError {
-                        service: service_name.to_string(),
-                        reason: e.to_string(),
-                    })?
-                    .response,
-            )
-            .into_parts();
+            let (_parts, response) = service
+                .oneshot(subgraph_request)
+                .instrument(tracing::trace_span!("subfetch_stream"))
+                .await
+                // TODO this is a problem since it restores details about failed service
+                // when errors have been redacted in the include_subgraph_errors module.
+                // Unfortunately, not easy to fix here, because at this point we don't
+                // know if we should be redacting errors for this subgraph...
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                })?
+                .response
+                .into_parts();
 
             super::log::trace_subfetch(service_name, operation, &variables, &response);
 
@@ -1279,13 +1278,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1343,13 +1336,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1403,13 +1390,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1545,19 +1526,7 @@ mod tests {
         });
 
         let response = query_plan
-            .execute(
-                &Context::new(),
-                &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
-                &schema,
-                sender,
-            )
+            .execute(&Context::new(), &sf, &Default::default(), &schema, sender)
             .await;
 
         // primary response
@@ -1685,13 +1654,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(schema, &Default::default()).unwrap(),
                 sender,
             )

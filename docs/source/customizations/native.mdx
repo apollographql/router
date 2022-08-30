@@ -31,13 +31,10 @@ Most plugins should start by including the following set of `use` declarations:
 
 ```rust title="hello_world.rs"
 use apollo_router::plugin::Plugin;
-use apollo_router::{
-    register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, SupergraphRequest, SupergraphResponse, SubgraphRequest, SubgraphResponse,
-};
+use apollo_router::register_plugin;
+use apollo_router::services::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 ```
 

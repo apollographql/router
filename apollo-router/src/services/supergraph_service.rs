@@ -9,9 +9,15 @@ use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
+use http::header::ACCEPT;
+use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
 use lazy_static::__Deref;
+use mediatype::names::MIXED;
+use mediatype::names::MULTIPART;
+use mediatype::MediaType;
+use mediatype::MediaTypeList;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -31,7 +37,6 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::Response;
-use crate::http_ext::Request;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
@@ -147,14 +152,31 @@ where
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
 
                     Ok(SupergraphResponse {
-                        response: resp.into(),
+                        response: resp,
                         context,
                     })
                 }
                 QueryPlannerContent::Plan { query, plan } => {
                     let can_be_deferred = plan.root.contains_defer();
 
-                    if let Some(err) = query.validate_variables(body, &schema).err() {
+                    if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
+                            tracing::error!("tried to send a defer request without accept: multipart/mixed");
+                            let mut resp = http::Response::new(
+                                once(ready(
+                                    graphql::Response::builder()
+                                        .errors(vec![crate::error::Error::builder()
+                                            .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                                            .build()])
+                                        .build(),
+                                ))
+                                .boxed(),
+                            );
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
+                            Ok(SupergraphResponse {
+                                response: resp,
+                                context,
+                            })
+                    } else  if let Some(err) = query.validate_variables(body, &schema).err() {
                         let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                         *res.response.status_mut() = StatusCode::BAD_REQUEST;
                         Ok(res)
@@ -164,14 +186,14 @@ where
                         let ExecutionResponse { response, context } = execution
                             .oneshot(
                                 ExecutionRequest::builder()
-                                    .originating_request(req.originating_request.clone())
+                                    .originating_request(req.originating_request)
                                     .query_plan(plan)
                                     .context(context)
                                     .build(),
                             )
                             .await?;
 
-                        let (parts, response_stream) = http::Response::from(response).into_parts();
+                        let (parts, response_stream) = response.into_parts();
 
                         let stream = response_stream
                         .map(move |mut response: Response| {
@@ -248,7 +270,6 @@ where
                                 }.in_current_span()
                                 .boxed(),
                             )
-                            .into(),
                         })
                     }
                 }
@@ -282,6 +303,21 @@ where
 
         Box::pin(fut)
     }
+}
+
+fn accepts_multipart(headers: &HeaderMap) -> bool {
+    let multipart_mixed = MediaType::new(MULTIPART, MIXED);
+
+    headers.get_all(ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// Builder which generates a plugin pipeline.
@@ -395,31 +431,31 @@ pub(crate) struct RouterCreator {
     apq: APQLayer,
 }
 
-impl NewService<Request<graphql::Request>> for RouterCreator {
+impl NewService<http::Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
-        BoxService::new(
-            self.make()
-                .map_request(|http_request: Request<graphql::Request>| http_request.into())
-                .map_response(|response| response.response),
-        )
+        self.make()
+            .map_request(|http_request: http::Request<graphql::Request>| http_request.into())
+            .map_response(|response| response.response)
+            .boxed()
     }
 }
 
 impl SupergraphServiceFactory for RouterCreator {
     type SupergraphService = BoxService<
-        Request<graphql::Request>,
-        crate::http_ext::Response<BoxStream<'static, Response>>,
+        http::Request<graphql::Request>,
+        http::Response<BoxStream<'static, Response>>,
         BoxError,
     >;
 
-    type Future = <<RouterCreator as NewService<Request<graphql::Request>>>::Service as Service<
-        Request<graphql::Request>,
-    >>::Future;
+    type Future =
+        <<RouterCreator as NewService<http::Request<graphql::Request>>>::Service as Service<
+            http::Request<graphql::Request>,
+        >>::Future;
 
     fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
         self.plugins

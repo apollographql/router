@@ -236,10 +236,7 @@ impl Plugin for JwtAuth {
                     status: StatusCode,
                 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError> {
                     let res = supergraph::Response::error_builder()
-                        .errors(vec![graphql::Error {
-                            message: msg,
-                            ..Default::default()
-                        }])
+                        .error(graphql::Error::builder().message(msg).build())
                         .status_code(status)
                         .context(context)
                         .build()?;
@@ -615,7 +612,7 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = supergraph::Request::fake_builder()
-            .header("authorization", &format!("Bearer {token}"))
+            .header("authorization", format!("Bearer {token}"))
             .build()
             .expect("expecting valid request");
 

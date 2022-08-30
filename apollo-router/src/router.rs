@@ -16,11 +16,13 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
+use http_body::Body as _;
+use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
-use tracing::subscriber::SetGlobalDefaultError;
+use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
@@ -29,14 +31,56 @@ use Event::Shutdown;
 use Event::UpdateConfiguration;
 use Event::UpdateSchema;
 
+use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::plugin::DynPlugin;
+use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::transport;
+use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
+
+// For now this is unused:
+#[allow(unused)]
+// Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
+// see https://github.com/apollographql/router/issues/1496.
+// In the meantime keeping this function helps make sure it still compiles.
+async fn make_transport_service<RF>(
+    schema: &str,
+    configuration: Arc<Configuration>,
+    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
+) -> Result<transport::BoxCloneService, BoxError> {
+    let schema = Arc::new(Schema::parse(schema, &configuration)?);
+    let service_factory = YamlSupergraphServiceFactory
+        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .await?;
+    let extra = Default::default();
+    Ok(make_axum_router(service_factory, &configuration, extra)?
+        .map_response(|response| {
+            response.map(|body| {
+                // Axum makes this `body` have type:
+                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                let mut body = Box::pin(body);
+                // We make a stream based on its `poll_data` method
+                // in order to create a `hyper::Body`.
+                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                // … but we ignore the `poll_trailers` method:
+                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                // Apparently HTTP/2 trailers are like headers, except after the response body.
+                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                // so ignoring `poll_trailers` is fine.
+                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+            })
+        })
+        .map_err(|error| match error {})
+        .boxed_clone())
+}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -53,37 +97,17 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_yaml::Error),
-
-    /// could not read configuration: {0}
-    ReadConfigError(std::io::Error),
-
-    /// {0}
-    ConfigError(crate::configuration::ConfigurationError),
-
-    /// could not read schema: {0}
-    ReadSchemaError(crate::error::SchemaError),
-
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
-
-    /// could not configure spaceport
-    ServerSpaceportError,
-
-    /// no reload handle available
-    NoReloadTracingHandleError,
-
-    /// could not set global subscriber: {0}
-    SetGlobalSubscriberError(SetGlobalDefaultError),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
     #[display(fmt = "String")]
@@ -175,6 +199,8 @@ impl SchemaSource {
                 urls,
                 poll_interval,
             } => {
+                // With regards to ELv2 licensing, the code inside this block
+                // is license key functionality
                 apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
@@ -200,6 +226,7 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 /// The user supplied config. Either a static instance or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ConfigurationSource {
     /// A static configuration.
     ///
@@ -289,12 +316,20 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
-        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
+    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = fs::read_to_string(path)?;
+        let config = validate_configuration(&config)?;
 
         Ok(config)
     }
+}
+
+#[derive(From, Display)]
+enum ReadConfigError {
+    /// could not read configuration: {0}
+    Io(std::io::Error),
+    /// {0}
+    Validation(crate::configuration::ConfigurationError),
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -302,6 +337,7 @@ type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// Specifies when the Router’s HTTP server should gracefully shutdown
 #[derive(Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ShutdownSource {
     /// No graceful shutdown
     #[display(fmt = "None")]

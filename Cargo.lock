@@ -149,7 +149,7 @@ dependencies = [
  "axum",
  "backtrace",
  "base64 0.13.0",
- "buildstructor 0.5.0",
+ "buildstructor 0.4.1",
  "bytes",
  "clap 3.2.17",
  "dashmap 5.3.4",
@@ -178,6 +178,7 @@ dependencies = [
  "libc",
  "lru",
  "maplit",
+ "mediatype",
  "miette 5.3.0",
  "mime",
  "mockall",
@@ -366,8 +367,7 @@ dependencies = [
 [[package]]
 name = "async-compression"
 version = "0.3.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "345fd392ab01f746c717b1357165b76f0b67a60192007b234058c9045fdcf695"
+source = "git+https://github.com/geal/async-compression?tag=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
 dependencies = [
  "brotli",
  "flate2",
@@ -657,9 +657,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.5.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54027423064fb9ead112911b05eccb6484070f5ec778610906458603e0673381"
+checksum = "4a7772d3542812693473268c2308979967035162dd36d053ec728e6c947ba93f"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -2961,6 +2961,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
+name = "mediatype"
+version = "0.19.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90da6e15720cff55898a02a2ed6e9a21b152f0283a5ad89465f8d8f80c9750ca"
+
+[[package]]
 name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4424,8 +4430,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?tag=defer-alpha4#5ce2e2b3fc8e4f8e6f8350bb1b68d8e8d639bf26"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f76769e567afde5e5e51f36f96bc734b35eb77d38668f6cf07e2784b3f303ed"
 dependencies = [
  "anyhow",
  "async-channel",

@@ -1,5 +1,5 @@
 //! Telemetry plugin.
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -55,7 +55,6 @@ use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
-use crate::http_ext::RequestId;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -74,6 +73,7 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::request::RequestId;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
