@@ -46,10 +46,6 @@ expression: get_spans()
             "{}"
           ],
           [
-            "request.id",
-            "[REDACTED]"
-          ],
-          [
             "operation.signature",
             "# -\n{topProducts{name name}}"
           ]
@@ -67,8 +63,7 @@ expression: get_spans()
               "client_version",
               "otel.kind",
               "operation.signature",
-              "graphql.variables",
-              "request.id"
+              "graphql.variables"
             ]
           }
         }

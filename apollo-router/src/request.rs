@@ -2,31 +2,14 @@
 
 use bytes::Bytes;
 use derivative::Derivative;
-use derive_more::Display;
 use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
-use ulid::Ulid;
 
 use crate::json_ext::Object;
-
-#[derive(Clone, Debug, Display, Default, Serialize, PartialEq, Eq, Hash)]
-pub struct RequestId(pub(crate) Ulid);
-impl RequestId {
-    pub fn new() -> Self {
-        Self(Ulid::new())
-    }
-}
-impl std::ops::Deref for RequestId {
-    type Target = Ulid;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 /// A graphql request.
 /// Used for federated and subgraph queries.

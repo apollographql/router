@@ -6,13 +6,13 @@ use std::time::Duration;
 use apollo_spaceport::ReferencedFieldsForType;
 use apollo_spaceport::StatsContext;
 use serde::Serialize;
+use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
-use crate::request::RequestId;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
-    pub(crate) request_id: RequestId,
+    pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
     pub(crate) operation_count: u64,
 }
@@ -340,7 +340,7 @@ mod test {
         let mut count = Count::default();
 
         SingleStatsReport {
-            request_id: RequestId::default(),
+            request_id: Uuid::default(),
             operation_count: count.inc_u64(),
             stats: HashMap::from([(
                 stats_report_key.to_string(),

@@ -9,7 +9,6 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use crate::request::RequestId;
 use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
@@ -270,9 +269,7 @@ impl<T> Request<T> {
                 builder = builder.header(header_name.clone(), header_value);
             }
         }
-        let mut req = builder.body(body)?;
-        req.extensions_mut().insert(RequestId::new());
-
+        let req = builder.body(body)?;
         Ok(Self { inner: req })
     }
 }
@@ -319,10 +316,7 @@ impl<T> DerefMut for Request<T> {
 
 impl<T> From<http::Request<T>> for Request<T> {
     fn from(inner: http::Request<T>) -> Self {
-        let mut req = Request { inner };
-        req.extensions_mut().insert(RequestId::new());
-
-        req
+        Request { inner }
     }
 }
 

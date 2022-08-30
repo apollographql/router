@@ -73,7 +73,6 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
-use crate::request::RequestId;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -200,16 +199,9 @@ impl Plugin for Telemetry {
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
-                    (
-                        req.originating_request
-                            .extensions()
-                            .get::<RequestId>()
-                            .expect("request id must be set")
-                            .clone(),
-                        req.context.clone(),
-                    )
+                    req.context.clone()
                 },
-                move |(request_id, ctx): (RequestId, Context), fut| {
+                move |ctx: Context, fut| {
                     let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
@@ -225,13 +217,7 @@ impl Plugin for Telemetry {
                         )
                         .await;
                         Self::update_metrics_on_last_response(
-                            &request_id,
-                            &ctx,
-                            config,
-                            metrics,
-                            sender,
-                            start,
-                            result,
+                            &ctx, config, metrics, sender, start, result,
                         )
                     }
                 },
@@ -619,12 +605,6 @@ impl Telemetry {
                 &send_variable_values,
                 &request.context,
             );
-            let request_id: &RequestId = request
-                .originating_request
-                .extensions()
-                .get()
-                .expect("request id must be set");
-
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
@@ -635,7 +615,6 @@ impl Telemetry {
                 "otel.kind" = %SpanKind::Internal,
                 "operation.signature" = field::Empty,
                 graphql.variables = %variables,
-                request.id = %request_id
             );
             span
         }
@@ -977,7 +956,6 @@ impl Telemetry {
 
     #[allow(clippy::too_many_arguments)]
     fn update_metrics_on_last_response(
-        request_id: &RequestId,
         ctx: &Context,
         config: Arc<Conf>,
         metrics: BasicMetrics,
@@ -988,7 +966,7 @@ impl Telemetry {
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) && is_span_sampled(ctx) {
-                    Self::update_apollo_metrics(ctx, request_id, sender, true, start.elapsed());
+                    Self::update_apollo_metrics(ctx, sender, true, start.elapsed());
                 }
                 let mut metric_attrs = Vec::new();
                 // Fill attributes from error
@@ -1016,7 +994,6 @@ impl Telemetry {
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
-                    let request_id = request_id.clone();
 
                     response_stream
                         .map(move |response| {
@@ -1029,7 +1006,6 @@ impl Telemetry {
                             {
                                 Self::update_apollo_metrics(
                                     &ctx,
-                                    &request_id,
                                     sender.clone(),
                                     has_errors,
                                     start.elapsed(),
@@ -1045,7 +1021,6 @@ impl Telemetry {
 
     fn update_apollo_metrics(
         context: &Context,
-        request_id: &RequestId,
         sender: Sender,
         has_errors: bool,
         duration: Duration,
@@ -1074,7 +1049,14 @@ impl Telemetry {
                 }
             } else {
                 SingleStatsReport {
-                    request_id: request_id.clone(),
+                    request_id: uuid::Uuid::from_bytes(
+                        Span::current()
+                            .context()
+                            .span()
+                            .span_context()
+                            .trace_id()
+                            .to_bytes(),
+                    ),
                     operation_count,
                     stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
