@@ -58,5 +58,12 @@ This breaks up the code in more manageable functions.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1615
 
+### Conditionally use `HorizontalPodAutoscaler` api version `autoscaling/v2` ([PR #1635](https://github.com/apollographql/router/pull/1635))
+
+The helm chart HorizontalPodAutoscaler resource now will use api version
+`autoscaling/v2` on kubernetes hosts greater than 1.23 when the version is
+available. Fallback to version `autoscaling/v2beta1` will still be utilised
+when this version is unavailable
+
 
 ## 📚 Documentation
