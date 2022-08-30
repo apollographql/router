@@ -5,11 +5,14 @@ use std::sync::Arc;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
+use itertools::Itertools;
+use multimap::MultiMap;
 
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
+use crate::plugin::WebServer;
 use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.
@@ -23,8 +26,8 @@ pub(crate) trait HttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        listener: Option<Listener>,
-        plugin_handlers: HashMap<String, Handler>,
+        listeners: Vec<Listener>,
+        web_endpoints: MultiMap<ListenAddr, axum::Router>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
@@ -42,23 +45,25 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
-    listen_address: ListenAddr,
+    listen_addresses: Vec<ListenAddr>,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
-        listen_address: ListenAddr,
+        server_future: Pin<
+            Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>,
+        >,
+        listen_addresses: Vec<ListenAddr>,
     ) -> Self {
         Self {
             shutdown_sender,
             server_future,
-            listen_address,
+            listen_addresses,
         }
     }
 
@@ -68,8 +73,8 @@ impl HttpServerHandle {
         };
         let _listener = self.server_future.await?;
         #[cfg(unix)]
-        {
-            if let ListenAddr::UnixSocket(path) = self.listen_address {
+        for listen_address in self.listen_addresses {
+            if let ListenAddr::UnixSocket(path) = listen_address {
                 let _ = tokio::fs::remove_file(path).await;
             }
         }
@@ -81,7 +86,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        plugin_handlers: HashMap<String, Handler>,
+        web_endpoints: MultiMap<ListenAddr, axum::Router>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -96,37 +101,32 @@ impl HttpServerHandle {
         // connections, and returns the TCP listener, to reuse it in the next server
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
-        let listener = self.server_future.await;
+        let listeners = self.server_future.await;
         tracing::debug!("previous server stopped");
 
-        // we keep the TCP listener if it is compatible with the new configuration
-        let listener = if self.listen_address != configuration.server.listen {
-            None
-        } else {
-            match listener {
-                Ok(listener) => Some(listener),
-                Err(e) => {
-                    tracing::error!("the previous listen socket failed: {}", e);
-                    None
-                }
-            }
-        };
-
+        // we give the listeners to the new configuration, they'll clean up whatever needs to
         let handle = factory
             .create(
                 router,
                 Arc::clone(&configuration),
-                listener,
-                plugin_handlers,
+                listeners.unwrap_or_default(),
+                web_endpoints,
             )
             .await?;
-        tracing::debug!("restarted on {}", handle.listen_address());
+        tracing::debug!(
+            "restarted on {}",
+            handle
+                .listen_addresses()
+                .iter()
+                .map(std::string::ToString::to_string)
+                .join(" - ")
+        );
 
         Ok(handle)
     }
 
-    pub(crate) fn listen_address(&self) -> &ListenAddr {
-        &self.listen_address
+    pub(crate) fn listen_addresses(&self) -> &[ListenAddr] {
+        self.listen_addresses.as_slice()
     }
 }
 

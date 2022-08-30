@@ -18,6 +18,7 @@ use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -44,6 +45,7 @@ use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugin::WebServer;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;
@@ -55,6 +57,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
+use crate::ListenAddr;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::Schema;
@@ -480,16 +483,12 @@ impl SupergraphServiceFactory for RouterCreator {
             http::Request<graphql::Request>,
         >>::Future;
 
-    fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, axum::Router> {
+        let mut mm = MultiMap::new();
         self.plugins
-            .iter()
-            .filter_map(|(plugin_name, plugin)| {
-                (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint().map(Handler::new))
-                    .flatten()
-                    .map(|h| (plugin_name.clone(), h))
-            })
-            .collect()
+            .values()
+            .for_each(|plugin| mm.extend(plugin.bindings()));
+        mm
     }
 }
 

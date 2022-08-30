@@ -29,6 +29,7 @@ use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
@@ -43,6 +44,7 @@ use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::transport;
+use crate::ListenAddr;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -289,6 +291,25 @@ macro_rules! register_plugin {
             $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
         }
     };
+}
+
+pub(crate) trait WebServer {
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router>;
+}
+
+impl<T> WebServer for T
+where
+    T: Plugin,
+{
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+        MultiMap::new()
+    }
+}
+
+impl WebServer for Box<dyn DynPlugin> {
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+        MultiMap::new()
+    }
 }
 
 /// Handler represents a [`Plugin`] endpoint.

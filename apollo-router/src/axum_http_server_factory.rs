@@ -22,6 +22,7 @@ use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::channel::oneshot;
+use futures::future::join_all;
 use futures::future::ready;
 use futures::prelude::*;
 use futures::stream::once;
@@ -38,6 +39,7 @@ use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use multimap::MultiMap;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -66,6 +68,7 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::plugin::Handler;
+use crate::plugin::WebServer;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -86,8 +89,8 @@ impl AxumHttpServerFactory {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    plugin_handlers: HashMap<String, Handler>,
-) -> Result<Router, ApolloRouterError>
+    plugins: MultiMap<ListenAddr, axum::Router>,
+) -> Result<Vec<(ListenAddr, Router)>, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
@@ -100,7 +103,7 @@ where
     } else {
         configuration.server.graphql_path.clone()
     };
-    let mut router = Router::<hyper::Body>::new()
+    let mut main_router = Router::<hyper::Body>::new()
         .route(
             &graphql_path,
             get({
@@ -153,24 +156,25 @@ where
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    for (plugin_name, handler) in plugin_handlers {
-        router = router.route(
-            &format!("/plugins/{}/*path", plugin_name),
-            get({
-                let new_handler = handler.clone();
-                move |host: Host, request_parts: Request<Body>| {
-                    custom_plugin_handler(host, request_parts, new_handler)
-                }
-            })
-            .post({
-                let new_handler = handler.clone();
-                move |host: Host, request_parts: Request<Body>| {
-                    custom_plugin_handler(host, request_parts, new_handler)
-                }
-            }),
-        );
-    }
-    Ok(router)
+    let mut addrs_and_routers: MultiMap<ListenAddr, Router> = Default::default();
+
+    addrs_and_routers.insert(configuration.server.listen.clone().into(), main_router);
+
+    addrs_and_routers.extend(plugins);
+
+    let merged = addrs_and_routers
+        .into_iter()
+        .map(|(addr, routers)| {
+            (
+                addr,
+                routers
+                    .into_iter()
+                    .fold(axum::Router::new(), |acc, r| acc.merge(r)),
+            )
+        })
+        .collect::<Vec<(ListenAddr, Router)>>();
+
+    Ok(merged)
 }
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -180,24 +184,31 @@ impl HttpServerFactory for AxumHttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        listener: Option<Listener>,
-        plugin_handlers: HashMap<String, Handler>,
+        listeners: Vec<Listener>,
+        web_endpoints: MultiMap<ListenAddr, axum::Router>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-            let listen_address = configuration.server.listen.clone();
+            let axum_router = make_axum_router(service_factory, &configuration, web_endpoints)?;
 
-            let router = make_axum_router(service_factory, &configuration, plugin_handlers)?;
+            let mut listeners_and_routers = Vec::with_capacity(axum_router.len());
 
-            // if we received a TCP listener, reuse it, otherwise create a new one
-            #[cfg_attr(not(unix), allow(unused_mut))]
-            let mut listener = if let Some(listener) = listener {
-                listener
-            } else {
-                match listen_address {
+            // reuse previous listen addrs
+            for listener in listeners.into_iter() {
+                if let Some((_, router)) = axum_router
+                    .iter()
+                    .find(|(l, _)| l == &listener.local_addr().unwrap())
+                {
+                    listeners_and_routers.push((listener, router.clone()));
+                }
+            }
+            // populate the new listen addrs
+            for (listen_addr, router) in axum_router {
+                // if we received a TCP listener, reuse it, otherwise create a new one
+                #[cfg_attr(not(unix), allow(unused_mut))]
+                let listener = match listen_addr {
                     ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
@@ -207,23 +218,37 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     ListenAddr::UnixSocket(path) => Listener::Unix(
                         UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
                     ),
-                }
-            };
-            let actual_listen_address = listener
-                .local_addr()
-                .map_err(ApolloRouterError::ServerCreationError)?;
+                };
+                listeners_and_routers.push((listener, router));
+            }
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
-                actual_listen_address,
+                listeners_and_routers
+                    .first()
+                    .clone()
+                    .expect("no main adress :/")
+                    .0
+                    .local_addr()
+                    .expect("no main adress :/"),
                 configuration.server.graphql_path
             );
+
+            let listen_adresses = listeners_and_routers
+                .iter()
+                .map(|(l, _)| l.local_addr().expect("checked above"))
+                .collect::<Vec<_>>();
+
+            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
+
+            let servers_and_shutdowns = listeners_and_routers.into_iter().map(|(mut listener, router)| {
+                let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
             // accept future. If the channel received something or the sender
             // was dropped, we stop using the listener and send it back through
             // listener_receiver
-            let server = async move {
+             let server = async move {
                 tokio::pin!(shutdown_receiver);
 
                 let connection_shutdown = Arc::new(Notify::new());
@@ -382,16 +407,37 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 connection_shutdown.notify_waiters();
                 listener
             };
+            (server, shutdown_sender)
+            });
+
+            let collected = servers_and_shutdowns.collect::<Vec<_>>();
+
+            let mut shutdowns = Vec::with_capacity(collected.len());
+            let mut servers = Vec::with_capacity(collected.len());
+
+            for (server, shutdown) in collected {
+                servers.push(server);
+                shutdowns.push(shutdown);
+            }
+
+            tokio::task::spawn(async move {
+                let _ = outer_shutdown_receiver.await;
+                shutdowns.into_iter().for_each(|sender| {
+                    if let Err(_err) = sender.send(()) {
+                        tracing::error!("Failed to notify http thread of shutdown")
+                    };
+                })
+            });
 
             // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(server)
+            let server_future = tokio::task::spawn(join_all(servers))
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
-                shutdown_sender,
+                outer_shutdown_sender,
                 server_future,
-                actual_listen_address,
+                listen_adresses,
             ))
         })
     }
@@ -826,10 +872,6 @@ mod tests {
         type Future = <<TestSupergraphServiceFactory as NewService<
             http::Request<graphql::Request>,
         >>::Service as Service<http::Request<graphql::Request>>>::Future;
-
-        fn custom_endpoints(&self) -> HashMap<String, Handler> {
-            HashMap::new()
-        }
     }
 
     async fn init(mut mock: MockSupergraphService) -> (HttpServerHandle, Client) {

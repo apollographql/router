@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
+use multimap::MultiMap;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -12,10 +13,11 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
+use crate::plugin::WebServer;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
@@ -38,7 +40,7 @@ pub(crate) trait SupergraphServiceFactory:
         > + Send;
     type Future: Send;
 
-    fn custom_endpoints(&self) -> HashMap<String, Handler>;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, axum::Router>;
 }
 
 /// Factory for creating a SupergraphServiceFactory
