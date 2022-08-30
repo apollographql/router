@@ -60,7 +60,6 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.20", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
-include_dir = "0.7.2"
 indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
@@ -68,7 +67,6 @@ lazy_static = "1.4.0"
 libc = "0.2.132"
 lru = "0.7.8"
 mockall = "0.11.2"
-moka = { version = "0.9.3", features = ["future", "futures-util"] }
 miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
