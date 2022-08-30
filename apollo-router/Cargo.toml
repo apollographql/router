@@ -36,12 +36,12 @@ axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
 bytes = "1.2.1"
-clap = { version = "3.2.18", default-features = false, features = [
+clap = { version = "3.2.19", default-features = false, features = [
     "env",
     "derive",
     "std",
 ] }
-dashmap = { version = "5.3.4", features = ["serde"] }
+dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
