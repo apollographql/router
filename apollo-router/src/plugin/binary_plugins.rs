@@ -13,7 +13,27 @@ macro_rules! declare_plugin {
         pub extern "C" fn _plugin_create(
             cfg: Box<serde_json::Value>,
         ) -> FfiFuture<*mut Result<Box<dyn DynPlugin>, BoxError>> {
-            let _subscriber = tracing_subscriber::fmt::init();
+            // TODO: We should'nt have to define a subscriber here, but
+            // we are doing because of shortcomings in the tracing
+            // crate. This needs a more permanent fix
+            // By default, tracing will give us a filter which filters
+            // at level ERROR. That's not what we want, so if we don't
+            // have a filter specification, let's create one set at
+            // level INFO.
+            let filter = match tracing_subscriber::filter::EnvFilter::try_from_default_env() {
+                Ok(f) => f,
+                Err(_e) => tracing_subscriber::filter::EnvFilter::new("info"),
+            };
+            // TODO: What about json()?
+            let _subscriber = match tracing_subscriber::fmt::fmt()
+                .with_env_filter(filter)
+                .try_init()
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("ignoring subscriber init error in plugin: {}", e);
+                }
+            };
             async move {
                 // We can't just shortcut error handling here...
                 let pi: PluginInit<$conf> = match PluginInit::try_new(*cfg, Default::default()) {
