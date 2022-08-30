@@ -840,7 +840,14 @@ mod tests {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
-                    "The supergraph schema failed to produce a valid API schema"
+                    r#"The supergraph schema failed to produce a valid API schema. Caused by:
+Input field "InputObject.privateField" is @inaccessible but is used in the default value of "@foo(someArg:)", which is in the API schema.
+
+GraphQL request:42:1
+41 |
+42 | input InputObject {
+   | ^
+43 |   someField: String"#
                 );
             }
             other => panic!("unexpected schema result: {:?}", other),
