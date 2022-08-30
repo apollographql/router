@@ -30,6 +30,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🐛 Fixes
 ## 🛠 Maintenance
 
+### Remove cache layer ([PR #1647](https://github.com/apollographql/router/issues/1647))
+
+We removed ServiceBuilderExt::cache in 0.16.0. That was the only consumer of
+the cache layer. This completes the removal by deleting the cache layer.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1647
+
 ### Refactor `SupergraphService` ([PR #1615](https://github.com/apollographql/router/issues/1615))
 
 The `SupergrapHService` code became too complex, so much that `rsutfmt` could not modify it anymore.
