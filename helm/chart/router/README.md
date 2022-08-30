@@ -11,8 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm repo add apollographql https://todo/where-to-host-helm-repo
-helm repo update
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 0.1.21
 ```
 
 ## Install Chart
@@ -20,7 +19,7 @@ helm repo update
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] apollographql/router --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 0.1.21 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._

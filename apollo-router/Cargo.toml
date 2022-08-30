@@ -36,7 +36,7 @@ axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
 bytes = "1.2.1"
-clap = { version = "3.2.17", default-features = false, features = [
+clap = { version = "3.2.18", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -50,8 +50,8 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.2"
-futures = { version = "0.3.23", features = ["thread-pool"] }
+envmnt = "0.10.4"
+futures = { version = "0.3.24", features = ["thread-pool"] }
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
@@ -60,7 +60,6 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.20", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
-include_dir = "0.7.2"
 indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
@@ -68,7 +67,6 @@ lazy_static = "1.4.0"
 libc = "0.2.132"
 lru = "0.7.8"
 mockall = "0.11.2"
-moka = { version = "0.9.3", features = ["future", "futures-util"] }
 miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
@@ -114,7 +112,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.8"
 prometheus = "0.13"
-rhai = { version = "1.9.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.9.1", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
