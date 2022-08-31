@@ -967,7 +967,7 @@ impl Telemetry {
     ) -> Result<supergraph::Response, BoxError> {
         match result {
             Err(e) => {
-                if !matches!(sender, Sender::Noop) && is_span_sampled(ctx) {
+                if !matches!(sender, Sender::Noop) {
                     Self::update_apollo_metrics(ctx, sender, true, start.elapsed());
                 }
                 let mut metric_attrs = Vec::new();

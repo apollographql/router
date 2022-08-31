@@ -31,12 +31,12 @@ telemetry:
         # This cannot be higher than tracing->trace_config->sampler
         field_level_instrumentation_sampler: 0.01 # (default)
         
-        # Send headers in apollo usage reporting (except Authorization and Cookies)
+        # Include HTTP request and response headers in traces sent to Apollo Studio
         send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
             except: # Send all headers except referer
             - referer
 
-        # Send variable values in apollo usage reporting
+        # Include variable values in Apollo in traces sent to Apollo Studio
         send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
             except: # Send all variable values except for variable named first
             - first
