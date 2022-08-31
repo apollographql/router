@@ -16,9 +16,8 @@ use indexmap::IndexMap;
 use lazy_static::__Deref;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
 use mediatype::MediaTypeList;
-use mediatype::WriteParams;
+use mediatype::ReadParams;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -248,19 +247,27 @@ async fn plan_query(
 }
 
 fn accepts_multipart(headers: &HeaderMap) -> bool {
-    let mut multipart_mixed = MediaType::new(MULTIPART, MIXED);
-    multipart_mixed.set_param(
-        mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER).expect("valid name"),
-        mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE).expect("valid value"),
-    );
-
     headers.get_all(ACCEPT).iter().any(|value| {
         value
             .to_str()
             .map(|accept_str| {
                 let mut list = MediaTypeList::new(accept_str);
 
-                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+                list.any(|mime| {
+                    mime.as_ref()
+                        .map(|mime| {
+                            mime.ty == MULTIPART
+                                && mime.subty == MIXED
+                                && mime.get_param(
+                                    mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER)
+                                        .expect("valid name"),
+                                ) == Some(
+                                    mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE)
+                                        .expect("valid value"),
+                                )
+                        })
+                        .unwrap_or(false)
+                })
             })
             .unwrap_or(false)
     })
