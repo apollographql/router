@@ -18,7 +18,7 @@ failfast = []
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.62"
+anyhow = "1.0.63"
 apollo-parser = "0.2.10"
 # ELv2 licensing: The apollo-spaceport crate is license key functionality
 apollo-spaceport = { path = "../apollo-spaceport" }
@@ -36,12 +36,12 @@ axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
 bytes = "1.2.1"
-clap = { version = "3.2.18", default-features = false, features = [
+clap = { version = "3.2.19", default-features = false, features = [
     "env",
     "derive",
     "std",
 ] }
-dashmap = { version = "5.3.4", features = ["serde"] }
+dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
@@ -121,7 +121,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
 ] }
 router-bridge = "0.1.0"
 schemars = { version = "0.8.10", features = ["url"] }
-sha2 = "0.10.2"
+sha2 = "0.10.3"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
@@ -130,7 +130,7 @@ serde_yaml = "0.8.26"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 tokio = { version = "1.20.1", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
