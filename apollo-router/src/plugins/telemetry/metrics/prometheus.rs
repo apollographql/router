@@ -48,7 +48,7 @@ impl MetricsConfigurator for Config {
                 ))
                 .try_init()?;
             builder = builder.with_custom_endpoint(
-                "/metrics",
+                "",
                 PrometheusService {
                     registry: exporter.registry().clone(),
                 }

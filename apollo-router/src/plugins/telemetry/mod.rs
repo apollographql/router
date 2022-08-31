@@ -488,7 +488,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
+    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -499,8 +499,11 @@ impl Plugin for Telemetry {
             endpoints,
             // How we pick which service to send the request to
             move |req: &transport::Request, _services: &[_]| {
-                let endpoint = req.uri().path();
-                if let Some(index) = paths.iter().position(|path| path == endpoint) {
+                let endpoint = req.uri().path().strip_prefix(prefix.as_str());
+                if let Some(index) = paths
+                    .iter()
+                    .position(|path| Some(path.as_str()) == endpoint)
+                {
                     index
                 } else {
                     not_found_index
@@ -517,7 +520,7 @@ impl Plugin for Telemetry {
         if let Some(Some(prom_conf)) = self.config.metrics.as_ref().map(|m| m.prometheus.as_ref()) {
             let addr = prom_conf.listen.clone().unwrap();
             let path = prom_conf.path.clone().unwrap();
-            let endpoint = Plugin::custom_endpoint(self).unwrap();
+            let endpoint = Plugin::custom_endpoint(self, path.clone()).unwrap();
             let handler = move |req: http::Request<hyper::Body>| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint.oneshot(req).await.unwrap().into_response()) }
@@ -525,7 +528,7 @@ impl Plugin for Telemetry {
 
             mm.insert(
                 ListenAddr::from(addr),
-                Router::new().route(&path, service_fn(handler)),
+                Router::new().route(path.as_str(), service_fn(handler)),
             );
         }
 

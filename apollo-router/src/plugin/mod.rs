@@ -196,7 +196,7 @@ pub trait Plugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
+    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
         None
     }
 
@@ -245,7 +245,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxCloneService>;
+    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService>;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -273,8 +273,8 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
-        self.custom_endpoint()
+    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
+        self.custom_endpoint(prefix)
     }
 
     fn name(&self) -> &'static str {
