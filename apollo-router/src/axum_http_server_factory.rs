@@ -71,6 +71,7 @@ use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -540,9 +541,7 @@ where
                             if response.has_next.unwrap_or(false) {
                                 parts.headers.insert(
                                     CONTENT_TYPE,
-                                    HeaderValue::from_static(
-                                        "multipart/mixed;boundary=\"graphql\"",
-                                    ),
+                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
                                 );
 
                                 // each chunk contains a response and the next delimiter, to let client parsers
@@ -765,6 +764,7 @@ mod tests {
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
+    use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -2282,9 +2282,7 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(CONTENT_TYPE),
-            Some(&HeaderValue::from_static(
-                "multipart/mixed;boundary=\"graphql\""
-            ))
+            Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
         );
 
         let first = response.chunk().await.unwrap().unwrap();

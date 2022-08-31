@@ -16,8 +16,8 @@ use indexmap::IndexMap;
 use lazy_static::__Deref;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use mediatype::ReadParams;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -35,6 +35,8 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use super::MULTIPART_DEFER_SPEC_PARAMETER;
+use super::MULTIPART_DEFER_SPEC_VALUE;
 use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -184,10 +186,10 @@ where
             if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses"))
+                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
                         .build()])
                     .build(), context);
-                *response.response.status_mut() = StatusCode::BAD_REQUEST;
+                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
             } else if let Some(err) = query.validate_variables(body, &schema).err() {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
@@ -245,15 +247,27 @@ async fn plan_query(
 }
 
 fn accepts_multipart(headers: &HeaderMap) -> bool {
-    let multipart_mixed = MediaType::new(MULTIPART, MIXED);
-
     headers.get_all(ACCEPT).iter().any(|value| {
         value
             .to_str()
             .map(|accept_str| {
                 let mut list = MediaTypeList::new(accept_str);
 
-                list.any(|mime| mime.as_ref() == Ok(&multipart_mixed))
+                list.any(|mime| {
+                    mime.as_ref()
+                        .map(|mime| {
+                            mime.ty == MULTIPART
+                                && mime.subty == MIXED
+                                && mime.get_param(
+                                    mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER)
+                                        .expect("valid name"),
+                                ) == Some(
+                                    mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE)
+                                        .expect("valid value"),
+                                )
+                        })
+                        .unwrap_or(false)
+                })
             })
             .unwrap_or(false)
     })
