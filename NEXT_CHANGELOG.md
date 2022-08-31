@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### Return an error when nullifying a non-null field ([PR #1537](https://github.com/apollographql/router/pull/1537))
+
+Nullability rules can end up removing large parts of the response without indicating why. This will provide context,
+showing which aprt of the response triggered nullability rules.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1537
+
 ## 🐛 Fixes
 
 ### Update our helm documentation to illustrate how to use our registry ([PR #1649](https://github.com/apollographql/router/issues/1649))
