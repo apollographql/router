@@ -25,7 +25,6 @@ use futures::channel::oneshot;
 use futures::future::ready;
 use futures::prelude::*;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -1023,11 +1022,8 @@ mod tests {
             .times(2)
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(SupergraphResponse::new_from_response(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
                     Context::new(),
                 ))
             });
@@ -1110,16 +1106,17 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_ref().unwrap(), "query");
+                assert_eq!(
+                    req.originating_request.body().query.as_ref().unwrap(),
+                    "query"
+                );
                 true
             })
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1177,11 +1174,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1279,11 +1274,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::builder()
@@ -1348,11 +1341,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::builder()
@@ -1417,11 +1408,9 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::builder()
@@ -1500,20 +1489,25 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
                 assert_eq!(
-                    req.body().operation_name.as_deref().unwrap(),
+                    req.originating_request.body().query.as_deref().unwrap(),
+                    expected_query
+                );
+                assert_eq!(
+                    req.originating_request
+                        .body()
+                        .operation_name
+                        .as_deref()
+                        .unwrap(),
                     expected_operation_name
                 );
                 true
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1560,20 +1554,25 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
                 assert_eq!(
-                    req.body().operation_name.as_deref().unwrap(),
+                    req.originating_request.body().query.as_deref().unwrap(),
+                    expected_query
+                );
+                assert_eq!(
+                    req.originating_request
+                        .body()
+                        .operation_name
+                        .as_deref()
+                        .unwrap(),
                     expected_operation_name
                 );
                 true
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1608,11 +1607,9 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1712,11 +1709,14 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_response(
+                    http_ext::from_response_to_stream(
+                        http::Response::builder()
+                            .status(200)
+                            .body(example_response)
+                            .unwrap(),
+                    ),
+                    Context::new(),
                 ))
             });
         let server = init_unix(expectations, &temp_dir).await;
@@ -1984,20 +1984,16 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(
-                            graphql::Response::builder()
-                                .data(json!(format!(
-                                    "{} + {} + {:?}",
-                                    req.method(),
-                                    req.uri(),
-                                    serde_json::to_string(req.body()).unwrap()
-                                )))
-                                .build(),
-                        )
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!(format!(
+                            "{} + {} + {:?}",
+                            req.originating_request.method(),
+                            req.originating_request.uri(),
+                            serde_json::to_string(req.originating_request.body()).unwrap()
+                        )))
+                        .build(),
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -2204,17 +2200,13 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(
-                            graphql::Response::builder()
-                                .data(json!({
-                                    "test": "hello"
-                                }))
-                                .build(),
-                        )
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello"
+                        }))
+                        .build(),
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -2276,7 +2268,10 @@ Content-Type: application/json\r
                     graphql::Response::builder().has_next(false).build(),
                 ])
                 .boxed();
-                Ok(http::Response::builder().status(200).body(body).unwrap())
+                Ok(SupergraphResponse::new_from_response(
+                    http::Response::builder().status(200).body(body).unwrap(),
+                    Context::new(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let query = json!(

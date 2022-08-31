@@ -17,7 +17,6 @@ use tower::Layer;
 use tower::Service;
 
 use crate::cache::DeduplicatingCache;
-use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::SupergraphRequest;

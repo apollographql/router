@@ -423,7 +423,6 @@ mod tests {
 
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
-    use futures::stream::BoxStream;
     use mockall::mock;
     use mockall::Sequence;
     use test_log::test;
@@ -431,7 +430,6 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::graphql;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
     use crate::plugin::Handler;
