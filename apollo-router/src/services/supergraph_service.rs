@@ -190,7 +190,7 @@ where
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
                         .build()])
                     .build(), context);
-                *response.response.status_mut() = StatusCode::BAD_REQUEST;
+                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
             } else if let Some(err) = query.validate_variables(body, &schema).err() {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
