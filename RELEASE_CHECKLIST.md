@@ -40,7 +40,7 @@ in lieu of an official changelog.
    - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
 7. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
 8. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
-9. Update the `version` in `docker-compose*` files in the `dockerfiles` directory.
+9. Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
 10. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
     You can install `cargo-about` by running `cargo install cargo-about`.
 11. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
