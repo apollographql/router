@@ -35,6 +35,13 @@ The helm chart never used to have a registry, so our docs were really just place
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1649
 
+
+### Update router-bridge to `query-planner` v2.1.0 ([PR #1650](https://github.com/apollographql/router/pull/1650))
+
+The 2.1.0 release of the query planner comes with fixes to fragment interpretation and reduced memory usage.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1650
+
 ## 🛠 Maintenance
 
 ### Remove cache layer ([PR #1647](https://github.com/apollographql/router/issues/1647))
@@ -46,7 +53,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Refactor `SupergraphService` ([PR #1615](https://github.com/apollographql/router/issues/1615))
 
-The `SupergrapHService` code became too complex, so much that `rsutfmt` could not modify it anymore.
+The `SupergraphService` code became too complex, so much that `rsutfmt` could not modify it anymore.
 This breaks up the code in more manageable functions.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1615
