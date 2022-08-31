@@ -69,6 +69,7 @@ pub mod services;
 mod spec;
 mod state_machine;
 mod test_harness;
+pub mod tracer;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
