@@ -331,6 +331,7 @@ mod tests {
 
     use axum::Server;
     use http::header::HOST;
+    use http::StatusCode;
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
