@@ -187,7 +187,7 @@ where
             if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header Accept: multipart/mixed; deferSpec=20220824"))
+                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
                         .build()])
                     .build(), context);
                 *response.response.status_mut() = StatusCode::BAD_REQUEST;
