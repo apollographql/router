@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 
 use crate::configuration::Configuration;
@@ -11,6 +12,7 @@ use crate::plugin::PluginInit;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::services::execution;
+use crate::services::layers::apq::APQLayer;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Schema;
@@ -197,8 +199,12 @@ impl<'a> TestHarness<'a> {
         let router_creator = YamlSupergraphServiceFactory
             .create(config, schema, None, Some(builder.extra_plugins))
             .await?;
+        let apq = APQLayer::new().await;
+
         Ok(tower::service_fn(move |request| {
-            let service = router_creator.make();
+            // APQ must be added here because it is implemented in the HTTP server
+            let service = apq.layer(router_creator.make()).boxed();
+
             async move { service.oneshot(request).await }
         })
         .boxed_clone())

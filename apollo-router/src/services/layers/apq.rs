@@ -38,6 +38,12 @@ pub(crate) struct APQLayer {
 }
 
 impl APQLayer {
+    pub(crate) async fn new() -> Self {
+        Self {
+            cache: DeduplicatingCache::new().await,
+        }
+    }
+
     pub(crate) fn with_cache(cache: DeduplicatingCache<Vec<u8>, String>) -> Self {
         Self { cache }
     }
