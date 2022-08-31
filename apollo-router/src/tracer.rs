@@ -18,7 +18,7 @@ impl TraceId {
 
     /// Create a TraceId. If called from an invalid context
     /// (e.g.: not in a span, or in a disabled span), then
-    /// the value of the TraceId is [`TRACE_INVALID`].
+    /// the value of the TraceId is [`TraceId::INVALID`].
     pub fn new() -> Self {
         TraceId(
             Span::current()
@@ -36,6 +36,12 @@ impl TraceId {
     }
 }
 
+impl Default for TraceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)
@@ -44,11 +50,12 @@ impl fmt::Display for TraceId {
 
 #[cfg(test)]
 mod test {
-    use super::TraceId;
     use opentelemetry::sdk::export::trace::stdout;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
+
+    use super::TraceId;
 
     #[test]
     fn it_returns_invalid_trace_id() {
