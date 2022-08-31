@@ -2,7 +2,6 @@ use std::collections::HashMap;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -10,7 +9,6 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::graphql;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::services::new_service::NewService;

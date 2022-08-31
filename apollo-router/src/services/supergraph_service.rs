@@ -34,7 +34,6 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -47,7 +46,6 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;
 use crate::router_factory::SupergraphServiceFactory;
-use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::spec::Query;
 use crate::Configuration;
@@ -431,14 +429,11 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-
         Ok(RouterCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
             plugins,
-            apq,
         })
     }
 }
@@ -450,16 +445,12 @@ pub(crate) struct RouterCreator {
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    apq: APQLayer,
 }
 
 impl NewService<SupergraphRequest> for RouterCreator {
     type Service = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
     fn new_service(&self) -> Self::Service {
-        self.make()
-            //.map_request(|http_request: http::Request<graphql::Request>| http_request.into())
-            //.map_response(|response| response.response)
-            .boxed()
+        self.make().boxed()
     }
 }
 
