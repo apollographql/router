@@ -49,7 +49,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
-### router now provides TraceId ([PR #XXXX](https://github.com/apollographql/router/issues/1536))
+### router now provides TraceId ([PR #1663](https://github.com/apollographql/router/issues/1536))
 
 If you need a reliable way to link together the various stages of pipeline processing, you can now use
 
@@ -57,7 +57,7 @@ If you need a reliable way to link together the various stages of pipeline proce
 apollo_router::tracer::TraceId
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1663
 
 ## 🐛 Fixes
 
