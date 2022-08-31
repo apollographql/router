@@ -341,6 +341,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::query_planner::fetch::OperationKind;
@@ -353,7 +354,14 @@ mod tests {
             Ok(http::Response::builder()
                 .header("Content-Type", "application/json")
                 .status(StatusCode::BAD_REQUEST)
-                .body(r#"BAD REQUEST"#.into())
+                .body(
+                    serde_json::to_string(&Response {
+                        errors: vec![Error::builder().message("This went wrong").build()],
+                        ..Response::default()
+                    })
+                    .expect("always valid")
+                    .into(),
+                )
                 .unwrap())
         }
 
@@ -431,13 +439,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_bad_status_code() {
+    async fn test_bad_status_code_should_not_fail() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
         let subgraph_service = SubgraphService::new("test");
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
-        let err = subgraph_service
+        let response = subgraph_service
             .oneshot(SubgraphRequest {
                 originating_request: Arc::new(
                     http::Request::builder()
@@ -456,10 +464,10 @@ mod tests {
                 context: Context::new(),
             })
             .await
-            .unwrap_err();
+            .unwrap();
         assert_eq!(
-            err.to_string(),
-            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST"
+            response.response.body().errors[0].message,
+            "This went wrong"
         );
     }
 
