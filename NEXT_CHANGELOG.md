@@ -48,6 +48,17 @@ The router will now return a response with the status code `406 Not Acceptable` 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1652
 
 ## 🚀 Features
+
+### router now provides TraceId ([PR #XXXX](https://github.com/apollographql/router/issues/1536))
+
+If you need a reliable way to link together the various stages of pipeline processing, you can now use
+
+```
+apollo_router::tracer::TraceId
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ## 🐛 Fixes
 
 ### Update our helm documentation to illustrate how to use our registry ([#1643](https://github.com/apollographql/router/issues/1643))
