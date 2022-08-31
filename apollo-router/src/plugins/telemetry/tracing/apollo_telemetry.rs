@@ -142,12 +142,7 @@ impl Exporter {
 
         let details = Details {
             variables_json,
-            operation_name: span
-                .attributes
-                .get(&Key::new("graphql.operation.name"))
-                .map(|data| data.as_str())
-                .unwrap_or_default()
-                .to_string(),
+            operation_name: "".to_string(), // Deprecated do not set
         };
         Ok(apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
