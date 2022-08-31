@@ -62,6 +62,17 @@ The 2.1.0 release of the query planner comes with fixes to fragment interpretati
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1650
 
+
+
+### Propagate graphql response regardless of the subgraph HTTP status code. ([#1664](https://github.com/apollographql/router/issues/1664))
+
+Subgraph service calls used to return an error when the received HTTP status code isn't 200.
+There's however no mention in the GraphQL specification that leads us to assume any intent behind the HTTP status code returned by a GraphQL server.
+
+This commit removes our HTTP status code check in the subgraph_service.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1664
+
 ## 🛠 Maintenance
 
 ### Remove cache layer ([PR #1647](https://github.com/apollographql/router/pull/1647))
