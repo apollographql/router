@@ -10,6 +10,8 @@ pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 use futures::future::join_all;
 use futures::prelude::*;
+use http::HeaderMap;
+use http::HeaderValue;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -270,7 +272,7 @@ impl QueryPlan {
         originating_request: &'a Arc<http::Request<Request>>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> Response
+    ) -> (Response, Option<HeaderMap<HeaderValue>>)
     where
         SF: SubgraphServiceFactory,
     {
@@ -278,7 +280,7 @@ impl QueryPlan {
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
-        let (value, subselection, errors) = self
+        let (headers, value, subselection, errors) = self
             .root
             .execute_recursively(
                 &ExecutionParameters {
@@ -295,11 +297,14 @@ impl QueryPlan {
             )
             .await;
 
-        Response::builder()
-            .data(value)
-            .and_subselection(subselection)
-            .errors(errors)
-            .build()
+        (
+            Response::builder()
+                .data(value)
+                .and_subselection(subselection)
+                .errors(errors)
+                .build(),
+            headers,
+        )
     }
 
     pub fn contains_mutations(&self) -> bool {
@@ -313,7 +318,8 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
     originating_request: &'a Arc<http::Request<Request>>,
-    deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    deferred_fetches:
+        &'a HashMap<String, Sender<(Option<HeaderMap<HeaderValue>>, Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
 
@@ -324,12 +330,18 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)>
+    ) -> future::BoxFuture<(
+        Option<HeaderMap<HeaderValue>>,
+        Value,
+        Option<String>,
+        Vec<Error>,
+    )>
     where
         SF: SubgraphServiceFactory,
     {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
+            let mut headers = None;
             let mut value;
             let mut errors;
             let mut subselection = None;
@@ -340,7 +352,7 @@ impl PlanNode {
                     errors = Vec::new();
                     let span = tracing::info_span!("sequence");
                     for node in nodes {
-                        let (v, subselect, err) = node
+                        let (_headers, v, subselect, err) = node
                             .execute_recursively(parameters, current_dir, &value, sender.clone())
                             .instrument(span.clone())
                             .in_current_span()
@@ -368,7 +380,7 @@ impl PlanNode {
                         })
                         .collect();
 
-                    while let Some((v, _subselect, err)) = stream
+                    while let Some((_headers, v, _subselect, err)) = stream
                         .next()
                         .instrument(span.clone())
                         .in_current_span()
@@ -379,7 +391,7 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
-                    let (v, subselect, err) = node
+                    let (_headers, v, subselect, err) = node
                         .execute_recursively(
                             parameters,
                             // this is the only command that actually changes the "current dir"
@@ -403,7 +415,10 @@ impl PlanNode {
                         ))
                         .await
                     {
-                        Ok((v, e)) => {
+                        Ok((h, v, e)) => {
+                            // TODO: This means that headers is overwritten on each Fetch. Is that
+                            // correct? Probably not...
+                            headers = h;
                             value = v;
                             errors = e;
                         }
@@ -423,8 +438,10 @@ impl PlanNode {
                         },
                     deferred,
                 } => {
-                    let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
-                        HashMap::new();
+                    let mut deferred_fetches: HashMap<
+                        String,
+                        Sender<(Option<HeaderMap<HeaderValue>>, Value, Vec<Error>)>,
+                    > = HashMap::new();
                     let mut futures = Vec::new();
 
                     let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
@@ -483,7 +500,7 @@ impl PlanNode {
                                     // sender was dropped, possibly because there was no need to do it,
                                     // or because it is lagging, but here we only send one message so it
                                     // will not happen
-                                    if let Some(Ok((deferred_value, err))) = v {
+                                    if let Some(Ok((None, deferred_value, err))) = v {
                                         value.deep_merge(deferred_value);
                                         errors.extend(err.into_iter())
                                     }
@@ -494,7 +511,7 @@ impl PlanNode {
                             let deferred_fetches = HashMap::new();
 
                             if let Some(node) = deferred_inner {
-                                let (mut v, node_subselection, err) = node
+                                let (_headers, mut v, node_subselection, err) = node
                                     .execute_recursively(
                                         &ExecutionParameters {
                                             context: &ctx,
@@ -576,7 +593,7 @@ impl PlanNode {
                     errors = Vec::new();
                     let span = tracing::info_span!("primary");
                     if let Some(node) = node {
-                        let (v, _subselect, err) = node
+                        let (_headers, v, _subselect, err) = node
                             .execute_recursively(
                                 &ExecutionParameters {
                                     context: parameters.context,
@@ -624,7 +641,7 @@ impl PlanNode {
                         //FIXME: should we show an error if the if_node was not present?
                         if let Some(node) = if_clause {
                             let span = tracing::info_span!("condition_if");
-                            let (v, subselect, err) = node
+                            let (_headers, v, subselect, err) = node
                                 .execute_recursively(
                                     parameters,
                                     current_dir,
@@ -640,7 +657,7 @@ impl PlanNode {
                         }
                     } else if let Some(node) = else_clause {
                         let span = tracing::info_span!("condition_else");
-                        let (v, subselect, err) = node
+                        let (_headers, v, subselect, err) = node
                             .execute_recursively(
                                 parameters,
                                 current_dir,
@@ -657,7 +674,7 @@ impl PlanNode {
                 }
             }
 
-            (value, subselection, errors)
+            (headers, value, subselection, errors)
         })
     }
 
@@ -729,6 +746,8 @@ pub(crate) mod fetch {
     use std::fmt::Display;
     use std::sync::Arc;
 
+    use http::HeaderMap;
+    use http::HeaderValue;
     use indexmap::IndexSet;
     use serde::Deserialize;
     use serde::Serialize;
@@ -910,7 +929,7 @@ pub(crate) mod fetch {
             parameters: &'a ExecutionParameters<'a, SF>,
             data: &'a Value,
             current_dir: &'a Path,
-        ) -> Result<(Value, Vec<Error>), FetchError>
+        ) -> Result<(Option<HeaderMap<HeaderValue>>, Value, Vec<Error>), FetchError>
         where
             SF: SubgraphServiceFactory,
         {
@@ -936,7 +955,7 @@ pub(crate) mod fetch {
             {
                 Some(variables) => variables,
                 None => {
-                    return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
+                    return Ok((None, Value::from_path(current_dir, Value::Null), Vec::new()));
                 }
             };
 
@@ -980,7 +999,7 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = service
+            let (parts, response) = service
                 .oneshot(subgraph_request)
                 .instrument(tracing::trace_span!("subfetch_stream"))
                 .await
@@ -1020,13 +1039,17 @@ pub(crate) mod fetch {
                 Ok(value) => {
                     if let Some(id) = &self.id {
                         if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
-                            if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                            if let Err(e) = sender.clone().send((
+                                Some(parts.headers.clone()),
+                                value.clone(),
+                                errors.clone(),
+                            )) {
                                 tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
                             }
                         }
                     }
 
-                    Ok((value, errors))
+                    Ok((Some(parts.headers), value, errors))
                 }
                 Err(e) => Err(e),
             }

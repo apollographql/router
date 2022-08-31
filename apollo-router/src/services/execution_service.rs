@@ -70,10 +70,11 @@ where
 
             let rest = receiver;
 
-            let stream = once(ready(first)).chain(rest).boxed();
+            let stream = once(ready(first.0)).chain(rest).boxed();
 
             Ok(ExecutionResponse::new_from_response(
                 http::Response::new(stream as BoxStream<'static, Response>),
+                first.1,
                 ctx,
             ))
         }
