@@ -58,5 +58,10 @@ This breaks up the code in more manageable functions.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1615
 
+### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
+
+This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
 
 ## 📚 Documentation
