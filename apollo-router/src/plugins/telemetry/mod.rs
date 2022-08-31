@@ -517,13 +517,32 @@ impl Plugin for Telemetry {
 
     fn bindings(&self) -> multimap::MultiMap<crate::ListenAddr, axum::Router> {
         let mut mm = MultiMap::new();
+
+        let prometheus_configuration = self
+            .config
+            .metrics
+            .clone()
+            .map(|m| m.prometheus)
+            .unwrap_or_default()
+            .unwrap_or_default();
+
+        let enabled = prometheus_configuration.enabled;
+        let listen = prometheus_configuration.listen;
+        let path = prometheus_configuration.path;
+
         if let Some(Some(prom_conf)) = self.config.metrics.as_ref().map(|m| m.prometheus.as_ref()) {
             let addr = prom_conf.listen.clone().unwrap();
             let path = prom_conf.path.clone().unwrap();
             let endpoint = Plugin::custom_endpoint(self, path.clone()).unwrap();
             let handler = move |req: http::Request<hyper::Body>| {
                 let endpoint = endpoint.clone();
-                async move { Ok(endpoint.oneshot(req).await.unwrap().into_response()) }
+                async move {
+                    Ok(endpoint
+                        .oneshot(req)
+                        .await
+                        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                        .into_response())
+                }
             };
 
             mm.insert(

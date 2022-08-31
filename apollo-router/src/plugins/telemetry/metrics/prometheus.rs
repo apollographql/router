@@ -23,9 +23,21 @@ use crate::ListenAddr;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
-    enabled: bool,
+    pub(crate) enabled: bool,
     pub(crate) listen: Option<ListenAddr>,
     pub(crate) path: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen: Some(ListenAddr::SocketAddr(
+                "0.0.0.0:9090".parse().expect("valid listenAddr"),
+            )),
+            path: Some("/metrics".to_string()),
+        }
+    }
 }
 
 impl MetricsConfigurator for Config {
