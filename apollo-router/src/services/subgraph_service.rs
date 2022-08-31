@@ -17,7 +17,6 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
@@ -197,16 +196,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-            if parts.status != StatusCode::OK {
-                return Err(BoxError::from(FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: format!(
-                        "subgraph HTTP status error '{}': {}",
-                        parts.status,
-                        String::from_utf8_lossy(&body)
-                    ),
-                }));
-            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
