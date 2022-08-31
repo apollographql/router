@@ -26,6 +26,19 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Fix the supported defer specification version to 20220824 ([PR #1652](https://github.com/apollographql/router/issues/1652))
+
+Since the router will ship before the `@defer` specification is done, we
+add a parameter to the `Accept` and `Content-Type` headers to indicate
+which specification version is accepted.
+
+The specification is fixed to [graphql/graphql-spec@01d7b98](https://github.com/graphql/graphql-spec/commit/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82)
+
+The router will now return a response with the status code `406 Not Acceptable` if the `Accept` header does not match.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1652
+
 ## 🚀 Features
 ## 🐛 Fixes
 
