@@ -196,7 +196,7 @@ pub trait Plugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
         None
     }
 
@@ -206,6 +206,10 @@ pub trait Plugin: Send + Sync + 'static {
         Self: Sized,
     {
         get_type_of(self)
+    }
+
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+        MultiMap::new()
     }
 }
 
@@ -241,10 +245,14 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxService>;
+    fn custom_endpoint(&self) -> Option<transport::BoxCloneService>;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
+
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+        MultiMap::new()
+    }
 }
 
 #[async_trait]
@@ -265,12 +273,16 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
         self.custom_endpoint()
     }
 
     fn name(&self) -> &'static str {
         self.name()
+    }
+
+    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+        self.bindings()
     }
 }
 
@@ -291,25 +303,6 @@ macro_rules! register_plugin {
             $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
         }
     };
-}
-
-pub(crate) trait WebServer {
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router>;
-}
-
-impl<T> WebServer for T
-where
-    T: Plugin,
-{
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
-        MultiMap::new()
-    }
-}
-
-impl WebServer for Box<dyn DynPlugin> {
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
-        MultiMap::new()
-    }
 }
 
 /// Handler represents a [`Plugin`] endpoint.

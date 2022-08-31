@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::net::SocketAddr;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -15,12 +16,20 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
+use axum::response::Html;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Json;
+use axum::Router;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
 use http::StatusCode;
+use http_body::Body;
 use metrics::apollo::Sender;
+use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -32,6 +41,7 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
+use serde_json_bytes::json;
 use tower::service_fn;
 use tower::steer::Steer;
 use tower::BoxError;
@@ -48,6 +58,7 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -71,6 +82,7 @@ use crate::services::supergraph;
 use crate::services::transport;
 use crate::Context;
 use crate::ExecutionRequest;
+use crate::ListenAddr;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
@@ -476,7 +488,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
+    fn custom_endpoint(&self) -> Option<transport::BoxCloneService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -487,10 +499,7 @@ impl Plugin for Telemetry {
             endpoints,
             // How we pick which service to send the request to
             move |req: &transport::Request, _services: &[_]| {
-                let endpoint = req
-                    .uri()
-                    .path()
-                    .trim_start_matches("/plugins/apollo.telemetry");
+                let endpoint = req.uri().path();
                 if let Some(index) = paths.iter().position(|path| path == endpoint) {
                     index
                 } else {
@@ -498,9 +507,29 @@ impl Plugin for Telemetry {
                 }
             },
         )
-        .boxed();
+        .boxed_clone();
 
         Some(svc)
+    }
+
+    fn bindings(&self) -> multimap::MultiMap<crate::ListenAddr, axum::Router> {
+        let mut mm = MultiMap::new();
+        if let Some(Some(prom_conf)) = self.config.metrics.as_ref().map(|m| m.prometheus.as_ref()) {
+            let addr = prom_conf.listen.clone().unwrap();
+            let path = prom_conf.path.clone().unwrap();
+            let endpoint = Plugin::custom_endpoint(self).unwrap();
+            let handler = move |req: http::Request<hyper::Body>| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint.oneshot(req).await.unwrap().into_response()) }
+            };
+
+            mm.insert(
+                ListenAddr::from(addr),
+                Router::new().route(&path, service_fn(handler)),
+            );
+        }
+
+        mm
     }
 }
 

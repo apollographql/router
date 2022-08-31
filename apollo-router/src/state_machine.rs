@@ -436,7 +436,7 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
     use crate::plugin::Handler;
-    use crate::plugin::WebServer;
+    use crate::plugin::Plugin;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;

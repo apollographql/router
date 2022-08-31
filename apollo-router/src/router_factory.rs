@@ -13,7 +13,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::plugin::DynPlugin;
-use crate::plugin::WebServer;
+use crate::plugin::Plugin;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;

@@ -18,11 +18,14 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::services::transport;
+use crate::ListenAddr;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     enabled: bool,
+    pub(crate) listen: Option<ListenAddr>,
+    pub(crate) path: Option<String>,
 }
 
 impl MetricsConfigurator for Config {
@@ -45,7 +48,7 @@ impl MetricsConfigurator for Config {
                 ))
                 .try_init()?;
             builder = builder.with_custom_endpoint(
-                "/prometheus",
+                "/metrics",
                 PrometheusService {
                     registry: exporter.registry().clone(),
                 }

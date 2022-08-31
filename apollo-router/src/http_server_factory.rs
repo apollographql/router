@@ -12,7 +12,7 @@ use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::Handler;
-use crate::plugin::WebServer;
+use crate::plugin::Plugin;
 use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.

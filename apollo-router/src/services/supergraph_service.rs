@@ -1,6 +1,7 @@
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::ready;
@@ -45,7 +46,7 @@ use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
-use crate::plugin::WebServer;
+use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;
@@ -485,9 +486,7 @@ impl SupergraphServiceFactory for RouterCreator {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, axum::Router> {
         let mut mm = MultiMap::new();
-        self.plugins
-            .values()
-            .for_each(|plugin| mm.extend(plugin.bindings()));
+        self.plugins.values().for_each(|p| mm.extend(p.bindings()));
         mm
     }
 }
