@@ -154,7 +154,7 @@ impl Exporter {
             end_time: Some(span.end_time.into()),
             duration_ns: span.end_time.duration_since(span.start_time)?.as_nanos() as u64,
             root: None,
-            signature: "".to_string(),
+            signature: "".to_string(), // This is legacy and should never be set.
             unexecuted_operation_body: "".to_string(),
             unexecuted_operation_name: "".to_string(),
             details: Some(details),
