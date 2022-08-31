@@ -72,7 +72,6 @@ pub(crate) struct Exporter {
     client_name_header: HeaderName,
     client_version_header: HeaderName,
     schema_id: String,
-    field_level_instrumentation: bool,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
     send_headers: ForwardValues,
@@ -86,7 +85,6 @@ enum TreeData {
 
 #[buildstructor::buildstructor]
 impl Exporter {
-    #[allow(clippy::too_many_arguments)]
     #[builder]
     pub(crate) fn new(
         trace_config: config::Trace,
@@ -98,7 +96,6 @@ impl Exporter {
         schema_id: String,
         apollo_sender: Sender,
         buffer_size: usize,
-        field_level_instrumentation: bool,
         send_headers: Option<ForwardValues>,
         send_variable_values: Option<ForwardValues>,
     ) -> Self {
@@ -111,7 +108,6 @@ impl Exporter {
             client_name_header,
             client_version_header,
             schema_id,
-            field_level_instrumentation,
             apollo_sender,
             send_headers: send_headers.unwrap_or_default(),
             send_variable_values: send_variable_values.unwrap_or_default(),
@@ -283,23 +279,18 @@ impl Exporter {
         &mut self,
         span: &SpanData,
     ) -> Result<Option<Box<apollo_spaceport::Trace>>, Error> {
-        if !self.field_level_instrumentation {
-            Ok(None)
-        } else {
-            Ok(span
-                .attributes
-                .get(&Key::new("apollo_private_ftv1"))
-                .map(|data| {
-                    if let Value::String(data) = data {
-                        Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
-                            base64::decode(data.to_string())?,
-                        ))?))
-                    } else {
-                        Err(Error::Ftv1SpanAttribute)
-                    }
-                })
-                .transpose()?)
-        }
+        span.attributes
+            .get(&Key::new("apollo_private_ftv1"))
+            .map(|data| {
+                if let Value::String(data) = data {
+                    Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
+                        base64::decode(data.to_string())?,
+                    ))?))
+                } else {
+                    Err(Error::Ftv1SpanAttribute)
+                }
+            })
+            .transpose()
     }
 
     fn extract_http_data(&self, span: &SpanData) -> Http {

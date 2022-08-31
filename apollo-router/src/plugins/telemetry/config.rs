@@ -13,6 +13,12 @@ use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
 
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum Error {
+    #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
+    InvalidFieldLevelInstrumentationSampler,
+}
+
 pub(crate) trait GenericWith<T>
 where
     Self: Sized,
@@ -156,9 +162,7 @@ impl From<AttributeArray> for opentelemetry::Array {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SamplerOption {
-    /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
-    /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
-    /// zero, but spans may still be sampled if their parent is.
+    /// Sample a given fraction. Fractions >= 1 will always sample.
     TraceIdRatioBased(f64),
     Always(Sampler),
 }
@@ -166,9 +170,9 @@ pub(crate) enum SamplerOption {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Sampler {
-    /// Always sample the trace
+    /// Always sample
     AlwaysOn,
-    /// Never sample the trace
+    /// Never sample
     AlwaysOff,
 }
 
@@ -267,4 +271,57 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
 
 fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
     opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
+}
+
+impl Conf {
+    pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
+        Ok(
+            match (
+                self.tracing
+                    .clone()
+                    .unwrap_or_default()
+                    .trace_config
+                    .unwrap_or_default()
+                    .sampler,
+                self.apollo
+                    .clone()
+                    .unwrap_or_default()
+                    .field_level_instrumentation_sampler,
+            ) {
+                // Error conditions
+                (
+                    Some(SamplerOption::TraceIdRatioBased(global_ratio)),
+                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                ) if field_ratio > global_ratio => {
+                    Err(Error::InvalidFieldLevelInstrumentationSampler)?
+                }
+                (
+                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
+                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
+                ) => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
+                (
+                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
+                    Some(SamplerOption::TraceIdRatioBased(ratio)),
+                ) if ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
+                (
+                    Some(SamplerOption::TraceIdRatioBased(ratio)),
+                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
+                ) if ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
+
+                // Happy paths
+                (_, Some(SamplerOption::TraceIdRatioBased(ratio))) if ratio == 0.0 => 0.0,
+                (Some(SamplerOption::TraceIdRatioBased(ratio)), _) if ratio == 0.0 => 0.0,
+                (_, Some(SamplerOption::Always(Sampler::AlwaysOn))) => 1.0,
+                (
+                    Some(SamplerOption::TraceIdRatioBased(global_ratio)),
+                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                ) => field_ratio / global_ratio,
+                (
+                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
+                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                ) => field_ratio,
+                (_, _) => 0.0,
+            },
+        )
+    }
 }

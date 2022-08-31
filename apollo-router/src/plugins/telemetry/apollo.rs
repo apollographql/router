@@ -22,6 +22,7 @@ use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
+use crate::plugins::telemetry::config::SamplerOption;
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -63,8 +64,9 @@ pub(crate) struct Config {
     pub(crate) buffer_size: usize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    #[serde(default)]
-    pub(crate) field_level_instrumentation: bool,
+    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
+    /// Value MUST be less than global sampling rate
+    pub(crate) field_level_instrumentation_sampler: Option<SamplerOption>,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     #[serde(default)]
@@ -122,7 +124,7 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             apollo_sender: Sender::default(),
             buffer_size: default_buffer_size(),
-            field_level_instrumentation: false,
+            field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
             send_headers: ForwardValues::None,
             send_variable_values: ForwardValues::None,
         }

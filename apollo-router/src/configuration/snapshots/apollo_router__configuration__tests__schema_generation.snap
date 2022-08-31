@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 932
 expression: "&schema"
 ---
 {
@@ -493,10 +492,23 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
-            "field_level_instrumentation": {
-              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",
-              "default": false,
-              "type": "boolean"
+            "field_level_instrumentation_sampler": {
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
+              "anyOf": [
+                {
+                  "description": "Sample a given fraction. Fractions >= 1 will always sample.",
+                  "type": "number",
+                  "format": "double"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "always_on",
+                    "always_off"
+                  ]
+                }
+              ],
+              "nullable": true
             },
             "send_headers": {
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
@@ -1885,7 +1897,7 @@ expression: "&schema"
                 "sampler": {
                   "anyOf": [
                     {
-                      "description": "Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                      "description": "Sample a given fraction. Fractions >= 1 will always sample.",
                       "type": "number",
                       "format": "double"
                     },

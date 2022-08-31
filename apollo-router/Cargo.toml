@@ -35,7 +35,7 @@ atty = "0.2.14"
 axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 base64 = "0.13.0"
-buildstructor = "0.4.1"
+buildstructor = "0.5.0"
 bytes = "1.2.1"
 clap = { version = "3.2.17", default-features = false, features = [
     "env",
@@ -117,6 +117,7 @@ opentelemetry-prometheus = "0.10.0"
 paste = "1.0.8"
 pin-project-lite = "0.2.9"
 prometheus = "0.13"
+rand = "0.8.5"
 rhai = { version = "1.9.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [

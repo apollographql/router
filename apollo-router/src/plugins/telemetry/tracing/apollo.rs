@@ -25,12 +25,11 @@ impl TracingConfigurator for Config {
                 schema_id,
                 apollo_sender,
                 buffer_size,
-                field_level_instrumentation,
                 send_headers,
                 send_variable_values,
+                ..
             } => {
-                tracing::debug!("configuring exporter to Spaceport");
-
+                tracing::debug!("configuring exporter to Studio");
                 let mut send_headers = send_headers.clone();
                 match &mut send_headers {
                     ForwardValues::None | ForwardValues::All => {}
@@ -49,7 +48,6 @@ impl TracingConfigurator for Config {
                     .schema_id(schema_id)
                     .apollo_sender(apollo_sender.clone())
                     .buffer_size(*buffer_size)
-                    .field_level_instrumentation(*field_level_instrumentation)
                     .send_headers(send_headers)
                     .send_variable_values(send_variable_values.clone())
                     .build();

@@ -1,7 +1,7 @@
 //! Telemetry plugin.
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
-use std::error::Error;
+use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -32,6 +32,7 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -116,6 +117,7 @@ pub struct Telemetry {
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: apollo_exporter::Sender,
+    field_level_instrumentation_ratio: f64,
 }
 
 #[derive(Debug)]
@@ -461,12 +463,16 @@ impl Telemetry {
             Ok(true)
         })?;
 
+        let field_level_instrumentation_ratio =
+            config.calculate_field_level_instrumentation_ratio()?;
+
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
+            field_level_instrumentation_ratio,
             config,
         });
 
@@ -784,13 +790,9 @@ impl Telemetry {
     }
 
     fn apollo_handler(&self) -> ApolloFtv1Handler {
-        if self
-            .config
-            .apollo
-            .clone()
-            .unwrap_or_default()
-            .field_level_instrumentation
-        {
+        let mut rng = rand::thread_rng();
+
+        if rng.gen_ratio((self.field_level_instrumentation_ratio * 100.0) as u32, 100) {
             ApolloFtv1Handler::Enabled
         } else {
             ApolloFtv1Handler::Disabled

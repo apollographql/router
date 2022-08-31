@@ -173,26 +173,30 @@ If you have an active rhai script in your router, you will now see a "rhai plugi
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1598
 
 
-### Add FTV1 tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
 
-Add support of [FTV1](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio. To fetch traces from subgraphs and have full support of FTV1 you have to configure it:
+Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
 
 ```yaml
 telemetry:
     apollo:
-        field_level_instrumentation: true
+        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
+        # This is expensive and should be left at a low value.
+        # This cannot be higher than tracing->trace_config->sampler
+        field_level_instrumentation_sampler: 0.01 # (default)
+        
         # Send headers in apollo usage reporting (except Authorization and Cookies)
         send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
             except: # Send all headers except referer
             - referer
+
         # Send variable values in apollo usage reporting
         send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
             except: # Send all variable values except for variable named first
             - first
     tracing:
         trace_config:
-            sampler: 0.5 # Do not forget to configure a sampler for traces (a rate or `always_on` or `always_off`)
-
+            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
 ```
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
