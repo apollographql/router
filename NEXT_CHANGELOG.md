@@ -38,7 +38,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ## 🚀 Features
 ## 🐛 Fixes
 
-### Update our helm documentation to illustrate how to use our registry ([PR #1649](https://github.com/apollographql/router/issues/1643))
+### Update our helm documentation to illustrate how to use our registry ([#1643](https://github.com/apollographql/router/issues/1643))
 
 The helm chart never used to have a registry, so our docs were really just placeholders. I've updated them to reflect the fact that we now store the chart in our OCI registry.
 
