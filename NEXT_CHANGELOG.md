@@ -40,6 +40,16 @@ The router will now return a response with the status code `406 Not Acceptable` 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1652
 
 ## 🚀 Features
+
+### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
+
+to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
+
+To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1632
+
+
 ## 🐛 Fixes
 
 ### Update our helm documentation to illustrate how to use our registry ([PR #1649](https://github.com/apollographql/router/issues/1649))
@@ -66,7 +76,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Refactor `SupergraphService` ([PR #1615](https://github.com/apollographql/router/issues/1615))
 
-The `SupergraphService` code became too complex, so much that `rsutfmt` could not modify it anymore.
+The `SupergraphService` code became too complex, so much that `rustfmt` could not modify it anymore.
 This breaks up the code in more manageable functions.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1615
