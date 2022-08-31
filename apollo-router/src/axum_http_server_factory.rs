@@ -485,7 +485,7 @@ async fn health_check() -> impl IntoResponse {
 
 // Process the headers to make sure that `VARY` is set correctly
 fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).cloned().is_none() {
+    if headers.get(VARY).is_none() {
         // We don't have a VARY header, add one with value "origin"
         headers.insert(VARY, HeaderValue::from_static("origin"));
     }
