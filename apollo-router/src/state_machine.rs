@@ -23,6 +23,7 @@ use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::Schema;
@@ -659,7 +660,7 @@ mod tests {
         impl SupergraphServiceFactory for MyRouterFactory {
             type SupergraphService = MockMyRouter;
             type Future = <Self::SupergraphService as Service<http::Request<graphql::Request>>>::Future;
-            fn web_endpoints(&self) -> MultiMap<ListenAddr, axum::Router>;
+            fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
         impl  NewService<http::Request<graphql::Request>> for MyRouterFactory {
             type Service = MockMyRouter;

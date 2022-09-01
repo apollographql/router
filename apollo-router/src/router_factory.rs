@@ -1,12 +1,18 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
+use axum::response::IntoResponse;
 use futures::stream::BoxStream;
+use http::Method;
+use http::StatusCode;
 use multimap::MultiMap;
 use serde_json::Map;
 use serde_json::Value;
+use tower::service_fn;
 use tower::BoxError;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
@@ -17,10 +23,35 @@ use crate::plugin::Plugin;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::transport;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
+#[derive(Debug)]
+pub struct Endpoint {
+    path: String,
+    handler: transport::BoxCloneService,
+}
+
+impl Endpoint {
+    pub fn new(path: String, handler: transport::BoxCloneService) -> Self {
+        Self { path, handler }
+    }
+    pub fn into_router(self) -> axum::Router {
+        let handler = move |req: http::Request<hyper::Body>| {
+            let endpoint = self.handler.clone();
+            async move {
+                Ok(endpoint
+                    .oneshot(req)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                    .into_response())
+            }
+        };
+        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+    }
+}
 /// Factory for creating a SupergraphService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
@@ -40,7 +71,7 @@ pub(crate) trait SupergraphServiceFactory:
         > + Send;
     type Future: Send;
 
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, axum::Router>;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
 /// Factory for creating a SupergraphServiceFactory

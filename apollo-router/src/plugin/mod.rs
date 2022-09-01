@@ -20,6 +20,7 @@ pub mod test;
 
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
@@ -40,6 +41,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 
 use crate::layers::ServiceBuilderExt;
+use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -194,12 +196,6 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
-    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
-    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
-        None
-    }
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -208,7 +204,7 @@ pub trait Plugin: Send + Sync + 'static {
         get_type_of(self)
     }
 
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
 }
@@ -243,14 +239,10 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
-    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
-    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService>;
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
 }
@@ -273,16 +265,12 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
-        self.custom_endpoint(prefix)
-    }
-
     fn name(&self) -> &'static str {
         self.name()
     }
 
-    fn bindings(&self) -> MultiMap<ListenAddr, axum::Router> {
-        self.bindings()
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        self.web_endpoints()
     }
 }
 

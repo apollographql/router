@@ -76,6 +76,7 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -488,34 +489,33 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self, prefix: String) -> Option<transport::BoxCloneService> {
-        let (paths, mut endpoints): (Vec<_>, Vec<_>) =
-            self.custom_endpoints.clone().into_iter().unzip();
-        endpoints.push(Self::not_found_endpoint());
-        let not_found_index = endpoints.len() - 1;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let telemetry_service = |prefix: String| {
+            let (paths, mut endpoints): (Vec<_>, Vec<_>) =
+                self.custom_endpoints.clone().into_iter().unzip();
+            endpoints.push(Self::not_found_endpoint());
+            let not_found_index = endpoints.len() - 1;
 
-        let svc = Steer::new(
-            // All services we route between
-            endpoints,
-            // How we pick which service to send the request to
-            move |req: &transport::Request, _services: &[_]| {
-                let endpoint = req.uri().path().strip_prefix(prefix.as_str());
-                if let Some(index) = paths
-                    .iter()
-                    .position(|path| Some(path.as_str()) == endpoint)
-                {
-                    index
-                } else {
-                    not_found_index
-                }
-            },
-        )
-        .boxed_clone();
+            let svc = Steer::new(
+                // All services we route between
+                endpoints,
+                // How we pick which service to send the request to
+                move |req: &transport::Request, _services: &[_]| {
+                    let endpoint = req.uri().path().strip_prefix(prefix.as_str());
+                    if let Some(index) = paths
+                        .iter()
+                        .position(|path| Some(path.as_str()) == endpoint)
+                    {
+                        index
+                    } else {
+                        not_found_index
+                    }
+                },
+            )
+            .boxed_clone();
 
-        Some(svc)
-    }
-
-    fn bindings(&self) -> multimap::MultiMap<crate::ListenAddr, axum::Router> {
+            Some(svc)
+        };
         let mut mm = MultiMap::new();
 
         let prometheus_configuration = self
@@ -533,22 +533,9 @@ impl Plugin for Telemetry {
         if let Some(Some(prom_conf)) = self.config.metrics.as_ref().map(|m| m.prometheus.as_ref()) {
             let addr = prom_conf.listen.clone().unwrap();
             let path = prom_conf.path.clone().unwrap();
-            let endpoint = Plugin::custom_endpoint(self, path.clone()).unwrap();
-            let handler = move |req: http::Request<hyper::Body>| {
-                let endpoint = endpoint.clone();
-                async move {
-                    Ok(endpoint
-                        .oneshot(req)
-                        .await
-                        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-                        .into_response())
-                }
-            };
-
-            mm.insert(
-                ListenAddr::from(addr),
-                Router::new().route(path.as_str(), service_fn(handler)),
-            );
+            if let Some(endpoint) = telemetry_service(path.clone()) {
+                mm.insert(ListenAddr::from(addr), Endpoint::new(path, endpoint));
+            }
         }
 
         mm

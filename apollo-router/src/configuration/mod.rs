@@ -501,6 +501,7 @@ impl Cors {
             }))
         };
         let cors = CorsLayer::new()
+            .vary([])
             .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
             .expose_headers(cors::ExposeHeaders::list(

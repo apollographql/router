@@ -1,5 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
+use http::header::VARY;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
@@ -71,7 +73,9 @@ use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -88,7 +92,7 @@ impl AxumHttpServerFactory {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    plugins: MultiMap<ListenAddr, axum::Router>,
+    web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<Vec<(ListenAddr, Router)>, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -155,13 +159,21 @@ where
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    let mut addrs_and_routers: MultiMap<ListenAddr, Router> = Default::default();
+    let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
 
-    addrs_and_routers.insert(configuration.server.listen.clone().into(), main_router);
+    addrs_and_endpoints.insert(configuration.server.listen.clone().into(), main_router);
 
-    addrs_and_routers.extend(plugins);
+    addrs_and_endpoints.extend(web_endpoints.into_iter().map(|(listen_addr, endpoints)| {
+        (
+            listen_addr,
+            endpoints
+                .into_iter()
+                .map(|e| e.into_router())
+                .collect::<Vec<_>>(),
+        )
+    }));
 
-    let merged = addrs_and_routers
+    let merged = addrs_and_endpoints
         .into_iter()
         .map(|(addr, routers)| {
             (
@@ -184,7 +196,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         listeners: Vec<Listener>,
-        web_endpoints: MultiMap<ListenAddr, axum::Router>,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory,
@@ -527,6 +539,13 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
+// Process the headers to make sure that `VARY` is set correctly
+fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
+    if headers.get(VARY).is_none() {
+        // We don't have a VARY header, add one with value "origin"
+        headers.insert(VARY, HeaderValue::from_static("origin"));
+    }
+}
 async fn run_graphql_request<RS>(
     service: RS,
     http_request: Request<graphql::Request>,
@@ -562,6 +581,8 @@ where
                 Ok(response) => {
                     let (mut parts, mut stream) = response.into_parts();
 
+                    process_vary_header(&mut parts.headers);
+
                     match stream.next().await {
                         None => {
                             tracing::error!("router service is not available to process request",);
@@ -575,9 +596,7 @@ where
                             if response.has_next.unwrap_or(false) {
                                 parts.headers.insert(
                                     CONTENT_TYPE,
-                                    HeaderValue::from_static(
-                                        "multipart/mixed;boundary=\"graphql\"",
-                                    ),
+                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
                                 );
 
                                 // each chunk contains a response and the next delimiter, to let client parsers
@@ -800,6 +819,7 @@ mod tests {
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
+    use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -2313,9 +2333,7 @@ Content-Type: application/json\r
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(CONTENT_TYPE),
-            Some(&HeaderValue::from_static(
-                "multipart/mixed;boundary=\"graphql\""
-            ))
+            Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
         );
 
         let first = response.chunk().await.unwrap().unwrap();
@@ -2337,5 +2355,41 @@ Content-Type: application/json\r
         );
 
         server.shutdown().await
+    }
+
+    // Test Vary processing
+
+    #[test]
+    fn it_adds_default_with_value_origin_if_no_vary_header() {
+        let mut default_headers = HeaderMap::new();
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "origin");
+    }
+
+    #[test]
+    fn it_leaves_vary_alone_if_set() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("*"));
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "*");
+    }
+
+    #[test]
+    fn it_leaves_varys_alone_if_there_are_more_than_one() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("one"));
+        default_headers.append(VARY, HeaderValue::from_static("two"));
+        process_vary_header(&mut default_headers);
+        let vary = default_headers.get_all(VARY);
+        assert_eq!(vary.iter().count(), 2);
+        for value in vary {
+            assert!(value == "one" || value == "two");
+        }
     }
 }

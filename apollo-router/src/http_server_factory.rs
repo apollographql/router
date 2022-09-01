@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -11,8 +12,7 @@ use multimap::MultiMap;
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::Handler;
-use crate::plugin::Plugin;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.
@@ -27,7 +27,7 @@ pub(crate) trait HttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         listeners: Vec<Listener>,
-        web_endpoints: MultiMap<ListenAddr, axum::Router>,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
@@ -86,7 +86,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        web_endpoints: MultiMap<ListenAddr, axum::Router>,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
