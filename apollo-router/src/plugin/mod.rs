@@ -20,7 +20,6 @@ pub mod test;
 
 use std::any::TypeId;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
@@ -204,6 +203,7 @@ pub trait Plugin: Send + Sync + 'static {
         get_type_of(self)
     }
 
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }

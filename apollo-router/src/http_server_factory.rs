@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -125,6 +123,7 @@ impl HttpServerHandle {
         Ok(handle)
     }
 
+    // TODO [igni]: provide a separate graphql_listen_address function.
     pub(crate) fn listen_addresses(&self) -> &[ListenAddr] {
         self.listen_addresses.as_slice()
     }
@@ -189,8 +188,8 @@ mod tests {
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(listener)).boxed(),
-            SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+            futures::future::ready(Ok(vec![listener])).boxed(),
+            vec![SocketAddr::from_str("127.0.0.1:0").unwrap().into()],
         )
         .shutdown()
         .await
@@ -211,8 +210,8 @@ mod tests {
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(listener)).boxed(),
-            ListenAddr::UnixSocket(sock),
+            futures::future::ready(Ok(vec![listener])).boxed(),
+            vec![ListenAddr::UnixSocket(sock)],
         )
         .shutdown()
         .await
@@ -220,6 +219,6 @@ mod tests {
 
         shutdown_receiver
             .await
-            .expect("Should have been send notification to shutdown");
+            .expect("Should have sent notification to shutdown");
     }
 }

@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::net::SocketAddr;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -16,18 +15,11 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
-use axum::response::Html;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::routing::post;
-use axum::Json;
-use axum::Router;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
 use http::StatusCode;
-use http_body::Body;
 use metrics::apollo::Sender;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
@@ -41,7 +33,6 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
-use serde_json_bytes::json;
 use tower::service_fn;
 use tower::steer::Steer;
 use tower::BoxError;
@@ -58,7 +49,6 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -489,8 +479,9 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
+    // TODO [igni]: Refactor this, telemetry shouldnt be responsible for prometheus endpoint bootstrap
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-        let telemetry_service = |prefix: String| {
+        let telemetry_endpoint = |prefix: String| {
             let (paths, mut endpoints): (Vec<_>, Vec<_>) =
                 self.custom_endpoints.clone().into_iter().unzip();
             endpoints.push(Self::not_found_endpoint());
@@ -514,7 +505,7 @@ impl Plugin for Telemetry {
             )
             .boxed_clone();
 
-            Some(svc)
+            svc
         };
         let mut mm = MultiMap::new();
 
@@ -526,16 +517,12 @@ impl Plugin for Telemetry {
             .unwrap_or_default()
             .unwrap_or_default();
 
-        let enabled = prometheus_configuration.enabled;
-        let listen = prometheus_configuration.listen;
-        let path = prometheus_configuration.path;
-
-        if let Some(Some(prom_conf)) = self.config.metrics.as_ref().map(|m| m.prometheus.as_ref()) {
-            let addr = prom_conf.listen.clone().unwrap();
-            let path = prom_conf.path.clone().unwrap();
-            if let Some(endpoint) = telemetry_service(path.clone()) {
-                mm.insert(ListenAddr::from(addr), Endpoint::new(path, endpoint));
-            }
+        if prometheus_configuration.enabled {
+            let path = prometheus_configuration.path;
+            mm.insert(
+                prometheus_configuration.listen,
+                Endpoint::new(path.clone(), telemetry_endpoint(path)),
+            );
         }
 
         mm
@@ -1424,16 +1411,30 @@ mod tests {
             http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
                 .body(Default::default())
                 .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let mut web_endpoint = dyn_plugin
+            .web_endpoints()
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .into_iter()
+            .next()
+            .unwrap()
+            .handler;
+        let resp = web_endpoint
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         let http_req_prom =
             http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
                 .body(Default::default())
                 .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
+        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);

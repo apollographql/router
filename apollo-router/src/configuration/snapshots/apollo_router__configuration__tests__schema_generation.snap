@@ -1425,6 +1425,24 @@ expression: "&schema"
               "properties": {
                 "enabled": {
                   "type": "boolean"
+                },
+                "listen": {
+                  "description": "Listening address.",
+                  "default": "0.0.0.0:9090",
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "path": {
+                  "default": "/metrics",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,

@@ -16,13 +16,10 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
-use http_body::Body as _;
-use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
-use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
@@ -31,16 +28,11 @@ use Event::Shutdown;
 use Event::UpdateConfiguration;
 use Event::UpdateSchema;
 
-use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::DynPlugin;
-use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
-use crate::services::transport;
-use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -609,10 +601,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
         let mut router_handle = init_with_server();
-        let listen_address = router_handle
-            .listen_address()
-            .await
-            .expect("router failed to start");
+        let listen_addresses = router_handle.listen_addresses().await;
+
+        let listen_address = listen_addresses.first().expect("router failed to start");
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         router_handle.shutdown().await.unwrap();
     }

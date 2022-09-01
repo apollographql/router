@@ -1,9 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::ready;
@@ -36,7 +33,6 @@ use tracing_futures::Instrument;
 use super::new_service::NewService;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
-use super::transport;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
@@ -50,8 +46,6 @@ use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
-use crate::plugin::Plugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;

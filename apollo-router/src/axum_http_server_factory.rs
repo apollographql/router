@@ -1,6 +1,4 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -69,7 +67,6 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
-use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -106,7 +103,7 @@ where
     } else {
         configuration.server.graphql_path.clone()
     };
-    let mut main_router = Router::<hyper::Body>::new()
+    let main_router = Router::<hyper::Body>::new()
         .route(
             &graphql_path,
             get({
@@ -156,6 +153,7 @@ where
         )
         .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
+        // TODO [igni]: Should cors and Compression apply to the plugin endpoints?
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
@@ -458,22 +456,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
 struct CustomRejection {
     #[allow(dead_code)]
     msg: String,
-}
-
-async fn custom_plugin_handler(
-    Host(host): Host,
-    request: Request<Body>,
-    handler: Handler,
-) -> impl IntoResponse {
-    let (mut head, body) = request.into_parts();
-    head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
-        .expect("if the authority is some then the URL is valid; qed");
-    let req = Request::from_parts(head, body);
-    handler
-        .oneshot(req)
-        .await
-        .map(http::Response::from)
-        .map_err(|err| err.to_string())
 }
 
 async fn handle_get(
@@ -891,6 +873,10 @@ mod tests {
         type Future = <<TestSupergraphServiceFactory as NewService<
             http::Request<graphql::Request>,
         >>::Service as Service<http::Request<graphql::Request>>>::Future;
+
+        fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+            MultiMap::new()
+        }
     }
 
     async fn init(mut mock: MockSupergraphService) -> (HttpServerHandle, Client) {
@@ -921,8 +907,8 @@ mod tests {
                         )
                         .build(),
                 ),
-                None,
-                HashMap::new(),
+                vec![],
+                MultiMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -940,7 +926,7 @@ mod tests {
     async fn init_with_config(
         mut mock: MockSupergraphService,
         conf: Configuration,
-        plugin_handlers: HashMap<String, Handler>,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> (HttpServerHandle, Client) {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
@@ -961,8 +947,8 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(conf),
-                None,
-                plugin_handlers,
+                vec![],
+                web_endpoints,
             )
             .await
             .expect("Failed to create server factory");
@@ -1009,8 +995,8 @@ mod tests {
                         )
                         .build(),
                 ),
-                None,
-                HashMap::new(),
+                vec![],
+                MultiMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -1030,7 +1016,7 @@ mod tests {
 
         // Regular studio redirect
         let response = client
-            .get(&format!("{}/", server.listen_address()))
+            .get(&format!("{}/", server.listen_addresses().first().unwrap()))
             .header(ACCEPT, "text/html")
             .send()
             .await
@@ -1070,7 +1056,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         // Post query
         let response = client
@@ -1161,7 +1147,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         // Post query
         let response = client
@@ -1189,7 +1175,7 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/", server.listen_address()))
+            .post(format!("{}/", server.listen_addresses().first().unwrap()))
             .body("Garbage")
             .send()
             .await
@@ -1223,7 +1209,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         // Post query
         let response = client
@@ -1273,7 +1259,7 @@ mod tests {
     async fn bad_response() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
-        let url = format!("{}/test", server.listen_address());
+        let url = format!("{}/test", server.listen_addresses().first().unwrap());
 
         // Post query
         let err = client
@@ -1337,8 +1323,8 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
-        let url = format!("{}/graphql", server.listen_address());
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let url = format!("{}/graphql", server.listen_addresses().first().unwrap());
 
         // Post query
         let response = client
@@ -1406,8 +1392,11 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
-        let url = format!("{}/prefix/graphql", server.listen_address());
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let url = format!(
+            "{}/prefix/graphql",
+            server.listen_addresses().first().unwrap()
+        );
 
         // Post query
         let response = client
@@ -1475,10 +1464,16 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         for url in &[
-            format!("{}/graphql/test", server.listen_address()),
-            format!("{}/graphql/anothertest", server.listen_address()),
+            format!(
+                "{}/graphql/test",
+                server.listen_addresses().first().unwrap()
+            ),
+            format!(
+                "{}/graphql/anothertest",
+                server.listen_addresses().first().unwrap()
+            ),
         ] {
             // Post query
             let response = client
@@ -1555,7 +1550,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         let response = client
             .get(url.as_str())
@@ -1615,7 +1610,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         let response = client
             .post(url.as_str())
@@ -1656,7 +1651,7 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/", server.listen_address()))
+            .post(format!("{}/", server.listen_addresses().first().unwrap()))
             .body(
                 json!(
                 {
@@ -1694,10 +1689,13 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
 
         let response = client
-            .request(Method::OPTIONS, &format!("{}/", server.listen_address()))
+            .request(
+                Method::OPTIONS,
+                &format!("{}/", server.listen_addresses().first().unwrap()),
+            )
             .header(ACCEPT, "text/html")
             .header(ORIGIN, "https://studio.apollographql.com")
             .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
@@ -1760,7 +1758,7 @@ mod tests {
         let server = init_unix(expectations, &temp_dir).await;
 
         let output = send_to_unix_socket(
-            server.listen_address(),
+            server.listen_addresses().first().unwrap(),
             Method::POST,
             r#"{"query":"query"}"#,
         )
@@ -1772,8 +1770,12 @@ mod tests {
         );
 
         // Get query
-        let output =
-            send_to_unix_socket(server.listen_address(), Method::GET, r#"query=query"#).await;
+        let output = send_to_unix_socket(
+            server.listen_addresses().first().unwrap(),
+            Method::GET,
+            r#"query=query"#,
+        )
+        .await;
 
         assert_eq!(
             serde_json::from_slice::<graphql::Response>(&output).unwrap(),
@@ -1857,7 +1859,7 @@ Content-Type: application/json\r
         let (server, client) = init(expectations).await;
         let url = format!(
             "{}/.well-known/apollo/server-health",
-            server.listen_address()
+            server.listen_addresses().first().unwrap()
         );
 
         let response = client.get(url).send().await.unwrap();
@@ -1880,8 +1882,8 @@ Content-Type: application/json\r
             )
             .build();
         let expectations = MockSupergraphService::new();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
-        let url = format!("{}/health", server.listen_address());
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let url = format!("{}/health", server.listen_addresses().first().unwrap());
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -1894,7 +1896,7 @@ Content-Type: application/json\r
 
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
-        let url = format!("{}", server.listen_address());
+        let url = format!("{}", server.listen_addresses().first().unwrap());
         let response = client
             .post(url.as_str())
             .header(CONTENT_TYPE, "application/yaml")
@@ -1924,9 +1926,9 @@ Content-Type: application/json\r
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         let response = client
-            .get(&format!("{}/", server.listen_address()))
+            .get(&format!("{}/", server.listen_addresses().first().unwrap()))
             .header(ACCEPT, "text/html")
             .send()
             .await
@@ -1940,21 +1942,19 @@ Content-Type: application/json\r
     #[test(tokio::test)]
     async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let plugin_handler = Handler::new(
-            service_fn(|req: transport::Request| async move {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::OK)
-                        .body(format!("{} + {}", req.method(), req.uri().path()).into())
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        );
-        let mut plugin_handlers = HashMap::new();
-        plugin_handlers.insert(
-            "apollo.test.custom_plugin_with_endpoint".to_string(),
-            plugin_handler,
+        let endpoint = service_fn(|req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(format!("{} + {}", req.method(), req.uri().path()).into())
+                    .unwrap(),
+            )
+        })
+        .boxed_clone();
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint),
         );
 
         let conf = Configuration::builder()
@@ -1969,13 +1969,13 @@ Content-Type: application/json\r
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, plugin_handlers).await;
+        let (server, client) = init_with_config(expectations, conf, web_endpoints).await;
 
         for path in &["/", "/test"] {
             let response = client
                 .get(&format!(
                     "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
-                    server.listen_address(),
+                    server.listen_addresses().first().unwrap(),
                     path
                 ))
                 .send()
@@ -1996,7 +1996,7 @@ Content-Type: application/json\r
             let response = client
                 .post(&format!(
                     "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
-                    server.listen_address(),
+                    server.listen_addresses().first().unwrap(),
                     path
                 ))
                 .send()
@@ -2043,7 +2043,7 @@ Content-Type: application/json\r
         {
           "query": "query",
         });
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
         let response = client.get(&url).query(&query).send().await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -2085,7 +2085,7 @@ Content-Type: application/json\r
     #[tokio::test]
     async fn cors_origin_default() -> Result<(), ApolloRouterError> {
         let (server, client) = init(MockSupergraphService::new()).await;
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         let response =
             request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com")
@@ -2109,8 +2109,8 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
-        let url = format!("{}/", server.listen_address());
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         let response =
             request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
@@ -2136,8 +2136,8 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
-        let url = format!("{}/", server.listen_address());
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
         assert_cors_origin(response, valid_origin);
@@ -2167,8 +2167,8 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, HashMap::new()).await;
-        let url = format!("{}/", server.listen_address());
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
 
         // regex tests
         let response =
@@ -2260,7 +2260,7 @@ Content-Type: application/json\r
         {
           "query": "query { test }",
         });
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
         let response = client
             .post(&url)
             .body(query.to_string())
@@ -2321,7 +2321,7 @@ Content-Type: application/json\r
         {
           "query": "query { test ... @defer { other } }",
         });
-        let url = format!("{}/", server.listen_address());
+        let url = format!("{}/", server.listen_addresses().first().unwrap());
         let mut response = client
             .post(&url)
             .body(query.to_string())

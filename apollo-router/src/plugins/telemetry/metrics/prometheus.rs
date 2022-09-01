@@ -24,18 +24,26 @@ use crate::ListenAddr;
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     pub(crate) enabled: bool,
-    pub(crate) listen: Option<ListenAddr>,
-    pub(crate) path: Option<String>,
+    #[serde(default = "prometheus_default_listen_addr")]
+    pub(crate) listen: ListenAddr,
+    #[serde(default = "prometheus_default_path")]
+    pub(crate) path: String,
+}
+
+fn prometheus_default_listen_addr() -> ListenAddr {
+    ListenAddr::SocketAddr("0.0.0.0:9090".parse().expect("valid listenAddr"))
+}
+
+fn prometheus_default_path() -> String {
+    "/metrics".to_string()
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: true,
-            listen: Some(ListenAddr::SocketAddr(
-                "0.0.0.0:9090".parse().expect("valid listenAddr"),
-            )),
-            path: Some("/metrics".to_string()),
+            listen: prometheus_default_listen_addr(),
+            path: prometheus_default_path(),
         }
     }
 }

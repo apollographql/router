@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
 use futures::stream::BoxStream;
-use http::Method;
 use http::StatusCode;
 use multimap::MultiMap;
 use serde_json::Map;
@@ -19,7 +16,6 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::plugin::DynPlugin;
-use crate::plugin::Plugin;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
@@ -31,7 +27,7 @@ use crate::Schema;
 #[derive(Debug)]
 pub struct Endpoint {
     path: String,
-    handler: transport::BoxCloneService,
+    pub(crate) handler: transport::BoxCloneService,
 }
 
 impl Endpoint {

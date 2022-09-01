@@ -23,7 +23,6 @@ use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::Schema;
@@ -415,7 +414,6 @@ impl<T> ResultExt<T> for Result<T, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
@@ -428,6 +426,7 @@ mod tests {
     use futures::stream::BoxStream;
     use mockall::mock;
     use mockall::Sequence;
+    use multimap::MultiMap;
     use test_log::test;
     use tower::BoxError;
     use tower::Service;
@@ -436,8 +435,7 @@ mod tests {
     use crate::graphql;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
-    use crate::plugin::Handler;
-    use crate::plugin::Plugin;
+    use crate::router_factory::Endpoint;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;
@@ -607,7 +605,7 @@ mod tests {
             .returning(|_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                router.expect_custom_endpoints().returning(HashMap::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory
@@ -703,7 +701,7 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
+                listeners: Vec<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
         }
     }
 
@@ -715,13 +713,13 @@ mod tests {
             &self,
             _service_factory: RF,
             configuration: Arc<Configuration>,
-            listener: Option<Listener>,
-            _plugin_handlers: HashMap<String, Handler>,
+            listeners: Vec<Listener>,
+            _web_endpoints: MultiMap<ListenAddr, Endpoint>,
         ) -> Self::Future
         where
             RF: SupergraphServiceFactory,
         {
-            let res = self.create_server(configuration, listener);
+            let res = self.create_server(configuration, listeners);
             Box::pin(async move { res })
         }
     }
@@ -751,7 +749,7 @@ mod tests {
             .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |configuration: Arc<Configuration>, listener: Option<Listener>| {
+                move |configuration: Arc<Configuration>, listeners: Vec<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -759,19 +757,19 @@ mod tests {
                         .push(shutdown_receiver);
 
                     let server = async move {
-                        Ok(if let Some(l) = listener {
-                            l
-                        } else {
-                            Listener::Tcp(
+                        Ok(if listeners.is_empty() {
+                            vec![Listener::Tcp(
                                 tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
-                            )
+                            )]
+                        } else {
+                            listeners
                         })
                     };
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
-                        configuration.server.listen.clone(),
+                        vec![configuration.server.listen.clone()],
                     ))
                 },
             );
@@ -787,7 +785,7 @@ mod tests {
             .returning(move |_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                router.expect_custom_endpoints().returning(HashMap::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory
