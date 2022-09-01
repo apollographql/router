@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::DeferStreamSupport;
+use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::QueryPlannerConfig;
 
 use crate::cache::storage::CacheStorage;
@@ -58,7 +58,7 @@ impl Introspection {
             schema_sdl,
             vec![query.to_owned()],
             QueryPlannerConfig {
-                defer_stream_support: Some(DeferStreamSupport {
+                incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(self.defer_support),
                 }),
             },

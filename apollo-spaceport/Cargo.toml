@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 bytes = "1.2.1"
-clap = { version = "3.2.18", default-features = false, features = [
+clap = { version = "3.2.19", default-features = false, features = [
     "std",
     "derive",
 ] }
