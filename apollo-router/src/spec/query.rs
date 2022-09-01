@@ -581,6 +581,8 @@ impl Query {
                         }
                     } else if field_type.is_non_null() {
                         return Err(InvalidValue);
+                    } else {
+                        output.insert(field_name.clone(), Value::Null);
                     }
                 }
                 Selection::InlineFragment {
@@ -5572,6 +5574,94 @@ mod tests {
                     },
                 }
             }},
+        );
+    }
+
+    #[test]
+    fn query_operation_nullification() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                name: String
+            }
+            ",
+            "{
+                get {
+                    name
+                }
+            }",
+            json! {{}},
+            None,
+            json! {{
+                "get": null,
+            }},
+        );
+
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                name: String
+            }
+            ",
+            "query {
+               ...F
+            }
+            
+            fragment F on Query {
+                get {
+                    name
+                }
+            }
+            ",
+            json! {{}},
+            None,
+            json! {{
+                "get": null,
+            }},
+        );
+
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                name: String
+            }
+            ",
+            "query {
+               ... on Query {
+                get {
+                    name
+                }
+               }
+            }",
+            json! {{}},
+            None,
+            json! {{
+                "get": null,
+            }},
+        );
+
+        assert_format_response!(
+            "type Query {
+                get: Thing!
+            }
+            type Thing {
+                name: String
+            }
+            ",
+            "{
+                get {
+                    name
+                }
+            }",
+            json! {{}},
+            None,
+            Value::Null,
         );
     }
 }

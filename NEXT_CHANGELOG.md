@@ -67,11 +67,21 @@ The helm chart never used to have a registry, so our docs were really just place
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1649
 
-### Update router-bridge to `query-planner` v2.1.0 ([PR #1650](https://github.com/apollographql/router/pull/1650))
+### Update router-bridge to `query-planner` v2.1.1 ([PR #1650](https://github.com/apollographql/router/pull/1650) [PR #1672](https://github.com/apollographql/router/pull/1672))
 
 The 2.1.0 release of the query planner comes with fixes to fragment interpretation and reduced memory usage.
+The 2.1.1 release of the query planner fixes an issue with the `@defer` directive's `if` argument being ignored.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1650
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1650 and https://github.com/apollographql/router/pull/1672
+
+### Do not nullify the entire query if the root operation is not present ([PR #1674](https://github.com/apollographql/router/issues/1674))
+
+if a root field was not returned by the subgraph (example: when
+there's an error), we should not nullify the entire data objet. Instead,
+it's the root field that should be null (unless it is non
+nullable).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1674
 
 ## 🛠 Maintenance
 

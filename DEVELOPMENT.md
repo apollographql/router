@@ -18,20 +18,14 @@ The **Apollo Router** is a configurable, high-performance **graph router** for a
 
 ## Development
 
-We recommend using [asdf](https://github.com/asdf-vm/asdf) to make sure your
-nodejs and rust versions are correct.  The versions currently used to compile
-are specified in [.tool-versions](.tool-versions). To set up your toolchain
-run:
+You will need a recent version of rust (`1.63` works well as of writing). 
+Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
+the recommended way to do it as it will install rustup, rustfmt and other 
+goodies that are not always included by default in other rust distribution channels:
 
-```shell
-asdf plugin add rust
-asdf plugin add nodejs
-asdf install
-asdf reshim
 ```
-
-The `router-bridge` dependency requires building a nodejs project. This should
-happen automatically, but may take some time.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
 Set up your git hooks:
 
