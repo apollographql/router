@@ -16,7 +16,7 @@ pub struct TraceId([u8; 16]);
 impl TraceId {
     /// Create a TraceId. If called from an invalid context
     /// (e.g.: not in a span, or in a disabled span), then
-    /// the value of the TraceId is None.
+    /// None is returned.
     pub fn maybe_new() -> Option<Self> {
         let trace_id = Span::current().context().span().span_context().trace_id();
         if trace_id == OtelTraceId::INVALID {
