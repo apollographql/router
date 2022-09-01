@@ -65,9 +65,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Do not nullify the entire query if the root operation is not present ([PR #1674](https://github.com/apollographql/router/issues/1674))
 
-if the root operation was not returned by the subgraph (example: when
+if a root field was not returned by the subgraph (example: when
 there's an error), we should not nullify the entire data objet. Instead,
-it's the root operation field that should be null (unless it is non
+it's the root field that should be null (unless it is non
 nullable).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1674
