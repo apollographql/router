@@ -5,6 +5,7 @@
 use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceId as OtelTraceId;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -13,21 +14,16 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
-    /// Invalid Trace ID
-    pub const INVALID: TraceId = TraceId([0; 16]);
-
     /// Create a TraceId. If called from an invalid context
     /// (e.g.: not in a span, or in a disabled span), then
-    /// the value of the TraceId is [`TraceId::INVALID`].
-    pub fn new() -> Self {
-        TraceId(
-            Span::current()
-                .context()
-                .span()
-                .span_context()
-                .trace_id()
-                .to_bytes(),
-        )
+    /// the value of the TraceId is None.
+    pub fn maybe_new() -> Option<Self> {
+        let trace_id = Span::current().context().span().span_context().trace_id();
+        if trace_id == OtelTraceId::INVALID {
+            None
+        } else {
+            Some(Self(trace_id.to_bytes()))
+        }
     }
 
     /// Convert the TraceId to bytes.
@@ -38,12 +34,6 @@ impl TraceId {
     /// Convert the TraceId to u128.
     pub fn to_u128(&self) -> u128 {
         u128::from_be_bytes(self.0)
-    }
-}
-
-impl Default for TraceId {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -64,9 +54,8 @@ mod test {
 
     #[test]
     fn it_returns_invalid_trace_id() {
-        let my_id = TraceId::new();
-        assert_eq!(my_id, TraceId::INVALID);
-        assert_eq!(my_id.as_bytes(), &[0; 16])
+        let my_id = TraceId::maybe_new();
+        assert!(my_id.is_none());
     }
 
     #[test]
@@ -84,7 +73,7 @@ mod test {
             let root = span!(tracing::Level::TRACE, "trace test");
             let _enter = root.enter();
 
-            assert!(TraceId::new() != TraceId::INVALID);
+            assert!(TraceId::maybe_new().is_some());
         });
     }
 }
