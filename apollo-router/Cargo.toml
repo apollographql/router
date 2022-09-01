@@ -18,7 +18,7 @@ failfast = []
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.62"
+anyhow = "1.0.63"
 apollo-parser = "0.2.10"
 # ELv2 licensing: The apollo-spaceport crate is license key functionality
 apollo-spaceport = { path = "../apollo-spaceport" }
@@ -36,12 +36,12 @@ axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 buildstructor = "0.4.1"
 bytes = "1.2.1"
-clap = { version = "3.2.17", default-features = false, features = [
+clap = { version = "3.2.19", default-features = false, features = [
     "env",
     "derive",
     "std",
 ] }
-dashmap = { version = "5.3.4", features = ["serde"] }
+dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
@@ -50,8 +50,8 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.2"
-futures = { version = "0.3.23", features = ["thread-pool"] }
+envmnt = "0.10.4"
+futures = { version = "0.3.24", features = ["thread-pool"] }
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
@@ -60,7 +60,6 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.20", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
-include_dir = "0.7.2"
 indexmap = { version = "1.9.1", features = ["serde-1"] }
 itertools = "0.10.3"
 jsonschema = { version = "0.16.0", default-features = false }
@@ -68,7 +67,6 @@ lazy_static = "1.4.0"
 libc = "0.2.132"
 lru = "0.7.8"
 mockall = "0.11.2"
-moka = { version = "0.9.3", features = ["future", "futures-util"] }
 miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
@@ -112,18 +110,18 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.10.0"
-paste = "1.0.8"
+paste = "1.0.9"
 prometheus = "0.13"
-rhai = { version = "1.9.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.9.1", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
     "json",
     "stream",
 ] }
-router-bridge = "0.1.0-alpha.1"
+router-bridge = "0.1.1"
 schemars = { version = "0.8.10", features = ["url"] }
-sha2 = "0.10.2"
+sha2 = "0.10.3"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
@@ -132,7 +130,7 @@ serde_yaml = "0.8.26"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 tokio = { version = "1.20.1", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
@@ -178,7 +176,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.19.0", features = [ "json" ] }
+insta = { version = "1.19.1", features = [ "json" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 mockall = "0.11.2"
