@@ -27,7 +27,6 @@ use futures::prelude::*;
 use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use http::header;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
@@ -57,7 +56,6 @@ use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing::Level;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
@@ -693,42 +691,12 @@ impl PropagatingMakeSpan {
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // This method needs to be moved to the telemetry plugin once we have a hook for the http request.
+
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
-
-        // Only for FTV1
-        let headers_to_str = Span::current()
-            .context()
-            .span()
-            .span_context()
-            .is_sampled()
-            .then(|| {
-                let headers_str = request.headers().into_iter().filter_map(|(name, value)| {
-                    if name == header::AUTHORIZATION
-                        || name == header::COOKIE
-                        || name == header::SET_COOKIE
-                    {
-                        None
-                    } else {
-                        Some((
-                            name.to_string(),
-                            value.to_str().unwrap_or_default().to_string(),
-                        ))
-                    }
-                });
-                let mut headers_map: HashMap<String, Vec<String>> = HashMap::new();
-                for (header_name, header_value) in headers_str {
-                    let header_value_cloned = header_value.clone();
-                    headers_map
-                        .entry(header_name)
-                        .and_modify(move |e| e.push(header_value_cloned))
-                        .or_insert_with(move || vec![header_value]);
-                }
-                serde_json::to_string(&headers_map).unwrap_or_default()
-            })
-            .unwrap_or_default();
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
@@ -741,7 +709,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
-                headers = %headers_to_str,
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
             )
@@ -753,7 +720,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
-                headers = %headers_to_str,
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
             )

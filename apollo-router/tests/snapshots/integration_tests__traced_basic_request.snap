@@ -42,11 +42,15 @@ expression: get_spans()
             "internal"
           ],
           [
-            "graphql.variables",
-            "{}"
+            "apollo_private_request_variables",
+            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
           ],
           [
-            "operation.signature",
+            "apollo_private_request_headers",
+            "{\"content-type\":[\"\"]}"
+          ],
+          [
+            "apollo_private_operation_signature",
             "# -\n{topProducts{name name}}"
           ]
         ],
@@ -62,8 +66,9 @@ expression: get_spans()
               "client_name",
               "client_version",
               "otel.kind",
-              "operation.signature",
-              "graphql.variables"
+              "apollo_private_operation_signature",
+              "apollo_private_request_variables",
+              "apollo_private_request_headers"
             ]
           }
         }

@@ -3,11 +3,9 @@
 use apollo_spaceport::Trace;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
-use std::collections::HashMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -25,18 +23,9 @@ impl TracingConfigurator for Config {
                 schema_id,
                 apollo_sender,
                 buffer_size,
-                send_headers,
-                send_variable_values,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
-                let mut send_headers = send_headers.clone();
-                match &mut send_headers {
-                    ForwardValues::None | ForwardValues::All => {}
-                    ForwardValues::Only(headers) | ForwardValues::Except(headers) => headers
-                        .iter_mut()
-                        .for_each(|header_name| *header_name = header_name.to_lowercase()),
-                };
 
                 let exporter = apollo_telemetry::Exporter::builder()
                     .trace_config(trace_config.clone())
@@ -48,8 +37,6 @@ impl TracingConfigurator for Config {
                     .schema_id(schema_id)
                     .apollo_sender(apollo_sender.clone())
                     .buffer_size(*buffer_size)
-                    .send_headers(send_headers)
-                    .send_variable_values(send_variable_values.clone())
                     .build();
                 builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
             }
@@ -61,6 +48,6 @@ impl TracingConfigurator for Config {
 // List of signature and trace by request_id
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct TracesReport {
-    // signature and trace by request_id
-    pub(crate) traces: HashMap<String, (String, Trace)>,
+    // signature and trace
+    pub(crate) traces: Vec<(String, Trace)>,
 }

@@ -10,8 +10,8 @@ use http::header::HeaderName;
 use http::HeaderValue;
 use regex::Regex;
 use serde::de;
-use serde::de::Error;
 use serde::de::Visitor;
+use serde::de::{Error, SeqAccess};
 use serde::Deserializer;
 
 pub fn deserialize_option_header_name<'de, D>(
@@ -44,6 +44,34 @@ where
         }
     }
     deserializer.deserialize_option(OptionHeaderNameVisitor)
+}
+
+pub fn deserialize_vec_header_name<'de, D>(deserializer: D) -> Result<Vec<HeaderName>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct VecHeaderNameVisitor;
+
+    impl<'de> Visitor<'de> for VecHeaderNameVisitor {
+        type Value = Vec<HeaderName>;
+
+        fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+            formatter.write_str("struct HeaderName")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut result = Vec::new();
+            while let Some(element) = seq.next_element::<String>()? {
+                let header_name = HeaderNameVisitor::default().visit_string(element)?;
+                result.push(header_name);
+            }
+            Ok(result)
+        }
+    }
+    deserializer.deserialize_seq(VecHeaderNameVisitor)
 }
 
 pub fn deserialize_option_header_value<'de, D>(
@@ -79,6 +107,7 @@ where
     deserializer.deserialize_option(OptionHeaderValueVisitor)
 }
 
+#[derive(Default)]
 struct HeaderNameVisitor;
 
 impl<'de> Visitor<'de> for HeaderNameVisitor {

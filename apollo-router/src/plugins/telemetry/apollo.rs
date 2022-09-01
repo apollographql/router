@@ -22,6 +22,7 @@ use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_vec_header_name;
 use crate::plugins::telemetry::config::SamplerOption;
 
 #[derive(Derivative)]
@@ -70,7 +71,7 @@ pub(crate) struct Config {
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     #[serde(default)]
-    pub(crate) send_headers: ForwardValues,
+    pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
     #[serde(default)]
     pub(crate) send_variable_values: ForwardValues,
@@ -125,9 +126,28 @@ impl Default for Config {
             apollo_sender: Sender::default(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
-            send_headers: ForwardValues::None,
+            send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ForwardHeaders {
+    None,
+    All,
+    #[serde(deserialize_with = "deserialize_vec_header_name")]
+    #[schemars(with = "Vec<String>")]
+    Only(Vec<HeaderName>),
+    #[schemars(with = "Vec<String>")]
+    #[serde(deserialize_with = "deserialize_vec_header_name")]
+    Except(Vec<HeaderName>),
+}
+
+impl Default for ForwardHeaders {
+    fn default() -> Self {
+        Self::None
     }
 }
 
@@ -195,7 +215,7 @@ impl AddAssign<SingleReport> for Report {
 impl AddAssign<TracesReport> for Report {
     fn add_assign(&mut self, report: TracesReport) {
         self.operation_count += report.traces.len() as u64;
-        for (_request_id, (operation_signature, trace)) in report.traces {
+        for (operation_signature, trace) in report.traces {
             self.traces_per_query
                 .entry(operation_signature)
                 .or_default()

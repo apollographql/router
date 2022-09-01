@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::str::FromStr;
 use std::time::SystemTimeError;
 
 use apollo_spaceport::trace::http::Values;
@@ -16,24 +15,21 @@ use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
 use http::header::HeaderName;
-use http::Uri;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
-use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use thiserror::Error;
 use url::Url;
 
 use super::apollo::TracesReport;
-use crate::plugins::telemetry::apollo::ForwardValues;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
-use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::REQUEST_SPAN_NAME;
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -74,12 +70,12 @@ pub(crate) struct Exporter {
     schema_id: String,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
-    send_headers: ForwardValues,
-    send_variable_values: ForwardValues,
 }
 
 enum TreeData {
-    QueryPlanNode(QueryPlanNode),
+    RootTrace(Result<Box<apollo_spaceport::Trace>, Error>),
+    Http(Http),
+    QueryPlan(QueryPlanNode),
     Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
 }
 
@@ -96,8 +92,6 @@ impl Exporter {
         schema_id: String,
         apollo_sender: Sender,
         buffer_size: usize,
-        send_headers: Option<ForwardValues>,
-        send_variable_values: Option<ForwardValues>,
     ) -> Self {
         Self {
             spans_by_parent_id: LruCache::new(buffer_size),
@@ -109,26 +103,14 @@ impl Exporter {
             client_version_header,
             schema_id,
             apollo_sender,
-            send_headers: send_headers.unwrap_or_default(),
-            send_variable_values: send_variable_values.unwrap_or_default(),
         }
     }
 
-    pub(crate) fn extract_query_plan_trace(
+    fn extract_root_trace(
         &mut self,
-        span: SpanData,
-    ) -> Result<apollo_spaceport::Trace, Error> {
-        let query_plan = self
-            .extract_query_plan_node(&span, &span)?
-            .pop()
-            .and_then(|node| {
-                if let TreeData::QueryPlanNode(node) = node {
-                    Some(Box::new(node))
-                } else {
-                    None
-                }
-            });
-
+        span: &SpanData,
+        child_nodes: Vec<TreeData>,
+    ) -> Result<Box<apollo_spaceport::Trace>, Error> {
         let variables = span
             .attributes
             .get(&Key::new("graphql.variables"))
@@ -144,31 +126,64 @@ impl Exporter {
             variables_json,
             operation_name: "".to_string(), // Deprecated do not set
         };
-        Ok(apollo_spaceport::Trace {
+
+        let http = self.extract_http_data(span);
+
+        let mut root_trace = apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
             duration_ns: span.end_time.duration_since(span.start_time)?.as_nanos() as u64,
             root: None,
-            signature: "".to_string(), // This is legacy and should never be set.
+            signature: Default::default(), // This is legacy and should never be set.
             unexecuted_operation_body: "".to_string(),
             unexecuted_operation_name: "".to_string(),
             details: Some(details),
             client_name: "".to_string(),
             client_version: "".to_string(),
-            // Filled later
-            http: None,
+            http: Some(http),
             cache_policy: None,
-            query_plan,
+            query_plan: None,
             full_query_cache_hit: false,
             persisted_query_hit: false,
             persisted_query_register: false,
             registered_operation: false,
             forbidden_operation: false,
             field_execution_weight: 0.0,
-        })
+        };
+
+        for node in child_nodes {
+            match node {
+                TreeData::QueryPlan(query_plan) => {
+                    root_trace.query_plan = Some(Box::new(query_plan))
+                }
+                TreeData::Http(http) => {
+                    root_trace
+                        .http
+                        .as_mut()
+                        .expect("http was extracted earlier, qed")
+                        .request_headers = http.request_headers
+                }
+                _ => panic!("should never have had other node types"),
+            }
+        }
+
+        Ok(Box::new(root_trace))
     }
 
-    fn extract_query_plan_node(
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<apollo_spaceport::Trace>, Error> {
+        self.extract_data_from_spans(&span, &span)?
+            .pop()
+            .and_then(|node| {
+                if let TreeData::RootTrace(trace) = node {
+                    Some(trace)
+                } else {
+                    None
+                }
+            })
+            .expect("root trace must exist because it is constructed on the request span, qed")
+    }
+
+    fn extract_data_from_spans(
         &mut self,
         root_span: &SpanData,
         span: &SpanData,
@@ -179,7 +194,7 @@ impl Exporter {
             .map(|(_, spans)| spans)
             .unwrap_or_default()
             .into_iter()
-            .map(|span| self.extract_query_plan_node(root_span, &span))
+            .map(|span| self.extract_data_from_spans(root_span, &span))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
                 match next {
                     Ok(mut children) => oks.append(&mut children),
@@ -199,26 +214,26 @@ impl Exporter {
         }
 
         Ok(match span.name.as_ref() {
-            "parallel" => vec![TreeData::QueryPlanNode(QueryPlanNode {
+            "parallel" => vec![TreeData::QueryPlan(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes
                             .into_iter()
                             .filter_map(|child| match child {
-                                TreeData::QueryPlanNode(node) => Some(node),
+                                TreeData::QueryPlan(node) => Some(node),
                                 _ => None,
                             })
                             .collect(),
                     },
                 )),
             })],
-            "sequence" => vec![TreeData::QueryPlanNode(QueryPlanNode {
+            "sequence" => vec![TreeData::QueryPlan(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes
                             .into_iter()
                             .filter_map(|child| match child {
-                                TreeData::QueryPlanNode(node) => Some(node),
+                                TreeData::QueryPlan(node) => Some(node),
                                 _ => None,
                             })
                             .collect(),
@@ -239,7 +254,7 @@ impl Exporter {
                     .as_str())
                 .to_string();
 
-                vec![TreeData::QueryPlanNode(QueryPlanNode {
+                vec![TreeData::QueryPlan(QueryPlanNode {
                     node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
                             service_name,
@@ -255,16 +270,32 @@ impl Exporter {
                     )),
                 })]
             }
-            "flatten" => vec![TreeData::QueryPlanNode(QueryPlanNode {
+            "flatten" => vec![TreeData::QueryPlan(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
                     Box::new(FlattenNode {
                         response_path: vec![],
-                        node: None,
+                        node: child_nodes
+                            .into_iter()
+                            .filter_map(|child| match child {
+                                TreeData::QueryPlan(node) => Some(Box::new(node)),
+                                _ => None,
+                            })
+                            .next(),
                     }),
                 )),
             })],
             "subgraph" => {
                 vec![TreeData::Trace(self.find_ftv1_trace(span))]
+            }
+            "supergraph" => {
+                //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
+                child_nodes.push(TreeData::Http(self.extract_http_data(span)));
+                child_nodes
+            }
+            "request" => {
+                vec![TreeData::RootTrace(
+                    self.extract_root_trace(span, child_nodes),
+                )]
             }
             _ => child_nodes,
         })
@@ -296,90 +327,38 @@ impl Exporter {
             .unwrap_or_default()
             .as_ref()
         {
-            "OPTIONS" => 1,
-            "GET" => 2,
-            "HEAD" => 3,
-            "POST" => 4,
-            "PUT" => 5,
-            "DELETE" => 6,
-            "TRACE" => 7,
-            "CONNECT" => 8,
-            "PATCH" => 9,
-            _ => 0,
+            "OPTIONS" => apollo_spaceport::trace::http::Method::Options,
+            "GET" => apollo_spaceport::trace::http::Method::Get,
+            "HEAD" => apollo_spaceport::trace::http::Method::Head,
+            "POST" => apollo_spaceport::trace::http::Method::Post,
+            "PUT" => apollo_spaceport::trace::http::Method::Put,
+            "DELETE" => apollo_spaceport::trace::http::Method::Delete,
+            "TRACE" => apollo_spaceport::trace::http::Method::Trace,
+            "CONNECT" => apollo_spaceport::trace::http::Method::Connect,
+            "PATCH" => apollo_spaceport::trace::http::Method::Patch,
+            _ => apollo_spaceport::trace::http::Method::Unknown,
         };
-        let version = span
-            .attributes
-            .get(&Key::new("version"))
-            .map(|data| data.as_str())
-            .unwrap_or_default();
         let headers = span
             .attributes
-            .get(&Key::new("headers"))
+            .get(&Key::new("apollo_private_request_headers"))
             .map(|data| data.as_str())
             .unwrap_or_default();
-        let uri = Uri::from_str(
-            &span
-                .attributes
-                .get(&Key::new("uri"))
-                .map(|data| data.as_str())
-                .unwrap_or_default(),
-        )
-        .unwrap_or_default();
-        let mut request_headers: HashMap<String, Values> =
-            if let ForwardValues::None = &self.send_headers {
-                HashMap::new()
-            } else {
-                serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
-                    .collect()
-            };
-
-        match &self.send_headers {
-            ForwardValues::Only(headers_to_keep) => {
-                request_headers.retain(|header_name, _v| headers_to_keep.contains(header_name));
-            }
-            ForwardValues::Except(skip_headers) => {
-                request_headers.retain(|header_name, _v| !skip_headers.contains(header_name));
-            }
-            ForwardValues::None | ForwardValues::All => {}
-        }
+        let request_headers = serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+            .collect();
 
         Http {
-            method,
-            host: uri.host().map(|h| h.to_string()).unwrap_or_default(),
-            path: uri.path().to_owned(),
+            method: method.into(),
+            host: Default::default(), // Do not fill in, we can't reliably get this information
+            path: Default::default(), // Do not fill in, we can't reliably get this information
             request_headers,
-            response_headers: HashMap::new(),
+            response_headers: Default::default(),
             status_code: 0,
-            secure: false,
-            protocol: version.to_string(),
+            secure: Default::default(),
+            protocol: Default::default(),
         }
-    }
-}
-
-// Wrapper to add otel trace id on an apollo_spaceport::Trace
-#[derive(Debug)]
-struct TraceWithId {
-    trace_id: TraceId,
-    signature: String,
-    trace: apollo_spaceport::Trace,
-}
-
-impl TraceWithId {
-    fn new(trace_id: TraceId, trace: apollo_spaceport::Trace, signature: String) -> Self {
-        Self {
-            trace_id,
-            trace,
-            signature,
-        }
-    }
-}
-
-impl From<TraceWithId> for apollo_spaceport::Trace {
-    fn from(trace_with_id: TraceWithId) -> Self {
-        trace_with_id.trace
     }
 }
 
@@ -392,27 +371,18 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut traces_per_query: HashMap<String, TraceWithId> = HashMap::new();
+        let mut traces: Vec<(String, apollo_spaceport::Trace)> = Vec::new();
         for span in batch {
-            if span.name == SUPERGRAPH_SPAN_NAME {
+            if span.name == REQUEST_SPAN_NAME {
                 let operation_signature_attr = span
                     .attributes
                     .get(&Key::new("operation.signature"))
                     .map(Value::to_string);
-                let request_id_attr = span
-                    .attributes
-                    .get(&Key::new("request.id"))
-                    .map(Value::to_string);
-                if let (Some(operation_signature), Some(request_id)) =
-                    (operation_signature_attr, request_id_attr)
-                {
-                    let trace_id = span.span_context.trace_id();
-                    match self.extract_query_plan_trace(span) {
+
+                if let Some(operation_signature) = operation_signature_attr {
+                    match self.extract_trace(span) {
                         Ok(trace) => {
-                            traces_per_query.insert(
-                                request_id,
-                                TraceWithId::new(trace_id, trace, operation_signature),
-                            );
+                            traces.push((operation_signature, *trace));
                         }
                         Err(Error::MultipleErrors(errors)) => {
                             if let Some(Error::DoNotSample(reason)) = errors.first() {
@@ -433,13 +403,6 @@ impl SpanExporter for Exporter {
                     }
                 }
             } else {
-                if span.name == "request" {
-                    if let Some(trace_found) = traces_per_query.values_mut().find(|trace_with_id| {
-                        trace_with_id.trace_id == span.span_context.trace_id()
-                    }) {
-                        trace_found.trace.http = self.extract_http_data(&span).into();
-                    }
-                }
                 // Not a root span, we may need it later so stash it.
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
@@ -453,12 +416,8 @@ impl SpanExporter for Exporter {
             }
         }
 
-        self.apollo_sender.send(SingleReport::Traces(TracesReport {
-            traces: traces_per_query
-                .into_iter()
-                .map(|(k, v)| (k, (v.signature, v.trace)))
-                .collect(),
-        }));
+        self.apollo_sender
+            .send(SingleReport::Traces(TracesReport { traces }));
 
         return ExportResult::Ok(());
     }

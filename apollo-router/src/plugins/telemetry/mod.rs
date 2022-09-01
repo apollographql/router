@@ -1,6 +1,6 @@
 //! Telemetry plugin.
 // With regards to ELv2 licensing, this entire file is license key functionality
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
@@ -19,8 +19,8 @@ use apollo_spaceport::StatsContext;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
-use http::HeaderValue;
-use http::StatusCode;
+use http::{header, HeaderValue};
+use http::{HeaderMap, StatusCode};
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -60,6 +60,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -94,7 +95,7 @@ mod metrics;
 mod otlp;
 mod tracing;
 
-static SUPERGRAPH_SPAN_NAME: &str = "supergraph";
+static REQUEST_SPAN_NAME: &str = "request";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -192,7 +193,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        "operation.signature",
+                        "apollo_private_operation_signature",
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
@@ -584,10 +585,6 @@ impl Telemetry {
     fn supergraph_service_span(
         config: apollo::Config,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
-        let client_name_header = config.client_name_header;
-        let client_version_header = config.client_version_header;
-        let send_variable_values = config.send_variable_values;
-
         move |request: &SupergraphRequest| {
             let http_request = &request.originating_request;
             let headers = http_request.headers();
@@ -598,84 +595,125 @@ impl Telemetry {
                 .clone()
                 .unwrap_or_default();
             let client_name = headers
-                .get(&client_name_header)
+                .get(&config.client_name_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let client_version = headers
-                .get(&client_version_header)
+                .get(&config.client_version_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
 
-            let variables = Self::filter_variables_values(
-                &request.originating_request.body().variables,
-                &send_variable_values,
-                &request.context,
-            );
             let span = info_span!(
-                SUPERGRAPH_SPAN_NAME,
+                "supergraph",
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
                 client_version = client_version.to_str().unwrap_or_default(),
                 "otel.kind" = %SpanKind::Internal,
-                "operation.signature" = field::Empty,
-                graphql.variables = %variables,
+                apollo_private_operation_signature = field::Empty,
+                apollo_private_request_variables = field::Empty,
+                apollo_private_request_headers = field::Empty
             );
+
+            if is_span_sampled(&request.context) {
+                span.record(
+                    "apollo_private_request_variables",
+                    &Self::filter_variables_values(
+                        &request.originating_request.body().variables,
+                        &config.send_variable_values,
+                    )
+                    .as_str(),
+                );
+                span.record(
+                    "apollo_private_request_headers",
+                    &Self::filter_headers(
+                        request.originating_request.headers(),
+                        &config.send_headers,
+                    )
+                    .as_str(),
+                );
+            }
+
             span
+        }
+    }
+
+    fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+        let headers_map = headers
+            .iter()
+            .filter(|(name, _value)| {
+                name != &header::AUTHORIZATION
+                    && name != &header::COOKIE
+                    && name != &header::SET_COOKIE
+            })
+            .map(|(name, value)| {
+                if match &forward_rules {
+                    ForwardHeaders::None => false,
+                    ForwardHeaders::All => true,
+                    ForwardHeaders::Only(only) => only.contains(name),
+                    ForwardHeaders::Except(except) => !except.contains(name),
+                } {
+                    (
+                        name.to_string(),
+                        value.to_str().unwrap_or("<unknown>").to_string(),
+                    )
+                } else {
+                    (name.to_string(), "".to_string())
+                }
+            })
+            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc
+            });
+
+        match serde_json::to_string(&headers_map) {
+            Ok(result) => result,
+            Err(_err) => {
+                ::tracing::warn!(
+                    "could not serialize header, trace will not have header information"
+                );
+                Default::default()
+            }
         }
     }
 
     fn filter_variables_values(
         variables: &Map<ByteString, Value>,
-        forward_rule: &ForwardValues,
-        context: &Context,
+        forward_rules: &ForwardValues,
     ) -> String {
-        // Only needed for FTV1
-        if !is_span_sampled(context) {
-            return String::new();
-        }
         #[allow(clippy::mutable_key_type)] // False positive lint
-        let variables = match forward_rule {
-            ForwardValues::None => HashMap::new(),
-            ForwardValues::All => {
-                let variables: HashMap<ByteString, String> = variables
-                    .clone()
-                    .into_iter()
-                    .map(|(key, val)| (key, val.to_string()))
-                    .collect();
-                variables
+        let variables = variables
+            .iter()
+            .map(|(name, value)| {
+                if match &forward_rules {
+                    ForwardValues::None => false,
+                    ForwardValues::All => true,
+                    ForwardValues::Only(only) => only.contains(&name.as_str().to_string()),
+                    ForwardValues::Except(except) => !except.contains(&name.as_str().to_string()),
+                } {
+                    (
+                        name,
+                        serde_json::to_string(value).unwrap_or_else(|_| "<unknown>".to_string()),
+                    )
+                } else {
+                    (name, "".to_string())
+                }
+            })
+            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc
+            });
+
+        match serde_json::to_string(&variables) {
+            Ok(result) => result,
+            Err(_err) => {
+                ::tracing::warn!(
+                    "could not serialize variables, trace will not have variables information"
+                );
+                Default::default()
             }
-            ForwardValues::Only(variables_to_keep) => {
-                let variables: HashMap<ByteString, String> = variables
-                    .clone()
-                    .into_iter()
-                    .map(|(key, val)| {
-                        if !variables_to_keep.contains(&key.as_str().to_string()) {
-                            (key, String::new())
-                        } else {
-                            (key, val.to_string())
-                        }
-                    })
-                    .collect();
-                variables
-            }
-            ForwardValues::Except(variables_to_skip) => {
-                let variables: HashMap<ByteString, String> = variables
-                    .clone()
-                    .into_iter()
-                    .map(|(key, val)| {
-                        if variables_to_skip.contains(&key.as_str().to_string()) {
-                            (key, String::new())
-                        } else {
-                            (key, val.to_string())
-                        }
-                    })
-                    .collect();
-                variables
-            }
-        };
-        serde_json::to_string(&variables).expect("variables has already been deserialized")
+        }
     }
 
     async fn update_otel_metrics(
