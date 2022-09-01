@@ -4316,9 +4316,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e071f018fe9ed74b34dee5ee533037b8b441364206f1379b91b3f243ffcabc"
+checksum = "1dfffd561d68c0b604db40293bec1f69b4e67f19ad92791a9a4d103952ddd918"
 dependencies = [
  "anyhow",
  "async-channel",
