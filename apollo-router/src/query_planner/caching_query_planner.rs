@@ -279,7 +279,7 @@ mod tests {
             let mut planner = MockMyQueryPlanner::new();
             planner.expect_sync_call().times(0..2).returning(|_| {
                 let query_plan: QueryPlan = QueryPlan {
-                    formatted_query_plan: String::new(),
+                    formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
                     options: QueryPlanOptions::default(),
                     usage_reporting: UsageReporting {
