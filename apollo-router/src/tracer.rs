@@ -31,8 +31,13 @@ impl TraceId {
     }
 
     /// Convert the TraceId to bytes.
-    pub fn to_bytes(self) -> [u8; 16] {
-        self.0
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
+    /// Convert the TraceId to u128.
+    pub fn to_u128(&self) -> u128 {
+        u128::from_be_bytes(self.0)
     }
 }
 
@@ -44,7 +49,7 @@ impl Default for TraceId {
 
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{}", self.to_u128())
     }
 }
 
@@ -61,7 +66,7 @@ mod test {
     fn it_returns_invalid_trace_id() {
         let my_id = TraceId::new();
         assert_eq!(my_id, TraceId::INVALID);
-        assert_eq!(my_id.to_bytes(), [0; 16])
+        assert_eq!(my_id.as_bytes(), &[0; 16])
     }
 
     #[test]
