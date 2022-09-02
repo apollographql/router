@@ -54,7 +54,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 If you need a reliable way to link together the various stages of pipeline processing, you can now use
 
 ```rust
-apollo_router::tracer::TraceId
+apollo_router::tracer::TraceId::new()
 ```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1663
