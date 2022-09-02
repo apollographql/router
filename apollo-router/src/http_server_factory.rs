@@ -25,7 +25,7 @@ pub(crate) trait HttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         main_listener: Option<Listener>,
-        extra_listeners: Vec<(ListenAddr, Listener)>,
+        previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where

@@ -36,6 +36,7 @@ use http::Request;
 use http::Uri;
 use hyper::server::conn::Http;
 use hyper::Body;
+use itertools::Itertools;
 use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
@@ -93,13 +94,7 @@ pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
 #[derive(Debug)]
 pub(crate) struct ListenersAndRouters {
     pub(crate) main: ListenAddrAndRouter,
-    pub(crate) extra: Vec<ListenAddrAndRouter>,
-}
-
-impl ListenersAndRouters {
-    pub(crate) fn count(&self) -> usize {
-        self.extra.len() + 1
-    }
+    pub(crate) extra: MultiMap<ListenAddr, Router>,
 }
 
 pub(crate) fn make_axum_router<RF>(
@@ -107,6 +102,29 @@ pub(crate) fn make_axum_router<RF>(
     configuration: &Configuration,
     extra_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
+where
+    RF: SupergraphServiceFactory,
+{
+    let mut main_endpoint = main_router(service_factory, configuration)?;
+    let mut extra_endpoints = extra_routers(extra_endpoints);
+
+    // put any extra endpoint that uses the main ListenAddr into the main router
+    if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
+        main_endpoint.1 = routers
+            .into_iter()
+            .fold(main_endpoint.1, |acc, r| acc.merge(r));
+    }
+
+    Ok(ListenersAndRouters {
+        main: main_endpoint,
+        extra: extra_endpoints,
+    })
+}
+
+fn main_router<RF>(
+    service_factory: RF,
+    configuration: &Configuration,
+) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
@@ -119,7 +137,7 @@ where
     } else {
         configuration.server.graphql_path.clone()
     };
-    let main_router = Router::<hyper::Body>::new()
+    let route = Router::<hyper::Body>::new()
         .route(
             &graphql_path,
             get({
@@ -169,46 +187,22 @@ where
         )
         .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
-        // TODO [igni]: Should cors and Compression apply to the plugin endpoints?
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    let main_listener = configuration.server.listen.clone();
-    let mut main_endpoint = ListenAddrAndRouter(main_listener, main_router);
+    let listener = configuration.server.listen.clone();
+    Ok(ListenAddrAndRouter(listener, route))
+}
 
-    let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
-
-    addrs_and_endpoints.extend(extra_endpoints.into_iter().map(|(listen_addr, endpoints)| {
+fn extra_routers(endpoints: MultiMap<ListenAddr, Endpoint>) -> MultiMap<ListenAddr, Router> {
+    let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
+    mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
             listen_addr,
-            endpoints
-                .into_iter()
-                .map(|e| e.into_router())
-                .collect::<Vec<_>>(),
+            e.into_iter().map(|e| e.into_router()).collect::<Vec<_>>(),
         )
     }));
-
-    if let Some(routers) = addrs_and_endpoints.remove(&main_endpoint.0) {
-        main_endpoint.1 = routers
-            .into_iter()
-            .fold(main_endpoint.1, |acc, r| acc.merge(r));
-    }
-
-    let extra_listener_routes = addrs_and_endpoints
-        .into_iter()
-        .map(|(addr, routers)| {
-            ListenAddrAndRouter(
-                addr,
-                routers
-                    .into_iter()
-                    .fold(axum::Router::new(), |acc, r| acc.merge(r)),
-            )
-        })
-        .collect();
-    Ok(ListenersAndRouters {
-        main: main_endpoint,
-        extra: extra_listener_routes,
-    })
+    mm
 }
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -219,7 +213,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         mut main_listener: Option<Listener>,
-        extra_listeners: Vec<(ListenAddr, Listener)>,
+        previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
@@ -227,22 +221,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
-            let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
-                Vec::with_capacity(all_routers.count());
 
-            // TODO [igni]: It may seem odd but I believe configuring the router
+            // TODO [igni]: I believe configuring the router
             // To listen to port 0 would lead it to change ports on every restart Oo
 
-            // reuse previous listen addrs
-            for (listen_addr, listener) in extra_listeners.into_iter() {
-                if let Some(ListenAddrAndRouter(_, router)) = all_routers
-                    .extra
-                    .iter()
-                    .find(|ListenAddrAndRouter(extra_listener, _)| extra_listener == &listen_addr)
-                {
-                    listeners_and_routers.push(((listen_addr, listener), router.clone()));
-                }
-            }
+            // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -261,45 +244,41 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     ),
                 }
             };
-            let actual_listen_address = main_listener
+            let actual_main_listen_address = main_listener
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
-            // populate the new listen addrs
-            let extra = all_routers.extra.clone();
-            for ListenAddrAndRouter(listen_addr, router) in extra {
-                // if we received a TCP listener, reuse it, otherwise create a new one
-                #[cfg_attr(not(unix), allow(unused_mut))]
-                let listener = match listen_addr.clone() {
-                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
-                        TcpListener::bind(addr)
-                            .await
-                            .map_err(ApolloRouterError::ServerCreationError)?,
-                    ),
-                    #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => Listener::Unix(
-                        UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
-                    ),
-                };
-                listeners_and_routers.push(((listen_addr, listener), router));
-            }
+            let (main_server, main_shutdown_sender) =
+                serve_router_on_listen_addr(main_listener, all_routers.main.1);
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
-                actual_listen_address,
+                actual_main_listen_address,
                 configuration.server.graphql_path
             );
 
-            let graphql_listen_address = actual_listen_address;
-            let listen_addresses = listeners_and_routers
+            // serve extra routers
+
+            let listeners_and_routers =
+                get_extra_listeners(previous_listeners, all_routers.extra).await?;
+
+            let actual_extra_listen_adresses = listeners_and_routers
                 .iter()
                 .map(|((_, l), _)| l.local_addr().expect("checked above"))
                 .collect::<Vec<_>>();
 
-            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
-
-            let (main_server, main_shutdown_sender) =
-                serve_router_on_listen_addr(main_listener, all_routers.main.1);
+            // TODO [igni]: It would be great if we could tracing::debug!()
+            // all listen addrs *and* paths we have an endpoint on.
+            // I can only do it for listen addrs yet, but hey that's a good start
+            if !listeners_and_routers.is_empty() {
+                tracing::debug!(
+                    "Extra endpoints the router listens to:\n{}",
+                    listeners_and_routers
+                        .iter()
+                        .map(|((_, l), _)| format!("{}", l.local_addr().expect("checked above")))
+                        .join("\n")
+                );
+            }
 
             let servers_and_shutdowns =
                 listeners_and_routers
@@ -313,17 +292,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         )
                     });
 
-            let collected = servers_and_shutdowns.collect::<Vec<_>>();
-
-            let mut shutdowns = Vec::with_capacity(collected.len());
-            let mut servers = Vec::with_capacity(collected.len());
-
-            for (server, shutdown) in collected {
-                servers.push(server);
-                shutdowns.push(shutdown);
-            }
+            let (servers, mut shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
             shutdowns.push(main_shutdown_sender);
 
+            // graceful shutdown mechanism:
+            // we will fan out to all of the servers once we receive a signal
+            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
             tokio::task::spawn(async move {
                 let _ = outer_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
@@ -341,11 +315,56 @@ impl HttpServerFactory for AxumHttpServerFactory {
             Ok(HttpServerHandle::new(
                 outer_shutdown_sender,
                 server_future,
-                Some(graphql_listen_address),
-                listen_addresses,
+                Some(actual_main_listen_address),
+                actual_extra_listen_adresses,
             ))
         })
     }
+}
+
+async fn get_extra_listeners(
+    previous_listeners: Vec<(ListenAddr, Listener)>,
+    extra_routers: MultiMap<ListenAddr, Router>,
+) -> Result<Vec<((ListenAddr, Listener), axum::Router)>, ApolloRouterError> {
+    let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
+        Vec::with_capacity(extra_routers.len());
+
+    // reuse previous extra listen addrs
+    for (listen_addr, listener) in previous_listeners.into_iter() {
+        if let Some(routers) = extra_routers.get_vec(&listen_addr) {
+            listeners_and_routers.push((
+                (listen_addr, listener),
+                routers
+                    .iter()
+                    .fold(axum::Router::new(), |acc, r| acc.merge(r.clone())),
+            ));
+        }
+    }
+
+    // populate the new listen addrs
+    for (listen_addr, routers) in extra_routers.into_iter() {
+        // if we received a TCP listener, reuse it, otherwise create a new one
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let listener = match listen_addr.clone() {
+            ListenAddr::SocketAddr(addr) => Listener::Tcp(
+                TcpListener::bind(addr)
+                    .await
+                    .map_err(ApolloRouterError::ServerCreationError)?,
+            ),
+            #[cfg(unix)]
+            ListenAddr::UnixSocket(path) => Listener::Unix(
+                UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
+            ),
+        };
+        listeners_and_routers.push((
+            (listen_addr, listener),
+            routers
+                .iter()
+                .fold(axum::Router::new(), |acc, r| acc.merge(r.clone())),
+        ));
+    }
+
+    Ok(listeners_and_routers)
 }
 
 fn serve_router_on_listen_addr(
