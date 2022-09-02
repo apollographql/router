@@ -556,7 +556,6 @@ async fn defer_path_with_disabled_config() {
 
     let only = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(only);
-
 }
 
 #[tokio::test(flavor = "multi_thread")]
