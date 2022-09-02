@@ -27,19 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Preserve Plugin response Vary headers([PR #1660](https://github.com/apollographql/router/issues/1297))
+### Preserve plugin response `Vary` headers([PR #1660](https://github.com/apollographql/router/issues/1297))
 
 It is now possible to set a `Vary` header in a client response from a plugin.
 
-Note: This is a breaking change because the prior behaviour provided three default Vary headers and we've had to drop those to enable this change. If, after all plugin processing, there is no Vary header, the router will add one with a value of "origin".
+> Note: This is a breaking change because the prior behaviour provided three default `Vary` headers and we've had to drop those to enable this change. If, after all plugin processing, there is no `Vary` header, the router will add one with a value of "`origin`", as is best-practice for cache control headers with CORS.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1660
 
-### Fix the supported defer specification version to 20220824 ([PR #1652](https://github.com/apollographql/router/issues/1652))
+### Fix the supported defer specification version to `20220824` ([PR #1652](https://github.com/apollographql/router/issues/1652))
 
-Since the router will ship before the `@defer` specification is done, we
-add a parameter to the `Accept` and `Content-Type` headers to indicate
-which specification version is accepted.
+Since the router will ship before the `@defer` specification is done, we add a parameter to the `Accept` and `Content-Type` headers to indicate which specification version is accepted.
 
 The specification is fixed to [graphql/graphql-spec@01d7b98](https://github.com/graphql/graphql-spec/commit/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82)
 
@@ -72,7 +70,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 If you need a reliable way to link together the various stages of pipeline processing, you can now use
 
-```
+```rust
 apollo_router::tracer::TraceId
 ```
 
@@ -85,7 +83,6 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 This restores the absolute path in `ENTRYPOINT` in our `Dockerfile`s (and published images) to allow users to change their working directory without consequence (and without needing to change it back to `/dist` or override the `entrypoint`).
 
 By [@110y](https://github.com/110y) in https://github.com/apollographql/router/pull/1684
-
 
 ### Update our helm documentation to illustrate how to use our registry ([#1643](https://github.com/apollographql/router/issues/1643))
 
@@ -102,21 +99,15 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Do not nullify the entire query if the root operation is not present ([PR #1674](https://github.com/apollographql/router/issues/1674))
 
-if a root field was not returned by the subgraph (example: when
-there's an error), we should not nullify the entire data objet. Instead,
-it's the root field that should be null (unless it is non
-nullable).
+If a root field was not returned by the subgraph (e.g., when there's an error) we should not nullify the entire data object. Instead, it's the root field that should be null (unless it is non nullable).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1674
 
-
-
 ### Propagate graphql response regardless of the subgraph HTTP status code. ([#1664](https://github.com/apollographql/router/issues/1664))
 
-Subgraph service calls used to return an error when the received HTTP status code isn't 200.
-There's however no mention in the GraphQL specification that leads us to assume any intent behind the HTTP status code returned by a GraphQL server.
+Subgraph service calls used to return an error when the received HTTP status code isn't 200.  There's, however, no mention in the GraphQL specification that leads us to assume any intent behind the HTTP status code returned by a GraphQL server since the GraphQL specification is transport agnostic.
 
-This commit removes our HTTP status code check in the subgraph_service.
+This commit removes our HTTP status code check in the `subgraph_service`.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1664
 
@@ -124,8 +115,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Remove cache layer ([PR #1647](https://github.com/apollographql/router/pull/1647))
 
-We removed ServiceBuilderExt::cache in 0.16.0. That was the only consumer of
-the cache layer. This completes the removal by deleting the cache layer.
+We removed `ServiceBuilderExt::cache` in v0.16.0. That was the only consumer of the cache layer. This completes the removal by deleting the cache layer.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1647
 
@@ -138,10 +128,6 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Conditionally use `HorizontalPodAutoscaler` api version `autoscaling/v2` ([PR #1635](https://github.com/apollographql/router/pull/1635))
 
-The helm chart HorizontalPodAutoscaler resource now will use api version
-`autoscaling/v2` on kubernetes hosts greater than 1.23 when the version is
-available. Fallback to version `autoscaling/v2beta1` will still be utilised
-when this version is unavailable
+The helm chart `HorizontalPodAutoscaler` resource now will use API version `autoscaling/v2` on Kubernetes hosts greater than 1.23 when the version is available. Fallback to version `autoscaling/v2beta1` will still be utilised when this version is unavailable
 
-
-## 📚 Documentation
+By [@damienpontifex](https://github.com/damienpontifex) in https://github.com/apollographql/router/pull/1635
