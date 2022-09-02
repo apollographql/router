@@ -57,7 +57,7 @@ Following up on a tremendous amount of work tracked in https://github.com/apollo
 
   To see which headers are required, see https://github.com/apollographql/router/issues/1648.
 
-By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1685
 
 ## 🚀 Features
 ## 🐛 Fixes
