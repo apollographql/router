@@ -50,6 +50,13 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Docker images: Use absolute path for `ENTRYPOINT` ([PR #1684](https://github.com/apollographql/router/pull/1684))
+
+This restores the absolute path in `ENTRYPOINT` in our `Dockerfile`s (and published images) to allow users to change their working directory without consequence (and without needing to change it back to `/dist` or override the `entrypoint`).
+
+By [@110y](https://github.com/110y) in https://github.com/apollographql/router/pull/1684
+
+
 ### Update our helm documentation to illustrate how to use our registry ([#1643](https://github.com/apollographql/router/issues/1643))
 
 The helm chart never used to have a registry, so our docs were really just placeholders. I've updated them to reflect the fact that we now store the chart in our OCI registry.
