@@ -87,7 +87,6 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Propagate graphql response regardless of the subgraph HTTP status code. ([#1664](https://github.com/apollographql/router/issues/1664))
 
-```suggestion
 Subgraph service calls no longer return an error when the received HTTP status code isn't 200.  The GraphQL specification does not specify HTTP status code behavior since the GraphQL specification is transport agnostic.
 
 This commit removes our HTTP status code check in the `subgraph_service`.
