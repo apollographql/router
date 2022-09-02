@@ -86,6 +86,7 @@ impl AxumHttpServerFactory {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
 
 pub(crate) struct ListenersAndRouters {
@@ -94,7 +95,7 @@ pub(crate) struct ListenersAndRouters {
 }
 
 impl ListenersAndRouters {
-    pub fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.extra.len() + 1
     }
 }
@@ -102,7 +103,7 @@ impl ListenersAndRouters {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    extra_endpoints: MultiMap<Listener, Endpoint>,
+    extra_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -185,7 +186,7 @@ where
         )
     }));
 
-    if let Some(routers) = addrs_and_endpoints.remove(&main_listener) {
+    if let Some(routers) = addrs_and_endpoints.remove(&main_endpoint.0) {
         main_endpoint.1 = routers
             .into_iter()
             .fold(main_endpoint.1, |acc, r| acc.merge(r));
@@ -216,30 +217,66 @@ impl HttpServerFactory for AxumHttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        main_listener: Option<Listener>,
-        extra_endpoints: MultiMap<Listener, Endpoint>,
+        mut main_listener: Option<Listener>,
+        extra_listeners: Vec<(ListenAddr, Listener)>,
+        extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
             let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
-            let mut listeners_and_routers = Vec::with_capacity(all_routers.count());
+            let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
+                Vec::with_capacity(all_routers.count());
 
             // TODO [igni]: It may seem odd but I believe configuring the router
             // To listen to port 0 would lead it to change ports on every restart Oo
 
             // reuse previous listen addrs
-            for listener in all_routers.extra.into_iter() {
-                if let Some((_, router)) = extra_endpoints.iter().find(|(l, _)| l == &&listener.0) {
-                    listeners_and_routers.push((listener.0, router.clone()));
+            for (listen_addr, listener) in extra_listeners.into_iter() {
+                if let Some(ListenAddrAndRouter(_, router)) = all_routers
+                    .extra
+                    .iter()
+                    .find(|ListenAddrAndRouter(extra_listener, _)| extra_listener == &listen_addr)
+                {
+                    listeners_and_routers.push(((listen_addr, listener), router.clone()));
                 }
             }
+            // for ListenAddrAndRouter(listener, router) in all_routers.extra.into_iter() {
+            //     if let Some((listen_addr, listener)) =
+            //         extra_listeners.iter().find(|(l, _)| l == &listener)
+            //     {
+            //         listeners_and_routers.push(((listen_addr.clone(), listener), router.clone()));
+            //     }
+            // }
+
+            // if we received a TCP listener, reuse it, otherwise create a new one
+            #[cfg_attr(not(unix), allow(unused_mut))]
+            let mut main_listener = if let Some(listener) = main_listener.take() {
+                listener
+            } else {
+                match all_routers.main.0.clone() {
+                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
+                        TcpListener::bind(addr)
+                            .await
+                            .map_err(ApolloRouterError::ServerCreationError)?,
+                    ),
+                    #[cfg(unix)]
+                    ListenAddr::UnixSocket(path) => Listener::Unix(
+                        UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
+                    ),
+                }
+            };
+            let actual_listen_address = main_listener
+                .local_addr()
+                .map_err(ApolloRouterError::ServerCreationError)?;
+
             // populate the new listen addrs
-            for ListenAddrAndRouter(listen_addr, router) in all_routers.extra {
+            let extra = all_routers.extra.clone();
+            for ListenAddrAndRouter(listen_addr, router) in extra {
                 // if we received a TCP listener, reuse it, otherwise create a new one
                 #[cfg_attr(not(unix), allow(unused_mut))]
-                let listener = match listen_addr {
+                let listener = match listen_addr.clone() {
                     ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
@@ -250,29 +287,183 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
                     ),
                 };
-                listeners_and_routers.push((listener, router));
+                listeners_and_routers.push(((listen_addr, listener), router));
             }
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
-                listeners_and_routers
-                    .first()
-                    .clone()
-                    .expect("no main adress :/")
-                    .0
-                    .local_addr()
-                    .expect("no main adress :/"),
+                actual_listen_address,
                 configuration.server.graphql_path
             );
 
-            let listen_adresses = listeners_and_routers
-                .iter()
-                .map(|(l, _)| l.local_addr().expect("checked above"))
-                .collect::<Vec<_>>();
-
             let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
 
-            let servers_and_shutdowns = listeners_and_routers.into_iter().map(|(mut listener, router)| {
+            let (main_server, main_shutdown_sender) = {
+                let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+
+                let server = async move {
+                    tokio::pin!(shutdown_receiver);
+
+                    let connection_shutdown = Arc::new(Notify::new());
+                    let mut max_open_file_warning = None;
+
+                    loop {
+                        tokio::select! {
+                            _ = &mut shutdown_receiver => {
+                                break;
+                            }
+                            res = main_listener.accept() => {
+                                let app = all_routers.main.1.clone();
+                                let connection_shutdown = connection_shutdown.clone();
+
+                                match res {
+                                    Ok(res) => {
+                                        if max_open_file_warning.is_some(){
+                                            tracing::info!("can accept connections again");
+                                            max_open_file_warning = None;
+                                        }
+
+                                        tokio::task::spawn(async move {
+                                            match res {
+                                                NetworkStream::Tcp(stream) => {
+                                                    stream
+                                                        .set_nodelay(true)
+                                                        .expect(
+                                                            "this should not fail unless the socket is invalid",
+                                                        );
+                                                        let connection = Http::new()
+                                                        .http1_keep_alive(true)
+                                                        .serve_connection(stream, app);
+
+                                                    tokio::pin!(connection);
+                                                    tokio::select! {
+                                                        // the connection finished first
+                                                        _res = &mut connection => {
+                                                        }
+                                                        // the shutdown receiver was triggered first,
+                                                        // so we tell the connection to do a graceful shutdown
+                                                        // on the next request, then we wait for it to finish
+                                                        _ = connection_shutdown.notified() => {
+                                                            let c = connection.as_mut();
+                                                            c.graceful_shutdown();
+
+                                                            let _= connection.await;
+                                                        }
+                                                    }
+                                                }
+                                                #[cfg(unix)]
+                                                NetworkStream::Unix(stream) => {
+                                                    let connection = Http::new()
+                                                    .http1_keep_alive(true)
+                                                    .serve_connection(stream, app);
+
+                                                    tokio::pin!(connection);
+                                                    tokio::select! {
+                                                        // the connection finished first
+                                                        _res = &mut connection => {
+                                                        }
+                                                        // the shutdown receiver was triggered first,
+                                                        // so we tell the connection to do a graceful shutdown
+                                                        // on the next request, then we wait for it to finish
+                                                        _ = connection_shutdown.notified() => {
+                                                            let c = connection.as_mut();
+                                                            c.graceful_shutdown();
+
+                                                            let _= connection.await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
+
+                                    Err(e) => match e.kind() {
+                                        // this is already handled by moi and tokio
+                                        //std::io::ErrorKind::WouldBlock => todo!(),
+
+                                        // should be treated as EAGAIN
+                                        // https://man7.org/linux/man-pages/man2/accept.2.html
+                                        // Linux accept() (and accept4()) passes already-pending network
+                                        // errors on the new socket as an error code from accept().  This
+                                        // behavior differs from other BSD socket implementations.  For
+                                        // reliable operation the application should detect the network
+                                        // errors defined for the protocol after accept() and treat them
+                                        // like EAGAIN by retrying.  In the case of TCP/IP, these are
+                                        // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
+                                        // EOPNOTSUPP, and ENETUNREACH.
+                                        //
+                                        // those errors are not supported though: needs the unstable io_error_more feature
+                                        // std::io::ErrorKind::NetworkDown => todo!(),
+                                        // std::io::ErrorKind::HostUnreachable => todo!(),
+                                        // std::io::ErrorKind::NetworkUnreachable => todo!(),
+
+                                        //ECONNABORTED
+                                        std::io::ErrorKind::ConnectionAborted|
+                                        //EINTR
+                                        std::io::ErrorKind::Interrupted|
+                                        // EINVAL
+                                        std::io::ErrorKind::InvalidInput|
+                                        std::io::ErrorKind::PermissionDenied |
+                                        std::io::ErrorKind::TimedOut |
+                                        std::io::ErrorKind::ConnectionReset|
+                                        std::io::ErrorKind::NotConnected => {
+                                            // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
+                                            // we should ignore that and get to the next one
+                                            continue;
+                                        }
+
+                                        // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
+                                        std::io::ErrorKind::Other => {
+                                            match e.raw_os_error() {
+                                                Some(libc::EMFILE) | Some(libc::ENFILE) => {
+                                                    match max_open_file_warning {
+                                                        None => {
+                                                            tracing::error!("reached the max open file limit, cannot accept any new connection");
+                                                            max_open_file_warning = Some(Instant::now());
+                                                        }
+                                                        Some(last) => if Instant::now() - last < Duration::from_secs(60) {
+                                                            tracing::error!("still at the max open file limit, cannot accept any new connection");
+                                                        }
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                            continue;
+                                        }
+
+                                        /* we should ignore the remaining errors as they're not supposed
+                                        to happen with the accept() call
+                                        std::io::ErrorKind::NotFound => todo!(),
+                                        std::io::ErrorKind::AddrInUse => todo!(),
+                                        std::io::ErrorKind::AddrNotAvailable => todo!(),
+                                        std::io::ErrorKind::BrokenPipe => todo!(),
+                                        std::io::ErrorKind::AlreadyExists => todo!(),
+                                        std::io::ErrorKind::InvalidData => todo!(),
+                                        std::io::ErrorKind::WriteZero => todo!(),
+
+                                        std::io::ErrorKind::Unsupported => todo!(),
+                                        std::io::ErrorKind::UnexpectedEof => todo!(),
+                                        std::io::ErrorKind::OutOfMemory => todo!(),*/
+                                        _ => {
+                                            continue;
+                                        }
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // the shutdown receiver was triggered so we break out of
+                    // the server loop, tell the currently active connections to stop
+                    // then return the TCP listen socket
+                    connection_shutdown.notify_waiters();
+                    main_listener
+                };
+                (server, shutdown_sender)
+            };
+
+            let servers_and_shutdowns = listeners_and_routers.into_iter().map(|((listen_addr,mut listener), router)| {
                 let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
@@ -436,7 +627,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 // the server loop, tell the currently active connections to stop
                 // then return the TCP listen socket
                 connection_shutdown.notify_waiters();
-                listener
+                (listen_addr,listener)
             };
             (server, shutdown_sender)
             });
@@ -451,6 +642,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 shutdowns.push(shutdown);
             }
 
+            shutdowns.push(main_shutdown_sender);
+
             tokio::task::spawn(async move {
                 let _ = outer_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
@@ -461,14 +654,16 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(join_all(servers))
-                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
-                .boxed();
+            let server_future =
+                tokio::task::spawn(async { (main_server.await, join_all(servers).await) })
+                    .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
+                    .boxed();
 
             Ok(HttpServerHandle::new(
                 outer_shutdown_sender,
                 server_future,
-                listen_adresses,
+                Some(all_routers.main.0),
+                all_routers.extra.into_iter().map(|l| l.0).collect(),
             ))
         })
     }

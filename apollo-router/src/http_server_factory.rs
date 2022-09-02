@@ -25,7 +25,8 @@ pub(crate) trait HttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         main_listener: Option<Listener>,
-        extra_endpoints: MultiMap<Listener, Endpoint>,
+        extra_listeners: Vec<(ListenAddr, Listener)>,
+        extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
@@ -43,8 +44,12 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future:
-        Pin<Box<dyn Future<Output = Result<(Listener, Vec<Listener>), ApolloRouterError>> + Send>>,
+    server_future: Pin<
+        Box<
+            dyn Future<Output = Result<(Listener, Vec<(ListenAddr, Listener)>), ApolloRouterError>>
+                + Send,
+        >,
+    >,
 
     /// The listen addresses that the server is actually listening on.
     /// This includes the `graphql_listen_address` as well as any other address a plugin listens on.
@@ -60,7 +65,11 @@ impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
-            Box<dyn Future<Output = Result<(Listener, Vec<Listener>), ApolloRouterError>> + Send>,
+            Box<
+                dyn Future<
+                        Output = Result<(Listener, Vec<(ListenAddr, Listener)>), ApolloRouterError>,
+                    > + Send,
+            >,
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
@@ -108,7 +117,7 @@ impl HttpServerHandle {
         // connections, and returns the TCP listener, to reuse it in the next server
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
-        let listeners = self.server_future.await;
+        let (main_listener, extra_listeners) = self.server_future.await?;
         tracing::debug!("previous server stopped");
 
         // we give the listeners to the new configuration, they'll clean up whatever needs to
@@ -116,7 +125,8 @@ impl HttpServerHandle {
             .create(
                 router,
                 Arc::clone(&configuration),
-                listeners.unwrap_or_default(),
+                Some(main_listener),
+                extra_listeners,
                 web_endpoints,
             )
             .await?;
@@ -132,13 +142,12 @@ impl HttpServerHandle {
         Ok(handle)
     }
 
-    // TODO [igni]: provide a separate graphql_listen_address function.
     pub(crate) fn listen_addresses(&self) -> &[ListenAddr] {
         self.listen_addresses.as_slice()
     }
 
-    pub(crate) fn graphql_listen_address(&self) -> Option<ListenAddr> {
-        self.graphql_listen_address
+    pub(crate) fn graphql_listen_address(&self) -> &Option<ListenAddr> {
+        &self.graphql_listen_address
     }
 }
 

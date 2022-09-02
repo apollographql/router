@@ -420,7 +420,8 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    all_listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
+    graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -475,7 +476,8 @@ impl RouterHttpServer {
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let all_listen_addresses = state_machine.listen_addresses.clone();
+        let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
+        let graphql_listen_address = state_machine.graphql_listen_address.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -494,18 +496,28 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            all_listen_addresses,
+            graphql_listen_address,
+            extra_listen_adresses,
         }
     }
 
-    /// Returns the listen address when the router is ready to receive requests.
+    /// Returns the listen address when the router is ready to receive GraphQL requests.
     ///
     /// This can be useful when the `server.listen` configuration specifies TCP port 0,
     /// which instructs the operating system to pick an available port number.
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
-    pub async fn all_listen_addresses(&self) -> Vec<ListenAddr> {
-        self.all_listen_addresses.read().await.clone()
+    pub async fn listen_address(&self) -> Option<ListenAddr> {
+        self.graphql_listen_address.read().await.clone()
+    }
+
+    /// Returns the extra listen addresses the router can receive requests to.
+    ///
+    /// Combine it with `listen_address` to have an exhaustive list
+    /// of all addresses used by the router.
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn extra_listen_adresses(&self) -> Vec<ListenAddr> {
+        self.extra_listen_adresses.read().await.clone()
     }
 
     /// Trigger and wait for graceful shutdown

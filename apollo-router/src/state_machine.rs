@@ -72,9 +72,9 @@ where
     http_server_factory: S,
     router_configurator: FA,
 
-    // The reason we have all_listen_addresses and listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
+    // The reason we have extra_listen_adresses and listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
     pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    pub(crate) all_listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
+    pub(crate) extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
     listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
 }
 
@@ -90,7 +90,7 @@ where
         Self {
             http_server_factory,
             router_configurator: router_factory,
-            all_listen_addresses: ready,
+            extra_listen_adresses: ready,
             graphql_listen_address: Default::default(),
             listen_addresses_guard: Some(ready_guard),
         }
@@ -258,7 +258,7 @@ where
         &mut self,
         state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
     ) {
-        let (graphql_listen_address, all_listen_addresses) =
+        let (graphql_listen_address, extra_listen_adresses) =
             if let Running { server_handle, .. } = &state {
                 let listen_addresses = server_handle.listen_addresses().to_vec();
                 let graphql_listen_address = server_handle.graphql_listen_address().clone();
@@ -269,9 +269,9 @@ where
 
         if let Some(listen_address) = graphql_listen_address {
             if let Some(mut listen_addresses_guard) = self.listen_addresses_guard.take() {
-                *listen_addresses_guard = all_listen_addresses.to_vec();
+                *listen_addresses_guard = extra_listen_adresses.to_vec();
             } else {
-                *self.all_listen_addresses.write().await = Vec::new();
+                *self.extra_listen_adresses.write().await = Vec::new();
             }
             *self.graphql_listen_address.write().await = listen_address;
         }
@@ -319,6 +319,7 @@ where
                 .create(
                     router_factory.clone(),
                     configuration.clone(),
+                    Default::default(),
                     Default::default(),
                     web_endpoints,
                 )
