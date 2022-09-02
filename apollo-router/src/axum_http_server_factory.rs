@@ -21,6 +21,7 @@ use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::channel::oneshot;
+use futures::future::join;
 use futures::future::join_all;
 use futures::future::ready;
 use futures::prelude::*;
@@ -86,9 +87,10 @@ impl AxumHttpServerFactory {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
 
+#[derive(Debug)]
 pub(crate) struct ListenersAndRouters {
     pub(crate) main: ListenAddrAndRouter,
     pub(crate) extra: Vec<ListenAddrAndRouter>,
@@ -203,7 +205,6 @@ where
             )
         })
         .collect();
-
     Ok(ListenersAndRouters {
         main: main_endpoint,
         extra: extra_listener_routes,
@@ -242,13 +243,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     listeners_and_routers.push(((listen_addr, listener), router.clone()));
                 }
             }
-            // for ListenAddrAndRouter(listener, router) in all_routers.extra.into_iter() {
-            //     if let Some((listen_addr, listener)) =
-            //         extra_listeners.iter().find(|(l, _)| l == &listener)
-            //     {
-            //         listeners_and_routers.push(((listen_addr.clone(), listener), router.clone()));
-            //     }
-            // }
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -654,10 +648,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the server into a runtime
-            let server_future =
-                tokio::task::spawn(async { (main_server.await, join_all(servers).await) })
-                    .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
-                    .boxed();
+            let server_future = tokio::task::spawn(join(main_server, join_all(servers)))
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
+                .boxed();
 
             Ok(HttpServerHandle::new(
                 outer_shutdown_sender,
