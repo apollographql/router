@@ -72,8 +72,9 @@ where
     http_server_factory: S,
     router_configurator: FA,
 
-    // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
-    pub(crate) listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
+    // The reason we have all_listen_addresses and listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
+    pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    pub(crate) all_listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
     listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
 }
 
@@ -89,7 +90,8 @@ where
         Self {
             http_server_factory,
             router_configurator: router_factory,
-            listen_addresses: ready,
+            all_listen_addresses: ready,
+            graphql_listen_address: Default::default(),
             listen_addresses_guard: Some(ready_guard),
         }
     }
@@ -231,7 +233,7 @@ where
             state = new_state;
 
             // If we're running then let those waiting proceed.
-            self.maybe_update_listen_address(&mut state).await;
+            self.maybe_update_listen_addresses(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -252,23 +254,26 @@ where
         }
     }
 
-    async fn maybe_update_listen_address(
+    async fn maybe_update_listen_addresses(
         &mut self,
         state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
     ) {
-        let listen_addresses = if let Running { server_handle, .. } = &state {
-            let listen_addresses = server_handle.listen_addresses().clone();
-            Some(listen_addresses)
-        } else {
-            None
-        };
-
-        if let Some(listen_addresses) = listen_addresses {
-            if let Some(mut listen_addresses_guard) = self.listen_addresses_guard.take() {
-                *listen_addresses_guard = listen_addresses.to_vec();
+        let (graphql_listen_address, all_listen_addresses) =
+            if let Running { server_handle, .. } = &state {
+                let listen_addresses = server_handle.listen_addresses().to_vec();
+                let graphql_listen_address = server_handle.graphql_listen_address().clone();
+                (Some(graphql_listen_address), listen_addresses)
             } else {
-                *self.listen_addresses.write().await = Vec::new();
+                (None, Vec::new())
+            };
+
+        if let Some(listen_address) = graphql_listen_address {
+            if let Some(mut listen_addresses_guard) = self.listen_addresses_guard.take() {
+                *listen_addresses_guard = all_listen_addresses.to_vec();
+            } else {
+                *self.all_listen_addresses.write().await = Vec::new();
             }
+            *self.graphql_listen_address.write().await = listen_address;
         }
     }
 

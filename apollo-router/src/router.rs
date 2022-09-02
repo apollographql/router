@@ -420,7 +420,7 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
+    all_listen_addresses: Arc<RwLock<Vec<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -475,7 +475,7 @@ impl RouterHttpServer {
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let listen_addresses = state_machine.listen_addresses.clone();
+        let all_listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -494,7 +494,7 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            listen_addresses,
+            all_listen_addresses,
         }
     }
 
@@ -504,8 +504,8 @@ impl RouterHttpServer {
     /// which instructs the operating system to pick an available port number.
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
-    pub async fn listen_addresses(&self) -> Vec<ListenAddr> {
-        self.listen_addresses.read().await.clone()
+    pub async fn all_listen_addresses(&self) -> Vec<ListenAddr> {
+        self.all_listen_addresses.read().await.clone()
     }
 
     /// Trigger and wait for graceful shutdown

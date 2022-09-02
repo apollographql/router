@@ -1,0 +1,21 @@
+---
+source: apollo-router/tests/integration_tests.rs
+assertion_line: 558
+expression: first
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: dns error: failed to lookup address information: nodename nor servname provided, or not known",
+      "locations": [],
+      "path": [],
+      "extensions": {
+        "type": "SubrequestHttpError",
+        "service": "accounts",
+        "reason": "HTTP fetch failed from 'accounts': error trying to connect: dns error: failed to lookup address information: nodename nor servname provided, or not known"
+      }
+    }
+  ],
+  "hasNext": true
+}

@@ -86,11 +86,18 @@ impl AxumHttpServerFactory {
     }
 }
 
+pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
+
+pub(crate) struct ListenersAndRouters {
+    pub(crate) main: ListenAddrAndRouter,
+    pub(crate) all: Vec<ListenAddrAndRouter>,
+}
+
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
-) -> Result<Vec<(ListenAddr, Router)>, ApolloRouterError>
+) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
@@ -157,9 +164,11 @@ where
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
+    let main_listener = configuration.server.listen.clone().into();
+    let mut main_endpoint: MultiMap<ListenAddr, axum::Router> = Default::default();
+    main_endpoint.insert(main_listener, main_router);
 
-    addrs_and_endpoints.insert(configuration.server.listen.clone().into(), main_router);
+    let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
 
     addrs_and_endpoints.extend(web_endpoints.into_iter().map(|(listen_addr, endpoints)| {
         (
@@ -171,7 +180,11 @@ where
         )
     }));
 
-    let merged = addrs_and_endpoints
+    if let Some(routers) = addrs_and_endpoints.remove(&main_listener) {
+        main_endpoint.extend(routers.into_iter().map(|r| (main_listener, r)));
+    }
+
+    let main_listener_routes = main_endpoint
         .into_iter()
         .map(|(addr, routers)| {
             (
@@ -183,7 +196,22 @@ where
         })
         .collect::<Vec<(ListenAddr, Router)>>();
 
-    Ok(merged)
+    let extra_listener_routes = addrs_and_endpoints
+        .into_iter()
+        .map(|(addr, routers)| {
+            (
+                addr,
+                routers
+                    .into_iter()
+                    .fold(axum::Router::new(), |acc, r| acc.merge(r)),
+            )
+        })
+        .collect::<Vec<(ListenAddr, Router)>>();
+
+    Ok(ListenersAndRouters {
+        main: main_listener_routes,
+        all: extra_listener_routes,
+    })
 }
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -203,6 +231,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let axum_router = make_axum_router(service_factory, &configuration, web_endpoints)?;
 
             let mut listeners_and_routers = Vec::with_capacity(axum_router.len());
+
+            // TODO [igni]: It may seem odd but I believe configuring the router
+            // To listen to port 0 would lead it to change ports on every restart Oo
 
             // reuse previous listen addrs
             for listener in listeners.into_iter() {
@@ -1954,7 +1985,11 @@ Content-Type: application/json\r
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
             ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-            Endpoint::new("/a-custom-path".to_string(), endpoint),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.clone()),
+        );
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/an-other-custom-path".to_string(), endpoint),
         );
 
         let conf = Configuration::builder()
@@ -1971,10 +2006,10 @@ Content-Type: application/json\r
             .build();
         let (server, client) = init_with_config(expectations, conf, web_endpoints).await;
 
-        for path in &["/", "/test"] {
+        for path in &["/a-custom-path", "/an-other-custom-path"] {
             let response = client
                 .get(&format!(
-                    "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    "{}{}",
                     server.listen_addresses().first().unwrap(),
                     path
                 ))
@@ -1983,19 +2018,13 @@ Content-Type: application/json\r
                 .unwrap();
 
             assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response.text().await.unwrap(),
-                format!(
-                    "GET + /plugins/apollo.test.custom_plugin_with_endpoint{}",
-                    path
-                )
-            );
+            assert_eq!(response.text().await.unwrap(), format!("GET + {}", path));
         }
 
-        for path in &["/", "/test"] {
+        for path in &["/a-custom-path", "/an-other-custom-path"] {
             let response = client
                 .post(&format!(
-                    "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    "{}{}",
                     server.listen_addresses().first().unwrap(),
                     path
                 ))
@@ -2004,13 +2033,7 @@ Content-Type: application/json\r
                 .unwrap();
 
             assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response.text().await.unwrap(),
-                format!(
-                    "POST + /plugins/apollo.test.custom_plugin_with_endpoint{}",
-                    path
-                )
-            );
+            assert_eq!(response.text().await.unwrap(), format!("POST + {}", path));
         }
         server.shutdown().await
     }

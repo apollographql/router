@@ -45,9 +45,14 @@ pub(crate) struct HttpServerHandle {
     #[derivative(Debug = "ignore")]
     server_future: Pin<Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>>,
 
-    /// The listen address that the server is actually listening on.
-    /// If the socket address specified port zero the OS will assign a random free port.
+    /// The listen addresses that the server is actually listening on.
+    /// This includes the `graphql_listen_address` as well as any other address a plugin listens on.
+    /// If a socket address specified port zero the OS will assign a random free port.
     listen_addresses: Vec<ListenAddr>,
+
+    /// The listen addresses that the graphql server is actually listening on.
+    /// If a socket address specified port zero the OS will assign a random free port.
+    graphql_listen_address: Option<ListenAddr>,
 }
 
 impl HttpServerHandle {
@@ -56,11 +61,13 @@ impl HttpServerHandle {
         server_future: Pin<
             Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>,
         >,
+        graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
     ) -> Self {
         Self {
             shutdown_sender,
             server_future,
+            graphql_listen_address,
             listen_addresses,
         }
     }
@@ -71,6 +78,7 @@ impl HttpServerHandle {
         };
         let _listener = self.server_future.await?;
         #[cfg(unix)]
+        // listen_addresses includes the main graphql_address
         for listen_address in self.listen_addresses {
             if let ListenAddr::UnixSocket(path) = listen_address {
                 let _ = tokio::fs::remove_file(path).await;
@@ -126,6 +134,10 @@ impl HttpServerHandle {
     // TODO [igni]: provide a separate graphql_listen_address function.
     pub(crate) fn listen_addresses(&self) -> &[ListenAddr] {
         self.listen_addresses.as_slice()
+    }
+
+    pub(crate) fn graphql_listen_address(&self) -> Option<ListenAddr> {
+        self.graphql_listen_address
     }
 }
 
@@ -189,7 +201,8 @@ mod tests {
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(vec![listener])).boxed(),
-            vec![SocketAddr::from_str("127.0.0.1:0").unwrap().into()],
+            Some(SocketAddr::from_str("127.0.0.1:0").unwrap().into()),
+            Default::default(),
         )
         .shutdown()
         .await
@@ -211,7 +224,8 @@ mod tests {
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(vec![listener])).boxed(),
-            vec![ListenAddr::UnixSocket(sock)],
+            Some(ListenAddr::UnixSocket(sock)),
+            Default::default(),
         )
         .shutdown()
         .await

@@ -1407,10 +1407,9 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
+            .body(Default::default())
+            .unwrap();
         let mut web_endpoint = dyn_plugin
             .web_endpoints()
             .into_iter()
@@ -1430,10 +1429,9 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
+            .body(Default::default())
+            .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
