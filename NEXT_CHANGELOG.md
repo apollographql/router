@@ -60,7 +60,25 @@ Following up on a tremendous amount of work tracked in https://github.com/apollo
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1685
 
 ## 🚀 Features
+
+### router now provides TraceId ([PR #1663](https://github.com/apollographql/router/issues/1536))
+
+If you need a reliable way to link together the various stages of pipeline processing, you can now use
+
+```
+apollo_router::tracer::TraceId
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1663
+
 ## 🐛 Fixes
+
+### Docker images: Use absolute path for `ENTRYPOINT` ([PR #1684](https://github.com/apollographql/router/pull/1684))
+
+This restores the absolute path in `ENTRYPOINT` in our `Dockerfile`s (and published images) to allow users to change their working directory without consequence (and without needing to change it back to `/dist` or override the `entrypoint`).
+
+By [@110y](https://github.com/110y) in https://github.com/apollographql/router/pull/1684
+
 
 ### Update our helm documentation to illustrate how to use our registry ([#1643](https://github.com/apollographql/router/issues/1643))
 
