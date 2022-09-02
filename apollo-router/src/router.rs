@@ -613,9 +613,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn basic_request() {
         let mut router_handle = init_with_server();
-        let listen_addresses = router_handle.listen_addresses().await;
+        let listen_address = router_handle
+            .listen_address()
+            .await
+            .expect("router failed to start");
 
-        let listen_address = listen_addresses.first().expect("router failed to start");
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         router_handle.shutdown().await.unwrap();
     }

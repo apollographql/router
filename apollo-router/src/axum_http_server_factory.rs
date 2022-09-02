@@ -173,14 +173,14 @@ where
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    let main_listener = configuration.server.listen.clone().into();
+    let main_listener = configuration.server.listen.clone();
     let mut main_endpoint = ListenAddrAndRouter(main_listener, main_router);
 
     let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
 
     addrs_and_endpoints.extend(extra_endpoints.into_iter().map(|(listen_addr, endpoints)| {
         (
-            listen_addr.into(),
+            listen_addr,
             endpoints
                 .into_iter()
                 .map(|e| e.into_router())
@@ -1117,6 +1117,7 @@ mod tests {
                         )
                         .build(),
                 ),
+                None,
                 vec![],
                 MultiMap::new(),
             )
@@ -1157,6 +1158,7 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(conf),
+                None,
                 vec![],
                 web_endpoints,
             )
@@ -1205,6 +1207,7 @@ mod tests {
                         )
                         .build(),
                 ),
+                None,
                 vec![],
                 MultiMap::new(),
             )

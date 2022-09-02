@@ -487,7 +487,7 @@ impl Plugin for Telemetry {
             endpoints.push(Self::not_found_endpoint());
             let not_found_index = endpoints.len() - 1;
 
-            let svc = Steer::new(
+            Steer::new(
                 // All services we route between
                 endpoints,
                 // How we pick which service to send the request to
@@ -503,9 +503,7 @@ impl Plugin for Telemetry {
                     }
                 },
             )
-            .boxed_clone();
-
-            svc
+            .boxed_clone()
         };
         let mut mm = MultiMap::new();
 

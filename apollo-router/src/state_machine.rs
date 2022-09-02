@@ -707,7 +707,7 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listeners: Vec<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
+                main_listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
         }
     }
 
@@ -719,13 +719,14 @@ mod tests {
             &self,
             _service_factory: RF,
             configuration: Arc<Configuration>,
-            listeners: Vec<Listener>,
+            main_listener: Option<Listener>,
+            _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
         ) -> Self::Future
         where
             RF: SupergraphServiceFactory,
         {
-            let res = self.create_server(configuration, listeners);
+            let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })
         }
     }
@@ -755,7 +756,7 @@ mod tests {
             .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |configuration: Arc<Configuration>, listeners: Vec<Listener>| {
+                move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -763,19 +764,21 @@ mod tests {
                         .push(shutdown_receiver);
 
                     let server = async move {
-                        Ok(if listeners.is_empty() {
-                            vec![Listener::Tcp(
+                        let main_listener = match main_listener.take() {
+                            Some(l) => l,
+                            None => Listener::Tcp(
                                 tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
-                            )]
-                        } else {
-                            listeners
-                        })
+                            ),
+                        };
+
+                        Ok((main_listener, vec![]))
                     };
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
-                        vec![configuration.server.listen.clone()],
+                        Some(configuration.server.listen.clone()),
+                        vec![],
                     ))
                 },
             );

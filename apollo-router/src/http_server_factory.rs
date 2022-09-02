@@ -32,6 +32,7 @@ pub(crate) trait HttpServerFactory {
         RF: SupergraphServiceFactory;
 }
 
+type MainAndExtraListeners = (Listener, Vec<(ListenAddr, Listener)>);
 /// A handle with with a client can shut down the server gracefully.
 /// This relies on the underlying server implementation doing the right thing.
 /// There are various ways that a user could prevent this working, including holding open connections
@@ -44,12 +45,8 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<
-        Box<
-            dyn Future<Output = Result<(Listener, Vec<(ListenAddr, Listener)>), ApolloRouterError>>
-                + Send,
-        >,
-    >,
+    server_future:
+        Pin<Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>>,
 
     /// The listen addresses that the server is actually listening on.
     /// This includes the `graphql_listen_address` as well as any other address a plugin listens on.
@@ -65,11 +62,7 @@ impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
-            Box<
-                dyn Future<
-                        Output = Result<(Listener, Vec<(ListenAddr, Listener)>), ApolloRouterError>,
-                    > + Send,
-            >,
+            Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>,
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
@@ -204,13 +197,14 @@ mod tests {
     use super::*;
 
     #[test(tokio::test)]
+    // TODO [igni]: add a check with extra endpoints
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Tcp(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap());
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(vec![listener])).boxed(),
+            futures::future::ready(Ok((listener, vec![]))).boxed(),
             Some(SocketAddr::from_str("127.0.0.1:0").unwrap().into()),
             Default::default(),
         )
@@ -225,6 +219,7 @@ mod tests {
 
     #[test(tokio::test)]
     #[cfg(unix)]
+    // TODO [igni]: add a check with extra endpoints
     async fn sanity_unix() {
         let temp_dir = tempfile::tempdir().unwrap();
         let sock = temp_dir.as_ref().join("sock");
@@ -233,7 +228,7 @@ mod tests {
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(vec![listener])).boxed(),
+            futures::future::ready(Ok((listener, vec![]))).boxed(),
             Some(ListenAddr::UnixSocket(sock)),
             Default::default(),
         )
