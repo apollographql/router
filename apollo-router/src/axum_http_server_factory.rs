@@ -93,6 +93,12 @@ pub(crate) struct ListenersAndRouters {
     pub(crate) all: Vec<ListenAddrAndRouter>,
 }
 
+impl ListenersAndRouters {
+    pub fn count(&self) -> usize {
+        self.all.len() + 1
+    }
+}
+
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -165,8 +171,7 @@ where
         .layer(CompressionLayer::new()); // To compress response body
 
     let main_listener = configuration.server.listen.clone().into();
-    let mut main_endpoint: MultiMap<ListenAddr, axum::Router> = Default::default();
-    main_endpoint.insert(main_listener, main_router);
+    let mut main_endpoint = ListenAddrAndRouter(main_listener, main_router);
 
     let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
 
@@ -181,35 +186,25 @@ where
     }));
 
     if let Some(routers) = addrs_and_endpoints.remove(&main_listener) {
-        main_endpoint.extend(routers.into_iter().map(|r| (main_listener, r)));
+        main_endpoint.1 = routers
+            .into_iter()
+            .fold(main_endpoint.1, |acc, r| acc.merge(r));
     }
-
-    let main_listener_routes = main_endpoint
-        .into_iter()
-        .map(|(addr, routers)| {
-            (
-                addr,
-                routers
-                    .into_iter()
-                    .fold(axum::Router::new(), |acc, r| acc.merge(r)),
-            )
-        })
-        .collect::<Vec<(ListenAddr, Router)>>();
 
     let extra_listener_routes = addrs_and_endpoints
         .into_iter()
         .map(|(addr, routers)| {
-            (
+            ListenAddrAndRouter(
                 addr,
                 routers
                     .into_iter()
                     .fold(axum::Router::new(), |acc, r| acc.merge(r)),
             )
         })
-        .collect::<Vec<(ListenAddr, Router)>>();
+        .collect();
 
     Ok(ListenersAndRouters {
-        main: main_listener_routes,
+        main: main_endpoint,
         all: extra_listener_routes,
     })
 }
@@ -228,9 +223,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let axum_router = make_axum_router(service_factory, &configuration, web_endpoints)?;
+            let all_routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
 
-            let mut listeners_and_routers = Vec::with_capacity(axum_router.len());
+            let mut listeners_and_routers = Vec::with_capacity(all_routers.count());
 
             // TODO [igni]: It may seem odd but I believe configuring the router
             // To listen to port 0 would lead it to change ports on every restart Oo
