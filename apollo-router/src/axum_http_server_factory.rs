@@ -290,6 +290,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.server.graphql_path
             );
 
+            let graphql_listen_address = actual_listen_address;
+            let listen_addresses = listeners_and_routers
+                .iter()
+                .map(|((_, l), _)| l.local_addr().expect("checked above"))
+                .collect::<Vec<_>>();
+
             let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
 
             let (main_server, main_shutdown_sender) = {
@@ -655,8 +661,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
             Ok(HttpServerHandle::new(
                 outer_shutdown_sender,
                 server_future,
-                Some(all_routers.main.0),
-                all_routers.extra.into_iter().map(|l| l.0).collect(),
+                Some(graphql_listen_address),
+                listen_addresses,
             ))
         })
     }
@@ -1229,7 +1235,10 @@ mod tests {
 
         // Regular studio redirect
         let response = client
-            .get(&format!("{}/", server.listen_addresses().first().unwrap()))
+            .get(&format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
             .header(ACCEPT, "text/html")
             .send()
             .await
@@ -1269,7 +1278,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // Post query
         let response = client
@@ -1360,7 +1369,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // Post query
         let response = client
@@ -1388,7 +1397,10 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/", server.listen_addresses().first().unwrap()))
+            .post(format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
             .body("Garbage")
             .send()
             .await
@@ -1422,7 +1434,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // Post query
         let response = client
@@ -1472,7 +1484,7 @@ mod tests {
     async fn bad_response() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
-        let url = format!("{}/test", server.listen_addresses().first().unwrap());
+        let url = format!("{}/test", server.graphql_listen_address().as_ref().unwrap());
 
         // Post query
         let err = client
@@ -1537,7 +1549,10 @@ mod tests {
             )
             .build();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
-        let url = format!("{}/graphql", server.listen_addresses().first().unwrap());
+        let url = format!(
+            "{}/graphql",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
 
         // Post query
         let response = client
@@ -1608,7 +1623,7 @@ mod tests {
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         let url = format!(
             "{}/prefix/graphql",
-            server.listen_addresses().first().unwrap()
+            server.graphql_listen_address().as_ref().unwrap()
         );
 
         // Post query
@@ -1681,11 +1696,11 @@ mod tests {
         for url in &[
             format!(
                 "{}/graphql/test",
-                server.listen_addresses().first().unwrap()
+                server.graphql_listen_address().as_ref().unwrap()
             ),
             format!(
                 "{}/graphql/anothertest",
-                server.listen_addresses().first().unwrap()
+                server.graphql_listen_address().as_ref().unwrap()
             ),
         ] {
             // Post query
@@ -1763,7 +1778,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response = client
             .get(url.as_str())
@@ -1823,7 +1838,7 @@ mod tests {
                 ))
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response = client
             .post(url.as_str())
@@ -1864,7 +1879,10 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/", server.listen_addresses().first().unwrap()))
+            .post(format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
             .body(
                 json!(
                 {
@@ -1907,7 +1925,7 @@ mod tests {
         let response = client
             .request(
                 Method::OPTIONS,
-                &format!("{}/", server.listen_addresses().first().unwrap()),
+                &format!("{}/", server.graphql_listen_address().as_ref().unwrap()),
             )
             .header(ACCEPT, "text/html")
             .header(ORIGIN, "https://studio.apollographql.com")
@@ -1971,7 +1989,7 @@ mod tests {
         let server = init_unix(expectations, &temp_dir).await;
 
         let output = send_to_unix_socket(
-            server.listen_addresses().first().unwrap(),
+            server.graphql_listen_address().as_ref().unwrap(),
             Method::POST,
             r#"{"query":"query"}"#,
         )
@@ -1984,7 +2002,7 @@ mod tests {
 
         // Get query
         let output = send_to_unix_socket(
-            server.listen_addresses().first().unwrap(),
+            server.graphql_listen_address().as_ref().unwrap(),
             Method::GET,
             r#"query=query"#,
         )
@@ -2072,7 +2090,7 @@ Content-Type: application/json\r
         let (server, client) = init(expectations).await;
         let url = format!(
             "{}/.well-known/apollo/server-health",
-            server.listen_addresses().first().unwrap()
+            server.graphql_listen_address().as_ref().unwrap()
         );
 
         let response = client.get(url).send().await.unwrap();
@@ -2096,7 +2114,10 @@ Content-Type: application/json\r
             .build();
         let expectations = MockSupergraphService::new();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
-        let url = format!("{}/health", server.listen_addresses().first().unwrap());
+        let url = format!(
+            "{}/health",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -2109,7 +2130,7 @@ Content-Type: application/json\r
 
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
-        let url = format!("{}", server.listen_addresses().first().unwrap());
+        let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
         let response = client
             .post(url.as_str())
             .header(CONTENT_TYPE, "application/yaml")
@@ -2141,7 +2162,10 @@ Content-Type: application/json\r
             .build();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         let response = client
-            .get(&format!("{}/", server.listen_addresses().first().unwrap()))
+            .get(&format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
             .header(ACCEPT, "text/html")
             .send()
             .await
@@ -2192,7 +2216,7 @@ Content-Type: application/json\r
             let response = client
                 .get(&format!(
                     "{}{}",
-                    server.listen_addresses().first().unwrap(),
+                    server.graphql_listen_address().as_ref().unwrap(),
                     path
                 ))
                 .send()
@@ -2207,7 +2231,7 @@ Content-Type: application/json\r
             let response = client
                 .post(&format!(
                     "{}{}",
-                    server.listen_addresses().first().unwrap(),
+                    server.graphql_listen_address().as_ref().unwrap(),
                     path
                 ))
                 .send()
@@ -2248,7 +2272,7 @@ Content-Type: application/json\r
         {
           "query": "query",
         });
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
         let response = client.get(&url).query(&query).send().await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -2290,7 +2314,7 @@ Content-Type: application/json\r
     #[tokio::test]
     async fn cors_origin_default() -> Result<(), ApolloRouterError> {
         let (server, client) = init(MockSupergraphService::new()).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response =
             request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com")
@@ -2315,7 +2339,7 @@ Content-Type: application/json\r
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response =
             request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
@@ -2342,7 +2366,7 @@ Content-Type: application/json\r
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
         assert_cors_origin(response, valid_origin);
@@ -2373,7 +2397,7 @@ Content-Type: application/json\r
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // regex tests
         let response =
@@ -2465,7 +2489,7 @@ Content-Type: application/json\r
         {
           "query": "query { test }",
         });
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
         let response = client
             .post(&url)
             .body(query.to_string())
@@ -2526,7 +2550,7 @@ Content-Type: application/json\r
         {
           "query": "query { test ... @defer { other } }",
         });
-        let url = format!("{}/", server.listen_addresses().first().unwrap());
+        let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
         let mut response = client
             .post(&url)
             .body(query.to_string())
