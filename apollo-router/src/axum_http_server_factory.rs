@@ -322,7 +322,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 servers.push(server);
                 shutdowns.push(shutdown);
             }
-
             shutdowns.push(main_shutdown_sender);
 
             tokio::task::spawn(async move {
