@@ -72,10 +72,11 @@ where
     http_server_factory: S,
     router_configurator: FA,
 
-    // The reason we have extra_listen_adresses and listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
+    // The reason we have extra_listen_adresses and extra_listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
     pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
     pub(crate) extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
-    listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
+    extra_listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
+    graphql_listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -85,14 +86,17 @@ where
     FA::SupergraphServiceFactory: SupergraphServiceFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
-        let ready = Arc::new(RwLock::new(Vec::new()));
-        let ready_guard = ready.clone().try_write_owned().expect("owned lock");
+        let graphql_ready = Arc::new(RwLock::new(None));
+        let graphql_ready_guard = graphql_ready.clone().try_write_owned().expect("owned lock");
+        let extra_ready = Arc::new(RwLock::new(Vec::new()));
+        let extra_ready_guard = extra_ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
             router_configurator: router_factory,
-            extra_listen_adresses: ready,
-            graphql_listen_address: Default::default(),
-            listen_addresses_guard: Some(ready_guard),
+            graphql_listen_address: graphql_ready,
+            graphql_listen_address_guard: Some(graphql_ready_guard),
+            extra_listen_adresses: extra_ready,
+            extra_listen_addresses_guard: Some(extra_ready_guard),
         }
     }
 
@@ -242,8 +246,10 @@ where
         }
         tracing::debug!("stopped");
 
-        // If the listen_address_guard has not been taken, take it so that anything waiting on listen_address will proceed.
-        self.listen_addresses_guard.take();
+        // If the listen_address_guard has not been taken,
+        // take it so that anything waiting on listen_address will proceed.
+        self.extra_listen_addresses_guard.take();
+        self.graphql_listen_address_guard.take();
 
         match state {
             Stopped => Ok(()),
@@ -262,18 +268,21 @@ where
             if let Running { server_handle, .. } = &state {
                 let listen_addresses = server_handle.listen_addresses().to_vec();
                 let graphql_listen_address = server_handle.graphql_listen_address().clone();
-                (Some(graphql_listen_address), listen_addresses)
+                (graphql_listen_address, listen_addresses)
             } else {
                 (None, Vec::new())
             };
 
-        if let Some(listen_address) = graphql_listen_address {
-            if let Some(mut listen_addresses_guard) = self.listen_addresses_guard.take() {
-                *listen_addresses_guard = extra_listen_adresses.to_vec();
-            } else {
-                *self.extra_listen_adresses.write().await = Vec::new();
-            }
-            *self.graphql_listen_address.write().await = listen_address;
+        if let Some(mut listen_address_guard) = self.graphql_listen_address_guard.take() {
+            *listen_address_guard = graphql_listen_address;
+        } else {
+            *self.graphql_listen_address.write().await = graphql_listen_address;
+        }
+
+        if let Some(mut extra_listen_addresses_guard) = self.extra_listen_addresses_guard.take() {
+            *extra_listen_addresses_guard = extra_listen_adresses;
+        } else {
+            *self.extra_listen_adresses.write().await = extra_listen_adresses;
         }
     }
 
