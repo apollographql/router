@@ -47,6 +47,18 @@ The router will now return a response with the status code `406 Not Acceptable` 
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1652
 
+### Change default enablement and promote `experimental_defer_support` to `preview_defer_support` ([PR #1673](https://github.com/apollographql/router/issues/1673))
+
+Following up on a tremendous amount of work tracked in https://github.com/apollographql/router/issues/80 - which brought various stages of `@defer` support to the Router - this changes our designation of its status from "Experimental" to "Preview".  It's worth noting that the specification *just* graduated to "Stage 2 (Draft)" mode in the GraphQL Working Group, so changes may still be expected and there are two stages ahead.  To help things progress:
+
+- We've lifted the previous requirement that users opt into defer support by setting `experimental_defer_support: true` in the `server` section of their configuration.  It is now on by default.
+- The option is now called `preview_defer_support` and it can be set to `false` to _specifically_ opt out of it existing at all.  This might be desired if you would prefer that it not even show up in introspection or be possible to use even if a client requests it.
+- Using `@defer` support _requires_ clients set the appropriate HTTP `accept` header to use it.  This puts the burden of understanding the risks of an early-preview on the clients who will need to consume the Router's responses. This is particularly important for clients who have long-lived support requirements (like native mobile apps).
+
+  To see which headers are required, see https://github.com/apollographql/router/issues/1648.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1685
+
 ## 🚀 Features
 
 ### router now provides TraceId ([PR #1663](https://github.com/apollographql/router/issues/1536))
