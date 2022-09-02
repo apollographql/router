@@ -1,0 +1,5 @@
+plugins:
+  # this plugin has one piece of configuration,
+  # the  of the entity you'd like to say hello to
+  example.http_plugin:
+    url: "http://127.0.0.1:8081"

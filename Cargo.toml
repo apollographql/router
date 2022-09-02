@@ -12,6 +12,7 @@ members = [
     "examples/context",
     "examples/forbid-anonymous-operations",
     "examples/hello-world",
+    "examples/http-plugin",
     "examples/status-code-propagation",
     "examples/op-name-to-header",
     "examples/rhai-logging",
