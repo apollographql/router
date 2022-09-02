@@ -116,7 +116,30 @@ mod test {
 
             let other_id = TraceId::maybe_new();
             assert!(other_id.is_some());
-            assert!(other_id != my_id);
+            assert_ne!(other_id, my_id);
+        });
+    }
+
+    #[test]
+    fn it_correctly_compares_valid_and_valid_trace_id() {
+        let _guard = TRACING_LOCK.lock().unwrap();
+        // Create a new OpenTelemetry pipeline
+        let tracer = stdout::new_pipeline().install_simple();
+        // Create a tracing layer with the configured tracer
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        // Use the tracing subscriber `Registry`, or any other subscriber
+        // that impls `LookupSpan`
+        let subscriber = Registry::default().with(telemetry);
+        // Trace executed code
+        tracing::subscriber::with_default(subscriber, || {
+            // Spans will be sent to the configured OpenTelemetry exporter
+            let root = span!(tracing::Level::TRACE, "trace test");
+            let _enter = root.enter();
+
+            let my_id = TraceId::maybe_new();
+            assert!(my_id.is_some());
+            let other_id = TraceId::maybe_new();
+            assert_eq!(other_id, my_id);
         });
     }
 }
