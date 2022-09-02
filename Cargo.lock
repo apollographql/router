@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -150,7 +150,7 @@ dependencies = [
  "backtrace",
  "buildstructor 0.4.1",
  "bytes",
- "clap 3.2.19",
+ "clap 3.2.20",
  "dashmap 5.4.0",
  "deadpool",
  "derivative",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -251,11 +251,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.2.19",
+ "clap 3.2.20",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -277,10 +277,10 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bytes",
- "clap 3.2.19",
+ "clap 3.2.20",
  "flate2",
  "prost",
  "prost-types",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "futures",
  "graphql_client",
@@ -721,7 +721,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.2.19",
+ "clap 3.2.20",
  "crates-io",
  "crossbeam-utils",
  "curl",
@@ -890,9 +890,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.19"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -4316,9 +4316,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e071f018fe9ed74b34dee5ee533037b8b441364206f1379b91b3f243ffcabc"
+checksum = "1dfffd561d68c0b604db40293bec1f69b4e67f19ad92791a9a4d103952ddd918"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6242,7 +6242,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 dependencies = [
  "ansi_term",
  "anyhow",

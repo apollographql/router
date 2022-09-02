@@ -22,7 +22,7 @@ impl Introspection {
     pub(crate) async fn with_capacity(configuration: &Configuration, capacity: usize) -> Self {
         Self {
             cache: CacheStorage::new(capacity).await,
-            defer_support: configuration.server.experimental_defer_support,
+            defer_support: configuration.server.preview_defer_support,
         }
     }
 

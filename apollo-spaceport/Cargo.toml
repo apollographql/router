@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "1.0.0-alpha.0"
+version = "1.0.0-alpha.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 bytes = "1.2.1"
-clap = { version = "3.2.19", default-features = false, features = [
+clap = { version = "3.2.20", default-features = false, features = [
     "std",
     "derive",
 ] }
