@@ -8,7 +8,6 @@ use itertools::Itertools;
 use multimap::MultiMap;
 
 use super::router::ApolloRouterError;
-use crate::axum_http_server_factory::ListenersAndRouters;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
@@ -25,8 +24,8 @@ pub(crate) trait HttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        web_endpoints: ListenersAndRouters,
-        web_endpoints: MultiMap<ListenAddr, Endpoint>,
+        main_listener: Option<Listener>,
+        extra_endpoints: MultiMap<Listener, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
@@ -94,7 +93,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        web_endpoints: ListenersAndRouters,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,

@@ -102,7 +102,7 @@ impl ListenersAndRouters {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+    extra_endpoints: MultiMap<Listener, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -175,9 +175,9 @@ where
 
     let mut addrs_and_endpoints: MultiMap<ListenAddr, axum::Router> = Default::default();
 
-    addrs_and_endpoints.extend(web_endpoints.into_iter().map(|(listen_addr, endpoints)| {
+    addrs_and_endpoints.extend(extra_endpoints.into_iter().map(|(listen_addr, endpoints)| {
         (
-            listen_addr,
+            listen_addr.into(),
             endpoints
                 .into_iter()
                 .map(|e| e.into_router())
@@ -217,29 +217,26 @@ impl HttpServerFactory for AxumHttpServerFactory {
         service_factory: RF,
         configuration: Arc<Configuration>,
         main_listener: Option<Listener>,
-        extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        extra_endpoints: MultiMap<Listener, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let all_routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
             let mut listeners_and_routers = Vec::with_capacity(all_routers.count());
 
             // TODO [igni]: It may seem odd but I believe configuring the router
             // To listen to port 0 would lead it to change ports on every restart Oo
 
             // reuse previous listen addrs
-            for listener in all_routers.all.into_iter() {
-                if let Some((_, router)) = axum_router
-                    .iter()
-                    .find(|(l, _)| l == &listener.local_addr().unwrap())
-                {
-                    listeners_and_routers.push((listener, router.clone()));
+            for listener in all_routers.extra.into_iter() {
+                if let Some((_, router)) = extra_endpoints.iter().find(|(l, _)| l == &&listener.0) {
+                    listeners_and_routers.push((listener.0, router.clone()));
                 }
             }
             // populate the new listen addrs
-            for (listen_addr, router) in axum_router {
+            for ListenAddrAndRouter(listen_addr, router) in all_routers.extra {
                 // if we received a TCP listener, reuse it, otherwise create a new one
                 #[cfg_attr(not(unix), allow(unused_mut))]
                 let listener = match listen_addr {
