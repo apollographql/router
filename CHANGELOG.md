@@ -98,7 +98,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Remove cache layer ([PR #1647](https://github.com/apollographql/router/pull/1647))
 
-We removed `ServiceBuilderExt::cache` in v0.16.0. That was the only consumer of the cache layer. This completes the removal by deleting the cache layer.
+`ServiceBuilderExt::cache` was removed in v0.16.0. The unused `CacheLayer` has now also been removed.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1647
 
