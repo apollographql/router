@@ -264,13 +264,13 @@ where
         &mut self,
         state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
     ) {
-        let (graphql_listen_address, extra_listen_adresses) =
+        let (graphql_listen_address, extra_listen_addresses) =
             if let Running { server_handle, .. } = &state {
                 let listen_addresses = server_handle.listen_addresses().to_vec();
                 let graphql_listen_address = server_handle.graphql_listen_address().clone();
                 (graphql_listen_address, listen_addresses)
             } else {
-                (None, Vec::new())
+                return;
             };
 
         if let Some(mut listen_address_guard) = self.graphql_listen_address_guard.take() {
@@ -280,9 +280,9 @@ where
         }
 
         if let Some(mut extra_listen_addresses_guard) = self.extra_listen_addresses_guard.take() {
-            *extra_listen_addresses_guard = extra_listen_adresses;
+            *extra_listen_addresses_guard = extra_listen_addresses;
         } else {
-            *self.extra_listen_adresses.write().await = extra_listen_adresses;
+            *self.extra_listen_adresses.write().await = extra_listen_addresses;
         }
     }
 
