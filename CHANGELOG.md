@@ -45,7 +45,6 @@ By [@abernix](https://github.com/abernix) in https://github.com/apollographql/ro
 ### Return an error when nullifying a non-null field ([Issue #1304](https://github.com/apollographql/router/issues/1304))
 
 Nullability rules may remove parts of the response without indicating why. Error messages now indicate which part of the response triggered nullability rules.
-showing which part of the response triggered nullability rules.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1537
 
