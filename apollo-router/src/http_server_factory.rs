@@ -8,6 +8,7 @@ use itertools::Itertools;
 use multimap::MultiMap;
 
 use super::router::ApolloRouterError;
+use crate::axum_http_server_factory::ListenersAndRouters;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
@@ -24,7 +25,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        listeners: Vec<Listener>,
+        web_endpoints: ListenersAndRouters,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
@@ -43,7 +44,8 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>>,
+    server_future:
+        Pin<Box<dyn Future<Output = Result<(Listener, Vec<Listener>), ApolloRouterError>> + Send>>,
 
     /// The listen addresses that the server is actually listening on.
     /// This includes the `graphql_listen_address` as well as any other address a plugin listens on.
@@ -59,7 +61,7 @@ impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
-            Box<dyn Future<Output = Result<Vec<Listener>, ApolloRouterError>> + Send>,
+            Box<dyn Future<Output = Result<(Listener, Vec<Listener>), ApolloRouterError>> + Send>,
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
@@ -92,7 +94,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        web_endpoints: MultiMap<ListenAddr, Endpoint>,
+        web_endpoints: ListenersAndRouters,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,

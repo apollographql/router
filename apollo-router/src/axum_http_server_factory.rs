@@ -90,19 +90,19 @@ pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
 
 pub(crate) struct ListenersAndRouters {
     pub(crate) main: ListenAddrAndRouter,
-    pub(crate) all: Vec<ListenAddrAndRouter>,
+    pub(crate) extra: Vec<ListenAddrAndRouter>,
 }
 
 impl ListenersAndRouters {
     pub fn count(&self) -> usize {
-        self.all.len() + 1
+        self.extra.len() + 1
     }
 }
 
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    web_endpoints: MultiMap<ListenAddr, Endpoint>,
+    extra_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -205,7 +205,7 @@ where
 
     Ok(ListenersAndRouters {
         main: main_endpoint,
-        all: extra_listener_routes,
+        extra: extra_listener_routes,
     })
 }
 
@@ -216,22 +216,21 @@ impl HttpServerFactory for AxumHttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        listeners: Vec<Listener>,
-        web_endpoints: MultiMap<ListenAddr, Endpoint>,
+        main_listener: Option<Listener>,
+        extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
             let all_routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
-
             let mut listeners_and_routers = Vec::with_capacity(all_routers.count());
 
             // TODO [igni]: It may seem odd but I believe configuring the router
             // To listen to port 0 would lead it to change ports on every restart Oo
 
             // reuse previous listen addrs
-            for listener in listeners.into_iter() {
+            for listener in all_routers.all.into_iter() {
                 if let Some((_, router)) = axum_router
                     .iter()
                     .find(|(l, _)| l == &listener.local_addr().unwrap())
