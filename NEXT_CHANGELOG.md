@@ -61,6 +61,13 @@ By [@abernix](https://github.com/abernix) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 
+### Return an error when nullifying a non-null field ([Issue #1304](https://github.com/apollographql/router/issues/1304))
+
+Nullability rules can end up removing large parts of the response without indicating why. This will provide context,
+showing which part of the response triggered nullability rules.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1537
+
 ### router now provides TraceId ([PR #1663](https://github.com/apollographql/router/issues/1536))
 
 If you need a reliable way to link together the various stages of pipeline processing, you can now use
