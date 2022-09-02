@@ -24,7 +24,6 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
