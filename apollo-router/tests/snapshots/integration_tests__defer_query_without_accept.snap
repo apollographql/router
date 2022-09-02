@@ -6,7 +6,8 @@ expression: first
 {
   "errors": [
     {
-      "message": "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses",
+      "message": "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'",
+      "locations": [],
       "path": null
     }
   ]

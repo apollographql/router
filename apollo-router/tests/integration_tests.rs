@@ -546,7 +546,7 @@ async fn defer_path() {
             }
         }"#,
         )
-        .header(ACCEPT, "multipart/mixed")
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 
@@ -589,7 +589,7 @@ async fn defer_path_in_array() {
                 }
             }"#,
         )
-        .header(ACCEPT, "multipart/mixed")
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
 

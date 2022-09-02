@@ -150,7 +150,7 @@ dependencies = [
  "backtrace",
  "buildstructor 0.4.1",
  "bytes",
- "clap 3.2.19",
+ "clap 3.2.20",
  "dashmap 5.4.0",
  "deadpool",
  "derivative",
@@ -255,7 +255,7 @@ version = "1.0.0-alpha.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.2.19",
+ "clap 3.2.20",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -280,7 +280,7 @@ name = "apollo-spaceport"
 version = "1.0.0-alpha.0"
 dependencies = [
  "bytes",
- "clap 3.2.19",
+ "clap 3.2.20",
  "flate2",
  "prost",
  "prost-types",
@@ -721,7 +721,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.2.19",
+ "clap 3.2.20",
  "crates-io",
  "crossbeam-utils",
  "curl",
@@ -890,9 +890,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.19"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -2537,9 +2537,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.19.0"
+version = "1.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f37dc501f12ec0c339b385787fa89ffda3d5d2caa62e558da731134c24d6e0c4"
+checksum = "fc61e98be01e89296f3343a878e9f8ca75a494cb5aaf29df65ef55734aeb85f5"
 dependencies = [
  "console 0.15.1",
  "linked-hash-map",
@@ -3654,9 +3654,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9423e2b32f7a043629287a536f21951e8c6a82482d0acb1eeebfc90bc2225b22"
+checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "pem-rfc7468"
@@ -4316,9 +4316,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "700465195ab6ed2241cd3bf76b9c08c2672d2437db0788ea03e85f5a7814225d"
+checksum = "1dfffd561d68c0b604db40293bec1f69b4e67f19ad92791a9a4d103952ddd918"
 dependencies = [
  "anyhow",
  "async-channel",
