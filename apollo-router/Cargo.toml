@@ -121,7 +121,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
 ] }
 router-bridge = "0.1.2"
 schemars = { version = "0.8.10", features = ["url"] }
-sha2 = "0.10.3"
+sha2 = "0.10.5"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
