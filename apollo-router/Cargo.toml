@@ -18,7 +18,7 @@ failfast = []
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.63"
+anyhow = "1.0.64"
 apollo-parser = "0.2.10"
 # ELv2 licensing: The apollo-spaceport crate is license key functionality
 apollo-spaceport = { path = "../apollo-spaceport" }
@@ -130,7 +130,7 @@ serde_yaml = "0.8.26"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
-thiserror = "1.0.33"
+thiserror = "1.0.34"
 tokio = { version = "1.21.0", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["sync"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
