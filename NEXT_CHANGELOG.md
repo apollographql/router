@@ -27,5 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fix telemetry propagation with headers ([#1701](https://github.com/apollographql/router/issues/1701))
+
+Span context is now correctly propagated if you're trying to propagate tracing context to the router.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1701
+
 ## 🛠 Maintenance
 ## 📚 Documentation
