@@ -2,7 +2,6 @@ use std::collections::HashMap;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -32,7 +31,7 @@ pub(crate) trait SupergraphServiceFactory:
 {
     type SupergraphService: Service<
             http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            Response = http::Response<graphql::ResponseStream>,
             Error = BoxError,
             Future = Self::Future,
         > + Send;

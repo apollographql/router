@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use futures::future::ready;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use http::StatusCode;
 use multimap::MultiMap;
@@ -81,7 +80,7 @@ impl Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<BoxStream<'static, graphql::Response>>,
+    pub response: http::Response<graphql::ResponseStream>,
 
     pub context: Context,
 }
@@ -176,7 +175,7 @@ impl Response {
     /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
     pub fn new_from_response(
-        response: http::Response<BoxStream<'static, graphql::Response>>,
+        response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {
         Self { response, context }
@@ -184,7 +183,7 @@ impl Response {
 
     pub fn map<F>(self, f: F) -> Response
     where
-        F: FnOnce(BoxStream<'static, graphql::Response>) -> BoxStream<'static, graphql::Response>,
+        F: FnOnce(graphql::ResponseStream) -> graphql::ResponseStream,
     {
         Response {
             context: self.context,

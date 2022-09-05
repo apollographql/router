@@ -6,7 +6,6 @@ use std::task::Poll;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
@@ -471,7 +470,7 @@ pub(crate) struct RouterCreator {
 impl NewService<http::Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
@@ -485,7 +484,7 @@ impl NewService<http::Request<graphql::Request>> for RouterCreator {
 impl SupergraphServiceFactory for RouterCreator {
     type SupergraphService = BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >;
 

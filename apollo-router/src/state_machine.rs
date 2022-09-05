@@ -423,7 +423,6 @@ mod tests {
 
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
-    use futures::stream::BoxStream;
     use mockall::mock;
     use mockall::Sequence;
     use test_log::test;
@@ -683,7 +682,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<http::Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = http::Response<BoxStream<'static, graphql::Response>>;
+        type Response = http::Response<graphql::ResponseStream>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
