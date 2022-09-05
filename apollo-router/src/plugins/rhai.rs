@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::thread;
 
 use futures::future::ready;
 use futures::stream::once;
@@ -35,6 +36,7 @@ use rhai::Shared;
 use rhai::AST;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::runtime::Runtime;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -50,6 +52,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::utility::Output;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -1308,7 +1311,30 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
             })
-            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) })
+            .register_result_fn(
+                "call_service",
+                |url: &str,
+                 request: Request,
+                 context: Context,
+                 sdl: &str|
+                 -> Result<Request, Box<EvalAltResult>> {
+                    let my_url = url.to_string();
+                    let my_sdl = sdl.to_string();
+                    let handler = async move {
+                        crate::services::utility::call_service(&my_url, request, context, my_sdl)
+                            .await
+                            .map_err(|e: BoxError| e.to_string())
+                    };
+                    let hdl = thread::spawn(move || -> Result<Output, String> {
+                        let rt = Runtime::new().expect("spawning tokio runtime should work");
+                        rt.block_on(handler)
+                    });
+
+                    let output = hdl.join().expect("join should work")?;
+                    Ok(output.body)
+                },
+            );
 
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 
