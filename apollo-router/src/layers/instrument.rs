@@ -38,6 +38,7 @@ impl<F, Request> InstrumentLayer<F, Request>
 where
     F: Fn(&Request) -> tracing::Span,
 {
+    #[allow(missing_docs)] // FIXME
     pub fn new(span_fn: F) -> InstrumentLayer<F, Request> {
         Self {
             span_fn,

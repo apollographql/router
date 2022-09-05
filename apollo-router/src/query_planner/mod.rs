@@ -1,11 +1,13 @@
 //! GraphQL operation planning.
+
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
 
 pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
-pub use fetch::OperationKind;
 use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
@@ -16,6 +18,7 @@ use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
+pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -33,20 +36,21 @@ mod selection;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    pub(crate) enable_variable_deduplication: bool,
+    pub(crate) enable_deduplicate_variables: bool,
 }
-
 /// A planner key.
 ///
 /// This type consists of a query string, an optional operation string and the
 /// [`QueryPlanOptions`].
-pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
+pub(crate) type QueryKey = (String, Option<String>);
 
 /// A plan for a given GraphQL query
 #[derive(Debug)]
 pub struct QueryPlan {
-    pub usage_reporting: UsageReporting,
+    usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
+    /// String representation of the query plan (not a json representation)
+    pub(crate) formatted_query_plan: Option<String>,
     options: QueryPlanOptions,
 }
 
@@ -65,6 +69,7 @@ impl QueryPlan {
                 referenced_fields_by_type: Default::default(),
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
+            formatted_query_plan: Default::default(),
             options: QueryPlanOptions::default(),
         }
     }
@@ -258,11 +263,11 @@ impl PlanNode {
 
 impl QueryPlan {
     /// Execute the plan and return a [`Response`].
-    pub async fn execute<'a, SF>(
+    pub(crate) async fn execute<'a, SF>(
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
-        originating_request: &'a Arc<http_ext::Request<Request>>,
+        originating_request: &'a Arc<http::Request<Request>>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response
@@ -307,7 +312,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     context: &'a Context,
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
-    originating_request: &'a Arc<http_ext::Request<Request>>,
+    originating_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
@@ -747,6 +752,7 @@ pub(crate) mod fetch {
     /// GraphQL operation type.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
+    #[non_exhaustive]
     pub enum OperationKind {
         Query,
         Mutation,
@@ -809,9 +815,9 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &Arc<http_ext::Request<Request>>,
+            request: &Arc<http::Request<Request>>,
             schema: &Schema,
-            enable_variable_deduplication: bool,
+            enable_deduplicate_variables: bool,
         ) -> Option<Variables> {
             let body = request.body();
             if !requires.is_empty() {
@@ -824,7 +830,7 @@ pub(crate) mod fetch {
                 }));
 
                 let mut paths: HashMap<Path, usize> = HashMap::new();
-                let (paths, representations) = if enable_variable_deduplication {
+                let (paths, representations) = if enable_deduplicate_variables {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
@@ -869,7 +875,7 @@ pub(crate) mod fetch {
                 Some(Variables { variables, paths })
             } else {
                 // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
-                // when the first fetch fails, the query plan wwill still execute up until the second fetch,
+                // when the first fetch fails, the query plan will still execute up until the second fetch,
                 // where `requires` is empty (not a federated fetch), the current dir is not emmpty (child of
                 // the previous operation field) and the data is null. In that case, we recognize that we
                 // should not perform the next fetch
@@ -924,7 +930,7 @@ pub(crate) mod fetch {
                 // Needs the original request here
                 parameters.originating_request,
                 parameters.schema,
-                parameters.options.enable_variable_deduplication,
+                parameters.options.enable_deduplicate_variables,
             )
             .await
             {
@@ -974,22 +980,20 @@ pub(crate) mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
-            let (_parts, response) = http::Response::from(
-                service
-                    .oneshot(subgraph_request)
-                    .instrument(tracing::trace_span!("subfetch_stream"))
-                    .await
-                    // TODO this is a problem since it restores details about failed service
-                    // when errors have been redacted in the include_subgraph_errors module.
-                    // Unfortunately, not easy to fix here, because at this point we don't
-                    // know if we should be redacting errors for this subgraph...
-                    .map_err(|e| FetchError::SubrequestHttpError {
-                        service: service_name.to_string(),
-                        reason: e.to_string(),
-                    })?
-                    .response,
-            )
-            .into_parts();
+            let (_parts, response) = service
+                .oneshot(subgraph_request)
+                .instrument(tracing::trace_span!("subfetch_stream"))
+                .await
+                // TODO this is a problem since it restores details about failed service
+                // when errors have been redacted in the include_subgraph_errors module.
+                // Unfortunately, not easy to fix here, because at this point we don't
+                // know if we should be redacting errors for this subgraph...
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                })?
+                .response
+                .into_parts();
 
             super::log::trace_subfetch(service_name, operation, &variables, &response);
 
@@ -1191,13 +1195,12 @@ mod tests {
     use std::sync::Arc;
 
     use http::Method;
-    use tower::ServiceBuilder;
-    use tower::ServiceExt;
 
     use super::*;
     use crate::json_ext::PathElement;
     use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
+    use crate::services::subgraph_service::MakeSubgraphService;
 
     macro_rules! test_query_plan {
         () => {
@@ -1237,9 +1240,11 @@ mod tests {
     /// The query planner reports the failed subgraph fetch as an error with a reason of "service
     /// closed", which is what this test expects.
     #[tokio::test]
+    #[should_panic(expected = "this panic should be propagated to the test harness")]
     async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            formatted_query_plan: Default::default(),
             options: QueryPlanOptions::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
@@ -1251,14 +1256,19 @@ mod tests {
         mock_products_service.expect_call().times(1).withf(|_| {
             panic!("this panic should be propagated to the test harness");
         });
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service.expect_call().times(1).withf(|_| {
+                panic!("this panic should be propagated to the test harness");
+            });
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1267,13 +1277,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1290,6 +1294,7 @@ mod tests {
     async fn fetch_includes_operation_name() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            formatted_query_plan: Default::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1301,25 +1306,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.body().operation_name
+                        == Some("topProducts_product_0".into());
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
 
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1328,13 +1335,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1347,6 +1348,7 @@ mod tests {
     async fn fetch_makes_post_requests() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            formatted_query_plan: Default::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1358,23 +1360,27 @@ mod tests {
         let inner_succeeded = Arc::clone(&succeeded);
 
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+        mock_products_service.expect_clone().return_once(|| {
+            let mut mock_products_service = plugin::test::MockSubgraphService::new();
+            mock_products_service
+                .expect_call()
+                .times(1)
+                .withf(move |request| {
+                    let matches = request.subgraph_request.method() == Method::POST;
+                    inner_succeeded.store(matches, Ordering::SeqCst);
+                    matches
+                })
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+            mock_products_service
+        });
+
         let (sender, _) = futures::channel::mpsc::channel(10);
 
         let sf = Arc::new(MockSubgraphFactory {
             subgraphs: HashMap::from([(
                 "product".into(),
-                ServiceBuilder::new()
-                    .buffer(1)
-                    .service(mock_products_service.build().boxed()),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
             )]),
             plugins: Default::default(),
         });
@@ -1383,13 +1389,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(test_schema!(), &Default::default()).unwrap(),
                 sender,
             )
@@ -1405,6 +1405,7 @@ mod tests {
     async fn defer() {
         // plan for { t { x ... @defer { y } }}
         let query_plan: QueryPlan = QueryPlan {
+            formatted_query_plan: Default::default(),
             root: PlanNode::Defer {
                 primary: Primary {
                     path: None,
@@ -1469,32 +1470,41 @@ mod tests {
         };
 
         let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
+        mock_x_service.expect_clone().return_once(|| {
+            let mut mock_x_service = plugin::test::MockSubgraphService::new();
+            mock_x_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "t": {"id": 1234,
+                            "__typename": "T",
+                             "x": "X"
+                            }
+                        }})
+                        .build())
+                });
+            mock_x_service
+        });
+
         let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
+        mock_y_service.expect_clone().return_once(|| {
+            let mut mock_y_service = plugin::test::MockSubgraphService::new();
+            mock_y_service
+                .expect_call()
+                .times(1)
+                .withf(move |_request| true)
+                .returning(|_| {
+                    Ok(SubgraphResponse::fake_builder()
+                        .data(serde_json::json! {{
+                            "_entities": [{"y": "Y", "__typename": "T"}]
+                        }})
+                        .build())
+                });
+            mock_y_service
+        });
 
         let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
@@ -1504,34 +1514,18 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "X".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_x_service.build().boxed()),
+                    Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "Y".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_y_service.build().boxed()),
+                    Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),
         });
 
         let response = query_plan
-            .execute(
-                &Context::new(),
-                &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
-                &schema,
-                sender,
-            )
+            .execute(&Context::new(), &sf, &Default::default(), &schema, sender)
             .await;
 
         // primary response
@@ -1589,6 +1583,7 @@ mod tests {
             //     mutationB
             //   }
             // }
+            formatted_query_plan: Default::default(),
             root: serde_json::from_str(
                 r#"{
                 "kind": "Sequence",
@@ -1625,10 +1620,15 @@ mod tests {
         };
 
         let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_a_service.expect_clone().returning(|| {
+            let mut mock_a_service = plugin::test::MockSubgraphService::new();
+            mock_a_service
+                .expect_call()
+                .times(1)
+                .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+
+            mock_a_service
+        });
 
         // the first fetch returned null, so there should never be a call to B
         let mut mock_b_service = plugin::test::MockSubgraphService::new();
@@ -1638,15 +1638,11 @@ mod tests {
             subgraphs: HashMap::from([
                 (
                     "A".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_a_service.build().boxed()),
+                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
                 ),
                 (
                     "B".into(),
-                    ServiceBuilder::new()
-                        .buffer(1)
-                        .service(mock_b_service.build().boxed()),
+                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
                 ),
             ]),
             plugins: Default::default(),
@@ -1657,13 +1653,7 @@ mod tests {
             .execute(
                 &Context::new(),
                 &sf,
-                &Arc::new(
-                    http_ext::Request::fake_builder()
-                        .headers(Default::default())
-                        .body(Default::default())
-                        .build()
-                        .expect("fake builds should always work; qed"),
-                ),
+                &Default::default(),
                 &Schema::parse(schema, &Default::default()).unwrap(),
                 sender,
             )

@@ -16,7 +16,7 @@ use crate::json_ext::Value;
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
-/// Context for a [`crate::http_ext::Request`]
+/// A map of arbitrary JSON values, for use by plugins.
 ///
 /// Context makes use of [`DashMap`] under the hood which tries to handle concurrency
 /// by allowing concurrency across threads without requiring locking. This is great

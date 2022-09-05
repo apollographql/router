@@ -240,26 +240,26 @@ server:
 
 By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.endpoint`:
+You can change this path by setting `server.graphql_path`:
 
 ```yaml title="router.yaml"
 #
 # server: Configuration of the HTTP server
 #
 server:
-  # The exposed endpoint to answer to GraphQL queries
+  # The path for GraphQL execution
   # (Defaults to /)
-  endpoint: /graphql
+  graphql_path: /graphql
 ```
 
-The endpoint path must start with `/`.
+The path must start with `/`.
 
 Path parameters and wildcards are supported. For example:
 
 - `/:my_dynamic_prefix/graphql` matches both `/my_project_a/graphql` and `/my_project_b/graphql`.
 - `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
 
-> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter.
+> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
 
 ### Introspection
 

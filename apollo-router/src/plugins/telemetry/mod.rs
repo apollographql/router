@@ -1,5 +1,5 @@
 //! Telemetry plugin.
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -15,7 +15,6 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -35,7 +34,6 @@ use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
 use tower::service_fn;
 use tower::steer::Steer;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -49,7 +47,6 @@ use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
-use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Handler;
 use crate::plugin::Plugin;
@@ -68,23 +65,24 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::services::execution;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::services::transport;
 use crate::Context;
 use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::RouterRequest;
-use crate::RouterResponse;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
-pub mod apollo;
-pub mod config;
+pub(crate) mod apollo;
+pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
 
-static ROUTER_SPAN_NAME: &str = "router";
+static SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -95,6 +93,7 @@ const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
+#[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
     config: config::Conf,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
@@ -161,23 +160,20 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Self::new_with_subscriber::<Registry>(init, None).await
+        Self::new_common::<Registry>(init.config, None).await
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
         let config_map_res = config.clone();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(
+            .instrument(Self::supergraph_service_span(
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_future_with_context(
-                move |req: &RouterRequest| {
+            .map_future_with_request_data(
+                move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
                     req.context.clone()
                 },
@@ -187,7 +183,7 @@ impl Plugin for Telemetry {
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
                     async move {
-                        let mut result: Result<RouterResponse, BoxError> = fut.await;
+                        let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -228,7 +224,7 @@ impl Plugin for Telemetry {
                                 Err(e)
                             }
                             Ok(router_response) => {
-                                let is_not_success =
+                                let mut has_errors =
                                     !router_response.response.status().is_success();
                                 Ok(router_response.map(move |response_stream| {
                                     let sender = sender.clone();
@@ -236,13 +232,17 @@ impl Plugin for Telemetry {
 
                                     response_stream
                                         .map(move |response| {
-                                            let response_has_errors = !response.errors.is_empty();
+                                            if !response.errors.is_empty() {
+                                                has_errors = true;
+                                            }
 
-                                            if !matches!(sender, Sender::Noop) {
+                                            if !response.has_next.unwrap_or(false)
+                                                && !matches!(sender, Sender::Noop)
+                                            {
                                                 Self::update_apollo_metrics(
                                                     &ctx,
                                                     sender.clone(),
-                                                    is_not_success || response_has_errors,
+                                                    has_errors,
                                                     start.elapsed(),
                                                 );
                                             }
@@ -259,29 +259,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn query_planning_service(
-        &self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        ServiceBuilder::new()
-            .instrument(move |req: &QueryPlannerRequest| {
-                let query = req.query.clone();
-                let operation_name = req.operation_name.clone().unwrap_or_default();
-
-                info_span!("query_planning",
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal
-                )
-            })
-            .service(service)
-            .boxed()
-    }
-
-    fn execution_service(
-        &self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let query = req
@@ -306,11 +284,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
@@ -401,7 +375,7 @@ impl Plugin for Telemetry {
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
-            .map_future_with_context(
+            .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
                     let subgraph_metrics_conf = subgraph_metrics_conf.clone();
                     let mut attributes = HashMap::new();
@@ -502,7 +476,7 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<Handler> {
+    fn custom_endpoint(&self) -> Option<transport::BoxService> {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
@@ -512,7 +486,7 @@ impl Plugin for Telemetry {
             // All services we route between
             endpoints,
             // How we pick which service to send the request to
-            move |req: &http_ext::Request<Bytes>, _services: &[_]| {
+            move |req: &transport::Request, _services: &[_]| {
                 let endpoint = req
                     .uri()
                     .path()
@@ -526,21 +500,31 @@ impl Plugin for Telemetry {
         )
         .boxed();
 
-        Some(Handler::new(svc))
+        Some(svc)
     }
 }
 
 impl Telemetry {
     /// This method can be used instead of `Plugin::new` to override the subscriber
     pub async fn new_with_subscriber<S>(
-        init: PluginInit<<Self as Plugin>::Config>,
+        config: serde_json::Value,
+        subscriber: S,
+    ) -> Result<Self, BoxError>
+    where
+        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
+    {
+        Self::new_common(serde_json::from_value(config)?, Some(subscriber)).await
+    }
+
+    /// This method can be used instead of `Plugin::new` to override the subscriber
+    async fn new_common<S>(
+        mut config: <Self as Plugin>::Config,
         subscriber: Option<S>,
     ) -> Result<Self, BoxError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let mut config = init.config;
         let apollo = config
             .apollo
             .as_mut()
@@ -731,23 +715,25 @@ impl Telemetry {
 
     fn not_found_endpoint() -> Handler {
         Handler::new(
-            service_fn(|_req: http_ext::Request<Bytes>| async {
-                Ok::<_, BoxError>(http_ext::Response {
-                    inner: http::Response::builder()
+            service_fn(|_req: transport::Request| async {
+                Ok::<_, BoxError>(
+                    http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .body("Not found".into())
                         .unwrap(),
-                })
+                )
             })
             .boxed(),
         )
     }
 
-    fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
+    fn supergraph_service_span(
+        config: apollo::Config,
+    ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         let client_name_header = config.client_name_header;
         let client_version_header = config.client_version_header;
 
-        move |request: &RouterRequest| {
+        move |request: &SupergraphRequest| {
             let http_request = &request.originating_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
@@ -765,7 +751,7 @@ impl Telemetry {
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
-                ROUTER_SPAN_NAME,
+                SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
@@ -849,9 +835,9 @@ impl Telemetry {
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<RouterResponse, BoxError>,
+        result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
-    ) -> Result<RouterResponse, BoxError> {
+    ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = context
             .get::<_, HashMap<String, String>>(ATTRIBUTES)
             .ok()
@@ -905,7 +891,7 @@ impl Telemetry {
         res
     }
 
-    fn populate_context(config: Arc<Conf>, req: &RouterRequest) {
+    fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.originating_request;
@@ -999,10 +985,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 mod tests {
     use std::str::FromStr;
 
-    use bytes::Bytes;
-    use http::Method;
     use http::StatusCode;
-    use http::Uri;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -1015,13 +998,13 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -1186,12 +1169,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
-        let mut mock_service = MockRouterService::new();
+        let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
                     .data(json!({"data": {"my_value": 2usize}}))
@@ -1337,10 +1320,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
-        let router_req = RouterRequest::fake_builder().header("test", "my_value_set");
+        let mut supergraph_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
 
-        let _router_response = router_service
+        let _router_response = supergraph_service
             .ready()
             .await
             .unwrap()
@@ -1351,10 +1334,8 @@ mod tests {
             .await
             .unwrap();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service(
-            "my_subgraph_name",
-            BoxService::new(mock_subgraph_service.build()),
-        );
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()
@@ -1378,7 +1359,7 @@ mod tests {
         // Another subgraph
         let mut subgraph_service = dyn_plugin.subgraph_service(
             "my_subgraph_name_error",
-            BoxService::new(mock_subgraph_service_in_error.build()),
+            BoxService::new(mock_subgraph_service_in_error),
         );
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -1401,29 +1382,23 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
+        let http_req_prom =
+            http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
+                .body(Default::default())
+                .unwrap();
         let handler = dyn_plugin.custom_endpoint().unwrap();
-        let http_req_prom = http_ext::Request::fake_builder()
-            .uri(Uri::from_static(
-                "http://localhost:4000/BADPATH/apollo.telemetry/prometheus",
-            ))
-            .method(Method::GET)
-            .body(Bytes::new())
-            .build()
-            .unwrap();
-        let resp = handler.clone().oneshot(http_req_prom).await.unwrap();
+        let resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom = http_ext::Request::fake_builder()
-            .uri(Uri::from_static(
-                "http://localhost:4000/plugins/apollo.telemetry/prometheus",
-            ))
-            .method(Method::GET)
-            .body(Bytes::new())
-            .build()
-            .unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let http_req_prom =
+            http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
+                .body(Default::default())
+                .unwrap();
+        let handler = dyn_plugin.custom_endpoint().unwrap();
+        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let prom_metrics = String::from_utf8_lossy(resp.body());
+        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let prom_metrics = String::from_utf8_lossy(&body);
         assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));

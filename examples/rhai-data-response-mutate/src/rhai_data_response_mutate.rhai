@@ -1,10 +1,10 @@
 // This example illustrates how to interact with responses to
 // modify the data returned.
 
-// At the router_service stage, register callbacks for processing 
+// At the supergraph_service stage, register callbacks for processing 
 // responses. We are using a closure here, but it could be a
 // function if we chose (see execution_service).
-fn router_service(service) {
+fn supergraph_service(service) {
     let f = |response| {
         print(response.body.data);
         print(response.body.data.me.name);
@@ -18,7 +18,7 @@ fn router_service(service) {
 
 // At the execution_service stage, register callbacks for processing 
 // responses. We are using a function here, but we could use a
-// closure if we chose (see router_service).
+// closure if we chose (see supergraph_service).
 fn execution_service(service) {
     const response_callback = Fn("process_response");
     service.map_response(response_callback);

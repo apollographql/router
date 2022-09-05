@@ -9,31 +9,31 @@ use crate::plugin::serde::deserialize_header_name;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub(crate) struct Config {
     #[schemars(with = "Option<String>")]
-    pub endpoint: Option<Url>,
+    pub(crate) endpoint: Option<Url>,
 
     #[schemars(skip)]
     #[serde(skip, default = "apollo_key")]
-    pub apollo_key: Option<String>,
+    pub(crate) apollo_key: Option<String>,
 
     #[schemars(skip)]
     #[serde(skip, default = "apollo_graph_reference")]
-    pub apollo_graph_ref: Option<String>,
+    pub(crate) apollo_graph_ref: Option<String>,
 
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(
         deserialize_with = "deserialize_header_name",
         default = "client_name_header_default"
     )]
-    pub client_name_header: HeaderName,
+    pub(crate) client_name_header: HeaderName,
 
     #[schemars(with = "Option<String>", default = "client_version_header_default_str")]
     #[serde(
         deserialize_with = "deserialize_header_name",
         default = "client_version_header_default"
     )]
-    pub client_version_header: HeaderName,
+    pub(crate) client_version_header: HeaderName,
 
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.

@@ -2,191 +2,53 @@
 title: Federation version support in the Apollo Router
 ---
 
-import { Link } from 'gatsby';
+The Apollo Router supports supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
 
-The Apollo Router uses Apollo Federation 2.x. Federation 2.x
-is [backward compatible with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/), so you can use the router with a valid Federation 1.x supergraph.
+* Apollo Studio (for supergraphs that use [managed federation](./managed-federation/overview/))
+* The Rover CLI (for _non_-managed supergraphs)
 
-> If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/) for possible causes.
+Apollo Federation is an evolving project, and its composition algorithm regularly receives new features and bug fixes. To help ensure that your router fully supports its supergraph schema, you should regularly update it to the latest stable version.
 
-Apollo Federation is an evolving project, and it will receive new features and bug fixes over time. If you need to run a particular version of federation, the following table shows which version of federation each router release is compiled against:
+## Support table
+
+The table below shows which version of federation each router release is compiled against. You might encounter issues if your router uses an earlier version of federation than the version that was used to compose its supergraph schema.
 
 <table>
     <thead>
     <tr>
         <th>Router version</th>
         <th>Federation version</th>
-        <th>Release date</th>
     </tr>
     </thead>
     <tbody>
     <tr>
         <td>
-            v0.15.1
+            v1.0.0-alpha.1 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
         </td>
         <td>
-            2.0.2
-        </td>
-        <td>
-            2022-08-10
+            2.1.1
         </td>
     </tr>
     <tr>
         <td>
-            v0.15.0
+            v0.16.0 - v1.0.0-alpha.0
+        </td>
+        <td>
+            2.1.0-alpha.4
+        </td>
+    </tr>
+    <tr>
+        <td>v0.9.0 – v0.15.1
         </td>
         <td>
             2.0.2
         </td>
-        <td>
-            2022-08-09
-        </td>
     </tr>
     <tr>
-        <td>
-            v0.14.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-08-02
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.12.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-07-18
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.11.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-07-12
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.10.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-07-05
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.9.5
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-06-17
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.9.4
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-06-14
-        </td>
-    </tr>
-    <tr>
-        <td>
-            v0.9.3
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-06-01
-        </td>
-    </tr>
-    <tr>
-        <td>v0.9.2
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-05-20
-        </td>
-    </tr>
-    <tr>
-        <td>v0.9.1
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-05-17
-        </td>
-    </tr>
-    <tr>
-        <td>v0.9.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-05-13
-        </td>
-    </tr>
-    <tr>
-        <td>v0.9.0-rc.0
-        </td>
-        <td>
-            2.0.2
-        </td>
-        <td>
-            2022-05-10
-        </td>
-    </tr>
-    <tr>
-        <td>v0.1.0-preview.7
+        <td>v0.1.0-preview.5 – v0.1.0-preview.7
         </td>
         <td>
             2.0.1
-        </td>
-        <td>
-            2022-05-04
-        </td>
-    </tr>
-    <tr>
-        <td>v0.1.0-preview.6
-        </td>
-        <td>
-            2.0.1
-        </td>
-        <td>
-            2022-04-21
-        </td>
-    </tr>
-    <tr>
-        <td>v0.1.0-preview.5
-        </td>
-        <td>
-            2.0.1
-        </td>
-        <td>
-            2022-04-20
         </td>
     </tr>
     <tr>
@@ -195,9 +57,6 @@ Apollo Federation is an evolving project, and it will receive new features and b
         <td>
             2.0.0
         </td>
-        <td>
-            2022-04-11
-        </td>
     </tr>
     <tr>
         <td>v0.1.0-preview.3
@@ -205,9 +64,12 @@ Apollo Federation is an evolving project, and it will receive new features and b
         <td>
             2.0.0-preview.7
         </td>
-        <td>
-            2022-04-08
-        </td>
     </tr>
     </tbody>
 </table>
+
+## Federation 1 support
+
+Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the Apollo Router with any valid Federation 1.x supergraph.
+
+> If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).

@@ -1,4 +1,7 @@
 //! Performance oriented JSON manipulation.
+
+#![allow(missing_docs)] // FIXME
+
 use std::cmp::min;
 use std::fmt;
 
@@ -7,12 +10,12 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 use serde_json_bytes::Map;
-pub use serde_json_bytes::Value;
+pub(crate) use serde_json_bytes::Value;
 
 use crate::error::FetchError;
 
 /// A JSON object.
-pub type Object = Map<ByteString, Value>;
+pub(crate) type Object = Map<ByteString, Value>;
 
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
@@ -41,7 +44,7 @@ macro_rules! ensure_object {
 
 #[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
-pub trait ValueExt {
+pub(crate) trait ValueExt {
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
     /// exists.
     #[track_caller]
@@ -527,6 +530,17 @@ impl Path {
 
     pub fn pop(&mut self) -> Option<PathElement> {
         self.0.pop()
+    }
+
+    pub fn last(&mut self) -> Option<&PathElement> {
+        self.0.last()
+    }
+
+    pub fn last_key(&mut self) -> Option<String> {
+        self.0.last().and_then(|elem| match elem {
+            PathElement::Key(k) => Some(k.clone()),
+            _ => None,
+        })
     }
 }
 

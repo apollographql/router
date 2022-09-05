@@ -36,13 +36,15 @@
     "Managed Federation": {
       "Overview": "/managed-federation/overview",
       "Setup": "/managed-federation/setup",
+      "Client awareness": "/managed-federation/client-awareness",
       "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
+      "Rhai scripts": "/customizations/rhai",
+      "Rhai API reference": "/customizations/rhai-api",
       "Native Rust plugins": "/customizations/native",
-      "Custom binary": "/customizations/custom-binary",
-      "Rhai scripts": "/customizations/rhai"
+      "Custom router binary": "/customizations/custom-binary"
     },
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",

@@ -15,18 +15,9 @@
 // one or perhaps two services and may only be interested in manipulating
 // requests or responses.
 
-// At the router_service stage, register callbacks for processing requests and
+// At the supergraph_service stage, register callbacks for processing requests and
 // responses.
-fn router_service(service) {
-    const request_callback = Fn("process_request");
-    service.map_request(request_callback);
-    const response_callback = Fn("process_response");
-    service.map_response(response_callback);
-}
-
-// At the query_planner_service stage, register callbacks for processing requests and
-// responses.
-fn query_planner_service(service) {
+fn supergraph_service(service) {
     const request_callback = Fn("process_request");
     service.map_request(request_callback);
     const response_callback = Fn("process_response");

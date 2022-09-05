@@ -20,9 +20,8 @@ telemetry:
     client_name_header: MyClientHeaderName
     # defaults to apollographql-client-version
     client_version_header: MyClientHeaderVersion
-server:
-  cors:
-    # The headers to allow.
-    # (Defaults to [ Content-Type ], which is required for Apollo Studio)
-    allow_headers: [ Content-Type, MyClientHeaderName, MyClientHeaderVersion]
+cors:
+  # The headers to allow.
+  # (Defaults to [ Content-Type ], which is required for Apollo Studio)
+  allow_headers: [ Content-Type, MyClientHeaderName, MyClientHeaderVersion]
 ```
