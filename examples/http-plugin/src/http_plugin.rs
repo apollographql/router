@@ -9,8 +9,8 @@ use apollo_router::register_plugin;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use apollo_router::services::utility;
 use apollo_router::Context;
-use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,7 +21,6 @@ use tower::ServiceExt;
 #[derive(Debug)]
 struct HttpPlugin {
     configuration: Conf,
-    client: Client, // Reqwest client
     sdl: Arc<String>,
 }
 
@@ -46,8 +45,7 @@ impl Plugin for HttpPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(HttpPlugin {
             configuration: init.config,
-            client: Client::new(),
-            sdl: init.supergraph_sdl.clone(),
+            sdl: init.supergraph_sdl,
         })
     }
 
@@ -55,32 +53,22 @@ impl Plugin for HttpPlugin {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         let proto_url = self.configuration.url.clone();
-        let my_client = self.client.clone();
         let sdl = self.sdl.clone();
         ServiceBuilder::new()
             .checkpoint_async(move |mut request: supergraph::Request| {
                 let proto_url = proto_url.clone();
-                let my_client = my_client.clone();
-                let sdl = sdl.clone();
+                let my_sdl = sdl.to_string();
 
                 async move {
                     // Call into our out of process processor with a body of our body
-                    let output = Output {
-                        context: request.context.clone(),
-                        sdl,
-                        body: request.originating_request.body().clone(),
-                    };
 
-                    tracing::info!(
-                        "forwarding query: {:?}",
-                        request.originating_request.body().query
-                    );
-                    let response = my_client.post(proto_url).json(&output).send().await?;
-
-                    // First, let's update our request
-                    let modified_output: Output = response.json().await?;
+                    let my_request = request.originating_request.body().clone();
+                    let my_context = request.context.clone();
+                    let modified_output =
+                        utility::call_service(&proto_url, my_request, my_context, my_sdl)
+                            .await
+                            .map_err(|e: BoxError| e.to_string())?;
                     // tracing::info!("modified output: {:?}", modified_output);
-                    tracing::info!("received modified query: {:?}", modified_output.body.query);
                     *request.originating_request.body_mut() = modified_output.body;
                     request.context = modified_output.context;
 

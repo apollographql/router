@@ -19,6 +19,7 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use once_cell::sync::Lazy;
 use opentelemetry::trace::SpanKind;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -36,7 +37,6 @@ use rhai::Shared;
 use rhai::AST;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::runtime::Runtime;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -58,6 +58,8 @@ use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
+
+static SDL: Lazy<Mutex<Arc<String>>> = Lazy::new(|| Mutex::new(Arc::new("".to_string())));
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -361,6 +363,7 @@ mod router_plugin_mod {
 pub(crate) struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
+    sdl: Arc<String>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -389,7 +392,11 @@ impl Plugin for Rhai {
         let main = scripts_path.join(&main_file);
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
-        Ok(Self { ast, engine })
+        let sdl = init.supergraph_sdl.clone();
+        // Take out existing value so that hot-reload works...
+        let mut guard = SDL.lock().unwrap();
+        *guard = sdl.clone();
+        Ok(Self { ast, engine, sdl })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -983,6 +990,7 @@ impl Rhai {
         service: ServiceStep,
     ) -> Result<(), String> {
         let mut scope = Scope::new();
+        scope.push_constant("apollo_sdl", self.sdl.clone());
         scope.push_constant("apollo_start", Instant::now());
         let rhai_service = RhaiService {
             scope: scope.clone(),
@@ -1314,31 +1322,42 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) })
             .register_result_fn(
                 "call_service",
-                |url: &str,
-                 request: Request,
-                 context: Context,
-                 sdl: &str|
-                 -> Result<Request, Box<EvalAltResult>> {
-                    let my_url = url.to_string();
-                    let my_sdl = sdl.to_string();
-                    let handler = async move {
-                        crate::services::utility::call_service(&my_url, request, context, my_sdl)
+                |obj: &mut SharedMut<SupergraphRequest>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| {
+                        let my_request = request.originating_request.body().clone();
+                        let my_context = request.context.clone();
+                        let my_sdl = SDL
+                            .lock()
+                            .expect("must be initialised during module load")
+                            .to_string();
+
+                        let my_url = url.to_string();
+
+                        let handler = async move {
+                            crate::services::utility::call_service(
+                                &my_url, my_request, my_context, my_sdl,
+                            )
                             .await
                             .map_err(|e: BoxError| e.to_string())
-                    };
-                    let hdl = thread::spawn(move || -> Result<Output, String> {
-                        let rt = Runtime::new().expect("spawning tokio runtime should work");
-                        rt.block_on(handler)
-                    });
-
-                    let output = hdl.join().expect("join should work")?;
-                    Ok(output.body)
+                        };
+                        // This would fail if we didn't have a tokio runtime here.
+                        let rt = tokio::runtime::Handle::current();
+                        // Spawn a thread to drive our async work
+                        let hdl = thread::spawn(move || -> Result<Output, String> {
+                            rt.block_on(handler)
+                        });
+                        // Join our thread and extract our result
+                        let modified_output =
+                            hdl.join().map_err(|e| format!("join failed: {:?}", e))??;
+                        // Update the supplied request
+                        *request.originating_request.body_mut() = modified_output.body;
+                        request.context = modified_output.context;
+                        Ok(())
+                    })
                 },
-            );
-
-        register_rhai_interface!(engine, supergraph, execution, subgraph);
-
-        engine
+            )
             .register_get_result(
                 "context",
                 |obj: &mut SharedMut<supergraph::DeferredResponse>| {
@@ -1351,9 +1370,7 @@ impl Rhai {
                     obj.with_mut(|response| response.context = context);
                     Ok(())
                 },
-            );
-
-        engine
+            )
             .register_get_result(
                 "context",
                 |obj: &mut SharedMut<execution::DeferredResponse>| {
@@ -1367,6 +1384,8 @@ impl Rhai {
                     Ok(())
                 },
             );
+
+        register_rhai_interface!(engine, supergraph, execution, subgraph);
 
         engine
     }

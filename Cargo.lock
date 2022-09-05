@@ -4245,6 +4245,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rhai-external"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rhai-logging"
 version = "0.1.0"
 dependencies = [

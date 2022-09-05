@@ -15,6 +15,7 @@ members = [
     "examples/http-plugin",
     "examples/status-code-propagation",
     "examples/op-name-to-header",
+    "examples/rhai-external",
     "examples/rhai-logging",
     "examples/rhai-data-response-mutate",
     "examples/rhai-error-response-mutate",
