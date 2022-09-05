@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 0.1.20](https://img.shields.io/badge/Version-0.1.20-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.16.0](https://img.shields.io/badge/AppVersion-v0.16.0-informational?style=flat-square)
+![Version: 0.1.22](https://img.shields.io/badge/Version-0.1.22-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.0-alpha.1](https://img.shields.io/badge/AppVersion-v1.0.0--alpha.1-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,8 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm repo add apollographql https://todo/where-to-host-helm-repo
-helm repo update
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 0.1.22
 ```
 
 ## Install Chart
@@ -20,7 +19,7 @@ helm repo update
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] apollographql/router --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 0.1.22 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -73,6 +72,7 @@ helm show values apollographql/router
 | rhai.input_file | string | `""` | input rhai file, contents will be stored in a ConfigMap |
 | router | object | `{"args":["--hot-reload"],"configuration":{"server":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
+| service.annotations | object | `{}` |  |
 | service.port | int | `80` |  |
 | service.type | string | `"ClusterIP"` |  |
 | serviceAccount.annotations | object | `{}` |  |

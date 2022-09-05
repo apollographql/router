@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::SystemTimeError;
 
+use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::{ApolloExporter, Sender};
+use crate::plugins::telemetry::BoxError;
 use apollo_spaceport::trace::http::Values;
 use apollo_spaceport::trace::query_plan_node::FetchNode;
 use apollo_spaceport::trace::query_plan_node::FlattenNode;
@@ -25,10 +28,8 @@ use opentelemetry::Value;
 use thiserror::Error;
 use url::Url;
 
-use super::apollo::TracesReport;
-use crate::plugins::telemetry::apollo::SingleReport;
-use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
+use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
 
 #[derive(Error, Debug)]
@@ -58,16 +59,17 @@ pub(crate) enum Error {
 /// [`Reporter`]: apollo_spaceport::Reporter
 #[derive(Derivative)]
 #[derivative(Debug)]
-#[allow(dead_code)]
 pub(crate) struct Exporter {
     trace_config: config::Trace,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     endpoint: Url,
-    apollo_key: String,
+    #[derivative(Debug = "ignore")]
     apollo_graph_ref: String,
     client_name_header: HeaderName,
     client_version_header: HeaderName,
     schema_id: String,
+    #[derivative(Debug = "ignore")]
+    _apollo_exporter: ApolloExporter,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
 }
@@ -90,20 +92,21 @@ impl Exporter {
         client_name_header: HeaderName,
         client_version_header: HeaderName,
         schema_id: String,
-        apollo_sender: Sender,
         buffer_size: usize,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BoxError> {
+        let apollo_exporter =
+            ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
+        Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             trace_config,
             endpoint,
-            apollo_key,
             apollo_graph_ref,
             client_name_header,
             client_version_header,
             schema_id,
-            apollo_sender,
-        }
+            apollo_sender: apollo_exporter.provider(),
+            _apollo_exporter: apollo_exporter,
+        })
     }
 
     fn extract_root_trace(
@@ -351,13 +354,9 @@ impl Exporter {
 
         Http {
             method: method.into(),
-            host: Default::default(), // Do not fill in, we can't reliably get this information
-            path: Default::default(), // Do not fill in, we can't reliably get this information
             request_headers,
             response_headers: Default::default(),
             status_code: 0,
-            secure: Default::default(),
-            protocol: Default::default(),
         }
     }
 }

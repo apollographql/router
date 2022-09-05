@@ -411,8 +411,6 @@ impl Telemetry {
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
         // eventually be one.
         let mut builder = Self::create_metrics_exporters(&config)?;
-        // TODO refactor
-        config.apollo.as_mut().unwrap().apollo_sender = builder.apollo_metrics_provider();
 
         // the global tracer and subscriber initialization step must be performed only once
         TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {

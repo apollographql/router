@@ -16,7 +16,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
-use super::apollo_exporter::Sender;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
@@ -80,10 +79,6 @@ pub(crate) struct Config {
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
     pub(crate) schema_id: String,
-    #[schemars(skip)]
-    #[serde(skip)]
-    #[derivative(Debug = "ignore")]
-    pub(crate) apollo_sender: Sender,
 }
 
 fn apollo_key() -> Option<String> {
@@ -123,7 +118,6 @@ impl Default for Config {
             client_name_header: client_name_header_default(),
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
-            apollo_sender: Sender::default(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
             send_headers: ForwardHeaders::None,

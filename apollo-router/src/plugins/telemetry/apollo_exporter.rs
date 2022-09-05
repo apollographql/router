@@ -109,6 +109,7 @@ impl ApolloExporter {
                         if let Some(r) = single_report {
                             report += r;
                         } else {
+                            tracing::info!("terminating apollo exporter");
                             break;
                         }
                        },

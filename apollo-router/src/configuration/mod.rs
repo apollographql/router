@@ -272,10 +272,10 @@ pub(crate) struct Server {
     #[serde(default = "default_health_check_path")]
     pub(crate) health_check_path: String,
 
-    /// Experimental @defer directive support
-    /// default: false
+    /// Preview @defer directive support
+    /// default: true
     #[serde(default = "default_defer_support")]
-    pub(crate) experimental_defer_support: bool,
+    pub(crate) preview_defer_support: bool,
 
     /// Experimental limitation of query depth
     /// default: 4096
@@ -302,7 +302,7 @@ impl Server {
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             graphql_path: graphql_path.unwrap_or_else(default_graphql_path),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
-            experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
+            preview_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }
@@ -442,7 +442,7 @@ fn default_health_check_path() -> String {
 }
 
 fn default_defer_support() -> bool {
-    false
+    true
 }
 
 fn default_parser_recursion_limit() -> usize {
@@ -501,6 +501,7 @@ impl Cors {
             }))
         };
         let cors = CorsLayer::new()
+            .vary([])
             .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
             .expose_headers(cors::ExposeHeaders::list(

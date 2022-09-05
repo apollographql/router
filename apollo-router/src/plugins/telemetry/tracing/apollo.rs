@@ -21,7 +21,6 @@ impl TracingConfigurator for Config {
                 client_name_header,
                 client_version_header,
                 schema_id,
-                apollo_sender,
                 buffer_size,
                 ..
             } => {
@@ -35,9 +34,8 @@ impl TracingConfigurator for Config {
                     .client_name_header(client_name_header)
                     .client_version_header(client_version_header)
                     .schema_id(schema_id)
-                    .apollo_sender(apollo_sender.clone())
                     .buffer_size(*buffer_size)
-                    .build();
+                    .build()?;
                 builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
             }
             _ => builder,
