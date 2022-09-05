@@ -1,7 +1,6 @@
 //! Configuration for the telemetry plugin.
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
@@ -14,7 +13,7 @@ use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
 
-pub trait GenericWith<T>
+pub(crate) trait GenericWith<T>
 where
     Self: Sized,
 {
@@ -42,74 +41,74 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
     #[allow(dead_code)]
-    pub metrics: Option<Metrics>,
-    pub tracing: Option<Tracing>,
-    pub apollo: Option<apollo::Config>,
+    pub(crate) metrics: Option<Metrics>,
+    pub(crate) tracing: Option<Tracing>,
+    pub(crate) apollo: Option<apollo::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
-pub struct Metrics {
-    pub common: Option<MetricsCommon>,
-    pub otlp: Option<otlp::Config>,
-    pub prometheus: Option<metrics::prometheus::Config>,
+pub(crate) struct Metrics {
+    pub(crate) common: Option<MetricsCommon>,
+    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct MetricsCommon {
-    pub delay_interval: Option<Duration>,
+pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
-    pub attributes: Option<MetricsAttributesConf>,
+    pub(crate) attributes: Option<MetricsAttributesConf>,
     /// Set a service.name resource in your metrics
-    pub service_name: Option<String>,
+    pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
-    pub service_namespace: Option<String>,
+    pub(crate) service_namespace: Option<String>,
     #[serde(default)]
     /// Resources
-    pub resources: HashMap<String, String>,
+    pub(crate) resources: HashMap<String, String>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Tracing {
-    pub propagation: Option<Propagation>,
-    pub trace_config: Option<Trace>,
-    pub otlp: Option<otlp::Config>,
-    pub jaeger: Option<tracing::jaeger::Config>,
-    pub zipkin: Option<tracing::zipkin::Config>,
-    pub datadog: Option<tracing::datadog::Config>,
+pub(crate) struct Tracing {
+    pub(crate) propagation: Option<Propagation>,
+    pub(crate) trace_config: Option<Trace>,
+    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) jaeger: Option<tracing::jaeger::Config>,
+    pub(crate) zipkin: Option<tracing::zipkin::Config>,
+    pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Propagation {
-    pub baggage: Option<bool>,
-    pub trace_context: Option<bool>,
-    pub jaeger: Option<bool>,
-    pub datadog: Option<bool>,
-    pub zipkin: Option<bool>,
+pub(crate) struct Propagation {
+    pub(crate) baggage: Option<bool>,
+    pub(crate) trace_context: Option<bool>,
+    pub(crate) jaeger: Option<bool>,
+    pub(crate) datadog: Option<bool>,
+    pub(crate) zipkin: Option<bool>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Trace {
-    pub service_name: Option<String>,
-    pub service_namespace: Option<String>,
-    pub sampler: Option<SamplerOption>,
-    pub parent_based_sampler: Option<bool>,
-    pub max_events_per_span: Option<u32>,
-    pub max_attributes_per_span: Option<u32>,
-    pub max_links_per_span: Option<u32>,
-    pub max_attributes_per_event: Option<u32>,
-    pub max_attributes_per_link: Option<u32>,
-    pub attributes: Option<BTreeMap<String, AttributeValue>>,
+#[non_exhaustive]
+pub(crate) struct Trace {
+    pub(crate) service_name: Option<String>,
+    pub(crate) service_namespace: Option<String>,
+    pub(crate) sampler: Option<SamplerOption>,
+    pub(crate) parent_based_sampler: Option<bool>,
+    pub(crate) max_events_per_span: Option<u32>,
+    pub(crate) max_attributes_per_span: Option<u32>,
+    pub(crate) max_links_per_span: Option<u32>,
+    pub(crate) max_attributes_per_event: Option<u32>,
+    pub(crate) max_attributes_per_link: Option<u32>,
+    pub(crate) attributes: Option<BTreeMap<String, AttributeValue>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum AttributeValue {
+pub(crate) enum AttributeValue {
     /// bool values
     Bool(bool),
     /// i64 values
@@ -136,7 +135,7 @@ impl From<AttributeValue> for opentelemetry::Value {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum AttributeArray {
+pub(crate) enum AttributeArray {
     /// Array of bools
     Bool(Vec<bool>),
     /// Array of integers
@@ -160,7 +159,7 @@ impl From<AttributeArray> for opentelemetry::Array {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
-pub enum SamplerOption {
+pub(crate) enum SamplerOption {
     /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
     /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
     /// zero, but spans may still be sampled if their parent is.
@@ -170,7 +169,7 @@ pub enum SamplerOption {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Sampler {
+pub(crate) enum Sampler {
     /// Always sample the trace
     AlwaysOn,
     /// Never sample the trace

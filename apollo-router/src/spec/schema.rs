@@ -21,7 +21,7 @@ use crate::*;
 
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]
-pub struct Schema {
+pub(crate) struct Schema {
     string: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, Uri>,
@@ -31,12 +31,12 @@ pub struct Schema {
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
-    pub schema_id: Option<String>,
+    pub(crate) schema_id: Option<String>,
     root_operations: HashMap<OperationKind, String>,
 }
 
 impl Schema {
-    pub fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+    pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let mut schema = parse(s, configuration)?;
         schema.api_schema = Some(Box::new(api_schema(s, configuration)?));
         return Ok(schema);
@@ -432,7 +432,7 @@ impl Schema {
 
 impl Schema {
     /// Extracts a string containing the entire [`Schema`].
-    pub fn as_string(&self) -> &Arc<String> {
+    pub(crate) fn as_string(&self) -> &Arc<String> {
         &self.string
     }
 
@@ -444,19 +444,15 @@ impl Schema {
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
-    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
+    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()
     }
 
-    pub fn api_schema(&self) -> &Schema {
+    pub(crate) fn api_schema(&self) -> &Schema {
         match &self.api_schema {
             Some(schema) => schema,
             None => self,
         }
-    }
-
-    pub fn boxed(self) -> Box<Self> {
-        Box::new(self)
     }
 
     fn with_introspection(schema: &str) -> String {
@@ -844,7 +840,14 @@ mod tests {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
-                    "The supergraph schema failed to produce a valid API schema"
+                    r#"The supergraph schema failed to produce a valid API schema. Caused by:
+Input field "InputObject.privateField" is @inaccessible but is used in the default value of "@foo(someArg:)", which is in the API schema.
+
+GraphQL request:42:1
+41 |
+42 | input InputObject {
+   | ^
+43 |   someField: String"#
                 );
             }
             other => panic!("unexpected schema result: {:?}", other),

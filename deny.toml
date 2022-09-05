@@ -41,10 +41,10 @@ allow = [
     "BSD-3-Clause",
     "CC0-1.0",
     "ISC",
-    "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
+    "LicenseRef-ELv2",
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"
@@ -97,4 +97,5 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["open-telemetry", "apollographql", "tokio-rs"]
+# FIXME: remove "geal" from the allowed orgs once we have a fix for `async-compression`
+github = ["open-telemetry", "apollographql", "tokio-rs", "geal"]

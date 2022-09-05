@@ -15,23 +15,23 @@ The request lifecycle looks like this:
 ```mermaid
 sequenceDiagram
     actor Client
-    participant RouterService
+    participant SupergraphService
     participant QueryPlannerService
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>RouterService: request
-    RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService: 
-    RouterService->>ExecutionService: execute
+    Client->>SupergraphService: request
+    SupergraphService->>QueryPlannerService: plan
+    QueryPlannerService-->>SupergraphService: 
+    SupergraphService->>ExecutionService: execute
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
-    ExecutionService-->>RouterService: response
-    RouterService-->>Client: response
+    ExecutionService-->>SupergraphService: response
+    SupergraphService-->>Client: response
 ```
 
 For each request a single instance of `Context` is created and maintained .

@@ -18,7 +18,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -33,8 +32,8 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::subgraph;
 use crate::SubgraphRequest;
-use crate::SubgraphResponse;
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -121,11 +120,7 @@ impl Plugin for Headers {
             config: init.config,
         })
     }
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let mut operations = self.config.all.clone();
         if let Some(subgraph_operations) = self.config.subgraphs.get(name) {
             operations.append(&mut subgraph_operations.clone())
@@ -259,8 +254,6 @@ mod test {
 
     use super::*;
     use crate::graphql::Request;
-    use crate::graphql::Response;
-    use crate::http_ext;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::Config;
     use crate::plugins::headers::HeadersLayer;
@@ -387,7 +380,7 @@ mod test {
             name: "c".try_into()?,
             value: "d".try_into()?,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -402,8 +395,7 @@ mod test {
             .returning(example_response);
 
         let mut service =
-            HeadersLayer::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))])
-                .layer(mock.build());
+            HeadersLayer::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]).layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -420,7 +412,7 @@ mod test {
         let mut service = HeadersLayer::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -445,7 +437,7 @@ mod test {
         let mut service = HeadersLayer::new(vec![Operation::Propagate(Propagate::Matching {
             matching: Regex::from_str("d[ab]")?,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -471,7 +463,7 @@ mod test {
             rename: None,
             default: None,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -497,7 +489,7 @@ mod test {
             rename: Some("ea".try_into()?),
             default: None,
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -523,7 +515,7 @@ mod test {
             rename: None,
             default: Some("defaulted".try_into()?),
         })])
-        .layer(mock.build());
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -531,10 +523,7 @@ mod test {
 
     fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new_from_response(
-            http::Response::builder()
-                .body(Response::builder().build())
-                .unwrap()
-                .into(),
+            http::Response::default(),
             Context::new(),
         ))
     }
@@ -542,7 +531,7 @@ mod test {
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
-                http_ext::Request::fake_builder()
+                http::Request::builder()
                     .header("da", "vda")
                     .header("db", "vdb")
                     .header("db", "vdb")
@@ -550,10 +539,9 @@ mod test {
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
                     .body(Request::builder().query("query").build())
-                    .build()
                     .expect("expecting valid request"),
             ),
-            subgraph_request: http_ext::Request::fake_builder()
+            subgraph_request: http::Request::builder()
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
@@ -561,7 +549,6 @@ mod test {
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
-                .build()
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),

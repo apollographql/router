@@ -1,13 +1,94 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 912
 expression: "&schema"
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "Configuration",
-  "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
+  "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "cors": {
+      "description": "Cross origin request headers.",
+      "default": {
+        "allow_any_origin": false,
+        "allow_credentials": false,
+        "allow_headers": [],
+        "expose_headers": null,
+        "origins": [
+          "https://studio.apollographql.com"
+        ],
+        "match_origins": null,
+        "methods": [
+          "GET",
+          "POST",
+          "OPTIONS"
+        ]
+      },
+      "type": "object",
+      "properties": {
+        "allow_any_origin": {
+          "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
+          "default": false,
+          "type": "boolean"
+        },
+        "allow_credentials": {
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
+          "default": false,
+          "type": "boolean"
+        },
+        "allow_headers": {
+          "description": "The headers to allow.\n\nIf this value is not set, the router will mirror client's `Access-Control-Request-Headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expose_headers": {
+          "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
+          "default": null,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
+        "match_origins": {
+          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
+          "default": null,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
+        "methods": {
+          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+          "default": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origins": {
+          "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "csrf": {
       "description": "CSRF Configuration.",
       "type": "object",
@@ -282,6 +363,9 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.expose_query_plan": {
+          "type": "boolean"
+        },
         "experimental.include_subgraph_errors": {
           "type": "object",
           "properties": {
@@ -321,126 +405,26 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": {
-          "allow_any_origin": false,
-          "allow_credentials": false,
-          "allow_headers": [],
-          "expose_headers": null,
-          "origins": [
-            "https://studio.apollographql.com"
-          ],
-          "match_origins": null,
-          "methods": [
-            "GET",
-            "POST",
-            "OPTIONS"
-          ]
-        },
         "introspection": true,
         "landing_page": true,
-        "endpoint": "/",
+        "graphql_path": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false,
+        "preview_defer_support": true,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
-        "cors": {
-          "description": "Cross origin request headers.",
-          "default": {
-            "allow_any_origin": false,
-            "allow_credentials": false,
-            "allow_headers": [],
-            "expose_headers": null,
-            "origins": [
-              "https://studio.apollographql.com"
-            ],
-            "match_origins": null,
-            "methods": [
-              "GET",
-              "POST",
-              "OPTIONS"
-            ]
-          },
-          "type": "object",
-          "properties": {
-            "allow_any_origin": {
-              "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
-              "default": false,
-              "type": "boolean"
-            },
-            "allow_credentials": {
-              "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
-              "default": false,
-              "type": "boolean"
-            },
-            "allow_headers": {
-              "description": "The headers to allow.\n\nIf this value is not set, the router will mirror client's `Access-Control-Request-Headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
-              "default": [],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "expose_headers": {
-              "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
-              "default": null,
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "nullable": true
-            },
-            "match_origins": {
-              "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
-              "default": null,
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "nullable": true
-            },
-            "methods": {
-              "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
-              "default": [
-                "GET",
-                "POST",
-                "OPTIONS"
-              ],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "origins": {
-              "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
-              "default": [
-                "https://studio.apollographql.com"
-              ],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "endpoint": {
-          "description": "GraphQL endpoint default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "experimental_defer_support": {
-          "description": "Experimental @defer directive support default: false",
-          "default": false,
-          "type": "boolean"
-        },
         "experimental_parser_recursion_limit": {
           "description": "Experimental limitation of query depth default: 4096",
           "default": 4096,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "graphql_path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
@@ -470,6 +454,11 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "preview_defer_support": {
+          "description": "Preview @defer directive support default: true",
+          "default": true,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1274,26 +1263,6 @@ expression: "&schema"
                   "additionalProperties": false,
                   "nullable": true
                 },
-                "delay_interval": {
-                  "type": "object",
-                  "required": [
-                    "nanos",
-                    "secs"
-                  ],
-                  "properties": {
-                    "nanos": {
-                      "type": "integer",
-                      "format": "uint32",
-                      "minimum": 0.0
-                    },
-                    "secs": {
-                      "type": "integer",
-                      "format": "uint64",
-                      "minimum": 0.0
-                    }
-                  },
-                  "nullable": true
-                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
@@ -1887,6 +1856,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
             "compression": {
@@ -1899,16 +1869,84 @@ expression: "&schema"
               ],
               "nullable": true
             },
-            "query_deduplication": {
+            "deduplicate_query": {
               "description": "Enable query deduplication",
               "type": "boolean",
               "nullable": true
+            },
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "deduplicate_variables": {
+          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "type": "boolean",
+          "nullable": true
+        },
+        "router": {
+          "description": "Applied at the router level",
+          "type": "object",
+          "properties": {
+            "global_rate_limit": {
+              "description": "Enable global rate limiting",
+              "type": "object",
+              "required": [
+                "capacity",
+                "interval"
+              ],
+              "properties": {
+                "capacity": {
+                  "description": "Number of requests allowed",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 1.0
+                },
+                "interval": {
+                  "description": "Per interval",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "timeout": {
+              "description": "Enable timeout for incoming requests",
+              "default": null,
+              "type": "string"
             }
           },
           "additionalProperties": false,
           "nullable": true
         },
         "subgraphs": {
+          "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -1923,19 +1961,41 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
-              "query_deduplication": {
+              "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
                 "nullable": true
+              },
+              "global_rate_limit": {
+                "description": "Enable global rate limiting",
+                "type": "object",
+                "required": [
+                  "capacity",
+                  "interval"
+                ],
+                "properties": {
+                  "capacity": {
+                    "description": "Number of requests allowed",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 1.0
+                  },
+                  "interval": {
+                    "description": "Per interval",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "nullable": true
+              },
+              "timeout": {
+                "description": "Enable timeout for incoming requests",
+                "default": null,
+                "type": "string"
               }
             },
             "additionalProperties": false
           }
-        },
-        "variables_deduplication": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": "boolean",
-          "nullable": true
         }
       },
       "additionalProperties": false
