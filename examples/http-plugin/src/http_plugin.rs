@@ -65,7 +65,7 @@ impl Plugin for HttpPlugin {
                     let my_request = request.originating_request.body().clone();
                     let my_context = request.context.clone();
                     let modified_output =
-                        utility::call_service(&proto_url, my_request, my_context, my_sdl)
+                        utility::call_with_request(&proto_url, my_request, my_context, my_sdl)
                             .await
                             .map_err(|e: BoxError| e.to_string())?;
                     // tracing::info!("modified output: {:?}", modified_output);

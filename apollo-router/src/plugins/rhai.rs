@@ -1320,8 +1320,10 @@ impl Rhai {
                 format!("{:?}", x)
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) })
+            // rhai doesn't support generics, so we need to register "call_external"
+            // multiple times for each type of object we intend to support.
             .register_result_fn(
-                "call_service",
+                "call_external",
                 |obj: &mut SharedMut<SupergraphRequest>,
                  url: &str|
                  -> Result<(), Box<EvalAltResult>> {
@@ -1335,25 +1337,33 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let handler = async move {
-                            crate::services::utility::call_service(
-                                &my_url, my_request, my_context, my_sdl,
-                            )
-                            .await
-                            .map_err(|e: BoxError| e.to_string())
-                        };
-                        // This would fail if we didn't have a tokio runtime here.
-                        let rt = tokio::runtime::Handle::current();
-                        // Spawn a thread to drive our async work
-                        let hdl = thread::spawn(move || -> Result<Output, String> {
-                            rt.block_on(handler)
-                        });
-                        // Join our thread and extract our result
-                        let modified_output =
-                            hdl.join().map_err(|e| format!("join failed: {:?}", e))??;
+                        let output = call_external(my_url, my_request, my_context, my_sdl)?;
                         // Update the supplied request
-                        *request.originating_request.body_mut() = modified_output.body;
-                        request.context = modified_output.context;
+                        *request.originating_request.body_mut() = output.body;
+                        request.context = output.context;
+                        Ok(())
+                    })
+                },
+            )
+            .register_result_fn(
+                "call_external",
+                |obj: &mut SharedMut<ExecutionRequest>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| {
+                        let my_request = request.originating_request.body().clone();
+                        let my_context = request.context.clone();
+                        let my_sdl = SDL
+                            .lock()
+                            .expect("must be initialised during module load")
+                            .to_string();
+
+                        let my_url = url.to_string();
+
+                        let output = call_external(my_url, my_request, my_context, my_sdl)?;
+                        // Update the supplied request
+                        *request.originating_request.body_mut() = output.body;
+                        request.context = output.context;
                         Ok(())
                     })
                 },
@@ -1393,6 +1403,30 @@ impl Rhai {
     fn ast_has_function(&self, name: &str) -> bool {
         self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
+}
+
+// This function is a sync "wrapper" into the async call_with_request fn.
+// Rhai interfaces must be sync, so we must bridge from sync into async.
+// The safest way to do this is to spawn a thread, using the current runtime
+// and then drive the work from our new thread.
+fn call_external(
+    url: String,
+    request: Request,
+    context: Context,
+    sdl: String,
+) -> Result<Output, Box<EvalAltResult>> {
+    let handler = async move {
+        crate::services::utility::call_with_request(&url, request, context, sdl)
+            .await
+            .map_err(|e: BoxError| e.to_string())
+    };
+    // This would fail if we didn't have a tokio runtime here.
+    let rt = tokio::runtime::Handle::current();
+    // Spawn a thread to drive our async work
+    let hdl = thread::spawn(move || -> Result<Output, String> { rt.block_on(handler) });
+    // Join our thread and extract our result
+    let output = hdl.join().map_err(|e| format!("join failed: {:?}", e))??;
+    Ok(output)
 }
 
 register_plugin!("apollo", "rhai", Rhai);

@@ -25,6 +25,6 @@ fn supergraph_service(service) {
 // Generate a log for each request at this stage
 fn process_request(request) {
     print(`before request: ${request}`);
-    request.call_service("http://127.0.0.1:8081");
+    request.call_external("http://127.0.0.1:8081");
     print(`after request: ${request}`);
 }

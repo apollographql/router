@@ -18,7 +18,7 @@ pub struct Output {
     pub body: graphql::Request,
 }
 
-pub async fn call_service(
+pub async fn call_with_request(
     url: &str,
     request: graphql::Request,
     context: Context,
