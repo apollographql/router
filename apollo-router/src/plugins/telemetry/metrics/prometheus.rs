@@ -17,6 +17,7 @@ use tower_service::Service;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::router_factory::Endpoint;
 use crate::services::transport;
 use crate::ListenAddr;
 
@@ -67,12 +68,16 @@ impl MetricsConfigurator for Config {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 ))
                 .try_init()?;
+
             builder = builder.with_custom_endpoint(
-                "",
-                PrometheusService {
-                    registry: exporter.registry().clone(),
-                }
-                .boxed(),
+                self.listen.clone(),
+                Endpoint::new(
+                    self.path.clone(),
+                    PrometheusService {
+                        registry: exporter.registry().clone(),
+                    }
+                    .boxed(),
+                ),
             );
             builder = builder.with_meter_provider(exporter.provider()?);
             builder = builder.with_exporter(exporter);

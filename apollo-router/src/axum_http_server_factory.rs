@@ -2062,11 +2062,11 @@ Content-Type: application/json\r
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
             ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-            Endpoint::new("/a-custom-path".to_string(), endpoint.clone()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.clone().boxed()),
         );
         web_endpoints.insert(
             ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-            Endpoint::new("/an-other-custom-path".to_string(), endpoint),
+            Endpoint::new("/an-other-custom-path".to_string(), endpoint.boxed()),
         );
 
         let conf = Configuration::builder()

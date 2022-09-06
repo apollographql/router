@@ -16,6 +16,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::plugin::DynPlugin;
+use crate::plugin::Handler;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
@@ -24,17 +25,30 @@ use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Endpoint {
     path: String,
-    pub(crate) handler: transport::BoxCloneService,
+    // Plugins need to be Send + Sync
+    // BoxCloneService isn't enough
+    handler: Handler,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 impl Endpoint {
-    pub fn new(path: String, handler: transport::BoxCloneService) -> Self {
-        Self { path, handler }
+    pub fn new(path: String, handler: transport::BoxService) -> Self {
+        Self {
+            path,
+            handler: Handler::new(handler),
+        }
     }
-    pub fn into_router(self) -> axum::Router {
+    pub(crate) fn into_router(self) -> axum::Router {
         let handler = move |req: http::Request<hyper::Body>| {
             let endpoint = self.handler.clone();
             async move {

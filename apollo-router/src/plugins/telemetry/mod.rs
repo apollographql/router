@@ -19,7 +19,6 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
-use http::StatusCode;
 use metrics::apollo::Sender;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
@@ -33,8 +32,6 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use router_bridge::planner::UsageReporting;
-use tower::service_fn;
-use tower::steer::Steer;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -49,7 +46,6 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -70,7 +66,6 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::transport;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ListenAddr;
@@ -104,7 +99,7 @@ pub struct Telemetry {
     // shutdown exporter.
     _metrics_exporters: Vec<MetricsExporterHandle>,
     meter_provider: AggregateMeterProvider,
-    custom_endpoints: HashMap<String, Handler>,
+    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: metrics::apollo::Sender,
 }
@@ -479,51 +474,8 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    // TODO [igni]: Refactor this, telemetry shouldnt be responsible for prometheus endpoint bootstrap
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-        let telemetry_endpoint = |prefix: String| {
-            let (paths, mut endpoints): (Vec<_>, Vec<_>) =
-                self.custom_endpoints.clone().into_iter().unzip();
-            endpoints.push(Self::not_found_endpoint());
-            let not_found_index = endpoints.len() - 1;
-
-            Steer::new(
-                // All services we route between
-                endpoints,
-                // How we pick which service to send the request to
-                move |req: &transport::Request, _services: &[_]| {
-                    let endpoint = req.uri().path().strip_prefix(prefix.as_str());
-                    if let Some(index) = paths
-                        .iter()
-                        .position(|path| Some(path.as_str()) == endpoint)
-                    {
-                        index
-                    } else {
-                        not_found_index
-                    }
-                },
-            )
-            .boxed_clone()
-        };
-        let mut mm = MultiMap::new();
-
-        let prometheus_configuration = self
-            .config
-            .metrics
-            .clone()
-            .map(|m| m.prometheus)
-            .unwrap_or_default()
-            .unwrap_or_default();
-
-        if prometheus_configuration.enabled {
-            let path = prometheus_configuration.path;
-            mm.insert(
-                prometheus_configuration.listen,
-                Endpoint::new(path.clone(), telemetry_endpoint(path)),
-            );
-        }
-
-        mm
+        self.custom_endpoints.clone()
     }
 }
 
@@ -734,20 +686,6 @@ impl Telemetry {
             setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
         Ok(builder)
-    }
-
-    fn not_found_endpoint() -> Handler {
-        Handler::new(
-            service_fn(|_req: transport::Request| async {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body("Not found".into())
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        )
     }
 
     fn supergraph_service_span(
@@ -1408,9 +1346,7 @@ mod tests {
         let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
             .body(Default::default())
             .unwrap();
-        let mut web_endpoint = dyn_plugin
-            .web_endpoints()
-            .into_iter()
+        let mut web_endpoint = dbg!(dyn_plugin.web_endpoints().into_iter())
             .next()
             .unwrap()
             .1

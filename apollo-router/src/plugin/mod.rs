@@ -242,9 +242,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-        MultiMap::new()
-    }
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
 #[async_trait]
@@ -269,6 +268,7 @@ where
         self.name()
     }
 
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.web_endpoints()
     }
