@@ -46,6 +46,7 @@ clap = { version = "3.2.20", default-features = false, features = [
     "std",
 ] }
 console-subscriber = { version = "0.1.7", optional = true }
+ctor = "0.1.23"
 dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
@@ -132,7 +133,6 @@ serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
-startup = "0.1.1"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.34"
