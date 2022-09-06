@@ -79,6 +79,7 @@ async fn create_plugin(path: &str) -> Result<Box<dyn DynPlugin>, BoxError> {
             tracing::debug!("loaded shared object: {:p}", p_hdl);
         }
         // Find our plugin
+        #[allow(clippy::type_complexity)]
         let ctr: libloading::Symbol<
             unsafe extern "C" fn(
                 Box<serde_json::Value>,
@@ -86,6 +87,7 @@ async fn create_plugin(path: &str) -> Result<Box<dyn DynPlugin>, BoxError> {
                 -> FfiFuture<Box<Result<Box<dyn DynPlugin>, BoxError>>>,
         > = hdl.get(b"_plugin_create")?;
         {
+            #[allow(clippy::type_complexity)]
             let p_ctr: *const libloading::Symbol<
                 unsafe extern "C" fn(
                     Box<serde_json::Value>,
