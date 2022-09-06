@@ -1349,14 +1349,16 @@ mod tests {
         let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
             .body(Default::default())
             .unwrap();
-        let mut web_endpoint = dbg!(dyn_plugin.web_endpoints().into_iter())
+        let mut web_endpoint = dyn_plugin
+            .web_endpoints()
+            .into_iter()
             .next()
             .unwrap()
             .1
             .into_iter()
             .next()
             .unwrap()
-            .handler;
+            .into_router();
         let resp = web_endpoint
             .ready()
             .await
