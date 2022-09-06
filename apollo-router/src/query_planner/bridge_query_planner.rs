@@ -52,7 +52,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.server.experimental_defer_support),
+                            enable_defer: Some(configuration.server.preview_defer_support),
                         }),
                     },
                 )
@@ -198,7 +198,7 @@ impl BridgeQueryPlanner {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
-    formatted_query_plan: String,
+    formatted_query_plan: Option<String>,
     query_plan: QueryPlan,
 }
 

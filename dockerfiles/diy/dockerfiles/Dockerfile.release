@@ -44,4 +44,4 @@ COPY --from=build --chown=root:root /dist .
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
 # Default executable is the router
-ENTRYPOINT ["./router"]
+ENTRYPOINT ["/dist/router"]

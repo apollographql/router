@@ -11,6 +11,11 @@ You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/gr
 ```yaml title="router.yaml"
 telemetry:
   metrics:
+    common:
+      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+      service_name: "apollo-router"
+      # (Optional)
+      service_namespace: "apollo"
     prometheus:
       # By setting this endpoint you enable the prometheus exporter
       # All our endpoints exposed by plugins are namespaced by the name of the plugin
@@ -163,15 +168,14 @@ JSON path queries always begin with a period `.`
 
 Resources are similar to [attributes](#adding-custom-attributeslabels), but there are more globals. They're configured directly on the metrics exporter, which means they're always present on each of your metrics.
 
-As an example, it can be useful to set a `service.name` resource to help you identify metrics related to a particular service:
+As an example, it can be useful to set a `environment_name` resource to help you identify metrics related to a particular environment:
 
 ```yaml title="router.yaml"
 telemetry:
   metrics:
     common:
       resources:
-        # Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-        service.name: "apollo-router"
+        environment_name: "production"
 ```
 
 > [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
