@@ -318,12 +318,14 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
     originating_request: &'a Arc<http::Request<Request>>,
+    #[allow(clippy::type_complexity)]
     deferred_fetches:
         &'a HashMap<String, Sender<(Option<HeaderMap<HeaderValue>>, Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
 
 impl PlanNode {
+    #[allow(clippy::type_complexity)]
     fn execute_recursively<'a, SF>(
         &'a self,
         parameters: &'a ExecutionParameters<'a, SF>,
@@ -438,6 +440,7 @@ impl PlanNode {
                         },
                     deferred,
                 } => {
+                    #[allow(clippy::type_complexity)]
                     let mut deferred_fetches: HashMap<
                         String,
                         Sender<(Option<HeaderMap<HeaderValue>>, Value, Vec<Error>)>,
@@ -1305,9 +1308,9 @@ mod tests {
                 sender,
             )
             .await;
-        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.0.errors.len(), 1);
         let reason: String = serde_json_bytes::from_value(
-            result.errors[0].extensions.get("reason").unwrap().clone(),
+            result.0.errors[0].extensions.get("reason").unwrap().clone(),
         )
         .unwrap();
         assert_eq!(reason, "service closed".to_string());
@@ -1553,7 +1556,7 @@ mod tests {
 
         // primary response
         assert_eq!(
-            serde_json::to_value(&response).unwrap(),
+            serde_json::to_value(&response.0).unwrap(),
             serde_json::json! {{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}}
         );
 

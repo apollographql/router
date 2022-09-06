@@ -128,6 +128,7 @@ impl Response {
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a SupergraphRequest.
+    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -170,6 +171,7 @@ impl Response {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// ExecutionResponse. It's usually enough for testing, when a fully consructed
     /// ExecutionResponse is difficult to construct and not required for the pusposes of the test.
+    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
