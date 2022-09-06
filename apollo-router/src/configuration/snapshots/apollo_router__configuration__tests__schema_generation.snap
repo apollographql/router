@@ -1270,6 +1270,16 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "string"
                   }
+                },
+                "service_name": {
+                  "description": "Set a service.name resource in your metrics",
+                  "type": "string",
+                  "nullable": true
+                },
+                "service_namespace": {
+                  "description": "Set a service.namespace attribute in your metrics",
+                  "type": "string",
+                  "nullable": true
                 }
               },
               "additionalProperties": false,
