@@ -204,6 +204,8 @@ pub trait Plugin: Send + Sync + 'static {
     }
 
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    ///
+    /// This method is experimental and subject to change post 1.0
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
