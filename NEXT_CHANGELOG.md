@@ -32,6 +32,23 @@ Callers may need to add either a operator `?` (in plugins) or an `.unwrap()` cal
 By [@SimonSapin](https://github.com/SimonSapin)
 
 ## 🚀 Features
+
+### New plugin helper: `map_first_graphql_response`
+
+In supergraph and execution services, the service response contains
+not just one GraphQL response but a stream of them,
+in order to support features such as `@defer`.
+
+This new method of `ServiceExt` and `ServiceBuilderExt` in `apollo_router::layers`
+wraps a service and call `callback` when the first GraphQL response
+in the stream returned by the inner service becomes available.
+The callback can then modify the HTTP parts (headers, status code, etc)
+or the first GraphQL response before returning them.
+
+See the doc-comments in `apollo-router/src/layers/mod.rs` for more.
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation

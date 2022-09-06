@@ -290,10 +290,47 @@ impl Response {
         }
     }
 
-    pub fn map_stream(
-        self,
-        f: impl FnMut(graphql::Response) -> graphql::Response + Send + 'static,
-    ) -> Self {
+    /// Returns a new supergraph response where each [`graphql::Response`] is mapped through `f`.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    /// This method uses [`futures::stream::StreamExt::map`] to map over each item in the stream.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         inner
+    ///             .map_response(|supergraph_response| {
+    ///                 supergraph_response.map_stream(|graphql_response| {
+    ///                     // Something interesting here
+    ///                     graphql_response
+    ///                 })
+    ///             })
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    pub fn map_stream<F>(self, f: F) -> Self
+    where
+        F: 'static + Send + FnMut(graphql::Response) -> graphql::Response,
+    {
         self.map(move |stream| stream.map(f).boxed())
     }
 }
