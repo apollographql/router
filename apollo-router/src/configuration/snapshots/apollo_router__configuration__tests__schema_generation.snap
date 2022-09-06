@@ -408,16 +408,11 @@ expression: "&schema"
         "landing_page": true,
         "graphql_path": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false,
+        "preview_defer_support": true,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
-        "experimental_defer_support": {
-          "description": "Experimental @defer directive support default: false",
-          "default": false,
-          "type": "boolean"
-        },
         "experimental_parser_recursion_limit": {
           "description": "Experimental limitation of query depth default: 4096",
           "default": 4096,
@@ -458,6 +453,11 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "preview_defer_support": {
+          "description": "Preview @defer directive support default: true",
+          "default": true,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1269,6 +1269,16 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "string"
                   }
+                },
+                "service_name": {
+                  "description": "Set a service.name resource in your metrics",
+                  "type": "string",
+                  "nullable": true
+                },
+                "service_namespace": {
+                  "description": "Set a service.namespace attribute in your metrics",
+                  "type": "string",
+                  "nullable": true
                 }
               },
               "additionalProperties": false,

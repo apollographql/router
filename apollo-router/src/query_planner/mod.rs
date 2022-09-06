@@ -52,7 +52,7 @@ pub struct QueryPlan {
     usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
     /// String representation of the query plan (not a json representation)
-    pub(crate) formatted_query_plan: String,
+    pub(crate) formatted_query_plan: Option<String>,
     options: QueryPlanOptions,
 }
 
@@ -71,7 +71,7 @@ impl QueryPlan {
                 referenced_fields_by_type: Default::default(),
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             options: QueryPlanOptions::default(),
         }
     }
@@ -1267,7 +1267,7 @@ mod tests {
     async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             options: QueryPlanOptions::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
@@ -1317,7 +1317,7 @@ mod tests {
     async fn fetch_includes_operation_name() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1371,7 +1371,7 @@ mod tests {
     async fn fetch_makes_post_requests() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1428,7 +1428,7 @@ mod tests {
     async fn defer() {
         // plan for { t { x ... @defer { y } }}
         let query_plan: QueryPlan = QueryPlan {
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             root: PlanNode::Defer {
                 primary: Primary {
                     path: None,
@@ -1606,7 +1606,7 @@ mod tests {
             //     mutationB
             //   }
             // }
-            formatted_query_plan: String::new(),
+            formatted_query_plan: Default::default(),
             root: serde_json::from_str(
                 r#"{
                 "kind": "Sequence",

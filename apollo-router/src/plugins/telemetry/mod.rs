@@ -573,8 +573,8 @@ impl Telemetry {
                 None,
             );
 
-            opentelemetry::global::set_tracer_provider(tracer_provider);
-            opentelemetry::global::set_error_handler(handle_error)
+            global::set_tracer_provider(tracer_provider);
+            global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
             global::set_text_map_propagator(Self::create_propagator(&config));
 
@@ -652,6 +652,12 @@ impl Telemetry {
         let tracing = config.clone().tracing.unwrap_or_default();
 
         let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
+        // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
+        // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
+        // Waiting for the >=0.16.1 release
+        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
+            propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
+        }
         if propagation.baggage.unwrap_or_default() {
             propagators.push(Box::new(BaggagePropagator::default()));
         }
@@ -660,9 +666,6 @@ impl Telemetry {
         }
         if propagation.zipkin.unwrap_or_default() || tracing.zipkin.is_some() {
             propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
-        }
-        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
-            propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
@@ -701,7 +704,20 @@ impl Telemetry {
         {
             metrics_common_config.resources.insert(
                 String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(DEFAULT_SERVICE_NAME),
+                String::from(
+                    metrics_common_config
+                        .service_name
+                        .as_deref()
+                        .unwrap_or(DEFAULT_SERVICE_NAME),
+                ),
+            );
+        }
+        if let Some(service_namespace) = &metrics_common_config.service_namespace {
+            metrics_common_config.resources.insert(
+                String::from(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
+                ),
+                service_namespace.clone(),
             );
         }
 
@@ -1231,9 +1247,7 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "resources": {
-                            "service.name": "apollo-router"
-                        },
+                        "service_name": "apollo-router",
                         "attributes": {
                             "router": {
                                 "static": [

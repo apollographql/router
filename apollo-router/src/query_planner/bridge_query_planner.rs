@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
-use router_bridge::planner::DeferStreamSupport;
+use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
@@ -51,8 +51,8 @@ impl BridgeQueryPlanner {
                 Planner::new(
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
-                        defer_stream_support: Some(DeferStreamSupport {
-                            enable_defer: Some(configuration.server.experimental_defer_support),
+                        incremental_delivery: Some(IncrementalDeliverySupport {
+                            enable_defer: Some(configuration.server.preview_defer_support),
                         }),
                     },
                 )
@@ -198,7 +198,7 @@ impl BridgeQueryPlanner {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
-    formatted_query_plan: String,
+    formatted_query_plan: Option<String>,
     query_plan: QueryPlan,
 }
 
