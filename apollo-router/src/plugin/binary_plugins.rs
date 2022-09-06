@@ -1,9 +1,10 @@
 //! Binary plugins support.
 
-use crate::plugin::DynPlugin;
 use async_ffi::FfiFuture;
 use libloading::Library;
 use tower::BoxError;
+
+use crate::plugin::DynPlugin;
 
 /// Declare a binary plugin.
 #[macro_export]
