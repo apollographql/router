@@ -27,6 +27,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fix telemetry propagation with headers ([#1701](https://github.com/apollographql/router/issues/1701))
+
+Span context is now correctly propagated if you're trying to propagate tracing context to the router.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1701
+
 ## 🛠 Maintenance
 
 ### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
@@ -37,5 +44,11 @@ We changed `QueryPlannerResponse` to:
 + Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
+### replace `startup` crate with `ctor` crate ([#1704](https://github.com/apollographql/router/issues/1703))
+
+At startup, the router registers plugins. The crate we used to use (`startup`) has been yanked from crates.io. We've decided to move to the `ctor` crate.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1704
 
 ## 📚 Documentation
