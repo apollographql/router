@@ -882,7 +882,7 @@ impl Telemetry {
                 }
             }
             Err(err) => {
-                metrics.http_requests_error_total.add(1, &[]);
+                metrics.http_requests_error_total.add(1, &metric_attrs);
 
                 Err(err)
             }
