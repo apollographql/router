@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
 
 use futures::future::ready;
@@ -59,7 +60,7 @@ use crate::ExecutionResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
-static SDL: Lazy<Mutex<Arc<String>>> = Lazy::new(|| Mutex::new(Arc::new("".to_string())));
+static SDL: Lazy<RwLock<Arc<String>>> = Lazy::new(|| RwLock::new(Arc::new("".to_string())));
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -394,7 +395,7 @@ impl Plugin for Rhai {
         let ast = engine.compile_file(main)?;
         let sdl = init.supergraph_sdl.clone();
         // Take out existing value so that hot-reload works...
-        let mut guard = SDL.lock().unwrap();
+        let mut guard = SDL.write().unwrap();
         *guard = sdl.clone();
         Ok(Self { ast, engine, sdl })
     }
@@ -1331,7 +1332,7 @@ impl Rhai {
                         let my_request = request.originating_request.body().clone();
                         let my_context = request.context.clone();
                         let my_sdl = SDL
-                            .lock()
+                            .read()
                             .expect("must be initialised during module load")
                             .to_string();
 
@@ -1354,7 +1355,7 @@ impl Rhai {
                         let my_request = request.originating_request.body().clone();
                         let my_context = request.context.clone();
                         let my_sdl = SDL
-                            .lock()
+                            .read()
                             .expect("must be initialised during module load")
                             .to_string();
 
