@@ -170,6 +170,7 @@ impl Response {
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
+        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -181,6 +182,7 @@ impl Response {
     ) -> Result<Self, BoxError> {
         // Build a response
         let b = graphql::Response::builder()
+            .and_label(label)
             .and_path(path)
             .errors(errors)
             .extensions(extensions);
@@ -214,6 +216,7 @@ impl Response {
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
+        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -224,6 +227,7 @@ impl Response {
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
         Response::new(
+            label,
             data,
             path,
             errors,
@@ -245,6 +249,7 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         Response::new(
+            Default::default(),
             Default::default(),
             None,
             errors,
