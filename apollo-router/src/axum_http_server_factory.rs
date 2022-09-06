@@ -29,6 +29,7 @@ use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
+use http::header::VARY;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
@@ -483,6 +484,13 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
+// Process the headers to make sure that `VARY` is set correctly
+fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
+    if headers.get(VARY).is_none() {
+        // We don't have a VARY header, add one with value "origin"
+        headers.insert(VARY, HeaderValue::from_static("origin"));
+    }
+}
 async fn run_graphql_request<RS>(
     service: RS,
     http_request: Request<graphql::Request>,
@@ -517,6 +525,8 @@ where
                 }
                 Ok(response) => {
                     let (mut parts, mut stream) = response.into_parts();
+
+                    process_vary_header(&mut parts.headers);
 
                     match stream.next().await {
                         None => {
@@ -2294,5 +2304,41 @@ Content-Type: application/json\r
         );
 
         server.shutdown().await
+    }
+
+    // Test Vary processing
+
+    #[test]
+    fn it_adds_default_with_value_origin_if_no_vary_header() {
+        let mut default_headers = HeaderMap::new();
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "origin");
+    }
+
+    #[test]
+    fn it_leaves_vary_alone_if_set() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("*"));
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "*");
+    }
+
+    #[test]
+    fn it_leaves_varys_alone_if_there_are_more_than_one() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("one"));
+        default_headers.append(VARY, HeaderValue::from_static("two"));
+        process_vary_header(&mut default_headers);
+        let vary = default_headers.get_all(VARY);
+        assert_eq!(vary.iter().count(), 2);
+        for value in vary {
+            assert!(value == "one" || value == "two");
+        }
     }
 }
