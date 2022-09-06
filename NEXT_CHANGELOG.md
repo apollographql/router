@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Fix metrics duration for router request ([#1705](https://github.com/apollographql/router/issues/1705))
+
+With the introduction of `BoxStream` for defer we introduced a bug when computing http request duration metrics. Sometimes we didn't wait for the first response in the `BoxStream`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1705
+
 ### Fix telemetry propagation with headers ([#1701](https://github.com/apollographql/router/issues/1701))
 
 Span context is now correctly propagated if you're trying to propagate tracing context to the router.
