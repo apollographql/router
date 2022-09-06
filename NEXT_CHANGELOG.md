@@ -26,23 +26,6 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
-
-### Add `service_name` and `service_namespace` in `telemetry.metrics.common` ([PR #1492](https://github.com/apollographql/router/pull/1492))
-
-Add `service_name` and `service_namespace` in `telemetry.metrics.common` to reflect the same configuration than tracing.
-
-```yaml
-telemetry:
-  metrics:
-    common:
-      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "apollo-router"
-      # (Optional)
-      service_namespace: "apollo"
-```
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1492 
-
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation

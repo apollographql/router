@@ -6,6 +6,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [1.0.0-alpha.2] - 2022-09-06
 
+## 🚀 Features
+
+### Add `service_name` and `service_namespace` in `telemetry.metrics.common` ([Issue #1490](https://github.com/apollographql/router/issues/1490))
+
+Add `service_name` and `service_namespace` in `telemetry.metrics.common` to reflect the same configuration than tracing.
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+      service_name: "apollo-router"
+      # (Optional)
+      service_namespace: "apollo"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1492
+
 ## 🐛 Fixes
 
 ### Fix distributed tracing header propagation ([#1701](https://github.com/apollographql/router/issues/1701))
