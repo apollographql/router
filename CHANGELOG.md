@@ -4,13 +4,40 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [1.0.0-alpha.2] - 2022-09-06
+
+## 🐛 Fixes
+
+### Fix distributed tracing header propagation ([#1701](https://github.com/apollographql/router/issues/1701))
+
+Span context is now correctly propagated if you're trying to propagate tracing context to the router.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1701
+
+## 🛠 Maintenance
+
+### Replace `startup` crate with `ctor` crate ([#1704](https://github.com/apollographql/router/issues/1703))
+
+At startup, the router registers plugins. The crate we used to use ([`startup`](https://crates.io/crates/startup/versions)) has been yanked from crates.io and archived on GitHub.  We're unsure why the package was yanked, but we've decided to move to the [`ctor`](https://crates.io/crates/ctor) crate, which is more widely adopted and maintained.
+
+This should fix the sudden errors for those who were using the router as a library or attempting to scaffold a new plugin using `cargo scaffold`.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1704
+
+### macOS: Update Xcode build version from 11.7 to 13.4 ([PR #1702](https://github.com/apollographql/router/pull/1702))
+
+We now build our macOS binaries with Xcode 13.4 rather than 11.7.  This may result in the Router not working on very old versions of macOS but we'd rather get this out of the way before CircleCI potentially deprecates 11.x images themselves and we're unable to test on them anymore.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1702
+
+
 # [1.0.0-alpha.1] - 2022-09-02
 
 > 👋 We're getting closer to our release candidate stages so there are far less breaking changes to the API in this version, rather changes to configuration.  We'll have a bit more in the next release, but nothing as bad as the bumps from 0.15.x, through 0.16.0 and on to v1.0.0-alpha.0
 
 ## ❗ BREAKING ❗
 
-### Preserve plugin response `Vary` headers([PR #1660](https://github.com/apollographql/router/issues/1297))
+### Preserve plugin response `Vary` headers ([PR #1660](https://github.com/apollographql/router/issues/1297))
 
 It is now possible to set a `Vary` header in a client response from a plugin.
 
