@@ -100,13 +100,13 @@ pub(crate) struct ListenersAndRouters {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+    endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
-    let mut main_endpoint = main_router(service_factory, configuration)?;
-    let mut extra_endpoints = extra_routers(extra_endpoints);
+    let mut main_endpoint = main_endpoint(service_factory, configuration)?;
+    let mut extra_endpoints = extra_endpoints(endpoints);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -121,7 +121,7 @@ where
     })
 }
 
-fn main_router<RF>(
+fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
@@ -194,7 +194,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-fn extra_routers(endpoints: MultiMap<ListenAddr, Endpoint>) -> MultiMap<ListenAddr, Router> {
+fn extra_endpoints(endpoints: MultiMap<ListenAddr, Endpoint>) -> MultiMap<ListenAddr, Router> {
     let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
@@ -267,17 +267,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map(|((_, l), _)| l.local_addr().expect("checked above"))
                 .collect::<Vec<_>>();
 
-            // TODO [igni]: It would be great if we could tracing::debug!()
+            // TODO: It would be great if we could tracing::debug!()
             // all listen addrs *and* paths we have an endpoint on.
             // I can only do it for listen addrs yet, but hey that's a good start
             if !listeners_and_routers.is_empty() {
-                tracing::debug!(
-                    "Extra endpoints the router listens to:\n{}",
-                    listeners_and_routers
-                        .iter()
-                        .map(|((_, l), _)| format!("{}", l.local_addr().expect("checked above")))
-                        .join("\n")
-                );
+                let tracing_endpoints = listeners_and_routers
+                    .iter()
+                    .map(|((_, l), _)| format!("{}", l.local_addr().expect("checked above")))
+                    .join(", ");
+                tracing::debug!(%tracing_endpoints, "extra endpoints the router listens to");
             }
 
             let servers_and_shutdowns =
