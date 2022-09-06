@@ -69,12 +69,21 @@ mod tests {
             .await
             .unwrap();
         let response = service_response.next_response().await.unwrap();
-        assert_eq!(response.errors, []);
-
-        // Rhai should return a 200...
-        assert_eq!(StatusCode::OK, service_response.response.status());
-
-        // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        // If there is no server, then we'll get this error
+        if response.errors.len() == 1 {
+            assert_eq!(response.errors[0].message, "rhai execution error: 'Runtime error: error sending request for url (http://127.0.0.1:8081/): error trying to connect: tcp connect error: Connection refused (os error 61) (line 28, position 12) in call to function process_request'");
+            // Rhai should return a 500...
+            assert_eq!(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                service_response.response.status()
+            );
+            assert_eq!(response.data, None);
+        } else {
+            assert_eq!(response.errors, []);
+            // Rhai should return a 200...
+            assert_eq!(StatusCode::OK, service_response.response.status());
+            // with the expected message
+            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        }
     }
 }

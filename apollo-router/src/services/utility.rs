@@ -32,13 +32,13 @@ pub async fn call_with_request(
         body: request,
     };
 
-    tracing::info!("forwarding query: {:?}", output.body.query);
+    tracing::debug!("forwarding query: {:?}", output.body.query);
     let response = my_client.post(url).json(&output).send().await?;
 
     // First, let's update our request
     let modified_output: Output = response.json().await?;
-    // tracing::info!("modified output: {:?}", modified_output);
-    tracing::info!("modified query: {:?}", modified_output.body.query);
+    // tracing::debug!("modified output: {:?}", modified_output);
+    tracing::debug!("modified query: {:?}", modified_output.body.query);
 
     Ok(modified_output)
 }
