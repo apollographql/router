@@ -87,9 +87,10 @@ pub use crate::test_harness::TestHarness;
 #[doc(hidden)]
 pub mod _private {
     // Reexports for macros
+    pub use ctor;
+    pub use paste;
     pub use router_bridge;
     pub use serde_json;
-    pub use startup;
 
     // For tests
     pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;

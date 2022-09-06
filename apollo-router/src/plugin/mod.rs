@@ -278,15 +278,17 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
-        $crate::_private::startup::on_startup! {
-            let qualified_name = if $group == "" {
-                $name.to_string()
-            }
-            else {
-                format!("{}.{}", $group, $name)
-            };
+        $crate::_private::paste::paste! {
+            #[$crate::_private::ctor::ctor]
+            fn [<register_plugin_ $group _ $name>]() {
+                let qualified_name = if $group == "" {
+                    $name.to_string()
+                } else {
+                    format!("{}.{}", $group, $name)
+                };
 
-            $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
+                $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
+            }
         }
     };
 }

@@ -314,7 +314,7 @@ mod test {
     }
 
     register_plugin!(
-        "apollo.test",
+        "apollo_test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -335,7 +335,7 @@ mod test {
     }
 
     register_plugin!(
-        "apollo.test",
+        "apollo_test",
         "always_fails_to_start",
         AlwaysFailsToStartPlugin
     );
@@ -352,7 +352,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                apollo_test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -366,7 +366,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_fails_to_start:
+                apollo_test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -380,9 +380,9 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                apollo_test.always_starts_and_stops:
                     name: albert
-                apollo.test.always_fails_to_start:
+                apollo_test.always_fails_to_start:
                     name: albert
         "#,
         )
