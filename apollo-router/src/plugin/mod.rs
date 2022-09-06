@@ -278,9 +278,10 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
-        $crate::_private::paste::paste! {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
             #[$crate::_private::ctor::ctor]
-            fn [<register_plugin_ $group _ $name>]() {
+            fn register_plugin() {
                 let qualified_name = if $group == "" {
                     $name.to_string()
                 } else {
@@ -289,7 +290,7 @@ macro_rules! register_plugin {
 
                 $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
             }
-        }
+        };
     };
 }
 

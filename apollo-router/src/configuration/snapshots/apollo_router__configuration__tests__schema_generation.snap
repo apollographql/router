@@ -362,28 +362,6 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
-        "apollo_test.always_fails_to_start": {
-          "type": "object",
-          "required": [
-            "name"
-          ],
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          }
-        },
-        "apollo_test.always_starts_and_stops": {
-          "type": "object",
-          "required": [
-            "name"
-          ],
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          }
-        },
         "experimental.expose_query_plan": {
           "type": "boolean"
         },
@@ -1850,6 +1828,28 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
+    },
+    "test.always_fails_to_start": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "test.always_starts_and_stops": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
     },
     "traffic_shaping": {
       "type": "object",
