@@ -44,5 +44,19 @@ telemetry:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1492 
 
 ## 🐛 Fixes
+
+### Fix telemetry propagation with headers ([#1701](https://github.com/apollographql/router/issues/1701))
+
+Span context is now correctly propagated if you're trying to propagate tracing context to the router.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1701
+
 ## 🛠 Maintenance
+
+### replace `startup` crate with `ctor` crate ([#1704](https://github.com/apollographql/router/issues/1703))
+
+At startup, the router registers plugins. The crate we used to use (`startup`) has been yanked from crates.io. We've decided to move to the `ctor` crate.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1704
+
 ## 📚 Documentation
