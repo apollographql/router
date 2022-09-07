@@ -68,6 +68,8 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    #[serde(default)]
+    pub(crate) graphql: Graphql,
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -85,7 +87,7 @@ pub struct Configuration {
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 const TELEMETRY_KEY: &str = "telemetry";
 
-fn default_listen() -> ListenAddr {
+fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
@@ -94,12 +96,14 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        graphql: Option<Graphql>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
+            graphql: graphql.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -246,10 +250,42 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct Graphql {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_graphql_path")]
+    pub(crate) path: String,
+}
+
+#[buildstructor::buildstructor]
+impl Graphql {
+    #[builder]
+    pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+        }
+    }
+}
+
+impl Default for Graphql {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_listen")]
+    #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
     /// introspection queries
@@ -297,7 +333,7 @@ impl Server {
         parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_listen),
+            listen: listen.unwrap_or_else(default_graphql_listen),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
             graphql_path: graphql_path.unwrap_or_else(default_graphql_path),

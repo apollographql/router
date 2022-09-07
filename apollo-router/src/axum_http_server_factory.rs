@@ -130,11 +130,13 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let graphql_path = if configuration.server.graphql_path.ends_with("/*") {
+
+    let graphql_configuration = configuration.graphql.clone();
+    let graphql_path = if graphql_configuration.path.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        format!("{}router_extra_path", configuration.server.graphql_path)
+        format!("{}router_extra_path", graphql_configuration.path)
     } else {
-        configuration.server.graphql_path.clone()
+        graphql_configuration.path
     };
     let route = Router::<hyper::Body>::new()
         .route(
@@ -191,7 +193,7 @@ where
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
 
-    let listener = configuration.server.listen.clone();
+    let listener = graphql_configuration.listen;
     Ok(ListenAddrAndRouter(listener, route))
 }
 
