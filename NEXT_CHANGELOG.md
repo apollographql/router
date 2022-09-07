@@ -26,23 +26,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### rename originating_request to supergraph_request on various plugin Request structures ([ISSUE #1713](https://github.com/apollographql/router/issues/1713))
+### rename originating_request to supergraph_request on various plugin Request structures ([Issue #1713](https://github.com/apollographql/router/issues/1713))
 
 We feel that `supergraph_request` makes it more clear that this is the request received from the client.
 
-By [garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1715
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1715
 
-### Allow users to customize the prometheus endpoint URL ([#1645](https://github.com/apollographql/router/issues/1645))
+### Allow users to customize the prometheus endpoint URL ([Issue #1645](https://github.com/apollographql/router/issues/1645))
 
 The prometheus endpoint now listens to 0.0.0.0:9090/metrics by default. It previously listened to http://0.0.0.0:4000/plugins/apollo.telemetry/prometheus
 
 Have a look at the Features section to learn how to customize the listen address and the path
 
-By [@o0Ignition0o](https://github.com/@o0Ignition0o) in https://github.com/apollographql/router/pull/1654
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1654
 
 ## 🚀 Features
 
-### Allow users to customize the prometheus endpoint URL ([#1645](https://github.com/apollographql/router/issues/1645))
+### Allow users to customize the prometheus endpoint URL ([Issue #1645](https://github.com/apollographql/router/issues/1645))
 
 You can now customize the prometheus endpoint URL in your yml configuration:
 
