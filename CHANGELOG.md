@@ -68,6 +68,13 @@ telemetry:
 
 By [@o0Ignition0o](https://github.com/@o0Ignition0o) in https://github.com/apollographql/router/pull/1654
 
+### Add an `apollo_router::graphql::ResponseStream` type alias ([PR #1697](https://github.com/apollographql/router/pull/1697))
+
+It is equivalent to `BoxStream<'static, graphql::Response>` and makes
+some type signatures slightly simpler.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1697
+
 ## 🐛 Fixes
 
 ### Fix metrics duration for router request ([#1705](https://github.com/apollographql/router/issues/1705))
