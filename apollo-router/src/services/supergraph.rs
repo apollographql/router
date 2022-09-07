@@ -2,7 +2,6 @@
 
 use futures::future::ready;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use http::header::HeaderName;
 use http::method::Method;
@@ -158,7 +157,7 @@ impl Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<BoxStream<'static, graphql::Response>>,
+    pub response: http::Response<graphql::ResponseStream>,
     pub context: Context,
 }
 
@@ -274,7 +273,7 @@ impl Response {
     }
 
     pub fn new_from_response(
-        response: http::Response<BoxStream<'static, graphql::Response>>,
+        response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {
         Self { response, context }
@@ -282,7 +281,7 @@ impl Response {
 
     pub fn map<F>(self, f: F) -> Response
     where
-        F: FnOnce(BoxStream<'static, graphql::Response>) -> BoxStream<'static, graphql::Response>,
+        F: FnOnce(graphql::ResponseStream) -> graphql::ResponseStream,
     {
         Response {
             context: self.context,

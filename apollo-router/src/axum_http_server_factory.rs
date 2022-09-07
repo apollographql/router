@@ -26,7 +26,6 @@ use futures::future::join_all;
 use futures::future::ready;
 use futures::prelude::*;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -547,7 +546,7 @@ async fn handle_get(
     Host(host): Host,
     service: BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >,
     http_request: Request<Body>,
@@ -579,7 +578,7 @@ async fn handle_post(
     Json(request): Json<graphql::Request>,
     service: BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >,
     header_map: HeaderMap,
@@ -620,7 +619,7 @@ async fn run_graphql_request<RS>(
 where
     RS: Service<
             http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            Response = http::Response<graphql::ResponseStream>,
             Error = BoxError,
         > + Send,
 {
@@ -930,7 +929,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         SupergraphService {
-            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<BoxStream<'static, graphql::Response>>, BoxError>;
+            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<graphql::ResponseStream>, BoxError>;
         }
     }
 

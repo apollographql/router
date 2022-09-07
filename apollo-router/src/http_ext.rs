@@ -392,7 +392,7 @@ pub(crate) struct Response<T> {
 #[cfg(test)]
 pub(crate) fn from_response_to_stream(
     http: http::response::Response<graphql::Response>,
-) -> http::Response<futures::stream::BoxStream<'static, graphql::Response>> {
+) -> http::Response<graphql::ResponseStream> {
     use futures::future::ready;
     use futures::stream::once;
     use futures::StreamExt;
