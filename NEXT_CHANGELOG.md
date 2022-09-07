@@ -27,5 +27,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Numerous fixes to preview `@defer` query planning ([Issue #1698](https://github.com/apollographql/router/issues/1698))
+
+Updated to [Federation `2.1.2-alpha.0`](https://github.com/apollographql/federation/pull/2132) which brings in a number of fixes for the preview `@defer` support.  These fixes include:
+
+ - [Empty selection set produced with @defer'd query `federation#2123`](https://github.com/apollographql/federation/issues/2123)
+ - [Include directive with operation argument errors out in Fed 2.1 `federation#2124`](https://github.com/apollographql/federation/issues/2124)
+ - [query plan sequencing affected with __typename in fragment `federation#2128`](https://github.com/apollographql/federation/issues/2128)
+ - [Router Returns Error if __typename Omitted `router#1668`](https://github.com/apollographql/router/issues/1668)
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1711
+
 ## 🛠 Maintenance
 ## 📚 Documentation
