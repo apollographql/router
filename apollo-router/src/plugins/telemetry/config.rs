@@ -60,6 +60,10 @@ pub(crate) struct Metrics {
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
     pub(crate) attributes: Option<MetricsAttributesConf>,
+    /// Set a service.name resource in your metrics
+    pub(crate) service_name: Option<String>,
+    /// Set a service.namespace attribute in your metrics
+    pub(crate) service_namespace: Option<String>,
     #[serde(default)]
     /// Resources
     pub(crate) resources: HashMap<String, String>,
