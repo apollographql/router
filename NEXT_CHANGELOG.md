@@ -26,11 +26,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### rename originating_request to supergraph_request on various plugin Request structures ([ISSUE #XXXX](https://github.com/apollographql/router/issues/XXXX))
+### rename originating_request to supergraph_request on various plugin Request structures ([ISSUE #1713](https://github.com/apollographql/router/issues/1713))
 
 We feel that `supergraph_request` makes it more clear that this is the request received from the client.
 
-By [garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/YYYY
+By [garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1715
 
 ### Allow users to customize the prometheus endpoint URL ([#1645](https://github.com/apollographql/router/issues/1645))
 
