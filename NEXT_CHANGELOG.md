@@ -48,7 +48,7 @@ Callers may need to add either a operator `?` (in plugins) or an `.unwrap()` cal
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### rename originating_request to supergraph_request on various plugin Request structures ([Issue #1713](https://github.com/apollographql/router/issues/1713))
+### Rename `originating_request` to `supergraph_request` on various plugin `Request` structures ([Issue #1713](https://github.com/apollographql/router/issues/1713))
 
 We feel that `supergraph_request` makes it more clear that this is the request received from the client.
 
