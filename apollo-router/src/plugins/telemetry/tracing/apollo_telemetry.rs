@@ -152,8 +152,7 @@ impl Exporter {
             duration_ns: span
                 .attributes
                 .get(&APOLLO_PRIVATE_DURATION_NS)
-                .map(Self::extract_i64)
-                .flatten()
+                .and_then(Self::extract_i64)
                 .map(|e| e as u64)
                 .unwrap_or_default(),
             root: None,
@@ -280,8 +279,7 @@ impl Exporter {
                             sent_time_offset: span
                                 .attributes
                                 .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
-                                .map(Self::extract_i64)
-                                .flatten()
+                                .and_then(Self::extract_i64)
                                 .map(|f| f as u64)
                                 .unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
@@ -297,8 +295,7 @@ impl Exporter {
                             response_path: span
                                 .attributes
                                 .get(&APOLLO_PRIVATE_PATH)
-                                .map(Self::extract_string_array)
-                                .flatten()
+                                .and_then(Self::extract_string_array)
                                 .unwrap_or_default()
                                 .iter()
                                 .map(|v| {
@@ -330,18 +327,15 @@ impl Exporter {
                     client_name: span
                         .attributes
                         .get(&CLIENT_NAME)
-                        .map(Self::extract_string)
-                        .flatten(),
+                        .and_then(Self::extract_string),
                     client_version: span
                         .attributes
                         .get(&CLIENT_VERSION)
-                        .map(Self::extract_string)
-                        .flatten(),
+                        .and_then(Self::extract_string),
                     field_level_instrumentation_ratio: span
                         .attributes
                         .get(&APOLLO_PRIVATE_FIELD_LEVEL_INSTRUMENTATION_RATIO)
-                        .map(Self::extract_f64)
-                        .flatten(),
+                        .and_then(Self::extract_f64),
                 });
                 child_nodes
             }
