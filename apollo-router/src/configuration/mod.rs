@@ -260,15 +260,28 @@ pub(crate) struct Graphql {
     /// default: "/"
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
+
+    #[serde(default)]
+    pub(crate) introspection: bool,
+
+    #[serde(default)]
+    pub(crate) preview_defer_support: bool,
 }
 
 #[buildstructor::buildstructor]
 impl Graphql {
     #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_default(),
+            preview_defer_support: preview_defer_support.unwrap_or_default(),
         }
     }
 }
