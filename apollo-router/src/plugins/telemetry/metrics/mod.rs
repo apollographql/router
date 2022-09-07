@@ -4,10 +4,8 @@ use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
-use futures::future::ready;
-use futures::stream::once;
-use futures::StreamExt;
 use http::header::HeaderName;
+use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
 use opentelemetry::metrics::Counter;
@@ -23,6 +21,7 @@ use serde_json::Value;
 use tower::BoxError;
 
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
@@ -30,7 +29,6 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::router_factory::Endpoint;
-use crate::services::SupergraphResponse;
 use crate::Context;
 use crate::ListenAddr;
 
@@ -252,10 +250,12 @@ impl ErrorsForward {
 }
 
 impl AttributesForwardConf {
-    pub(crate) async fn get_attributes_from_router_response(
+    pub(crate) fn get_attributes_from_router_response(
         &self,
-        response: SupergraphResponse,
-    ) -> (SupergraphResponse, HashMap<String, String>) {
+        parts: &Parts,
+        context: &Context,
+        first_response: &Option<graphql::Response>,
+    ) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -264,7 +264,6 @@ impl AttributesForwardConf {
                 attributes.insert(name.clone(), value.clone());
             }
         }
-        let context = response.context;
         // Fill from context
         if let Some(from_context) = &self.context {
             for ContextForward {
@@ -288,8 +287,7 @@ impl AttributesForwardConf {
                 };
             }
         }
-        let (parts, stream) = response.response.into_parts();
-        let (first, rest) = stream.into_future().await;
+
         // Fill from response
         if let Some(from_response) = &self.response {
             if let Some(header_forward) = &from_response.header {
@@ -303,7 +301,7 @@ impl AttributesForwardConf {
             }
 
             if let Some(body_forward) = &from_response.body {
-                if let Some(body) = &first {
+                if let Some(body) = &first_response {
                     for body_fw in body_forward {
                         let output = body_fw.path.execute(body).unwrap();
                         if let Some(val) = output {
@@ -320,12 +318,7 @@ impl AttributesForwardConf {
             }
         }
 
-        let response = http::Response::from_parts(
-            parts,
-            once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-        );
-
-        (SupergraphResponse { context, response }, attributes)
+        attributes
     }
 
     /// Get attributes from context
