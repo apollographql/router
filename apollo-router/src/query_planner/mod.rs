@@ -387,7 +387,7 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::trace_span!("flatten"))
+                        .instrument(tracing::trace_span!("flatten", apollo_private.path = %path))
                         .await;
 
                     value = v;
@@ -395,12 +395,15 @@ impl PlanNode {
                     subselection = subselect;
                 }
                 PlanNode::Fetch(fetch_node) => {
+                    let fetch_time_offset =
+                        parameters.context.created_at.elapsed().as_nanos() as i64;
                     match fetch_node
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             "fetch",
                             "otel.kind" = %SpanKind::Internal,
-                            "service.name" = fetch_node.service_name.as_str()
+                            "service.name" = fetch_node.service_name.as_str(),
+                            "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
                         .await
                     {

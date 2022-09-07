@@ -185,6 +185,7 @@ impl Plugin for Telemetry {
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
+                self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
             .map_response(|resp: SupergraphResponse| {
@@ -255,7 +256,7 @@ impl Plugin for Telemetry {
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
-                    ftv1_do_not_sample_reason = do_not_sample_reason
+                    ftv1.do_not_sample_reason = do_not_sample_reason
                 )
             })
             .service(service)
@@ -581,6 +582,7 @@ impl Telemetry {
     }
 
     fn supergraph_service_span(
+        field_level_instrumentation_ratio: f64,
         config: apollo::Config,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
@@ -606,17 +608,18 @@ impl Telemetry {
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
-                client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default(),
-                "otel.kind" = %SpanKind::Internal,
-                apollo_private_operation_signature = field::Empty,
-                apollo_private_request_variables = field::Empty,
-                apollo_private_request_headers = field::Empty
+                client.name = client_name.to_str().unwrap_or_default(),
+                client.version = client_version.to_str().unwrap_or_default(),
+                otel.kind = %SpanKind::Internal,
+                apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
+                apollo_private.operation_signature = field::Empty,
+                apollo_private.graphql.variables = field::Empty,
+                apollo_private.http.request_headers = field::Empty
             );
 
             if is_span_sampled(&request.context) {
                 span.record(
-                    "apollo_private_request_variables",
+                    "apollo_private.graphql.variables",
                     &Self::filter_variables_values(
                         &request.originating_request.body().variables,
                         &config.send_variable_values,
@@ -624,7 +627,7 @@ impl Telemetry {
                     .as_str(),
                 );
                 span.record(
-                    "apollo_private_request_headers",
+                    "apollo_private.http.request_headers",
                     &Self::filter_headers(
                         request.originating_request.headers(),
                         &config.send_headers,

@@ -18,8 +18,6 @@ impl TracingConfigurator for Config {
                 endpoint: Some(endpoint),
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
-                client_name_header,
-                client_version_header,
                 schema_id,
                 buffer_size,
                 ..
@@ -31,8 +29,6 @@ impl TracingConfigurator for Config {
                     .endpoint(endpoint.clone())
                     .apollo_key(key)
                     .apollo_graph_ref(reference)
-                    .client_name_header(client_name_header)
-                    .client_version_header(client_version_header)
                     .schema_id(schema_id)
                     .buffer_size(*buffer_size)
                     .build()?;

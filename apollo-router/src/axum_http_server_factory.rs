@@ -136,7 +136,9 @@ where
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(PropagatingMakeSpan::new())
-                .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
+                    // Duration here is instant based
+                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
                     if resp.status() >= StatusCode::BAD_REQUEST {
                         span.record(
                             "otel.status_code",
@@ -719,7 +721,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -730,7 +733,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         }
     }

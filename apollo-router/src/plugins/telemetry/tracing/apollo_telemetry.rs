@@ -10,6 +10,7 @@ use apollo_spaceport::trace::http::Values;
 use apollo_spaceport::trace::query_plan_node::FetchNode;
 use apollo_spaceport::trace::query_plan_node::FlattenNode;
 use apollo_spaceport::trace::query_plan_node::ParallelNode;
+use apollo_spaceport::trace::query_plan_node::ResponsePathElement;
 use apollo_spaceport::trace::query_plan_node::SequenceNode;
 use apollo_spaceport::trace::Details;
 use apollo_spaceport::trace::Http;
@@ -17,20 +18,38 @@ use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
-use http::header::HeaderName;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
-use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry::{Array, Key};
 use thiserror::Error;
 use url::Url;
 
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
+
+const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
+const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
+    Key::from_static_str("apollo_private.sent_time_offset");
+const APOLLO_PRIVATE_FIELD_LEVEL_INSTRUMENTATION_RATIO: Key =
+    Key::from_static_str("apollo_private.field_level_instrumentation_ratio");
+const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
+    Key::from_static_str("apollo_private.graphql.variables");
+const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.request_headers");
+const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
+    Key::from_static_str("apollo_private.operation_signature");
+const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
+const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
+const FTV1_DO_NOT_SAMPLE_REASON: Key = Key::from_static_str("ftv1.do_not_sample_reason");
+const SERVICE_NAME: Key = Key::from_static_str("service.name");
+const CLIENT_NAME: Key = Key::from_static_str("client.name");
+const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+const HTTP_METHOD: Key = Key::from_static_str("http.method");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -63,20 +82,19 @@ pub(crate) struct Exporter {
     trace_config: config::Trace,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     endpoint: Url,
-    #[derivative(Debug = "ignore")]
-    apollo_graph_ref: String,
-    client_name_header: HeaderName,
-    client_version_header: HeaderName,
     schema_id: String,
-    #[derivative(Debug = "ignore")]
-    _apollo_exporter: ApolloExporter,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
 }
 
 enum TreeData {
-    RootTrace(Result<Box<apollo_spaceport::Trace>, Error>),
-    Http(Http),
+    Request(Result<Box<apollo_spaceport::Trace>, Error>),
+    Supergraph {
+        http: Http,
+        client_name: Option<String>,
+        client_version: Option<String>,
+        field_level_instrumentation_ratio: Option<f64>,
+    },
     QueryPlan(QueryPlanNode),
     Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
 }
@@ -89,8 +107,6 @@ impl Exporter {
         endpoint: Url,
         apollo_key: String,
         apollo_graph_ref: String,
-        client_name_header: HeaderName,
-        client_version_header: HeaderName,
         schema_id: String,
         buffer_size: usize,
     ) -> Result<Self, BoxError> {
@@ -100,12 +116,8 @@ impl Exporter {
             spans_by_parent_id: LruCache::new(buffer_size),
             trace_config,
             endpoint,
-            apollo_graph_ref,
-            client_name_header,
-            client_version_header,
             schema_id,
             apollo_sender: apollo_exporter.provider(),
-            _apollo_exporter: apollo_exporter,
         })
     }
 
@@ -116,7 +128,7 @@ impl Exporter {
     ) -> Result<Box<apollo_spaceport::Trace>, Error> {
         let variables = span
             .attributes
-            .get(&Key::new("graphql.variables"))
+            .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
             .map(|data| data.as_str())
             .unwrap_or_default();
         let variables_json = if variables != "{}" {
@@ -127,7 +139,7 @@ impl Exporter {
 
         let details = Details {
             variables_json,
-            operation_name: "".to_string(), // Deprecated do not set
+            ..Default::default()
         };
 
         let http = self.extract_http_data(span);
@@ -135,23 +147,17 @@ impl Exporter {
         let mut root_trace = apollo_spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
-            duration_ns: span.end_time.duration_since(span.start_time)?.as_nanos() as u64,
+            duration_ns: span
+                .attributes
+                .get(&APOLLO_PRIVATE_DURATION_NS)
+                .map(Self::extract_i64)
+                .flatten()
+                .map(|e| e as u64)
+                .unwrap_or_default(),
             root: None,
-            signature: Default::default(), // This is legacy and should never be set.
-            unexecuted_operation_body: "".to_string(),
-            unexecuted_operation_name: "".to_string(),
             details: Some(details),
-            client_name: "".to_string(),
-            client_version: "".to_string(),
             http: Some(http),
-            cache_policy: None,
-            query_plan: None,
-            full_query_cache_hit: false,
-            persisted_query_hit: false,
-            persisted_query_register: false,
-            registered_operation: false,
-            forbidden_operation: false,
-            field_execution_weight: 0.0,
+            ..Default::default()
         };
 
         for node in child_nodes {
@@ -159,12 +165,21 @@ impl Exporter {
                 TreeData::QueryPlan(query_plan) => {
                     root_trace.query_plan = Some(Box::new(query_plan))
                 }
-                TreeData::Http(http) => {
+                TreeData::Supergraph {
+                    http,
+                    client_name,
+                    client_version,
+                    field_level_instrumentation_ratio,
+                } => {
                     root_trace
                         .http
                         .as_mut()
                         .expect("http was extracted earlier, qed")
-                        .request_headers = http.request_headers
+                        .request_headers = http.request_headers;
+                    root_trace.client_name = client_name.unwrap_or_default();
+                    root_trace.client_version = client_version.unwrap_or_default();
+                    root_trace.field_execution_weight =
+                        1.0 / field_level_instrumentation_ratio.unwrap_or(1.0);
                 }
                 _ => panic!("should never have had other node types"),
             }
@@ -177,7 +192,7 @@ impl Exporter {
         self.extract_data_from_spans(&span, &span)?
             .pop()
             .and_then(|node| {
-                if let TreeData::RootTrace(trace) = node {
+                if let TreeData::Request(trace) = node {
                     Some(trace)
                 } else {
                     None
@@ -208,9 +223,7 @@ impl Exporter {
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
         }
-        if let Some(Value::String(reason)) =
-            span.attributes.get(&Key::new("ftv1_do_not_sample_reason"))
-        {
+        if let Some(Value::String(reason)) = span.attributes.get(&FTV1_DO_NOT_SAMPLE_REASON) {
             if !reason.is_empty() {
                 return Err(Error::DoNotSample(reason.clone()));
             }
@@ -251,12 +264,11 @@ impl Exporter {
                 };
                 let service_name = (span
                     .attributes
-                    .get(&Key::new("service.name"))
+                    .get(&SERVICE_NAME)
                     .cloned()
                     .unwrap_or_else(|| Value::String("unknown service".into()))
                     .as_str())
                 .to_string();
-
                 vec![TreeData::QueryPlan(QueryPlanNode {
                     node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
@@ -264,39 +276,75 @@ impl Exporter {
                             trace_parsing_failed,
                             trace,
                             sent_time_offset: span
-                                .start_time
-                                .duration_since(root_span.start_time)?
-                                .as_nanos() as u64,
+                                .attributes
+                                .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
+                                .map(Self::extract_i64)
+                                .flatten()
+                                .map(|f| f as u64)
+                                .unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
                             received_time: Some(span.end_time.into()),
                         }),
                     )),
                 })]
             }
-            "flatten" => vec![TreeData::QueryPlan(QueryPlanNode {
-                node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
-                    Box::new(FlattenNode {
-                        response_path: vec![],
-                        node: child_nodes
-                            .into_iter()
-                            .filter_map(|child| match child {
-                                TreeData::QueryPlan(node) => Some(Box::new(node)),
-                                _ => None,
-                            })
-                            .next(),
-                    }),
-                )),
-            })],
+            "flatten" => {
+                vec![TreeData::QueryPlan(QueryPlanNode {
+                    node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
+                        Box::new(FlattenNode {
+                            response_path: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_PATH)
+                                .map(Self::extract_string_array)
+                                .flatten()
+                                .unwrap_or_default()
+                                .iter()
+                                .map(|v| {
+                                    if let Ok(index) = v.parse::<u32>() {
+                                        ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
+                                    } else {
+                                        ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
+                                    }
+                                })
+                                .collect(),
+                            node: child_nodes
+                                .into_iter()
+                                .filter_map(|child| match child {
+                                    TreeData::QueryPlan(node) => Some(Box::new(node)),
+                                    _ => None,
+                                })
+                                .next(),
+                        }),
+                    )),
+                })]
+            }
             "subgraph" => {
                 vec![TreeData::Trace(self.find_ftv1_trace(span))]
             }
             "supergraph" => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
-                child_nodes.push(TreeData::Http(self.extract_http_data(span)));
+                child_nodes.push(TreeData::Supergraph {
+                    http: self.extract_http_data(span),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME)
+                        .map(Self::extract_string)
+                        .flatten(),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .map(Self::extract_string)
+                        .flatten(),
+                    field_level_instrumentation_ratio: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_FIELD_LEVEL_INSTRUMENTATION_RATIO)
+                        .map(Self::extract_f64)
+                        .flatten(),
+                });
                 child_nodes
             }
             "request" => {
-                vec![TreeData::RootTrace(
+                vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
             }
@@ -304,12 +352,44 @@ impl Exporter {
         })
     }
 
+    fn extract_string(v: &Value) -> Option<String> {
+        if let Value::String(v) = v {
+            Some(v.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn extract_string_array(v: &Value) -> Option<Vec<String>> {
+        if let Value::Array(Array::String(v)) = v {
+            Some(v.iter().map(|v| v.to_string()).collect())
+        } else {
+            None
+        }
+    }
+
+    fn extract_i64(v: &Value) -> Option<i64> {
+        if let Value::I64(v) = v {
+            Some(*v)
+        } else {
+            None
+        }
+    }
+
+    fn extract_f64(v: &Value) -> Option<f64> {
+        if let Value::F64(v) = v {
+            Some(*v)
+        } else {
+            None
+        }
+    }
+
     fn find_ftv1_trace(
         &mut self,
         span: &SpanData,
     ) -> Result<Option<Box<apollo_spaceport::Trace>>, Error> {
         span.attributes
-            .get(&Key::new("apollo_private_ftv1"))
+            .get(&APOLLO_PRIVATE_FTV1)
             .map(|data| {
                 if let Value::String(data) = data {
                     Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
@@ -325,7 +405,7 @@ impl Exporter {
     fn extract_http_data(&self, span: &SpanData) -> Http {
         let method = match span
             .attributes
-            .get(&Key::new("method"))
+            .get(&HTTP_METHOD)
             .map(|data| data.as_str())
             .unwrap_or_default()
             .as_ref()
@@ -343,7 +423,7 @@ impl Exporter {
         };
         let headers = span
             .attributes
-            .get(&Key::new("apollo_private_request_headers"))
+            .get(&APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
             .map(|data| data.as_str())
             .unwrap_or_default();
         let request_headers = serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
@@ -375,7 +455,7 @@ impl SpanExporter for Exporter {
             if span.name == REQUEST_SPAN_NAME {
                 let operation_signature_attr = span
                     .attributes
-                    .get(&Key::new("operation.signature"))
+                    .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                     .map(Value::to_string);
 
                 if let Some(operation_signature) = operation_signature_attr {
