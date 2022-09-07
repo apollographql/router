@@ -1544,7 +1544,7 @@ mod tests {
             serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}}, "hasNext": false, "path":["t"]}}
         );
     }
 

@@ -1,13 +1,9 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::cell::RefCell;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Poll;
 
-use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
