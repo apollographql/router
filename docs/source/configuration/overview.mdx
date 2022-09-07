@@ -220,9 +220,9 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 
 ```yaml title="router_unix.yaml"
 #
-# server: Configuration of the HTTP server
+# graphql: Configuration of the GraphQL server
 #
-server:
+graphql:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
   listen: 127.0.0.1
@@ -231,7 +231,7 @@ server:
 The router can also listen on a Unix socket (not supported on Windows):
 
 ```yaml title="router_unix.yaml"
-server:
+graphql:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
 ```
@@ -240,16 +240,16 @@ server:
 
 By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.graphql_path`:
+You can change this path by setting `server.path`:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# graphql: Configuration of the GraphQL server
 #
-server:
+graphql:
   # The path for GraphQL execution
   # (Defaults to /)
-  graphql_path: /graphql
+  path: /graphql
 ```
 
 The path must start with `/`.
@@ -267,9 +267,9 @@ By default, the router answers to some introspection queries. You can override t
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# graphql: Configuration of the GraphQL server
 #
-server:
+graphql:
   introspection: false
 ```
 
@@ -279,9 +279,9 @@ By default, the router displays a landing page if you access its endpoint path v
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# router: Configuration of the GraphQL server
 #
-server:
+router:
   landing_page: false
 ```
 
@@ -343,7 +343,7 @@ Unix-style expansion is used. For example:
 Environment variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
-server:
+graphql:
   listen: "${MY_LISTEN_ADDRESS}"
 example:
   password: "${MY_PASSWORD}"

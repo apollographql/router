@@ -1,2 +1,2 @@
-server:
+graphql:
   listen: /tmp/router.sock

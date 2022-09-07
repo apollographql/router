@@ -2012,7 +2012,6 @@ Content-Type: application/json\r
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        todo!("set healthcheck up");
     }
 
     #[test(tokio::test)]
