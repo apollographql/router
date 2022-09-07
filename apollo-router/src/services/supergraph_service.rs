@@ -17,6 +17,7 @@ use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
+use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -44,10 +45,10 @@ use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
@@ -56,6 +57,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
+use crate::ListenAddr;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::Schema;
@@ -159,7 +161,7 @@ where
         Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
 {
     let context = req.context;
-    let body = req.originating_request.body();
+    let body = req.supergraph_request.body();
     let variables = body.variables.clone();
     let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
 
@@ -182,7 +184,7 @@ where
         QueryPlannerContent::Plan { query, plan } => {
             let can_be_deferred = plan.root.contains_defer();
 
-            if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
+            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -200,7 +202,7 @@ where
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
-                            .originating_request(req.originating_request)
+                            .supergraph_request(req.supergraph_request)
                             .query_plan(plan)
                             .context(context)
                             .build(),
@@ -493,16 +495,12 @@ impl SupergraphServiceFactory for RouterCreator {
             http::Request<graphql::Request>,
         >>::Future;
 
-    fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut mm = MultiMap::new();
         self.plugins
-            .iter()
-            .filter_map(|(plugin_name, plugin)| {
-                (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint().map(Handler::new))
-                    .flatten()
-                    .map(|h| (plugin_name.clone(), h))
-            })
-            .collect()
+            .values()
+            .for_each(|p| mm.extend(p.web_endpoints()));
+        mm
     }
 }
 

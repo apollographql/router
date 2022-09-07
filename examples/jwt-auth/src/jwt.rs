@@ -247,7 +247,7 @@ impl Plugin for JwtAuth {
                 // We are going to check the headers for the presence of the header we're looking for
                 // We are implementing: https://www.rfc-editor.org/rfc/rfc6750
                 // so check for our AUTHORIZATION header.
-                let jwt_value_result = match req.originating_request.headers().get(AUTHORIZATION) {
+                let jwt_value_result = match req.supergraph_request.headers().get(AUTHORIZATION) {
                     Some(value) => value.to_str(),
                     None =>
                         // Prepare an HTTP 401 response with a GraphQL error message

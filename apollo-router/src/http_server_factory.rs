@@ -1,15 +1,16 @@
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
+use itertools::Itertools;
+use multimap::MultiMap;
 
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::Handler;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 
 /// Factory for creating the http server component.
@@ -23,13 +24,15 @@ pub(crate) trait HttpServerFactory {
         &self,
         service_factory: RF,
         configuration: Arc<Configuration>,
-        listener: Option<Listener>,
-        plugin_handlers: HashMap<String, Handler>,
+        main_listener: Option<Listener>,
+        previous_listeners: Vec<(ListenAddr, Listener)>,
+        extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
         RF: SupergraphServiceFactory;
 }
 
+type MainAndExtraListeners = (Listener, Vec<(ListenAddr, Listener)>);
 /// A handle with with a client can shut down the server gracefully.
 /// This relies on the underlying server implementation doing the right thing.
 /// There are various ways that a user could prevent this working, including holding open connections
@@ -42,23 +45,33 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
+    server_future:
+        Pin<Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>>,
 
-    /// The listen address that the server is actually listening on.
-    /// If the socket address specified port zero the OS will assign a random free port.
-    listen_address: ListenAddr,
+    /// The listen addresses that the server is actually listening on.
+    /// This includes the `graphql_listen_address` as well as any other address a plugin listens on.
+    /// If a socket address specified port zero the OS will assign a random free port.
+    listen_addresses: Vec<ListenAddr>,
+
+    /// The listen addresses that the graphql server is actually listening on.
+    /// If a socket address specified port zero the OS will assign a random free port.
+    graphql_listen_address: Option<ListenAddr>,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<Box<dyn Future<Output = Result<Listener, ApolloRouterError>> + Send>>,
-        listen_address: ListenAddr,
+        server_future: Pin<
+            Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>,
+        >,
+        graphql_listen_address: Option<ListenAddr>,
+        listen_addresses: Vec<ListenAddr>,
     ) -> Self {
         Self {
             shutdown_sender,
             server_future,
-            listen_address,
+            graphql_listen_address,
+            listen_addresses,
         }
     }
 
@@ -68,8 +81,9 @@ impl HttpServerHandle {
         };
         let _listener = self.server_future.await?;
         #[cfg(unix)]
-        {
-            if let ListenAddr::UnixSocket(path) = self.listen_address {
+        // listen_addresses includes the main graphql_address
+        for listen_address in self.listen_addresses {
+            if let ListenAddr::UnixSocket(path) = listen_address {
                 let _ = tokio::fs::remove_file(path).await;
             }
         }
@@ -81,7 +95,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
-        plugin_handlers: HashMap<String, Handler>,
+        web_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -96,37 +110,37 @@ impl HttpServerHandle {
         // connections, and returns the TCP listener, to reuse it in the next server
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
-        let listener = self.server_future.await;
+        let (main_listener, extra_listeners) = self.server_future.await?;
         tracing::debug!("previous server stopped");
 
-        // we keep the TCP listener if it is compatible with the new configuration
-        let listener = if self.listen_address != configuration.server.listen {
-            None
-        } else {
-            match listener {
-                Ok(listener) => Some(listener),
-                Err(e) => {
-                    tracing::error!("the previous listen socket failed: {}", e);
-                    None
-                }
-            }
-        };
-
+        // we give the listeners to the new configuration, they'll clean up whatever needs to
         let handle = factory
             .create(
                 router,
                 Arc::clone(&configuration),
-                listener,
-                plugin_handlers,
+                Some(main_listener),
+                extra_listeners,
+                web_endpoints,
             )
             .await?;
-        tracing::debug!("restarted on {}", handle.listen_address());
+        tracing::debug!(
+            "restarted on {}",
+            handle
+                .listen_addresses()
+                .iter()
+                .map(std::string::ToString::to_string)
+                .join(" - ")
+        );
 
         Ok(handle)
     }
 
-    pub(crate) fn listen_address(&self) -> &ListenAddr {
-        &self.listen_address
+    pub(crate) fn listen_addresses(&self) -> &[ListenAddr] {
+        self.listen_addresses.as_slice()
+    }
+
+    pub(crate) fn graphql_listen_address(&self) -> &Option<ListenAddr> {
+        &self.graphql_listen_address
     }
 }
 
@@ -183,14 +197,16 @@ mod tests {
     use super::*;
 
     #[test(tokio::test)]
+    // TODO [igni]: add a check with extra endpoints
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Tcp(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap());
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(listener)).boxed(),
-            SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+            futures::future::ready(Ok((listener, vec![]))).boxed(),
+            Some(SocketAddr::from_str("127.0.0.1:0").unwrap().into()),
+            Default::default(),
         )
         .shutdown()
         .await
@@ -203,6 +219,7 @@ mod tests {
 
     #[test(tokio::test)]
     #[cfg(unix)]
+    // TODO [igni]: add a check with extra endpoints
     async fn sanity_unix() {
         let temp_dir = tempfile::tempdir().unwrap();
         let sock = temp_dir.as_ref().join("sock");
@@ -211,8 +228,9 @@ mod tests {
 
         HttpServerHandle::new(
             shutdown_sender,
-            futures::future::ready(Ok(listener)).boxed(),
-            ListenAddr::UnixSocket(sock),
+            futures::future::ready(Ok((listener, vec![]))).boxed(),
+            Some(ListenAddr::UnixSocket(sock)),
+            Default::default(),
         )
         .shutdown()
         .await
@@ -220,6 +238,6 @@ mod tests {
 
         shutdown_receiver
             .await
-            .expect("Should have been send notification to shutdown");
+            .expect("Should have sent notification to shutdown");
     }
 }
