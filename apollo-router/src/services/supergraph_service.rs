@@ -162,7 +162,7 @@ where
         Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
 {
     let context = req.context;
-    let body = req.originating_request.body();
+    let body = req.supergraph_request.body();
     let variables = body.variables.clone();
     let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
 
@@ -185,7 +185,7 @@ where
         QueryPlannerContent::Plan { query, plan } => {
             let can_be_deferred = plan.root.contains_defer();
 
-            if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
+            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -203,7 +203,7 @@ where
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
-                            .originating_request(req.originating_request)
+                            .supergraph_request(req.supergraph_request)
                             .query_plan(plan)
                             .context(context)
                             .build(),

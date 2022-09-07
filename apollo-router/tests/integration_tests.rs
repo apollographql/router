@@ -192,7 +192,7 @@ async fn simple_queries_should_not_work() {
         .build()
         .expect("expecting valid request");
     request
-        .originating_request
+        .supergraph_request
         .headers_mut()
         .remove("content-type");
 
@@ -673,7 +673,7 @@ async fn defer_query_without_accept() {
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
-        .json(request.originating_request.body())
+        .json(request.supergraph_request.body())
         .send()
         .await
         .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
