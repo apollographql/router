@@ -267,7 +267,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
-        originating_request: &'a Arc<http::Request<Request>>,
+        supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response
@@ -285,7 +285,7 @@ impl QueryPlan {
                     context,
                     service_factory,
                     schema,
-                    originating_request,
+                    supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     options: &self.options,
                 },
@@ -312,7 +312,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     context: &'a Context,
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
-    originating_request: &'a Arc<http::Request<Request>>,
+    supergraph_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
@@ -468,7 +468,7 @@ impl PlanNode {
                         let label = deferred_node.label.clone();
                         let mut tx = sender.clone();
                         let sc = parameters.schema.clone();
-                        let orig = parameters.originating_request.clone();
+                        let orig = parameters.supergraph_request.clone();
                         let sf = parameters.service_factory.clone();
                         let ctx = parameters.context.clone();
                         let opt = parameters.options.clone();
@@ -504,7 +504,7 @@ impl PlanNode {
                                             context: &ctx,
                                             service_factory: &sf,
                                             schema: &sc,
-                                            originating_request: &orig,
+                                            supergraph_request: &orig,
                                             deferred_fetches: &deferred_fetches,
                                             options: &opt,
                                         },
@@ -586,7 +586,7 @@ impl PlanNode {
                                     context: parameters.context,
                                     service_factory: parameters.service_factory,
                                     schema: parameters.schema,
-                                    originating_request: parameters.originating_request,
+                                    supergraph_request: parameters.supergraph_request,
                                     deferred_fetches: &deferred_fetches,
                                     options: parameters.options,
                                 },
@@ -620,7 +620,7 @@ impl PlanNode {
                     errors = Vec::new();
 
                     if let Some(&Value::Bool(true)) = parameters
-                        .originating_request
+                        .supergraph_request
                         .body()
                         .variables
                         .get(condition.as_str())
@@ -932,7 +932,7 @@ pub(crate) mod fetch {
                 data,
                 current_dir,
                 // Needs the original request here
-                parameters.originating_request,
+                parameters.supergraph_request,
                 parameters.schema,
                 parameters.options.enable_deduplicate_variables,
             )
@@ -945,7 +945,7 @@ pub(crate) mod fetch {
             };
 
             let subgraph_request = SubgraphRequest::builder()
-                .originating_request(parameters.originating_request.clone())
+                .supergraph_request(parameters.supergraph_request.clone())
                 .subgraph_request(
                     http_ext::Request::builder()
                         .method(http::Method::POST)

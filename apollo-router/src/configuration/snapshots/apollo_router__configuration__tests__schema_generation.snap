@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 912
 expression: "&schema"
 ---
 {
@@ -1382,6 +1381,16 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "string"
                   }
+                },
+                "service_name": {
+                  "description": "Set a service.name resource in your metrics",
+                  "type": "string",
+                  "nullable": true
+                },
+                "service_namespace": {
+                  "description": "Set a service.namespace attribute in your metrics",
+                  "type": "string",
+                  "nullable": true
                 }
               },
               "additionalProperties": false,
@@ -1538,6 +1547,24 @@ expression: "&schema"
               "properties": {
                 "enabled": {
                   "type": "boolean"
+                },
+                "listen": {
+                  "description": "Listening address.",
+                  "default": "127.0.0.1:9090",
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "path": {
+                  "default": "/metrics",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,

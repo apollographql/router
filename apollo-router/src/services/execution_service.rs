@@ -6,7 +6,6 @@ use std::task::Poll;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -18,7 +17,6 @@ use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLay
 use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
-use crate::graphql::Response;
 use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -62,7 +60,7 @@ where
                 .execute(
                     &context,
                     &this.subgraph_creator,
-                    &Arc::new(req.originating_request),
+                    &Arc::new(req.supergraph_request),
                     &this.schema,
                     sender,
                 )
@@ -73,7 +71,7 @@ where
             let stream = once(ready(first)).chain(rest).boxed();
 
             Ok(ExecutionResponse::new_from_response(
-                http::Response::new(stream as BoxStream<'static, Response>),
+                http::Response::new(stream as _),
                 ctx,
             ))
         }

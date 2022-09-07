@@ -2,7 +2,6 @@
 
 use futures::future::ready;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use http::header::HeaderName;
 use http::method::Method;
@@ -35,16 +34,16 @@ assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: http::Request<graphql::Request>,
+    pub supergraph_request: http::Request<graphql::Request>,
 
     /// Context for extension
     pub context: Context,
 }
 
 impl From<http::Request<graphql::Request>> for Request {
-    fn from(originating_request: http::Request<graphql::Request>) -> Self {
+    fn from(supergraph_request: http::Request<graphql::Request>) -> Self {
         Self {
-            originating_request,
+            supergraph_request,
             context: Context::new(),
         }
     }
@@ -74,13 +73,13 @@ impl Request {
             .variables(variables)
             .extensions(extensions)
             .build();
-        let mut originating_request = http::Request::builder()
+        let mut supergraph_request = http::Request::builder()
             .uri(uri)
             .method(method)
             .body(gql_request)?;
-        *originating_request.headers_mut() = header_map(headers)?;
+        *supergraph_request.headers_mut() = header_map(headers)?;
         Ok(Self {
-            originating_request,
+            supergraph_request,
             context,
         })
     }
@@ -158,7 +157,7 @@ impl Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<BoxStream<'static, graphql::Response>>,
+    pub response: http::Response<graphql::ResponseStream>,
     pub context: Context,
 }
 
@@ -170,6 +169,7 @@ impl Response {
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
+        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -181,6 +181,7 @@ impl Response {
     ) -> Result<Self, BoxError> {
         // Build a response
         let b = graphql::Response::builder()
+            .and_label(label)
             .and_path(path)
             .errors(errors)
             .extensions(extensions);
@@ -214,6 +215,7 @@ impl Response {
     #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
+        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
@@ -224,6 +226,7 @@ impl Response {
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
         Response::new(
+            label,
             data,
             path,
             errors,
@@ -245,6 +248,7 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         Response::new(
+            Default::default(),
             Default::default(),
             None,
             errors,
@@ -269,7 +273,7 @@ impl Response {
     }
 
     pub fn new_from_response(
-        response: http::Response<BoxStream<'static, graphql::Response>>,
+        response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {
         Self { response, context }
@@ -277,7 +281,7 @@ impl Response {
 
     pub fn map<F>(self, f: F) -> Response
     where
-        F: FnOnce(BoxStream<'static, graphql::Response>) -> BoxStream<'static, graphql::Response>,
+        F: FnOnce(graphql::ResponseStream) -> graphql::ResponseStream,
     {
         Response {
             context: self.context,
@@ -285,10 +289,47 @@ impl Response {
         }
     }
 
-    pub fn map_stream(
-        self,
-        f: impl FnMut(graphql::Response) -> graphql::Response + Send + 'static,
-    ) -> Self {
+    /// Returns a new supergraph response where each [`graphql::Response`] is mapped through `f`.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    /// This method uses [`futures::stream::StreamExt::map`] to map over each item in the stream.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         inner
+    ///             .map_response(|supergraph_response| {
+    ///                 supergraph_response.map_stream(|graphql_response| {
+    ///                     // Something interesting here
+    ///                     graphql_response
+    ///                 })
+    ///             })
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    pub fn map_stream<F>(self, f: F) -> Self
+    where
+        F: 'static + Send + FnMut(graphql::Response) -> graphql::Response,
+    {
         self.map(move |stream| stream.map(f).boxed())
     }
 }
@@ -321,7 +362,7 @@ mod test {
             .unwrap();
         assert_eq!(
             request
-                .originating_request
+                .supergraph_request
                 .headers()
                 .get_all("a")
                 .into_iter()
@@ -329,18 +370,18 @@ mod test {
             vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
         );
         assert_eq!(
-            request.originating_request.uri(),
+            request.supergraph_request.uri(),
             &Uri::from_static("http://example.com")
         );
         assert_eq!(
-            request.originating_request.body().extensions.get("foo"),
+            request.supergraph_request.body().extensions.get("foo"),
             Some(&json!({}).into())
         );
         assert_eq!(
-            request.originating_request.body().variables.get("bar"),
+            request.supergraph_request.body().variables.get("bar"),
             Some(&json!({}).into())
         );
-        assert_eq!(request.originating_request.method(), Method::POST);
+        assert_eq!(request.supergraph_request.method(), Method::POST);
 
         let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
             .as_object()
@@ -352,7 +393,7 @@ mod test {
             .unwrap()
             .clone();
         assert_eq!(
-            request.originating_request.body(),
+            request.supergraph_request.body(),
             &graphql::Request::builder()
                 .variables(variables)
                 .extensions(extensions)

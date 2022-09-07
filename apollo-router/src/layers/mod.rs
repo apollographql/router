@@ -10,16 +10,21 @@ use tower::ServiceBuilder;
 use tower_service::Service;
 use tracing::Span;
 
+use self::map_first_graphql_response::MapFirstGraphqlResponseLayer;
+use self::map_first_graphql_response::MapFirstGraphqlResponseService;
+use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
-
-pub mod map_future_with_request_data;
+use crate::services::supergraph;
+use crate::Context;
 
 pub mod async_checkpoint;
 pub mod instrument;
+pub mod map_first_graphql_response;
+pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
 
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -52,7 +57,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint(|req: supergraph::Request|{
-    ///         if req.originating_request.method() == Method::GET {
+    ///         if req.supergraph_request.method() == Method::GET {
     ///             Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                 .data("Only get requests allowed")
     ///                 .context(req.context)
@@ -113,7 +118,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
-    ///             if req.originating_request.method() == Method::GET {
+    ///             if req.supergraph_request.method() == Method::GET {
     ///                 Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                     .data("Only get requests allowed")
     ///                     .context(req.context)
@@ -199,6 +204,70 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(InstrumentLayer::new(span_fn))
     }
 
+    /// Maps HTTP parts, as well as the first GraphQL response, to different values.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    ///
+    /// This method wraps a service and calls a `callback` when the first GraphQL response
+    /// in the stream returned by the inner service becomes available.
+    /// The callback can then access the HTTP parts (headers, status code, etc)
+    /// or the first GraphQL response before returning them.
+    ///
+    /// Note that any subsequent GraphQL responses after the first will be forwarded unmodified.
+    /// In order to inspect or modify all GraphQL responses,
+    /// consider using [`map_response`][tower::ServiceExt::map_response]
+    /// together with [`supergraph::Response::map_stream`] instead.
+    /// (See the example in `map_stream`’s documentation.)
+    /// In that case however HTTP parts cannot be modified because they may have already been sent.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceBuilderExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         tower::ServiceBuilder::new()
+    ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
+    ///                 // Something interesting here
+    ///                 (http_parts, graphql_response)
+    ///             })
+    ///             .service(inner)
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    fn map_first_graphql_response<Callback>(
+        self,
+        callback: Callback,
+    ) -> ServiceBuilder<Stack<MapFirstGraphqlResponseLayer<Callback>, L>>
+    where
+        Callback: FnOnce(
+                Context,
+                http::response::Parts,
+                graphql::Response,
+            ) -> (http::response::Parts, graphql::Response)
+            + Clone
+            + Send
+            + 'static,
+    {
+        self.layer(MapFirstGraphqlResponseLayer { callback })
+    }
+
     /// Similar to map_future but also providing an opportunity to extract information out of the
     /// request for use when constructing the response.
     ///
@@ -260,7 +329,83 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 }
 
 /// Extension trait for [`Service`].
+///
+/// Importing both this trait and [`tower::ServiceExt`] could lead a name collision error.
+/// To work around that, use `as _` syntax to make a trait’s methods available in a module
+/// without assigning it a name in that module’s namespace.
+///
+/// ```
+/// use apollo_router::layers::ServiceExt as _;
+/// use tower::ServiceExt as _;
+/// ```
 pub trait ServiceExt<Request>: Service<Request> {
+    /// Maps HTTP parts, as well as the first GraphQL response, to different values.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    ///
+    /// This method wraps a service and call `callback` when the first GraphQL response
+    /// in the stream returned by the inner service becomes available.
+    /// The callback can then modify the HTTP parts (headers, status code, etc)
+    /// or the first GraphQL response before returning them.
+    ///
+    /// Note that any subsequent GraphQL responses after the first will be forwarded unmodified.
+    /// In order to inspect or modify all GraphQL responses,
+    /// consider using [`map_response`][tower::ServiceExt::map_response]
+    /// together with [`supergraph::Response::map_stream`] instead.
+    /// (See the example in `map_stream`’s documentation.)
+    /// In that case however HTTP parts cannot be modified because they may have already been sent.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         inner
+    ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
+    ///                 // Something interesting here
+    ///                 (http_parts, graphql_response)
+    ///             })
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    fn map_first_graphql_response<Callback>(
+        self,
+        callback: Callback,
+    ) -> MapFirstGraphqlResponseService<Self, Callback>
+    where
+        Self: Sized + Service<Request, Response = supergraph::Response>,
+        <Self as Service<Request>>::Future: Send + 'static,
+        Callback: FnOnce(
+                Context,
+                http::response::Parts,
+                graphql::Response,
+            ) -> (http::response::Parts, graphql::Response)
+            + Clone
+            + Send
+            + 'static,
+    {
+        ServiceBuilder::new()
+            .map_first_graphql_response(callback)
+            .service(self)
+    }
+
     /// Similar to map_future but also providing an opportunity to extract information out of the
     /// request for use when constructing the response.
     ///

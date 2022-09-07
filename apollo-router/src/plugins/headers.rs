@@ -222,14 +222,14 @@ where
                     default,
                 }) => {
                     let headers = req.subgraph_request.headers_mut();
-                    let value = req.originating_request.headers().get(named);
+                    let value = req.supergraph_request.headers().get(named);
                     if let Some(value) = value.or(default.as_ref()) {
                         headers.insert(rename.as_ref().unwrap_or(named), value.clone());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
                     let headers = req.subgraph_request.headers_mut();
-                    req.originating_request
+                    req.supergraph_request
                         .headers()
                         .iter()
                         .filter(|(name, _)| matching.is_match(name.as_str()))
@@ -530,7 +530,7 @@ mod test {
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
-            originating_request: Arc::new(
+            supergraph_request: Arc::new(
                 http::Request::builder()
                     .header("da", "vda")
                     .header("db", "vdb")

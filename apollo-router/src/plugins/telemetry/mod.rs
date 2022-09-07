@@ -17,13 +17,15 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
+use futures::future::ready;
 use futures::future::BoxFuture;
+use futures::stream::once;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
+use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -40,8 +42,6 @@ use router_bridge::planner::UsageReporting;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use tower::service_fn;
-use tower::steer::Steer;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -60,7 +60,6 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -78,14 +77,15 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::transport;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
 use crate::Context;
 use crate::ExecutionRequest;
+use crate::ListenAddr;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
@@ -118,7 +118,7 @@ pub struct Telemetry {
     // shutdown exporter.
     _metrics_exporters: Vec<MetricsExporterHandle>,
     meter_provider: AggregateMeterProvider,
-    custom_endpoints: HashMap<String, Handler>,
+    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -244,13 +244,13 @@ impl Plugin for Telemetry {
                     ""
                 };
                 let query = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .query
                     .clone()
                     .unwrap_or_default();
                 let operation_name = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .operation_name
                     .clone()
@@ -330,31 +330,8 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
-        let (paths, mut endpoints): (Vec<_>, Vec<_>) =
-            self.custom_endpoints.clone().into_iter().unzip();
-        endpoints.push(Self::not_found_endpoint());
-        let not_found_index = endpoints.len() - 1;
-
-        let svc = Steer::new(
-            // All services we route between
-            endpoints,
-            // How we pick which service to send the request to
-            move |req: &transport::Request, _services: &[_]| {
-                let endpoint = req
-                    .uri()
-                    .path()
-                    .trim_start_matches("/plugins/apollo.telemetry");
-                if let Some(index) = paths.iter().position(|path| path == endpoint) {
-                    index
-                } else {
-                    not_found_index
-                }
-            },
-        )
-        .boxed();
-
-        Some(svc)
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        self.custom_endpoints.clone()
     }
 }
 
@@ -427,8 +404,8 @@ impl Telemetry {
                 None,
             );
 
-            opentelemetry::global::set_tracer_provider(tracer_provider);
-            opentelemetry::global::set_error_handler(handle_error)
+            global::set_tracer_provider(tracer_provider);
+            global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
             global::set_text_map_propagator(Self::create_propagator(&config));
 
@@ -510,6 +487,12 @@ impl Telemetry {
         let tracing = config.clone().tracing.unwrap_or_default();
 
         let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
+        // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
+        // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
+        // Waiting for the >=0.16.1 release
+        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
+            propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
+        }
         if propagation.baggage.unwrap_or_default() {
             propagators.push(Box::new(BaggagePropagator::default()));
         }
@@ -518,9 +501,6 @@ impl Telemetry {
         }
         if propagation.zipkin.unwrap_or_default() || tracing.zipkin.is_some() {
             propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
-        }
-        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
-            propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
@@ -558,7 +538,20 @@ impl Telemetry {
         {
             metrics_common_config.resources.insert(
                 String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(DEFAULT_SERVICE_NAME),
+                String::from(
+                    metrics_common_config
+                        .service_name
+                        .as_deref()
+                        .unwrap_or(DEFAULT_SERVICE_NAME),
+                ),
+            );
+        }
+        if let Some(service_namespace) = &metrics_common_config.service_namespace {
+            metrics_common_config.resources.insert(
+                String::from(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
+                ),
+                service_namespace.clone(),
             );
         }
 
@@ -570,26 +563,12 @@ impl Telemetry {
         Ok(builder)
     }
 
-    fn not_found_endpoint() -> Handler {
-        Handler::new(
-            service_fn(|_req: transport::Request| async {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body("Not found".into())
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        )
-    }
-
     fn supergraph_service_span(
         field_level_instrumentation_ratio: f64,
         config: apollo::Config,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
-            let http_request = &request.originating_request;
+            let http_request = &request.supergraph_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
@@ -624,7 +603,7 @@ impl Telemetry {
                 span.record(
                     "apollo_private.graphql.variables",
                     &Self::filter_variables_values(
-                        &request.originating_request.body().variables,
+                        &request.supergraph_request.body().variables,
                         &config.send_variable_values,
                     )
                     .as_str(),
@@ -632,7 +611,7 @@ impl Telemetry {
                 span.record(
                     "apollo_private.http.request_headers",
                     &Self::filter_headers(
-                        request.originating_request.headers(),
+                        request.supergraph_request.headers(),
                         &config.send_headers,
                     )
                     .as_str(),
@@ -744,6 +723,11 @@ impl Telemetry {
                     "status",
                     response.response.status().as_u16().to_string(),
                 ));
+
+                // Wait for the first response of the stream
+                let (parts, stream) = response.response.into_parts();
+                let (first_response, rest) = stream.into_future().await;
+
                 if let Some(MetricsCommon {
                     attributes:
                         Some(MetricsAttributesConf {
@@ -753,22 +737,29 @@ impl Telemetry {
                     ..
                 }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
                 {
-                    let (resp, attributes) = forward_attributes
-                        .get_attributes_from_router_response(response)
-                        .await;
+                    let attributes = forward_attributes.get_attributes_from_router_response(
+                        &parts,
+                        &context,
+                        &first_response,
+                    );
 
                     metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
                     metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(resp)
                 } else {
                     metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(response)
                 }
+
+                let response = http::Response::from_parts(
+                    parts,
+                    once(ready(first_response.unwrap_or_default()))
+                        .chain(rest)
+                        .boxed(),
+                );
+
+                Ok(SupergraphResponse { context, response })
             }
             Err(err) => {
-                metrics.http_requests_error_total.add(1, &[]);
+                metrics.http_requests_error_total.add(1, &metric_attrs);
 
                 Err(err)
             }
@@ -783,7 +774,7 @@ impl Telemetry {
     fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
-        let http_request = &req.originating_request;
+        let http_request = &req.supergraph_request;
         let headers = http_request.headers();
         let client_name_header = &apollo_config.client_name_header;
         let client_version_header = &apollo_config.client_version_header;
@@ -810,7 +801,7 @@ impl Telemetry {
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, String> = HashMap::new();
-            if let Some(operation_name) = &req.originating_request.body().operation_name {
+            if let Some(operation_name) = &req.supergraph_request.body().operation_name {
                 attributes.insert("operation_name".to_string(), operation_name.clone());
             }
 
@@ -822,7 +813,7 @@ impl Telemetry {
             {
                 attributes.extend(
                     router_attributes_conf
-                        .get_attributes_from_request(headers, req.originating_request.body()),
+                        .get_attributes_from_request(headers, req.supergraph_request.body()),
                 );
                 attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
@@ -1475,9 +1466,7 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "resources": {
-                            "service.name": "apollo-router"
-                        },
+                        "service_name": "apollo-router",
                         "attributes": {
                             "router": {
                                 "static": [
@@ -1626,20 +1615,32 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut web_endpoint = dyn_plugin
+            .web_endpoints()
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_router();
+        let resp = web_endpoint
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);
