@@ -513,15 +513,17 @@ impl PlanNode {
                                     .await;
 
                                 if !is_depends_empty {
-                                    let primary_value =
+                                    let mut primary_value =
                                         primary_receiver.recv().await.unwrap_or_default();
+                                    primary_value
+                                        .deep_merge(serde_json_bytes::json!({"hasNext": false}));
                                     v.deep_merge(primary_value);
                                 }
 
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
-                                            .data(v)
+                                            .data(dbg!(v))
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection.or(node_subselection))
@@ -537,14 +539,15 @@ impl PlanNode {
                                     );
                                 };
                             } else {
-                                let primary_value =
+                                let mut primary_value =
                                     primary_receiver.recv().await.unwrap_or_default();
+                                primary_value
+                                    .deep_merge(serde_json_bytes::json!({"hasNext": false}));
                                 value.deep_merge(primary_value);
-
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
-                                            .data(value)
+                                            .data(dbg!(value))
                                             .errors(errors)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)

@@ -1,6 +1,8 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::ready;
@@ -284,8 +286,13 @@ fn process_execution_response(
     let ExecutionResponse { response, context } = execution_response;
 
     let (parts, response_stream) = response.into_parts();
-
     let stream = response_stream.map(move |mut response: Response| {
+        let has_next = response
+            .data
+            .as_ref()
+            .and_then(|data| data.get("hasNext"))
+            .and_then(|has_next| has_next.as_bool())
+            .unwrap_or(true);
         tracing::debug_span!("format_response").in_scope(|| {
             query.format_response(
                 &mut response,
@@ -298,10 +305,10 @@ fn process_execution_response(
         match (response.path.as_ref(), response.data.as_ref()) {
             (None, _) | (_, None) => {
                 if can_be_deferred {
-                    response.has_next = Some(true);
+                    response.has_next = Some(has_next);
                 }
 
-                response
+                dbg!(response)
             }
             // if the deferred response specified a path, we must extract the
             //values matched by that path and create a separate response for
@@ -315,12 +322,17 @@ fn process_execution_response(
             // under an array would generate one response par array element
             (Some(response_path), Some(response_data)) => {
                 let mut sub_responses = Vec::new();
-                response_data.select_values_and_paths(response_path, |path, value| {
+                dbg!(response_data).select_values_and_paths(response_path, |path, value| {
                     sub_responses.push((path.clone(), value.clone()));
                 });
+                // let has_next = response_data
+                //     .get("hasNext")
+                //     .and_then(|has_next| has_next.as_bool())
+                //     .unwrap_or(true);
 
                 Response::builder()
-                    .has_next(true)
+                    // TODO find a way to detect last element in a stream
+                    .has_next(has_next)
                     .incremental(
                         sub_responses
                             .into_iter()
@@ -345,9 +357,7 @@ fn process_execution_response(
         response: http::Response::from_parts(
             parts,
             if can_be_deferred {
-                stream
-                    .chain(once(ready(Response::builder().has_next(false).build())))
-                    .left_stream()
+                stream.left_stream()
             } else {
                 stream.right_stream()
             }
