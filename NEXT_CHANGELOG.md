@@ -26,7 +26,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-The prometheus endpoint now listens to 0.0.0.0:9090/metrics by default. It previously listened to http://0.0.0.0:4000/plugins/apollo.telemetry/prometheus
+The Router's Prometheus interface is now exposed at `127.0.0.1:9090/metrics`, rather than `http://0.0.0.0:4000/plugins/apollo.telemetry/prometheus`.  This should be both more secure and also more generally compatible with the default settings that Prometheus expects (which also uses port `9090` and just `/metrics` as its defaults).
+
+To expose to a non-localhost interface, it is necessary to explicitly opt-into binding to a socket address of `0.0.0.0:9090` (i.e., all interfaces on port 9090) or a specific available interface (e.g., `192.168.4.1`) on the host.
 
 Have a look at the Features section to learn how to customize the listen address and the path
 
@@ -40,7 +42,7 @@ You can now customize the prometheus endpoint URL in your yml configuration:
 telemetry:
   metrics:
     prometheus:
-      listen: 0.0.0.0:9090 # default
+      listen: 127.0.0.1:9090 # default
       path: /metrics # default
       enabled: true
 ```

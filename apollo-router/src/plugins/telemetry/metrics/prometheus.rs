@@ -32,7 +32,7 @@ pub(crate) struct Config {
 }
 
 fn prometheus_default_listen_addr() -> ListenAddr {
-    ListenAddr::SocketAddr("0.0.0.0:9090".parse().expect("valid listenAddr"))
+    ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr"))
 }
 
 fn prometheus_default_path() -> String {

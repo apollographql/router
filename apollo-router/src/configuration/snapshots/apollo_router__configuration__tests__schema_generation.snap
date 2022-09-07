@@ -1438,7 +1438,7 @@ expression: "&schema"
                 },
                 "listen": {
                   "description": "Listening address.",
-                  "default": "0.0.0.0:9090",
+                  "default": "127.0.0.1:9090",
                   "anyOf": [
                     {
                       "description": "Socket address.",
