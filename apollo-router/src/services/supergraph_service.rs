@@ -308,7 +308,7 @@ fn process_execution_response(
                     response.has_next = Some(has_next);
                 }
 
-                dbg!(response)
+                response
             }
             // if the deferred response specified a path, we must extract the
             //values matched by that path and create a separate response for
@@ -322,16 +322,11 @@ fn process_execution_response(
             // under an array would generate one response par array element
             (Some(response_path), Some(response_data)) => {
                 let mut sub_responses = Vec::new();
-                dbg!(response_data).select_values_and_paths(response_path, |path, value| {
+                response_data.select_values_and_paths(response_path, |path, value| {
                     sub_responses.push((path.clone(), value.clone()));
                 });
-                // let has_next = response_data
-                //     .get("hasNext")
-                //     .and_then(|has_next| has_next.as_bool())
-                //     .unwrap_or(true);
 
                 Response::builder()
-                    // TODO find a way to detect last element in a stream
                     .has_next(has_next)
                     .incremental(
                         sub_responses
