@@ -16,13 +16,10 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
-use http_body::Body as _;
-use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
-use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 use Event::NoMoreConfiguration;
@@ -31,56 +28,14 @@ use Event::Shutdown;
 use Event::UpdateConfiguration;
 use Event::UpdateSchema;
 
-use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::plugin::DynPlugin;
-use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
-use crate::services::transport;
-use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
-
-// For now this is unused:
-#[allow(unused)]
-// Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
-// see https://github.com/apollographql/router/issues/1496.
-// In the meantime keeping this function helps make sure it still compiles.
-async fn make_transport_service<RF>(
-    schema: &str,
-    configuration: Arc<Configuration>,
-    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-) -> Result<transport::BoxCloneService, BoxError> {
-    let schema = Arc::new(Schema::parse(schema, &configuration)?);
-    let service_factory = YamlSupergraphServiceFactory
-        .create(configuration.clone(), schema, None, Some(extra_plugins))
-        .await?;
-    let extra = Default::default();
-    Ok(make_axum_router(service_factory, &configuration, extra)?
-        .map_response(|response| {
-            response.map(|body| {
-                // Axum makes this `body` have type:
-                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                let mut body = Box::pin(body);
-                // We make a stream based on its `poll_data` method
-                // in order to create a `hyper::Body`.
-                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                // … but we ignore the `poll_trailers` method:
-                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                // Apparently HTTP/2 trailers are like headers, except after the response body.
-                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                // so ignoring `poll_trailers` is fine.
-                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-            })
-        })
-        .map_err(|error| match error {})
-        .boxed_clone())
-}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -428,7 +383,8 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -483,7 +439,8 @@ impl RouterHttpServer {
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let listen_address = state_machine.listen_address.clone();
+        let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
+        let graphql_listen_address = state_machine.graphql_listen_address.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -502,22 +459,28 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            listen_address,
+            graphql_listen_address,
+            extra_listen_adresses,
         }
     }
 
-    /// Returns the listen address when the router is ready to receive requests.
+    /// Returns the listen address when the router is ready to receive GraphQL requests.
     ///
     /// This can be useful when the `server.listen` configuration specifies TCP port 0,
     /// which instructs the operating system to pick an available port number.
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
-    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
-        self.listen_address
-            .read()
-            .await
-            .clone()
-            .ok_or(ApolloRouterError::StartupError)
+    pub async fn listen_address(&self) -> Option<ListenAddr> {
+        self.graphql_listen_address.read().await.clone()
+    }
+
+    /// Returns the extra listen addresses the router can receive requests to.
+    ///
+    /// Combine it with `listen_address` to have an exhaustive list
+    /// of all addresses used by the router.
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn extra_listen_adresses(&self) -> Vec<ListenAddr> {
+        self.extra_listen_adresses.read().await.clone()
     }
 
     /// Trigger and wait for graceful shutdown
@@ -617,6 +580,7 @@ mod tests {
             .listen_address()
             .await
             .expect("router failed to start");
+
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         router_handle.shutdown().await.unwrap();
     }
