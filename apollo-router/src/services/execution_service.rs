@@ -62,7 +62,7 @@ where
                 .execute(
                     &context,
                     &this.subgraph_creator,
-                    &Arc::new(req.originating_request),
+                    &Arc::new(req.supergraph_request),
                     &this.schema,
                     sender,
                 )

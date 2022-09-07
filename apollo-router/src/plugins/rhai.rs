@@ -816,7 +816,7 @@ macro_rules! register_rhai_interface {
             $engine.register_get_result(
                 "headers",
                 |obj: &mut SharedMut<$base::Request>| {
-                    Ok(obj.with_mut(|request| request.originating_request.headers().clone()))
+                    Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
                 }
             );
 
@@ -828,7 +828,7 @@ macro_rules! register_rhai_interface {
                             let _unused = (obj, headers);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.originating_request.headers_mut() = headers);
+                            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
                             Ok(())
                         }
                     }
@@ -838,7 +838,7 @@ macro_rules! register_rhai_interface {
             $engine.register_get_result(
                 "body",
                 |obj: &mut SharedMut<$base::Request>| {
-                    Ok(obj.with_mut(|request| request.originating_request.body().clone()))
+                    Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
                 }
             );
 
@@ -850,7 +850,7 @@ macro_rules! register_rhai_interface {
                             let _unused = (obj, body);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.originating_request.body_mut() = body);
+                            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
                             Ok(())
                         }
                     }
@@ -860,7 +860,7 @@ macro_rules! register_rhai_interface {
             $engine.register_get_result(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>| {
-                    Ok(obj.with_mut(|request| request.originating_request.uri().clone()))
+                    Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
                 }
             );
 
@@ -872,7 +872,7 @@ macro_rules! register_rhai_interface {
                             let _unused = (obj, uri);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.originating_request.uri_mut() = uri);
+                            obj.with_mut(|request| *request.supergraph_request.uri_mut() = uri);
                             Ok(())
                         }
                     }
@@ -1445,7 +1445,7 @@ mod tests {
         context.insert("test", 5i64).unwrap();
         let exec_req = ExecutionRequest::fake_builder()
             .context(context)
-            .originating_request(fake_req)
+            .supergraph_request(fake_req)
             .build();
 
         let mut exec_resp = router_service

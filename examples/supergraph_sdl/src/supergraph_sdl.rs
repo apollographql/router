@@ -36,7 +36,7 @@ impl Plugin for SupergraphSDL {
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
                 // If we have a query
-                if let Some(query) = &req.originating_request.body().query {
+                if let Some(query) = &req.supergraph_request.body().query {
                     // Compile our supergraph_sdl and query
                     let input = format!("{}\n{}", supergraph_sdl, query);
                     let ctx = ApolloCompiler::new(&input);
