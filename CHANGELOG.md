@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## ❗ BREAKING ❗
 
-### Unified supergraph and execution response types
+### Unified supergraph and execution response types ([PR #1708](https://github.com/apollographql/router/pull/1708))
 
 `apollo_router::services::supergraph::Response` and `apollo_router::services::execution::Response` were two structs with identical fields and almost-identical methods.  The main difference was that builders were fallible for the former but not the latter.
 
@@ -23,7 +23,7 @@ They are now the same type (with one location a `type` alias of the other), with
 +    .build()?;
 ```
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1708
 
 ### Rename `originating_request` to `supergraph_request` on various plugin `Request` structures ([Issue #1713](https://github.com/apollographql/router/issues/1713))
 
