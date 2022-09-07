@@ -1,6 +1,7 @@
 //! Telemetry plugin.
 // With regards to ELv2 licensing, this entire file is license key functionality
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
@@ -19,8 +20,10 @@ use apollo_spaceport::StatsContext;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
-use http::{header, HeaderValue};
-use http::{HeaderMap, StatusCode};
+use http::header;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::StatusCode;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;

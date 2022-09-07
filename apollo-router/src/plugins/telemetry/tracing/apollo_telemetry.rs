@@ -3,9 +3,6 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::SystemTimeError;
 
-use crate::plugins::telemetry::apollo::SingleReport;
-use crate::plugins::telemetry::apollo_exporter::{ApolloExporter, Sender};
-use crate::plugins::telemetry::BoxError;
 use apollo_spaceport::trace::http::Values;
 use apollo_spaceport::trace::query_plan_node::FetchNode;
 use apollo_spaceport::trace::query_plan_node::FlattenNode;
@@ -23,13 +20,18 @@ use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
+use opentelemetry::Array;
+use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry::{Array, Key};
 use thiserror::Error;
 use url::Url;
 
+use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
+use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
 
 const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");

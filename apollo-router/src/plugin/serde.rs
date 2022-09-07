@@ -10,8 +10,9 @@ use http::header::HeaderName;
 use http::HeaderValue;
 use regex::Regex;
 use serde::de;
+use serde::de::Error;
+use serde::de::SeqAccess;
 use serde::de::Visitor;
-use serde::de::{Error, SeqAccess};
 use serde::Deserializer;
 
 pub fn deserialize_option_header_name<'de, D>(
