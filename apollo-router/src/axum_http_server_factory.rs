@@ -99,12 +99,18 @@ pub(crate) struct ListenersAndRouters {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    endpoints: MultiMap<ListenAddr, Endpoint>,
+    mut endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
-    let mut main_endpoint = main_endpoint(service_factory, configuration)?;
+    let mut main_endpoint = main_endpoint(
+        service_factory,
+        configuration,
+        endpoints
+            .remove(&configuration.graphql.listen)
+            .unwrap_or_default(),
+    )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
@@ -123,6 +129,7 @@ where
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
+    endpoints_on_main_listener: Vec<Endpoint>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -138,7 +145,7 @@ where
     } else {
         graphql_configuration.path
     };
-    let route = Router::<hyper::Body>::new()
+    let main_route = Router::<hyper::Body>::new()
         .route(
             &graphql_path,
             get({
@@ -192,6 +199,10 @@ where
         .layer(Extension(service_factory))
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
+
+    let route = endpoints_on_main_listener
+        .into_iter()
+        .fold(main_route, |acc, r| acc.merge(r.into_router()));
 
     let listener = graphql_configuration.listen;
     Ok(ListenAddrAndRouter(listener, route))
