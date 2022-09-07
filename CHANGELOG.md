@@ -43,7 +43,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🚀 Features
 
-### New plugin helper: `map_first_graphql_response`
+### New plugin helper: `map_first_graphql_response` ([Issue #1564](https://github.com/apollographql/router/issues/1564))
 
 In supergraph and execution services, the service response contains not just one GraphQL response but a stream of them, in order to support features such as `@defer`.
 
@@ -51,7 +51,7 @@ This new method of `ServiceExt` and `ServiceBuilderExt` in `apollo_router::layer
 
 See the doc-comments in `apollo-router/src/layers/mod.rs` for more.
 
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1708
 
 ### Users can customize the Prometheus listener address and URL path ([Issue #1645](https://github.com/apollographql/router/issues/1645))
 
