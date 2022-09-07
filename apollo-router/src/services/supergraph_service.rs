@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::ops::Deref;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -13,7 +14,6 @@ use http::header::ACCEPT;
 use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
-use lazy_static::__Deref;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaTypeList;
@@ -122,19 +122,30 @@ where
         let context_cloned = req.context.clone();
         let fut =
             service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let errors = vec![crate::error::Error {
+                let mut errors = vec![crate::error::Error {
                     message: error.to_string(),
                     ..Default::default()
                 }];
+                // This mess is caused by BoxError
                 let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
-                    Some(crate::error::CacheResolverError::RetrievalError(retrieval_error))
-                        if matches!(
-                            retrieval_error.deref().downcast_ref::<QueryPlannerError>(),
-                            Some(QueryPlannerError::SpecError(_))
-                                | Some(QueryPlannerError::SchemaValidationErrors(_))
-                        ) =>
-                    {
-                        StatusCode::BAD_REQUEST
+                    Some(crate::error::CacheResolverError::RetrievalError(retrieval_error)) => {
+                        match retrieval_error.deref().downcast_ref::<QueryPlannerError>() {
+                            Some(qp_error) => {
+                                // Custom error for QueryPlannerError
+                                *errors.get_mut(0).unwrap() = qp_error.clone().into();
+                                if matches!(
+                                    qp_error,
+                                    QueryPlannerError::SpecError(_)
+                                        | QueryPlannerError::SchemaValidationErrors(_)
+                                        | QueryPlannerError::PlanningErrors(_)
+                                ) {
+                                    StatusCode::BAD_REQUEST
+                                } else {
+                                    StatusCode::INTERNAL_SERVER_ERROR
+                                }
+                            }
+                            None => StatusCode::INTERNAL_SERVER_ERROR,
+                        }
                     }
                     _ => StatusCode::INTERNAL_SERVER_ERROR,
                 };

@@ -3,15 +3,19 @@
 #![allow(missing_docs)] // FIXME
 
 use std::fmt;
+use std::ops::Deref;
 
+use router_bridge::planner::PlanErrors;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
+use crate::error::CacheResolverError;
 use crate::error::FetchError;
 pub use crate::error::Location;
+use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
@@ -107,5 +111,59 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.message.fmt(f)
+    }
+}
+
+impl From<PlanErrors> for Error {
+    fn from(p_err: PlanErrors) -> Self {
+        if p_err.errors.len() == 1 {
+            let error = p_err.errors[0].clone();
+            Self {
+                message: error
+                    .message
+                    .unwrap_or_else(|| String::from("query plan error")),
+                extensions: error
+                    .extensions
+                    .map(|ext| {
+                        let mut map = serde_json_bytes::map::Map::new();
+                        map.insert("code", Value::from(ext.code));
+
+                        map
+                    })
+                    .unwrap_or_default(),
+                ..Default::default()
+            }
+        } else {
+            Self {
+                message: p_err
+                    .errors
+                    .iter()
+                    .filter_map(|err| err.message.clone())
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+                ..Default::default()
+            }
+        }
+    }
+}
+
+impl From<QueryPlannerError> for Error {
+    fn from(qp_error: QueryPlannerError) -> Self {
+        match &qp_error {
+            QueryPlannerError::PlanningErrors(plan_errors) => return plan_errors.clone().into(),
+            QueryPlannerError::CacheResolverError(cache_err) => {
+                // This mess is caused by BoxError
+                let CacheResolverError::RetrievalError(retrieval_error) = cache_err.deref();
+                if let Some(qp_err) = retrieval_error.deref().downcast_ref::<QueryPlannerError>() {
+                    return qp_err.clone().into();
+                }
+            }
+            _ => (),
+        }
+
+        Self {
+            message: qp_error.to_string(),
+            ..Default::default()
+        }
     }
 }

@@ -4316,8 +4316,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dfffd561d68c0b604db40293bec1f69b4e67f19ad92791a9a4d103952ddd918"
+source = "git+https://github.com/apollographql/federation-rs.git?branch=garypen/1519-slghtly-better-errors#3f8297970c318734f2d642a4c4d8e17cc1996d78"
 dependencies = [
  "anyhow",
  "async-channel",
