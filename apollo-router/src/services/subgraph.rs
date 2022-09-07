@@ -24,7 +24,7 @@ assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: Arc<http::Request<graphql::Request>>,
+    pub supergraph_request: Arc<http::Request<graphql::Request>>,
 
     pub subgraph_request: http::Request<graphql::Request>,
 
@@ -40,13 +40,13 @@ impl Request {
     /// Required parameters are required in non-testing code to create a Request.
     #[builder(visibility = "pub")]
     fn new(
-        originating_request: Arc<http::Request<graphql::Request>>,
+        supergraph_request: Arc<http::Request<graphql::Request>>,
         subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
     ) -> Request {
         Self {
-            originating_request,
+            supergraph_request,
             subgraph_request,
             operation_kind,
             context,
@@ -60,13 +60,13 @@ impl Request {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
-        originating_request: Option<Arc<http::Request<graphql::Request>>>,
+        supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
     ) -> Request {
         Request::new(
-            originating_request.unwrap_or_default(),
+            supergraph_request.unwrap_or_default(),
             subgraph_request.unwrap_or_default(),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),

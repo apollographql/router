@@ -62,7 +62,7 @@ impl Plugin for AllowClientIdFromFile {
             // If we set a res, then we are going to break execution
             // If not, we are continuing
             let mut res = None;
-            if !req.originating_request.headers().contains_key(&header_key) {
+            if !req.supergraph_request.headers().contains_key(&header_key) {
                 // Prepare an HTTP 401 response with a GraphQL error message
                 res = Some(
                     supergraph::Response::error_builder()
@@ -81,7 +81,7 @@ impl Plugin for AllowClientIdFromFile {
                 // And to use `expect()` instead of `unwrap()`, with a message
                 // that explains why the use of `expect()` is safe
                 let client_id = req
-                    .originating_request
+                    .supergraph_request
                     .headers()
                     .get("x-client-id")
                     .expect("this cannot fail; we checked for header presence above;qed")
@@ -317,7 +317,7 @@ mod tests {
                     valid_client_id,
                     // we're ok with unwrap's here because we're running a test
                     // we would not do this in actual code
-                    req.originating_request
+                    req.supergraph_request
                         .headers()
                         .get("x-client-id")
                         .unwrap()

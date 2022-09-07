@@ -35,16 +35,16 @@ assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
-    pub originating_request: http::Request<graphql::Request>,
+    pub supergraph_request: http::Request<graphql::Request>,
 
     /// Context for extension
     pub context: Context,
 }
 
 impl From<http::Request<graphql::Request>> for Request {
-    fn from(originating_request: http::Request<graphql::Request>) -> Self {
+    fn from(supergraph_request: http::Request<graphql::Request>) -> Self {
         Self {
-            originating_request,
+            supergraph_request,
             context: Context::new(),
         }
     }
@@ -74,13 +74,13 @@ impl Request {
             .variables(variables)
             .extensions(extensions)
             .build();
-        let mut originating_request = http::Request::builder()
+        let mut supergraph_request = http::Request::builder()
             .uri(uri)
             .method(method)
             .body(gql_request)?;
-        *originating_request.headers_mut() = header_map(headers)?;
+        *supergraph_request.headers_mut() = header_map(headers)?;
         Ok(Self {
-            originating_request,
+            supergraph_request,
             context,
         })
     }
@@ -321,7 +321,7 @@ mod test {
             .unwrap();
         assert_eq!(
             request
-                .originating_request
+                .supergraph_request
                 .headers()
                 .get_all("a")
                 .into_iter()
@@ -329,18 +329,18 @@ mod test {
             vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
         );
         assert_eq!(
-            request.originating_request.uri(),
+            request.supergraph_request.uri(),
             &Uri::from_static("http://example.com")
         );
         assert_eq!(
-            request.originating_request.body().extensions.get("foo"),
+            request.supergraph_request.body().extensions.get("foo"),
             Some(&json!({}).into())
         );
         assert_eq!(
-            request.originating_request.body().variables.get("bar"),
+            request.supergraph_request.body().variables.get("bar"),
             Some(&json!({}).into())
         );
-        assert_eq!(request.originating_request.method(), Method::POST);
+        assert_eq!(request.supergraph_request.method(), Method::POST);
 
         let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
             .as_object()
@@ -352,7 +352,7 @@ mod test {
             .unwrap()
             .clone();
         assert_eq!(
-            request.originating_request.body(),
+            request.supergraph_request.body(),
             &graphql::Request::builder()
                 .variables(variables)
                 .extensions(extensions)

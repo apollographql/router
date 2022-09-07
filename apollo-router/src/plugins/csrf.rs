@@ -144,7 +144,7 @@ impl Plugin for Csrf {
 //
 // Given the first step is covered in our web browser, we'll take care of the two other steps below:
 fn is_preflighted(req: &SupergraphRequest, required_headers: &[String]) -> bool {
-    let headers = req.originating_request.headers();
+    let headers = req.supergraph_request.headers();
     content_type_requires_preflight(headers)
         || recommended_header_is_provided(headers, required_headers)
 }
@@ -256,7 +256,7 @@ mod csrf_tests {
         // fake_builder defaults to `Content-Type: application/json`,
         // specifically to avoid the case we’re testing here.
         non_preflighted_request
-            .originating_request
+            .supergraph_request
             .headers_mut()
             .remove("content-type");
         assert_rejected(config, non_preflighted_request).await

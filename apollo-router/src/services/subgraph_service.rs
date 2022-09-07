@@ -447,7 +447,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
@@ -480,7 +480,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
@@ -513,7 +513,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")

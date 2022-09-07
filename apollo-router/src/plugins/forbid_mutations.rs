@@ -190,7 +190,7 @@ mod forbid_http_get_mutations_tests {
             .build()
             .expect("expecting valid request");
         ExecutionRequest::fake_builder()
-            .originating_request(request)
+            .supergraph_request(request)
             .query_plan(QueryPlan::fake_builder().root(root).build())
             .build()
     }

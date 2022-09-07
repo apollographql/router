@@ -52,7 +52,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint(|req: supergraph::Request|{
-    ///         if req.originating_request.method() == Method::GET {
+    ///         if req.supergraph_request.method() == Method::GET {
     ///             Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                 .data("Only get requests allowed")
     ///                 .context(req.context)
@@ -113,7 +113,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
-    ///             if req.originating_request.method() == Method::GET {
+    ///             if req.supergraph_request.method() == Method::GET {
     ///                 Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                     .data("Only get requests allowed")
     ///                     .context(req.context)
