@@ -119,7 +119,7 @@ async fn traced_basic_request() {
         },
     );
     insta::assert_json_snapshot!(get_spans(), {
-      ".children.*.record.entries[]" => redact_request_id()
+      ".**.children.*.record.entries[]" => redact_dynamic()
     });
 }
 
@@ -135,7 +135,7 @@ async fn traced_basic_composition() {
         },
     );
     insta::assert_json_snapshot!(get_spans(), {
-      ".children.*.record.entries[]" => redact_request_id()
+      ".**.children.*.record.entries[]" => redact_dynamic()
     });
 }
 
@@ -868,7 +868,7 @@ impl ValueExt for Value {
 }
 
 // Useful to redact request_id in snapshot because it's not determinist
-fn redact_request_id() -> Redaction {
+fn redact_dynamic() -> Redaction {
     insta::dynamic_redaction(|value, _path| {
         if let Some(value_slice) = value.as_slice() {
             if value_slice.get(0).and_then(|v| v.as_str()) == Some("request.id") {
@@ -876,6 +876,11 @@ fn redact_request_id() -> Redaction {
                     value_slice.get(0).unwrap().clone(),
                     Content::String("[REDACTED]".to_string()),
                 ]);
+            }
+            if value_slice.get(0).and_then(|v| v.as_str())
+                == Some("apollo_private.sent_time_offset")
+            {
+                return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
             }
         }
         value

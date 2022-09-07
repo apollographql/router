@@ -30,11 +30,11 @@ expression: get_spans()
             ""
           ],
           [
-            "client_name",
+            "client.name",
             ""
           ],
           [
-            "client_version",
+            "client.version",
             ""
           ],
           [
@@ -42,16 +42,16 @@ expression: get_spans()
             "internal"
           ],
           [
-            "apollo_private_request_variables",
-            "{\"topProductsFirst\":[\"\"],\"reviewsForAuthorAuthorId\":[\"\"]}"
+            "apollo_private.field_level_instrumentation_ratio",
+            0.0
           ],
           [
-            "apollo_private_request_headers",
+            "apollo_private.graphql.variables",
+            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+          ],
+          [
+            "apollo_private.http.request_headers",
             "{\"content-type\":[\"\"]}"
-          ],
-          [
-            "apollo_private_operation_signature",
-            "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
           ]
         ],
         "metadata": {
@@ -63,12 +63,13 @@ expression: get_spans()
             "names": [
               "graphql.document",
               "graphql.operation.name",
-              "client_name",
-              "client_version",
+              "client.name",
+              "client.version",
               "otel.kind",
-              "apollo_private_operation_signature",
-              "apollo_private_request_variables",
-              "apollo_private_request_headers"
+              "apollo_private.field_level_instrumentation_ratio",
+              "apollo_private.operation_signature",
+              "apollo_private.graphql.variables",
+              "apollo_private.http.request_headers"
             ]
           }
         }
@@ -148,7 +149,7 @@ expression: get_spans()
                 "internal"
               ],
               [
-                "ftv1_do_not_sample_reason",
+                "ftv1.do_not_sample_reason",
                 ""
               ]
             ],
@@ -162,7 +163,7 @@ expression: get_spans()
                   "graphql.document",
                   "graphql.operation.name",
                   "otel.kind",
-                  "ftv1_do_not_sample_reason"
+                  "ftv1.do_not_sample_reason"
                 ]
               }
             }
@@ -194,6 +195,10 @@ expression: get_spans()
                       [
                         "service.name",
                         "products"
+                      ],
+                      [
+                        "apollo_private.sent_time_offset",
+                        0
                       ]
                     ],
                     "metadata": {
@@ -204,7 +209,8 @@ expression: get_spans()
                       "fields": {
                         "names": [
                           "otel.kind",
-                          "service.name"
+                          "service.name",
+                          "apollo_private.sent_time_offset"
                         ]
                       }
                     }
@@ -386,6 +392,10 @@ expression: get_spans()
                       [
                         "service.name",
                         "reviews"
+                      ],
+                      [
+                        "apollo_private.sent_time_offset",
+                        0
                       ]
                     ],
                     "metadata": {
@@ -396,7 +406,8 @@ expression: get_spans()
                       "fields": {
                         "names": [
                           "otel.kind",
-                          "service.name"
+                          "service.name",
+                          "apollo_private.sent_time_offset"
                         ]
                       }
                     }
@@ -593,6 +604,10 @@ expression: get_spans()
                           [
                             "service.name",
                             "products"
+                          ],
+                          [
+                            "apollo_private.sent_time_offset",
+                            0
                           ]
                         ],
                         "metadata": {
@@ -603,7 +618,8 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "otel.kind",
-                              "service.name"
+                              "service.name",
+                              "apollo_private.sent_time_offset"
                             ]
                           }
                         }
@@ -785,6 +801,10 @@ expression: get_spans()
                           [
                             "service.name",
                             "accounts"
+                          ],
+                          [
+                            "apollo_private.sent_time_offset",
+                            0
                           ]
                         ],
                         "metadata": {
@@ -795,7 +815,8 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "otel.kind",
-                              "service.name"
+                              "service.name",
+                              "apollo_private.sent_time_offset"
                             ]
                           }
                         }
