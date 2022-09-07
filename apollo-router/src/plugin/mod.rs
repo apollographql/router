@@ -29,6 +29,7 @@ use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
@@ -39,10 +40,12 @@ use tower::Service;
 use tower::ServiceBuilder;
 
 use crate::layers::ServiceBuilderExt;
+use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::transport;
+use crate::ListenAddr;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
@@ -192,18 +195,19 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
-    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
-    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
-        None
-    }
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
         Self: Sized,
     {
         get_type_of(self)
+    }
+
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    ///
+    /// This method is experimental and subject to change post 1.0
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        MultiMap::new()
     }
 }
 
@@ -237,12 +241,11 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
-    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
-    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
-    fn custom_endpoint(&self) -> Option<transport::BoxService>;
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
+
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
 #[async_trait]
@@ -263,12 +266,13 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
-        self.custom_endpoint()
-    }
-
     fn name(&self) -> &'static str {
         self.name()
+    }
+
+    /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        self.web_endpoints()
     }
 }
 
@@ -278,16 +282,19 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
-        $crate::_private::startup::on_startup! {
-            let qualified_name = if $group == "" {
-                $name.to_string()
-            }
-            else {
-                format!("{}.{}", $group, $name)
-            };
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            #[$crate::_private::ctor::ctor]
+            fn register_plugin() {
+                let qualified_name = if $group == "" {
+                    $name.to_string()
+                } else {
+                    format!("{}.{}", $group, $name)
+                };
 
-            $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
-        }
+                $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
+            }
+        };
     };
 }
 

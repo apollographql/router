@@ -7,6 +7,7 @@ use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
+use multimap::MultiMap;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
@@ -25,11 +26,11 @@ use crate::graphql::Request;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
-use crate::plugin::Handler;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::services::transport;
+use crate::router_factory::Endpoint;
 use crate::Context;
+use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;
@@ -452,7 +453,7 @@ fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::
 pub(crate) struct MetricsBuilder {
     exporters: Vec<MetricsExporterHandle>,
     meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    custom_endpoints: HashMap<String, Handler>,
+    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics: Sender,
 }
 
@@ -463,7 +464,7 @@ impl MetricsBuilder {
     pub(crate) fn meter_provider(&mut self) -> AggregateMeterProvider {
         AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
     }
-    pub(crate) fn custom_endpoints(&mut self) -> HashMap<String, Handler> {
+    pub(crate) fn custom_endpoints(&mut self) -> MultiMap<ListenAddr, Endpoint> {
         std::mem::take(&mut self.custom_endpoints)
     }
 
@@ -486,9 +487,8 @@ impl MetricsBuilder {
         self
     }
 
-    fn with_custom_endpoint(mut self, path: &str, endpoint: transport::BoxService) -> Self {
-        self.custom_endpoints
-            .insert(path.to_string(), Handler::new(endpoint));
+    fn with_custom_endpoint(mut self, listen_addr: ListenAddr, endpoint: Endpoint) -> Self {
+        self.custom_endpoints.insert(listen_addr, endpoint);
         self
     }
 
