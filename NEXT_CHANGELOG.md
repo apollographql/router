@@ -91,6 +91,12 @@ By [@o0Ignition0o](https://github.com/@o0Ignition0o) in https://github.com/apoll
 
 ## 🐛 Fixes
 
+### Fix metrics duration for router request ([#1705](https://github.com/apollographql/router/issues/1705))
+
+With the introduction of `BoxStream` for defer we introduced a bug when computing http request duration metrics. Sometimes we didn't wait for the first response in the `BoxStream`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1705
+
 ### Numerous fixes to preview `@defer` query planning ([Issue #1698](https://github.com/apollographql/router/issues/1698))
 
 Updated to [Federation `2.1.2-alpha.0`](https://github.com/apollographql/federation/pull/2132) which brings in a number of fixes for the preview `@defer` support.  These fixes include:
