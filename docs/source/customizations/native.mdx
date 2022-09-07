@@ -151,7 +151,7 @@ Some notable layers are:
 * **checkpoint** - Perform a sync call to decide if a request should proceed or not. Useful for validation.
 * **checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Requires `buffered`.
 * **instrument** - Add a tracing span around a service.
-* **map_reqeust** - Transform the request before proceeding. e.g. for header manipulation.
+* **map_request** - Transform the request before proceeding. e.g. for header manipulation.
 * **map_response** - Transform the response before proceeding. e.g. for header manipulation.
 
 Before implementing a layer yourself, always check whether an existing layer implementation might fit your needs. Reusing layers is significantly faster than implementing layers from scratch.

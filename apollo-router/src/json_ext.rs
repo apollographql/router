@@ -531,6 +531,17 @@ impl Path {
     pub fn pop(&mut self) -> Option<PathElement> {
         self.0.pop()
     }
+
+    pub fn last(&mut self) -> Option<&PathElement> {
+        self.0.last()
+    }
+
+    pub fn last_key(&mut self) -> Option<String> {
+        self.0.last().and_then(|elem| match elem {
+            PathElement::Key(k) => Some(k.clone()),
+            _ => None,
+        })
+    }
 }
 
 impl AsRef<Path> for Path {
