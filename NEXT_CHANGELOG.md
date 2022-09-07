@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-The prometheus endpoint now listens to 0.0.0.0:9090/metrics by default. It previously listened to http://0.0.0.0:4000/plugins/apollo.telemetry/prometheus
+The prometheus endpoint now listens to 127.0.0.1:9090/metrics by default. It previously listened to http://0.0.0.0:4000/plugins/apollo.telemetry/prometheus
 
 Have a look at the Features section to learn how to customize the listen address and the path
 
@@ -40,7 +40,7 @@ You can now customize the prometheus endpoint URL in your yml configuration:
 telemetry:
   metrics:
     prometheus:
-      listen: 0.0.0.0:9090 # default
+      listen: 127.0.0.1:9090 # default
       path: /metrics # default
       enabled: true
 ```
