@@ -210,7 +210,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// not just one GraphQL response but a stream of them,
     /// in order to support features such as `@defer`.
     ///
-    /// This method wraps a service and call `callback` when the first GraphQL response
+    /// This method wraps a service and calls a `callback` when the first GraphQL response
     /// in the stream returned by the inner service becomes available.
     /// The callback can then modify the HTTP parts (headers, status code, etc)
     /// or the first GraphQL response before returning them.
