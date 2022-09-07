@@ -268,7 +268,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
                 actual_main_listen_address,
-                configuration.server.graphql_path
+                configuration.graphql.path
             );
 
             // serve extra routers
@@ -1003,8 +1003,8 @@ mod tests {
                 },
                 Arc::new(
                     Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
+                        .graphql(
+                            crate::configuration::Graphql::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
@@ -1093,8 +1093,8 @@ mod tests {
                 },
                 Arc::new(
                     Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
+                        .graphql(
+                            crate::configuration::Graphql::builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
@@ -1428,10 +1428,10 @@ mod tests {
                     .origins(vec!["http://studio".to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql"))
+                    .path(String::from("/graphql"))
                     .build(),
             )
             .build();
@@ -1500,10 +1500,10 @@ mod tests {
                     .origins(vec!["http://studio".to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/:my_prefix/graphql"))
+                    .path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
             .build();
@@ -1574,8 +1574,13 @@ mod tests {
             )
             .server(
                 crate::configuration::Server::builder()
+                    .landing_page(false)
+                    .build(),
+            )
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql/*"))
+                    .path(String::from("/graphql/*"))
                     .build(),
             )
             .build();
@@ -1800,10 +1805,10 @@ mod tests {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::builder()
             .cors(Cors::builder().build())
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql/*"))
+                    .path(String::from("/graphql/*"))
                     .build(),
             )
             .build();
@@ -1992,10 +1997,9 @@ Content-Type: application/json\r
     #[tokio::test]
     async fn test_custom_health_check() {
         let conf = Configuration::builder()
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .health_check_path("/health")
                     .build(),
             )
             .build();
@@ -2008,6 +2012,7 @@ Content-Type: application/json\r
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        todo!("set healthcheck up");
     }
 
     #[test(tokio::test)]
@@ -2042,8 +2047,12 @@ Content-Type: application/json\r
             )
             .server(
                 crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .landing_page(false)
+                    .build(),
+            )
+            .graphql(
+                crate::configuration::Graphql::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -2091,8 +2100,8 @@ Content-Type: application/json\r
                     .origins(vec!["http://studio".to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
@@ -2218,8 +2227,8 @@ Content-Type: application/json\r
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         let conf = Configuration::builder()
             .cors(Cors::builder().allow_any_origin(true).build())
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
@@ -2245,8 +2254,8 @@ Content-Type: application/json\r
                     .origins(vec![valid_origin.to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
@@ -2276,8 +2285,8 @@ Content-Type: application/json\r
                     .match_origins(vec![apollo_subdomains.to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
+            .graphql(
+                crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )

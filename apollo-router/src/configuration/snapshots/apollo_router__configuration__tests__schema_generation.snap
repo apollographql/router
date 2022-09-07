@@ -125,7 +125,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "introspection": {
-          "default": false,
+          "default": true,
           "type": "boolean"
         },
         "listen": {
@@ -148,7 +148,7 @@ expression: "&schema"
           "type": "string"
         },
         "preview_defer_support": {
-          "default": false,
+          "default": true,
           "type": "boolean"
         }
       },
@@ -443,12 +443,8 @@ expression: "&schema"
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "listen": "127.0.0.1:4000",
-        "introspection": true,
         "landing_page": true,
-        "graphql_path": "/",
         "health_check_path": "/.well-known/apollo/server-health",
-        "preview_defer_support": true,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
@@ -460,42 +456,13 @@ expression: "&schema"
           "format": "uint",
           "minimum": 0.0
         },
-        "graphql_path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
           "default": "/.well-known/apollo/server-health",
           "type": "string"
         },
-        "introspection": {
-          "description": "introspection queries enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
         "landing_page": {
           "description": "display landing page enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "preview_defer_support": {
-          "description": "Preview @defer directive support default: true",
           "default": true,
           "type": "boolean"
         }
