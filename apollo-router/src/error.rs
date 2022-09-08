@@ -19,6 +19,7 @@ use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
+use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -136,10 +137,19 @@ impl FetchError {
 #[serde(rename_all = "camelCase")]
 pub struct Location {
     /// The line number.
-    pub line: i32,
+    pub line: u32,
 
     /// The column number.
-    pub column: i32,
+    pub column: u32,
+}
+
+impl From<router_bridge::planner::Location> for Location {
+    fn from(loc: router_bridge::planner::Location) -> Self {
+        Self {
+            line: loc.line,
+            column: loc.column,
+        }
+    }
 }
 
 impl From<QueryPlannerError> for FetchError {
@@ -201,9 +211,38 @@ pub(crate) enum QueryPlannerError {
     Introspection(IntrospectionError),
 }
 
+impl IntoGraphQLErrors for QueryPlannerError {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        match self {
+            // TODO add all cases
+            QueryPlannerError::SpecError(err) => Ok(vec![Error {
+                message: err.to_string(),
+                ..Default::default()
+            }]),
+            QueryPlannerError::SchemaValidationErrors(errs) => errs
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::SchemaValidationErrors),
+            QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
+                .errors
+                .iter()
+                .map(|p_err| Error::from(p_err.clone()))
+                .collect()),
+            err => Err(err),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Error)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
+
+impl IntoGraphQLErrors for PlannerErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        let errors = self.0.iter().map(|e| Error::from(e.clone())).collect();
+
+        Ok(errors)
+    }
+}
 
 impl std::fmt::Display for PlannerErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

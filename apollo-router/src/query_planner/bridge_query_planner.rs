@@ -18,6 +18,7 @@ use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
+use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
@@ -169,12 +170,17 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
-                    query_planner_content.into(),
-                    req.context,
-                    vec![],
-                )),
-                Err(e) => Err(tower::BoxError::from(e)),
+                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
+                    .content(query_planner_content)
+                    .context(req.context)
+                    .build()),
+                Err(e) => {
+                    let gql_errors = e.into_graphql_errors()?;
+                    Ok(QueryPlannerResponse::builder()
+                        .errors(gql_errors)
+                        .context(req.context)
+                        .build())
+                }
             }
         };
 

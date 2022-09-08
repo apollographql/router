@@ -41,6 +41,7 @@ use crate::cache::DeduplicatingCache;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
+use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
@@ -126,32 +127,34 @@ where
                     ..Default::default()
                 }];
                 // This mess is caused by BoxError
-                let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
-                    Some(crate::error::CacheResolverError::RetrievalError(retrieval_error)) => {
-                        match retrieval_error.deref().downcast_ref::<QueryPlannerError>() {
-                            Some(qp_error) => {
-                                // Custom error for QueryPlannerError
-                                *errors.get_mut(0).unwrap() = qp_error.clone().into();
-                                if matches!(
-                                    qp_error,
-                                    QueryPlannerError::SpecError(_)
-                                        | QueryPlannerError::SchemaValidationErrors(_)
-                                        | QueryPlannerError::PlanningErrors(_)
-                                ) {
-                                    StatusCode::BAD_REQUEST
-                                } else {
-                                    StatusCode::INTERNAL_SERVER_ERROR
-                                }
-                            }
-                            None => StatusCode::INTERNAL_SERVER_ERROR,
-                        }
-                    }
-                    _ => StatusCode::INTERNAL_SERVER_ERROR,
-                };
+                // let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
+                //     Some(crate::error::CacheResolverError::RetrievalError(retrieval_error)) => {
+                //         match retrieval_error.deref().downcast_ref::<QueryPlannerError>() {
+                //             Some(qp_error) => {
+                //                 // Custom error for QueryPlannerError
+                //                 if let Ok(qp_errors) = qp_error.clone().into_graphql_errors() {
+                //                     errors = qp_errors;
+                //                 }
+                //                 if matches!(
+                //                     qp_error,
+                //                     QueryPlannerError::SpecError(_)
+                //                         | QueryPlannerError::SchemaValidationErrors(_)
+                //                         | QueryPlannerError::PlanningErrors(_)
+                //                 ) {
+                //                     StatusCode::BAD_REQUEST
+                //                 } else {
+                //                     StatusCode::INTERNAL_SERVER_ERROR
+                //                 }
+                //             }
+                //             None => StatusCode::INTERNAL_SERVER_ERROR,
+                //         }
+                //     }
+                //     _ => StatusCode::INTERNAL_SERVER_ERROR,
+                // };
 
                 Ok(SupergraphResponse::builder()
                     .errors(errors)
-                    .status_code(status_code)
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)
                     .build()
                     .expect("building a response like this should not fail"))
@@ -184,6 +187,7 @@ where
         return Ok(SupergraphResponse::builder()
             .context(context)
             .errors(errors)
+            .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
             .build()
             .expect("this response build must not fail"));
     }

@@ -219,6 +219,8 @@ impl IncrementalResponse {
         self.errors.append(errors)
     }
 }
+
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
