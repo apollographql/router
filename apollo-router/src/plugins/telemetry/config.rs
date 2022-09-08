@@ -309,7 +309,7 @@ impl Conf {
                 ) if ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
                 (
                     Some(SamplerOption::TraceIdRatioBased(ratio)),
-                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
+                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
                 ) if ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
 
                 // Happy paths

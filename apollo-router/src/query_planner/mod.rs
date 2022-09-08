@@ -379,15 +379,19 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
+                    // Note that the span must be `info` as we need to pick this up in apollo tracing
+                    let current_dir = current_dir.join(path);
                     let (v, subselect, err) = node
                         .execute_recursively(
                             parameters,
                             // this is the only command that actually changes the "current dir"
-                            &current_dir.join(path),
+                            &current_dir,
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::trace_span!("flatten", apollo_private.path = %path))
+                        .instrument(
+                            tracing::info_span!("flatten", apollo_private.path = %current_dir),
+                        )
                         .await;
 
                     value = v;

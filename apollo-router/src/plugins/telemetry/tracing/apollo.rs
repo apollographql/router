@@ -20,6 +20,7 @@ impl TracingConfigurator for Config {
                 apollo_graph_ref: Some(reference),
                 schema_id,
                 buffer_size,
+                field_level_instrumentation_sampler,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
@@ -31,6 +32,7 @@ impl TracingConfigurator for Config {
                     .apollo_graph_ref(reference)
                     .schema_id(schema_id)
                     .buffer_size(*buffer_size)
+                    .and_field_execution_sampler(field_level_instrumentation_sampler.clone())
                     .build()?;
                 builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
             }

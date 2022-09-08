@@ -197,7 +197,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        "apollo_private_operation_signature",
+                        "apollo_private.operation_signature",
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
@@ -293,7 +293,7 @@ impl Plugin for Telemetry {
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
-                    "apollo_private_ftv1" = field::Empty
+                    "apollo_private.ftv1" = field::Empty
                 )
             })
             .map_request(move |req| apollo_handler.request_ftv1(req))
@@ -1206,7 +1206,7 @@ impl ApolloFtv1Handler {
                 resp.response.body().extensions.get("ftv1")
             {
                 // Record the ftv1 trace for processing later
-                Span::current().record("apollo_private_ftv1", &ftv1.as_str());
+                Span::current().record("apollo_private.ftv1", &ftv1.as_str());
             }
         }
         resp

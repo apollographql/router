@@ -15,6 +15,7 @@ use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
+use futures::StreamExt;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
@@ -23,6 +24,7 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::Value;
+use regex::internal::Input;
 use thiserror::Error;
 use url::Url;
 
@@ -30,6 +32,7 @@ use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
+use crate::plugins::telemetry::config::{Sampler, SamplerOption};
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
@@ -37,8 +40,6 @@ use crate::plugins::telemetry::REQUEST_SPAN_NAME;
 const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
     Key::from_static_str("apollo_private.sent_time_offset");
-const APOLLO_PRIVATE_FIELD_LEVEL_INSTRUMENTATION_RATIO: Key =
-    Key::from_static_str("apollo_private.field_level_instrumentation_ratio");
 const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
     Key::from_static_str("apollo_private.graphql.variables");
 const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
@@ -87,6 +88,7 @@ pub(crate) struct Exporter {
     schema_id: String,
     #[derivative(Debug = "ignore")]
     apollo_sender: Sender,
+    field_execution_weight: f64,
 }
 
 enum TreeData {
@@ -95,7 +97,7 @@ enum TreeData {
         http: Http,
         client_name: Option<String>,
         client_version: Option<String>,
-        field_level_instrumentation_ratio: Option<f64>,
+        operation_signature: String,
     },
     QueryPlan(QueryPlanNode),
     Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
@@ -111,6 +113,7 @@ impl Exporter {
         apollo_graph_ref: String,
         schema_id: String,
         buffer_size: usize,
+        field_execution_sampler: Option<SamplerOption>,
     ) -> Result<Self, BoxError> {
         let apollo_exporter =
             ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
@@ -120,6 +123,12 @@ impl Exporter {
             endpoint,
             schema_id,
             apollo_sender: apollo_exporter.provider(),
+            field_execution_weight: match field_execution_sampler {
+                Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
+                Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
+                Some(SamplerOption::TraceIdRatioBased(ratio)) => 1.0 / ratio,
+                None => 0.0,
+            },
         })
     }
 
@@ -170,7 +179,7 @@ impl Exporter {
                     http,
                     client_name,
                     client_version,
-                    field_level_instrumentation_ratio,
+                    operation_signature,
                 } => {
                     root_trace
                         .http
@@ -179,8 +188,9 @@ impl Exporter {
                         .request_headers = http.request_headers;
                     root_trace.client_name = client_name.unwrap_or_default();
                     root_trace.client_version = client_version.unwrap_or_default();
-                    root_trace.field_execution_weight =
-                        1.0 / field_level_instrumentation_ratio.unwrap_or(1.0);
+                    root_trace.field_execution_weight = self.field_execution_weight;
+                    // This will be moved out later
+                    root_trace.signature = operation_signature;
                 }
                 _ => panic!("should never have had other node types"),
             }
@@ -295,17 +305,16 @@ impl Exporter {
                             response_path: span
                                 .attributes
                                 .get(&APOLLO_PRIVATE_PATH)
-                                .and_then(Self::extract_string_array)
-                                .unwrap_or_default()
-                                .iter()
+                                .and_then(Self::extract_string)
                                 .map(|v| {
-                                    if let Ok(index) = v.parse::<u32>() {
-                                        ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
-                                    } else {
-                                        ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
-                                    }
-                                })
-                                .collect(),
+                                    v.split("/").filter(|v|!v.is_empty() && *v != "@").map(|v| {
+                                        if let Ok(index) = v.parse::<u32>() {
+                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
+                                        } else {
+                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
+                                        }
+                                    }).collect()
+                                }).unwrap_or_default(),
                             node: child_nodes
                                 .into_iter()
                                 .filter_map(|child| match child {
@@ -332,10 +341,11 @@ impl Exporter {
                         .attributes
                         .get(&CLIENT_VERSION)
                         .and_then(Self::extract_string),
-                    field_level_instrumentation_ratio: span
+                    operation_signature: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_FIELD_LEVEL_INSTRUMENTATION_RATIO)
-                        .and_then(Self::extract_f64),
+                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .and_then(Self::extract_string)
+                        .unwrap_or_default(),
                 });
                 child_nodes
             }
@@ -356,24 +366,8 @@ impl Exporter {
         }
     }
 
-    fn extract_string_array(v: &Value) -> Option<Vec<String>> {
-        if let Value::Array(Array::String(v)) = v {
-            Some(v.iter().map(|v| v.to_string()).collect())
-        } else {
-            None
-        }
-    }
-
     fn extract_i64(v: &Value) -> Option<i64> {
         if let Value::I64(v) = v {
-            Some(*v)
-        } else {
-            None
-        }
-    }
-
-    fn extract_f64(v: &Value) -> Option<f64> {
-        if let Value::F64(v) = v {
             Some(*v)
         } else {
             None
@@ -449,32 +443,29 @@ impl SpanExporter for Exporter {
         let mut traces: Vec<(String, apollo_spaceport::Trace)> = Vec::new();
         for span in batch {
             if span.name == REQUEST_SPAN_NAME {
-                let operation_signature_attr = span
-                    .attributes
-                    .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
-                    .map(Value::to_string);
-
-                if let Some(operation_signature) = operation_signature_attr {
-                    match self.extract_trace(span) {
-                        Ok(trace) => {
+                match self.extract_trace(span) {
+                    Ok(mut trace) => {
+                        let mut operation_signature = Default::default();
+                        std::mem::swap(&mut trace.signature, &mut operation_signature);
+                        if !operation_signature.is_empty() {
                             traces.push((operation_signature, *trace));
                         }
-                        Err(Error::MultipleErrors(errors)) => {
-                            if let Some(Error::DoNotSample(reason)) = errors.first() {
-                                tracing::debug!(
-                                    "sampling is disabled on this trace: {}, skipping",
-                                    reason
-                                );
-                            } else {
-                                tracing::error!(
-                                    "failed to construct trace: {}, skipping",
-                                    Error::MultipleErrors(errors)
-                                );
-                            }
+                    }
+                    Err(Error::MultipleErrors(errors)) => {
+                        if let Some(Error::DoNotSample(reason)) = errors.first() {
+                            tracing::debug!(
+                                "sampling is disabled on this trace: {}, skipping",
+                                reason
+                            );
+                        } else {
+                            tracing::error!(
+                                "failed to construct trace: {}, skipping",
+                                Error::MultipleErrors(errors)
+                            );
                         }
-                        Err(error) => {
-                            tracing::error!("failed to construct trace: {}, skipping", error);
-                        }
+                    }
+                    Err(error) => {
+                        tracing::error!("failed to construct trace: {}, skipping", error);
                     }
                 }
             } else {
@@ -490,7 +481,6 @@ impl SpanExporter for Exporter {
                     .push(span);
             }
         }
-
         self.apollo_sender
             .send(SingleReport::Traces(TracesReport { traces }));
 
