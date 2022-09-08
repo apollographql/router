@@ -468,7 +468,6 @@ macro_rules! gen_map_request {
                     fn failure_message(
                         context: Context,
                         msg: String,
-                        status: StatusCode,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
                         let res = $base::Response::error_builder()
@@ -476,7 +475,6 @@ macro_rules! gen_map_request {
                                 message: msg,
                                 ..Default::default()
                             }])
-                            .status_code(status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
@@ -509,7 +507,6 @@ macro_rules! gen_map_request {
                         return failure_message(
                             request_opt.unwrap().context,
                             format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
                         );
                     }
                     let mut guard = shared_request.lock().unwrap();
@@ -587,17 +584,12 @@ macro_rules! gen_map_response {
                     // the significantly different treatment of errors in different
                     // response types makes this extremely painful. This needs to be
                     // re-visited at some point post GA.
-                    fn failure_message(
-                        context: Context,
-                        msg: String,
-                        status: StatusCode,
-                    ) -> $base::Response {
+                    fn failure_message(context: Context, msg: String) -> $base::Response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
                                 message: msg,
                                 ..Default::default()
                             }])
-                            .status_code(status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
@@ -631,7 +623,6 @@ macro_rules! gen_map_response {
                         return failure_message(
                             response_opt.unwrap().context,
                             format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
                         );
                     }
                     let mut guard = shared_response.lock().unwrap();

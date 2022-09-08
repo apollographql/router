@@ -59,10 +59,16 @@ where
             if entry.is_first() {
                 let res = qp.delegate.ready().await?.call(request).await;
                 match res {
-                    Ok(QueryPlannerResponse { content, context }) => {
-                        entry.insert(Ok(content.clone())).await;
+                    Ok(QueryPlannerResponse {
+                        content,
+                        context,
+                        errors,
+                    }) => {
+                        if let Some(content) = &content {
+                            entry.insert(Ok(content.clone())).await;
+                        }
 
-                        if let QueryPlannerContent::Plan { plan, .. } = &content {
+                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                             match (&plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
@@ -75,7 +81,11 @@ where
                                 }
                             }
                         }
-                        Ok(QueryPlannerResponse { content, context })
+                        Ok(QueryPlannerResponse {
+                            content,
+                            context,
+                            errors,
+                        })
                     }
                     Err(error) => {
                         match error.downcast_ref::<QueryPlannerError>() {
@@ -137,11 +147,14 @@ where
                             }
                         }
 
-                        Ok(QueryPlannerResponse { content, context })
+                        Ok(QueryPlannerResponse::builder()
+                            .content(content)
+                            .context(context)
+                            .build())
                     }
                     Err(error) => {
-                        if let Some(error) = error.downcast_ref::<QueryPlannerError>() {
-                            if let QueryPlannerError::PlanningErrors(pe) = &error {
+                        match error.downcast_ref::<QueryPlannerError>() {
+                            Some(QueryPlannerError::PlanningErrors(pe)) => {
                                 if let Err(inner_e) = request
                                     .context
                                     .insert(USAGE_REPORTING, pe.usage_reporting.clone())
@@ -151,7 +164,8 @@ where
                                         inner_e
                                     );
                                 }
-                            } else if let QueryPlannerError::SpecError(e) = &error {
+                            }
+                            Some(QueryPlannerError::SpecError(e)) => {
                                 let error_key = match e {
                                     SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
                                     _ => "## GraphQLValidationFailure\n",
@@ -169,6 +183,7 @@ where
                                     );
                                 }
                             }
+                            _ => {}
                         }
 
                         Err(CacheResolverError::RetrievalError(error).into())
