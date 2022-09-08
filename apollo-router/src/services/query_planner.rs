@@ -36,7 +36,9 @@ impl Request {
 assert_impl_all!(Response: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
 pub(crate) struct Response {
-    pub(crate) content: QueryPlannerContent,
+    /// Optional in case of error
+    pub(crate) content: Option<QueryPlannerContent>,
+    pub(crate) errors: Vec<graphql::Error>,
     pub(crate) context: Context,
 }
 
@@ -59,7 +61,15 @@ impl Response {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub(crate) fn new(content: QueryPlannerContent, context: Context) -> Response {
-        Self { content, context }
+    pub(crate) fn new(
+        content: Option<QueryPlannerContent>,
+        context: Context,
+        errors: Vec<graphql::Error>,
+    ) -> Response {
+        Self {
+            content,
+            context,
+            errors,
+        }
     }
 }

@@ -163,13 +163,25 @@ where
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
-    let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
+    let QueryPlannerResponse {
+        content,
+        context,
+        errors,
+    } = plan_query(planning, body, context).await?;
+
+    if !errors.is_empty() {
+        return Ok(SupergraphResponse::builder()
+            .context(context)
+            .errors(errors)
+            .build()
+            .expect("this response build must not fail"));
+    }
 
     match content {
-        QueryPlannerContent::Introspection { response } => Ok(
+        Some(QueryPlannerContent::Introspection { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
-        QueryPlannerContent::IntrospectionDisabled => {
+        Some(QueryPlannerContent::IntrospectionDisabled) => {
             let mut response = SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
@@ -181,7 +193,7 @@ where
             *response.response.status_mut() = StatusCode::BAD_REQUEST;
             Ok(response)
         }
-        QueryPlannerContent::Plan { query, plan } => {
+        Some(QueryPlannerContent::Plan { query, plan }) => {
             let can_be_deferred = plan.root.contains_defer();
 
             if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
@@ -219,6 +231,8 @@ where
                 )
             }
         }
+        // This should never happen because if we have an empty query plan we should have error in errors vec
+        None => Err(BoxError::from("cannot compute a query plan")),
     }
 }
 
