@@ -508,7 +508,6 @@ expression: "&schema"
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "health_check_path": "/health",
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
@@ -519,11 +518,6 @@ expression: "&schema"
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/health",
-          "type": "string"
         }
       },
       "additionalProperties": false

@@ -399,11 +399,6 @@ impl Default for HealthCheck {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Server {
-    /// healthCheck path
-    /// default: "/.well-known/apollo/server-health"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) health_check_path: String,
-
     /// Experimental limitation of query depth
     /// default: 4096
     #[serde(default = "default_parser_recursion_limit")]
@@ -414,12 +409,8 @@ pub(crate) struct Server {
 impl Server {
     #[builder]
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
-    pub(crate) fn new(
-        health_check_path: Option<String>,
-        parser_recursion_limit: Option<usize>,
-    ) -> Self {
+    pub(crate) fn new(parser_recursion_limit: Option<usize>) -> Self {
         Self {
-            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }

@@ -44,7 +44,6 @@ use multimap::MultiMap;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
-use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -126,6 +125,22 @@ where
         );
     }
 
+    endpoints.insert(
+        configuration.health_check.listen.clone(),
+        Endpoint::new(
+            configuration.health_check.path.clone(),
+            service_fn(|_req: transport::Request| async move {
+                Ok::<_, BoxError>(
+                    http::Response::builder()
+                        .header("Content-Type", "application/json")
+                        .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
+                        .unwrap(),
+                )
+            })
+            .boxed(),
+        ),
+    );
+
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
@@ -181,7 +196,6 @@ where
                     }
                 }),
         )
-        .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
         .layer(cors)
         .layer(CompressionLayer::new()); // To compress response body
@@ -677,10 +691,6 @@ fn display_home_page() -> Html<Bytes> {
     Html(html)
 }
 
-async fn health_check() -> impl IntoResponse {
-    Json(json!({ "status": "pass" }))
-}
-
 // Process the headers to make sure that `VARY` is set correctly
 fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
     if headers.get(VARY).is_none() {
@@ -962,6 +972,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::HealthCheck;
     use crate::configuration::Sandbox;
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
@@ -1072,6 +1083,11 @@ mod tests {
                         )
                         .graphql(
                             crate::configuration::Graphql::builder()
+                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                                .build(),
+                        )
+                        .health_check(
+                            crate::configuration::HealthCheck::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
@@ -1209,6 +1225,11 @@ mod tests {
 
         let conf = Configuration::builder()
             .sandbox(Sandbox::builder().path("/a-custom-path").build())
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
@@ -1242,6 +1263,11 @@ mod tests {
                 Sandbox::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .path("/a-custom-path")
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1557,6 +1583,11 @@ mod tests {
                     .path(String::from("/graphql"))
                     .build(),
             )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
             .build();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         let url = format!(
@@ -1627,6 +1658,11 @@ mod tests {
                 crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .path(String::from("/:my_prefix/graphql"))
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1704,6 +1740,11 @@ mod tests {
                 crate::configuration::Graphql::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .path(String::from("/graphql/*"))
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1934,6 +1975,11 @@ mod tests {
                     .path(String::from("/graphql/*"))
                     .build(),
             )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
             .build();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
 
@@ -2115,11 +2161,17 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .path("/custom-health".to_string())
+                    .build(),
+            )
             .build();
         let expectations = MockSupergraphService::new();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
         let url = format!(
-            "{}/health",
+            "{}/custom-health",
             server.graphql_listen_address().as_ref().unwrap()
         );
 
@@ -2164,6 +2216,11 @@ Content-Type: application/json\r
             )
             .graphql(
                 crate::configuration::Graphql::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
@@ -2214,6 +2271,11 @@ Content-Type: application/json\r
             )
             .graphql(
                 crate::configuration::Graphql::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
@@ -2344,6 +2406,11 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
+            .health_check(
+                HealthCheck::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
@@ -2368,6 +2435,11 @@ Content-Type: application/json\r
             )
             .graphql(
                 crate::configuration::Graphql::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .build(),
+            )
+            .health_check(
+                HealthCheck::builder()
                     .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
