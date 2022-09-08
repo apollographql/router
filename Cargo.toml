@@ -21,7 +21,7 @@ members = [
     "examples/rhai-surrogate-cache-key",
     "examples/supergraph_sdl",
     "examples/jwt-auth",
-    # "fuzz",
+    "fuzz",
     "uplink",
     "xtask",
 ]
