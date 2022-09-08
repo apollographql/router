@@ -96,7 +96,7 @@ commands:
           environment:
             # Override auto-detection of RAM for Rustc install.
             # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-            RUSTUP_UNPACK_RAM: "21474836480"
+            RUSTUP_UNPACK_RAM: "1073741824"
           command: |
             $installer_dir = "$Env:TEMP"
             echo "Downloading rustup"
@@ -225,7 +225,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --workspace --locked -- --test-threads=8
+      - run: cargo test --jobs 2 --workspace --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -252,7 +252,7 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --workspace --locked -- --test-threads=8
+            - run: cargo test --jobs 2 --workspace --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
@@ -437,7 +437,7 @@ jobs:
                 environment:
                   # Override auto-detection of RAM for Rustc install.
                   # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-                  RUSTUP_UNPACK_RAM: "21474836480"
+                  RUSTUP_UNPACK_RAM: "1073741824"
                 command: |
                   $installer_dir = "$Env:TEMP"
                   echo "Downloading rustup"
