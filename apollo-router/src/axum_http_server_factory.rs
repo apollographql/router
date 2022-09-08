@@ -88,7 +88,7 @@ impl AxumHttpServerFactory {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
+pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
 
 #[derive(Debug)]
 pub(crate) struct ListenersAndRouters {
