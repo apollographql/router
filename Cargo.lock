@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "access-json",
  "anyhow",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "bytes",
  "clap 3.2.20",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "futures",
  "graphql_client",
@@ -5852,13 +5852,12 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "url"
-version = "2.2.2"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a507c383b2d33b5fc35d1861e77e6b383d158b2da5e14fe51b83dfedf6fd578c"
+checksum = "22fe195a4f217c25b25cb5058ced57059824a678474874038dc88d211bf508d3"
 dependencies = [
  "form_urlencoded",
  "idna",
- "matches",
  "percent-encoding",
  "serde",
 ]
@@ -6234,7 +6233,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "ansi_term",
  "anyhow",

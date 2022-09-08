@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
-use futures::stream::BoxStream;
 use http::StatusCode;
 use multimap::MultiMap;
 use serde_json::Map;
@@ -75,7 +74,7 @@ pub(crate) trait SupergraphServiceFactory:
 {
     type SupergraphService: Service<
             http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            Response = http::Response<graphql::ResponseStream>,
             Error = BoxError,
             Future = Self::Future,
         > + Send;

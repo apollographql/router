@@ -192,7 +192,7 @@ async fn simple_queries_should_not_work() {
         .build()
         .expect("expecting valid request");
     request
-        .originating_request
+        .supergraph_request
         .headers_mut()
         .remove("content-type");
 
@@ -255,9 +255,12 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let message = "Unknown operation named \"invalidOperationName\"";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
+        .extensions(extensions_map)
         .build();
 
     let request = supergraph::Request::fake_builder()
@@ -673,7 +676,7 @@ async fn defer_query_without_accept() {
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
-        .json(request.originating_request.body())
+        .json(request.supergraph_request.body())
         .send()
         .await
         .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?

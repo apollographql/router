@@ -1,12 +1,16 @@
 ---
 source: apollo-router/tests/integration_tests.rs
+assertion_line: 558
 expression: only
 ---
 {
   "errors": [
     {
-      "message": "value retrieval failed: couldn't plan query: query validation errors: Unknown directive \"@defer\".",
-      "path": null
+      "message": "Unknown directive \"@defer\".",
+      "path": null,
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
     }
   ]
 }

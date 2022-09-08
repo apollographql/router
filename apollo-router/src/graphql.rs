@@ -4,7 +4,9 @@
 
 use std::fmt;
 use std::ops::Deref;
+use std::pin::Pin;
 
+use futures::Stream;
 use router_bridge::planner::PlanErrors;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +25,16 @@ pub use crate::json_ext::PathElement as JsonPathElement;
 pub use crate::request::Request;
 pub use crate::response::IncrementalResponse;
 pub use crate::response::Response;
+
+/// An asynchronous [`Stream`] of GraphQL [`Response`]s.
+///
+/// In some cases such as with `@defer`, a single HTTP response from the Router
+/// may contain multiple GraphQL responses that will be sent at different times
+/// (as more data becomes available).
+///
+/// We represent this in Rust as a stream,
+/// even if that stream happens to only contain one item.
+pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
 
 /// Any GraphQL error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]

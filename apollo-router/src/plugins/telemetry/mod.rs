@@ -15,7 +15,9 @@ use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
+use futures::future::ready;
 use futures::future::BoxFuture;
+use futures::stream::once;
 use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
@@ -261,13 +263,13 @@ impl Plugin for Telemetry {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let query = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .query
                     .clone()
                     .unwrap_or_default();
                 let operation_name = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .operation_name
                     .clone()
@@ -711,7 +713,7 @@ impl Telemetry {
         let client_version_header = config.client_version_header;
 
         move |request: &SupergraphRequest| {
-            let http_request = &request.originating_request;
+            let http_request = &request.supergraph_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
@@ -832,6 +834,11 @@ impl Telemetry {
                     "status",
                     response.response.status().as_u16().to_string(),
                 ));
+
+                // Wait for the first response of the stream
+                let (parts, stream) = response.response.into_parts();
+                let (first_response, rest) = stream.into_future().await;
+
                 if let Some(MetricsCommon {
                     attributes:
                         Some(MetricsAttributesConf {
@@ -841,22 +848,29 @@ impl Telemetry {
                     ..
                 }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
                 {
-                    let (resp, attributes) = forward_attributes
-                        .get_attributes_from_router_response(response)
-                        .await;
+                    let attributes = forward_attributes.get_attributes_from_router_response(
+                        &parts,
+                        &context,
+                        &first_response,
+                    );
 
                     metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
                     metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(resp)
                 } else {
                     metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(response)
                 }
+
+                let response = http::Response::from_parts(
+                    parts,
+                    once(ready(first_response.unwrap_or_default()))
+                        .chain(rest)
+                        .boxed(),
+                );
+
+                Ok(SupergraphResponse { context, response })
             }
             Err(err) => {
-                metrics.http_requests_error_total.add(1, &[]);
+                metrics.http_requests_error_total.add(1, &metric_attrs);
 
                 Err(err)
             }
@@ -871,7 +885,7 @@ impl Telemetry {
     fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
-        let http_request = &req.originating_request;
+        let http_request = &req.supergraph_request;
         let headers = http_request.headers();
         let client_name_header = &apollo_config.client_name_header;
         let client_version_header = &apollo_config.client_version_header;
@@ -898,7 +912,7 @@ impl Telemetry {
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, String> = HashMap::new();
-            if let Some(operation_name) = &req.originating_request.body().operation_name {
+            if let Some(operation_name) = &req.supergraph_request.body().operation_name {
                 attributes.insert("operation_name".to_string(), operation_name.clone());
             }
 
@@ -910,7 +924,7 @@ impl Telemetry {
             {
                 attributes.extend(
                     router_attributes_conf
-                        .get_attributes_from_request(headers, req.originating_request.body()),
+                        .get_attributes_from_request(headers, req.supergraph_request.body()),
                 );
                 attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
