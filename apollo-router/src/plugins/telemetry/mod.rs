@@ -237,7 +237,7 @@ impl Plugin for Telemetry {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 // disable ftv1 sampling for deferred queries
-                let do_not_sample_reason = if req.query_plan.root.contains_defer() {
+                let do_not_sample_reason = if req.query_plan.root.contains_condition_or_defer() {
                     req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
                     "query is deferred"
                 } else {

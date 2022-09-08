@@ -52,6 +52,10 @@ expression: get_spans()
           [
             "apollo_private.http.request_headers",
             "{\"content-type\":[\"\"]}"
+          ],
+          [
+            "apollo_private.operation_signature",
+            "# -\n{topProducts{name name}}"
           ]
         ],
         "metadata": {
@@ -249,7 +253,7 @@ expression: get_spans()
                           "graphql.document",
                           "graphql.operation.name",
                           "otel.kind",
-                          "apollo_private_ftv1"
+                          "apollo_private.ftv1"
                         ]
                       }
                     }
