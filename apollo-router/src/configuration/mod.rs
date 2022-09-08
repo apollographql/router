@@ -69,6 +69,10 @@ pub struct Configuration {
     pub(crate) server: Server,
 
     #[serde(default)]
+    #[serde(rename = "health-check")]
+    pub(crate) health_check: HealthCheck,
+
+    #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
@@ -100,6 +104,7 @@ impl Configuration {
     pub(crate) fn new(
         server: Option<Server>,
         graphql: Option<Graphql>,
+        health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
@@ -108,6 +113,7 @@ impl Configuration {
         Self {
             server: server.unwrap_or_default(),
             graphql: graphql.unwrap_or_default(),
+            health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
@@ -352,6 +358,46 @@ impl Default for Sandbox {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct HealthCheck {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:9090
+    #[serde(default = "default_health_check_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_health_check_path")]
+    pub(crate) path: String,
+}
+
+fn default_health_check_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:9090").unwrap().into()
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
+}
+
+#[buildstructor::buildstructor]
+impl HealthCheck {
+    #[builder]
+    pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_health_check_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+        }
+    }
+}
+
+impl Default for HealthCheck {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Server {
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
@@ -498,10 +544,6 @@ fn default_cors_methods() -> Vec<String> {
 
 fn default_graphql_path() -> String {
     String::from("/")
-}
-
-fn default_health_check_path() -> String {
-    String::from("/.well-known/apollo/server-health")
 }
 
 fn default_parser_recursion_limit() -> usize {

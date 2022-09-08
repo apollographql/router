@@ -2096,25 +2096,15 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn test_health_check() {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!(
-            "{}/.well-known/apollo/server-health",
+            "{}/health",
             server.graphql_listen_address().as_ref().unwrap()
         );
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
     }
 
     #[tokio::test]

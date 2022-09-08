@@ -391,6 +391,36 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:9090",
+        "path": "/health"
+      },
+      "type": "object",
+      "properties": {
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9090",
+          "default": "127.0.0.1:9090",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/health",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
@@ -478,7 +508,7 @@ expression: "&schema"
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "health_check_path": "/.well-known/apollo/server-health",
+        "health_check_path": "/health",
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
@@ -492,7 +522,7 @@ expression: "&schema"
         },
         "health_check_path": {
           "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
+          "default": "/health",
           "type": "string"
         }
       },
