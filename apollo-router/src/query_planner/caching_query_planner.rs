@@ -88,38 +88,6 @@ where
                         })
                     }
                     Err(error) => {
-                        match error.downcast_ref::<QueryPlannerError>() {
-                            Some(QueryPlannerError::PlanningErrors(pe)) => {
-                                if let Err(inner_e) =
-                                    context.insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                                {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
-                            }
-                            Some(QueryPlannerError::SpecError(e)) => {
-                                let error_key = match e {
-                                    SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                                    _ => "## GraphQLValidationFailure\n",
-                                };
-                                if let Err(inner_e) = context.insert(
-                                    USAGE_REPORTING,
-                                    UsageReporting {
-                                        stats_report_key: error_key.to_string(),
-                                        referenced_fields_by_type: HashMap::new(),
-                                    },
-                                ) {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
-                            }
-                            _ => {}
-                        }
-
                         let e = Arc::new(error);
                         entry.insert(Err(e.clone())).await;
                         Err(CacheResolverError::RetrievalError(e).into())
@@ -153,6 +121,8 @@ where
                             .build())
                     }
                     Err(error) => {
+                        // FIXME: This is broken, I need to find a solution for that case.
+                        // It's broken because for these kind of errors we won't be in an error case but instead we will convert these errors to GraphQL error in the QueryPlannerResponse
                         match error.downcast_ref::<QueryPlannerError>() {
                             Some(QueryPlannerError::PlanningErrors(pe)) => {
                                 if let Err(inner_e) = request
