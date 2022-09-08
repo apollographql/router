@@ -2,14 +2,12 @@
 
 #![allow(missing_docs)] // FIXME
 
-use std::convert::TryFrom;
 use std::fmt;
 use std::pin::Pin;
 
 use futures::Stream;
 use router_bridge::planner::PlanError;
 use router_bridge::planner::PlanErrorExtensions;
-use router_bridge::planner::PlanErrors;
 use router_bridge::planner::PlannerError;
 use router_bridge::planner::WorkerError;
 use router_bridge::planner::WorkerGraphQLError;
@@ -22,8 +20,6 @@ use serde_json_bytes::Value;
 
 use crate::error::FetchError;
 pub use crate::error::Location;
-use crate::error::PlannerErrors;
-use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
@@ -55,6 +51,7 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
@@ -139,55 +136,14 @@ where
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self>;
 }
 
-// impl From<PlanErrors> for Error {
-//     fn from(p_err: PlanErrors) -> Self {
-//         if p_err.errors.len() == 1 {
-//             let error = p_err.errors[0].clone();
-//             Self {
-//                 message: error
-//                     .message
-//                     .unwrap_or_else(|| String::from("query plan error")),
-//                 extensions: error
-//                     .extensions
-//                     .map(|ext| {
-//                         let mut map = serde_json_bytes::map::Map::new();
-//                         map.insert("code", Value::from(ext.code));
-
-//                         map
-//                     })
-//                     .unwrap_or_default(),
-//                 ..Default::default()
-//             }
-//         } else {
-//             Self {
-//                 message: p_err
-//                     .errors
-//                     .iter()
-//                     .filter_map(|err| err.message.clone())
-//                     .collect::<Vec<String>>()
-//                     .join("\n"),
-//                 ..Default::default()
-//             }
-//         }
-//     }
-// }
-
 impl From<PlanError> for Error {
     fn from(err: PlanError) -> Self {
-        let mut extensions = Object::new();
-        if let Some(ext) = err.extensions {
-            extensions.insert("code", ext.code.into());
-            extensions.insert(
-                "exception",
-                json!({
-                    "stacktrace": ext.exception.map(|e| serde_json_bytes::Value::from(e.stacktrace))
-                }),
-            );
-        }
-
         Self {
             message: err.message.unwrap_or_else(|| String::from("plan error")),
-            extensions,
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
             ..Default::default()
         }
     }
@@ -204,20 +160,13 @@ impl From<PlannerError> for Error {
 
 impl From<WorkerError> for Error {
     fn from(err: WorkerError) -> Self {
-        let mut extensions = Object::new();
-        if let Some(ext) = err.extensions {
-            extensions.insert("code", ext.code.into());
-            extensions.insert(
-                "exception",
-                json!({
-                    "stacktrace": ext.exception.map(|e| serde_json_bytes::Value::from(e.stacktrace))
-                }),
-            );
-        }
         Self {
             message: err.message.unwrap_or_else(|| String::from("worker error")),
             locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions,
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
             ..Default::default()
         }
     }
@@ -225,6 +174,29 @@ impl From<WorkerError> for Error {
 
 impl From<WorkerGraphQLError> for Error {
     fn from(err: WorkerGraphQLError) -> Self {
-        todo!()
+        Self {
+            message: err.message,
+            locations: err.locations.into_iter().map(Location::from).collect(),
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
+            ..Default::default()
+        }
     }
+}
+
+fn convert_extensions_to_map(ext: PlanErrorExtensions) -> Object {
+    let mut extensions = Object::new();
+    extensions.insert("code", ext.code.into());
+    if let Some(exception) = ext.exception {
+        extensions.insert(
+            "exception",
+            json!({
+                "stacktrace": serde_json_bytes::Value::from(exception.stacktrace)
+            }),
+        );
+    }
+
+    extensions
 }

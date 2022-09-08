@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::ops::Deref;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -38,10 +37,8 @@ use super::QueryPlannerContent;
 use super::MULTIPART_DEFER_SPEC_PARAMETER;
 use super::MULTIPART_DEFER_SPEC_VALUE;
 use crate::cache::DeduplicatingCache;
-use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
-use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
@@ -122,35 +119,16 @@ where
         let context_cloned = req.context.clone();
         let fut =
             service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let mut errors = vec![crate::error::Error {
+                let errors = vec![crate::error::Error {
                     message: error.to_string(),
+                    extensions: serde_json_bytes::json!({
+                        "code": "INTERNAL_SERVER_ERROR",
+                    })
+                    .as_object()
+                    .unwrap()
+                    .to_owned(),
                     ..Default::default()
                 }];
-                // This mess is caused by BoxError
-                // let status_code = match error.downcast_ref::<crate::error::CacheResolverError>() {
-                //     Some(crate::error::CacheResolverError::RetrievalError(retrieval_error)) => {
-                //         match retrieval_error.deref().downcast_ref::<QueryPlannerError>() {
-                //             Some(qp_error) => {
-                //                 // Custom error for QueryPlannerError
-                //                 if let Ok(qp_errors) = qp_error.clone().into_graphql_errors() {
-                //                     errors = qp_errors;
-                //                 }
-                //                 if matches!(
-                //                     qp_error,
-                //                     QueryPlannerError::SpecError(_)
-                //                         | QueryPlannerError::SchemaValidationErrors(_)
-                //                         | QueryPlannerError::PlanningErrors(_)
-                //                 ) {
-                //                     StatusCode::BAD_REQUEST
-                //                 } else {
-                //                     StatusCode::INTERNAL_SERVER_ERROR
-                //                 }
-                //             }
-                //             None => StatusCode::INTERNAL_SERVER_ERROR,
-                //         }
-                //     }
-                //     _ => StatusCode::INTERNAL_SERVER_ERROR,
-                // };
 
                 Ok(SupergraphResponse::builder()
                     .errors(errors)

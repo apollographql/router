@@ -214,7 +214,6 @@ pub(crate) enum QueryPlannerError {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            // TODO add all cases
             QueryPlannerError::SpecError(err) => Ok(vec![Error {
                 message: err.to_string(),
                 ..Default::default()
