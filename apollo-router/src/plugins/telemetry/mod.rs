@@ -97,14 +97,15 @@ pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
-
-static REQUEST_SPAN_NAME: &str = "request";
-static CLIENT_NAME: &str = "apollo_telemetry::client_name";
-static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const REQUEST_SPAN_NAME: &str = "request";
+pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
+pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
+const CLIENT_NAME: &str = "apollo_telemetry::client_name";
+const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
-pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-pub(crate) static FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
+pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
@@ -288,7 +289,7 @@ impl Plugin for Telemetry {
                     .clone()
                     .unwrap_or_default();
 
-                info_span!("subgraph",
+                info_span!(SUBGRAPH_SPAN_NAME,
                     name = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
@@ -586,7 +587,7 @@ impl Telemetry {
                 .unwrap_or_else(|| HeaderValue::from_static(""));
 
             let span = info_span!(
-                "supergraph",
+                SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),

@@ -34,6 +34,12 @@ use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
+use crate::query_planner::FETCH_SPAN_NAME;
+use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::SEQUENCE_SPAN_NAME;
 
 const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
@@ -239,7 +245,7 @@ impl Exporter {
         }
 
         Ok(match span.name.as_ref() {
-            "parallel" => vec![TreeData::QueryPlan(QueryPlanNode {
+            PARALLEL_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes
@@ -252,7 +258,7 @@ impl Exporter {
                     },
                 )),
             })],
-            "sequence" => vec![TreeData::QueryPlan(QueryPlanNode {
+            SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
                 node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes
@@ -265,7 +271,7 @@ impl Exporter {
                     },
                 )),
             })],
-            "fetch" => {
+            FETCH_SPAN_NAME => {
                 let (trace_parsing_failed, trace) = match child_nodes.pop() {
                     Some(TreeData::Trace(Ok(trace))) => (false, trace),
                     Some(TreeData::Trace(Err(_err))) => (true, None),
@@ -296,7 +302,7 @@ impl Exporter {
                     )),
                 })]
             }
-            "flatten" => {
+            FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlan(QueryPlanNode {
                     node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
                         Box::new(FlattenNode {
@@ -324,10 +330,10 @@ impl Exporter {
                     )),
                 })]
             }
-            "subgraph" => {
+            SUBGRAPH_SPAN_NAME => {
                 vec![TreeData::Trace(self.find_ftv1_trace(span))]
             }
-            "supergraph" => {
+            SUPERGRAPH_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
                     http: self.extract_http_data(span),
@@ -347,7 +353,7 @@ impl Exporter {
                 });
                 child_nodes
             }
-            "request" => {
+            REQUEST_SPAN_NAME => {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]

@@ -32,6 +32,11 @@ mod bridge_query_planner;
 mod caching_query_planner;
 mod selection;
 
+pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
+pub(crate) const FLATTEN_SPAN_NAME: &str = "flatten";
+pub(crate) const SEQUENCE_SPAN_NAME: &str = "sequence";
+pub(crate) const PARALLEL_SPAN_NAME: &str = "parallel";
+
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub(crate) struct QueryPlanOptions {
@@ -349,7 +354,7 @@ impl PlanNode {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
                     errors = Vec::new();
-                    let span = tracing::info_span!("sequence");
+                    let span = tracing::info_span!(SEQUENCE_SPAN_NAME);
                     for node in nodes {
                         let (v, subselect, err) = node
                             .execute_recursively(parameters, current_dir, &value, sender.clone())
@@ -365,7 +370,7 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    let span = tracing::info_span!("parallel");
+                    let span = tracing::info_span!(PARALLEL_SPAN_NAME);
                     let mut stream: stream::FuturesUnordered<_> = nodes
                         .iter()
                         .map(|plan| {
@@ -401,7 +406,7 @@ impl PlanNode {
                             sender,
                         )
                         .instrument(
-                            tracing::info_span!("flatten", apollo_private.path = %current_dir),
+                            tracing::info_span!(FLATTEN_SPAN_NAME, apollo_private.path = %current_dir),
                         )
                         .await;
 
@@ -415,7 +420,7 @@ impl PlanNode {
                     match fetch_node
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
-                            "fetch",
+                            FETCH_SPAN_NAME,
                             "otel.kind" = %SpanKind::Internal,
                             "service.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
