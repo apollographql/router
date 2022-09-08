@@ -27,6 +27,18 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### Add warning logs for queries resulting in errors  ([Issue #1158](https://github.com/apollographql/router/issues/1158))
+
+In particular, when queries:
+
+ - contain wrong field requests
+ - result in an error thrown in a subgraph
+
+In both cases the router now logs a warning.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1730
+
 ## 🐛 Fixes
 ## 🛠 Maintenance
 
