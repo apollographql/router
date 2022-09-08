@@ -67,4 +67,14 @@ By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjj
 
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
+
+We changed `QueryPlannerResponse` to:
+
++ Add a `Vec<apollo_router::graphql::Error>`
++ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
 ## 📚 Documentation

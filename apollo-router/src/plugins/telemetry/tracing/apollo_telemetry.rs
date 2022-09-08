@@ -15,16 +15,13 @@ use apollo_spaceport::trace::QueryPlanNode;
 use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
-use futures::StreamExt;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
-use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::Value;
-use regex::internal::Input;
 use thiserror::Error;
 use url::Url;
 
@@ -32,7 +29,8 @@ use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
-use crate::plugins::telemetry::config::{Sampler, SamplerOption};
+use crate::plugins::telemetry::config::Sampler;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::REQUEST_SPAN_NAME;
@@ -307,7 +305,7 @@ impl Exporter {
                                 .get(&APOLLO_PRIVATE_PATH)
                                 .and_then(Self::extract_string)
                                 .map(|v| {
-                                    v.split("/").filter(|v|!v.is_empty() && *v != "@").map(|v| {
+                                    v.split('/').filter(|v|!v.is_empty() && *v != "@").map(|v| {
                                         if let Ok(index) = v.parse::<u32>() {
                                             ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
                                         } else {
