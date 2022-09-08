@@ -252,7 +252,7 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 1 --workspace --locked -- --test-threads=2
+            - run: cargo test --jobs 2 --workspace --locked -- --test-threads=8
       - when:
           condition:
             equal: [macos, << parameters.os >>]
