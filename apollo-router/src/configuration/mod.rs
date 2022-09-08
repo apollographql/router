@@ -69,6 +69,9 @@ pub struct Configuration {
     pub(crate) server: Server,
 
     #[serde(default)]
+    pub(crate) sandbox: Sandbox,
+
+    #[serde(default)]
     pub(crate) graphql: Graphql,
     /// Cross origin request headers.
     #[serde(default)]
@@ -97,6 +100,7 @@ impl Configuration {
     pub(crate) fn new(
         server: Option<Server>,
         graphql: Option<Graphql>,
+        sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -104,6 +108,7 @@ impl Configuration {
         Self {
             server: server.unwrap_or_default(),
             graphql: graphql.unwrap_or_default(),
+            sandbox: sandbox.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -303,12 +308,51 @@ impl Default for Graphql {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Server {
-    /// display landing page
-    /// enabled by default
-    #[serde(default = "default_landing_page")]
-    pub(crate) landing_page: bool,
+pub(crate) struct Sandbox {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
+    pub(crate) listen: ListenAddr,
 
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_graphql_path")]
+    pub(crate) path: String,
+
+    #[serde(default = "default_sandbox")]
+    pub(crate) enabled: bool,
+}
+
+fn default_sandbox() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Server {
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
@@ -325,12 +369,10 @@ impl Server {
     #[builder]
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
-        landing_page: Option<bool>,
         health_check_path: Option<String>,
         parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
-            landing_page: landing_page.unwrap_or_else(default_landing_page),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
@@ -452,10 +494,6 @@ fn default_origins() -> Vec<String> {
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
-}
-
-fn default_landing_page() -> bool {
-    true
 }
 
 fn default_graphql_path() -> String {

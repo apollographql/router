@@ -50,6 +50,7 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
+use tower::service_fn;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -73,11 +74,11 @@ use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::transport;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-/// Redirects to studio for GET requests.
 #[derive(Debug)]
 pub(crate) struct AxumHttpServerFactory;
 
@@ -104,6 +105,27 @@ pub(crate) fn make_axum_router<RF>(
 where
     RF: SupergraphServiceFactory,
 {
+    if !sandbox_on_main_endpoint(configuration) {
+        endpoints.insert(
+            configuration.sandbox.listen.clone(),
+            Endpoint::new(
+                configuration.sandbox.path.clone(),
+                service_fn(|_req: transport::Request| async move {
+                    Ok::<_, BoxError>(
+                        http::Response::builder()
+                            .header("Content-Type", "text/html")
+                            .body(
+                                Bytes::from_static(include_bytes!("../resources/index.html"))
+                                    .into(),
+                            )
+                            .unwrap(),
+                    )
+                })
+                .boxed(),
+            ),
+        );
+    }
+
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
@@ -138,43 +160,7 @@ where
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let graphql_configuration = configuration.graphql.clone();
-    let graphql_path = if graphql_configuration.path.ends_with("/*") {
-        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        format!("{}router_extra_path", graphql_configuration.path)
-    } else {
-        graphql_configuration.path
-    };
-    let main_route = Router::<hyper::Body>::new()
-        .route(
-            &graphql_path,
-            get({
-                let display_landing_page = configuration.server.landing_page;
-                move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                    handle_get(
-                        host,
-                        service.new_service().boxed(),
-                        http_request,
-                        display_landing_page,
-                    )
-                }
-            })
-            .post({
-                move |host: Host,
-                      uri: OriginalUri,
-                      request: Json<graphql::Request>,
-                      Extension(service): Extension<RF>,
-                      header_map: HeaderMap| {
-                    handle_post(
-                        host,
-                        uri,
-                        request,
-                        service.new_service().boxed(),
-                        header_map,
-                    )
-                }
-            }),
-        )
+    let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
             TraceLayer::new_for_http()
@@ -204,7 +190,7 @@ where
         .into_iter()
         .fold(main_route, |acc, r| acc.merge(r.into_router()));
 
-    let listener = graphql_configuration.listen;
+    let listener = configuration.graphql.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
 }
 
@@ -557,7 +543,7 @@ struct CustomRejection {
     msg: String,
 }
 
-async fn handle_get(
+async fn handle_get_with_sandbox(
     Host(host): Host,
     service: BoxService<
         http::Request<graphql::Request>,
@@ -565,9 +551,8 @@ async fn handle_get(
         BoxError,
     >,
     http_request: Request<Body>,
-    display_landing_page: bool,
 ) -> impl IntoResponse {
-    if prefers_html(http_request.headers()) && display_landing_page {
+    if prefers_html(http_request.headers()) {
         return display_home_page().into_response();
     }
 
@@ -585,6 +570,82 @@ async fn handle_get(
     }
 
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
+}
+
+fn main_router<RF>(configuration: &Configuration) -> axum::Router
+where
+    RF: SupergraphServiceFactory,
+{
+    let mut graphql_configuration = configuration.graphql.clone();
+    if graphql_configuration.path.ends_with("/*") {
+        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+        graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
+    }
+
+    let get_handler = if sandbox_on_main_endpoint(configuration) {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get_with_sandbox(host, service.new_service().boxed(), http_request)
+            }
+        })
+    } else {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get(host, service.new_service().boxed(), http_request)
+            }
+        })
+    };
+
+    Router::<hyper::Body>::new().route(
+        &graphql_configuration.path,
+        get_handler.post({
+            move |host: Host,
+                  uri: OriginalUri,
+                  request: Json<graphql::Request>,
+                  Extension(service): Extension<RF>,
+                  header_map: HeaderMap| {
+                handle_post(
+                    host,
+                    uri,
+                    request,
+                    service.new_service().boxed(),
+                    header_map,
+                )
+            }
+        }),
+    )
+}
+
+async fn handle_get(
+    Host(host): Host,
+    service: BoxService<
+        http::Request<graphql::Request>,
+        http::Response<graphql::ResponseStream>,
+        BoxError,
+    >,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    if let Some(request) = http_request
+        .uri()
+        .query()
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    {
+        let mut http_request = http_request.map(|_| request);
+        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+            .expect("the URL is already valid because it comes from axum; qed");
+        return run_graphql_request(service, http_request)
+            .await
+            .into_response();
+    }
+
+    (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
+}
+
+// Returns true if the sandbox is enabled, and on the same url as the graphql endpoint
+fn sandbox_on_main_endpoint(configuration: &Configuration) -> bool {
+    configuration.sandbox.enabled
+        && configuration.sandbox.listen == configuration.graphql.listen
+        && configuration.sandbox.path == configuration.graphql.path
 }
 
 async fn handle_post(
@@ -901,6 +962,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::Sandbox;
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
@@ -1003,6 +1065,11 @@ mod tests {
                 },
                 Arc::new(
                     Configuration::builder()
+                        .sandbox(
+                            crate::configuration::Sandbox::builder()
+                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                                .build(),
+                        )
                         .graphql(
                             crate::configuration::Graphql::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
@@ -1111,12 +1178,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_home_page() -> Result<(), ApolloRouterError> {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
+    async fn it_display_home_page_on_same_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
 
@@ -1137,11 +1199,72 @@ mod tests {
             response.text().await.unwrap()
         );
         assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_display_home_page_on_different_path() -> Result<(), ApolloRouterError> {
+        let expectations = MockSupergraphService::new();
+
+        let conf = Configuration::builder()
+            .sandbox(Sandbox::builder().path("/a-custom-path").build())
+            .build();
+
+        let (server, client) = init_with_config(expectations, conf, Default::default()).await;
+
+        // Regular studio redirect
+        let response = client
+            .get(&format!(
+                "{}/a-custom-path",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_display_home_page_on_different_endpoint() -> Result<(), ApolloRouterError> {
+        let expectations = MockSupergraphService::new();
+
+        let conf = Configuration::builder()
+            .sandbox(
+                Sandbox::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .path("/a-custom-path")
+                    .build(),
+            )
+            .build();
+
+        let (server, client) = init_with_config(expectations, conf, Default::default()).await;
+
+        // Regular studio redirect
+        let response = client
+            .get(&format!(
+                "{}/a-custom-path",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
         Ok(())
     }
 
@@ -1572,9 +1695,9 @@ mod tests {
                     .origins(vec!["http://studio".to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .landing_page(false)
+            .sandbox(
+                crate::configuration::Sandbox::builder()
+                    .enabled(false)
                     .build(),
             )
             .graphql(
@@ -2044,9 +2167,9 @@ Content-Type: application/json\r
                     .origins(vec!["http://studio".to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .landing_page(false)
+            .sandbox(
+                crate::configuration::Sandbox::builder()
+                    .enabled(false)
                     .build(),
             )
             .graphql(
