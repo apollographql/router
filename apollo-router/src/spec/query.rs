@@ -779,6 +779,7 @@ impl Query {
             .filter_map(|(name, (ty, _))| {
                 let value = request.variables.get(*name).unwrap_or(&Value::Null);
                 ty.validate_input_value(value, schema).err().map(|_| {
+                    tracing::warn!(%value, %name, "invalid type for variable");
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
                     }
