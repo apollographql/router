@@ -14,8 +14,10 @@ use std::error::Error;
 
 use agent::reporter_client::ReporterClient;
 pub use agent::*;
+pub use prost::*;
 pub use prost_types::Timestamp;
 pub use report::*;
+use serde::ser::SerializeStruct;
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
@@ -188,5 +190,23 @@ impl Reporter {
         request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client.add(Request::new(request)).await
+    }
+}
+
+pub fn serialize_timestamp<S>(
+    timestamp: &Option<prost_types::Timestamp>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match timestamp {
+        Some(ts) => {
+            let mut ts_strukt = serializer.serialize_struct("Timestamp", 2)?;
+            ts_strukt.serialize_field("seconds", &ts.seconds)?;
+            ts_strukt.serialize_field("nanos", &ts.nanos)?;
+            ts_strukt.end()
+        }
+        None => serializer.serialize_none(),
     }
 }

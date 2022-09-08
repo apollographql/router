@@ -148,7 +148,8 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
- "buildstructor 0.4.1",
+ "base64 0.13.0",
+ "buildstructor 0.5.0",
  "bytes",
  "clap 3.2.20",
  "ctor",
@@ -194,6 +195,7 @@ dependencies = [
  "paste",
  "pin-project-lite",
  "prometheus",
+ "rand",
  "regex",
  "reqwest",
  "rhai",
@@ -646,9 +648,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a7772d3542812693473268c2308979967035162dd36d053ec728e6c947ba93f"
+checksum = "54027423064fb9ead112911b05eccb6484070f5ec778610906458603e0673381"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -2554,6 +2556,8 @@ dependencies = [
  "console 0.15.1",
  "linked-hash-map",
  "once_cell",
+ "pest",
+ "pest_derive",
  "serde",
  "similar",
  "yaml-rust",
