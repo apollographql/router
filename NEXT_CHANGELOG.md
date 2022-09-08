@@ -26,6 +26,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
+OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
+
+* `client_name` => `client.name`
+* `client_version` => `client.version`
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
+
 ## 🚀 Features
 
 ### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
