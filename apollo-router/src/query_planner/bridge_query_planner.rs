@@ -12,7 +12,6 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
 
@@ -20,7 +19,6 @@ use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
-use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
@@ -154,7 +152,7 @@ impl BridgeQueryPlanner {
 impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     type Response = QueryPlannerResponse;
 
-    type Error = BoxError;
+    type Error = QueryPlannerError;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -209,11 +207,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         }
                         _ => (),
                     }
-                    let gql_errors = e.into_graphql_errors()?;
-                    Ok(QueryPlannerResponse::builder()
-                        .errors(gql_errors)
-                        .context(req.context)
-                        .build())
+                    Err(e)
                 }
             }
         };

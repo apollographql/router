@@ -37,8 +37,10 @@ use super::QueryPlannerContent;
 use super::MULTIPART_DEFER_SPEC_PARAMETER;
 use super::MULTIPART_DEFER_SPEC_VALUE;
 use crate::cache::DeduplicatingCache;
+use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
+use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
@@ -107,6 +109,7 @@ where
         self.ready_query_planner_service
             .get_or_insert_with(|| self.query_planner_service.clone())
             .poll_ready(cx)
+            .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
@@ -159,7 +162,20 @@ where
         content,
         context,
         errors,
-    } = plan_query(planning, body, context).await?;
+    } = match plan_query(planning, body, context.clone()).await {
+        Ok(resp) => resp,
+        Err(err) => match err.into_graphql_errors() {
+            Ok(gql_errors) => {
+                return Ok(SupergraphResponse::builder()
+                    .context(context)
+                    .errors(gql_errors)
+                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
+                    .build()
+                    .expect("this response build must not fail"));
+            }
+            Err(err) => return Err(err.into()),
+        },
+    };
 
     if !errors.is_empty() {
         return Ok(SupergraphResponse::builder()
@@ -233,7 +249,7 @@ async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
     body: &graphql::Request,
     context: Context,
-) -> Result<QueryPlannerResponse, BoxError> {
+) -> Result<QueryPlannerResponse, CacheResolverError> {
     planning
         .call(
             QueryPlannerRequest::builder()

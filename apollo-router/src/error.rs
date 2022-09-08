@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use displaydoc::Display;
+use lazy_static::__Deref;
 use miette::Diagnostic;
 use miette::NamedSource;
 use miette::Report;
@@ -14,7 +15,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
@@ -164,12 +164,23 @@ impl From<QueryPlannerError> for FetchError {
 #[derive(Error, Debug, Display, Clone)]
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
-    RetrievalError(Arc<BoxError>),
+    RetrievalError(Arc<QueryPlannerError>),
 }
 
-impl From<BoxError> for CacheResolverError {
-    fn from(err: BoxError) -> Self {
-        CacheResolverError::RetrievalError(Arc::new(err))
+impl IntoGraphQLErrors for CacheResolverError {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        let CacheResolverError::RetrievalError(retrieval_error) = self;
+        retrieval_error
+            .deref()
+            .clone()
+            .into_graphql_errors()
+            .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error))
+    }
+}
+
+impl From<QueryPlannerError> for CacheResolverError {
+    fn from(qp_err: QueryPlannerError) -> Self {
+        Self::RetrievalError(Arc::new(qp_err))
     }
 }
 

@@ -129,6 +129,7 @@ impl fmt::Display for Error {
     }
 }
 
+/// Trait used to convert expected errors into a list of GraphQL errors
 pub(crate) trait IntoGraphQLErrors
 where
     Self: Sized,
