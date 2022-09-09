@@ -1,13 +1,12 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 558
+assertion_line: 561
 expression: only
 ---
 {
   "errors": [
     {
       "message": "Unknown directive \"@defer\".",
-      "path": null,
       "extensions": {
         "code": "GRAPHQL_VALIDATION_FAILED"
       }

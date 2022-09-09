@@ -132,26 +132,6 @@ impl FetchError {
     }
 }
 
-/// A location in the request that triggered a graphql error.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Location {
-    /// The line number.
-    pub line: u32,
-
-    /// The column number.
-    pub column: u32,
-}
-
-impl From<router_bridge::planner::Location> for Location {
-    fn from(loc: router_bridge::planner::Location) -> Self {
-        Self {
-            line: loc.line,
-            column: loc.column,
-        }
-    }
-}
-
 impl From<QueryPlannerError> for FetchError {
     fn from(err: QueryPlannerError) -> Self {
         FetchError::ValidationPlanningError {

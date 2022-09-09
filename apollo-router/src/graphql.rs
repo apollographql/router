@@ -6,6 +6,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use futures::Stream;
+pub use router_bridge::planner::Location;
 use router_bridge::planner::PlanError;
 use router_bridge::planner::PlanErrorExtensions;
 use router_bridge::planner::PlannerError;
@@ -19,7 +20,6 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
 use crate::error::FetchError;
-pub use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
