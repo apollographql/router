@@ -235,7 +235,7 @@ impl Executable {
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
                 return Err(anyhow!(
-                    "--config cannot be used when a custom configuration source is in use"
+                    "--config and APOLLO_ROUTER_CONFIG_PATH cannot be used when a custom configuration source is in use"
                 ));
             }
             (Some(config), None) => config,
@@ -262,7 +262,7 @@ impl Executable {
         let schema = match (schema, opt.supergraph_path, opt.apollo_key) {
             (Some(_), Some(_), _) => {
                 return Err(anyhow!(
-                    "--supergraph cannot be used when a custom schema source is in use"
+                    "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
                 ))
             }
             (Some(source), None, _) => source,
