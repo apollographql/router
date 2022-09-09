@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use futures::stream::BoxStream;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
@@ -16,6 +15,7 @@ use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
+use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -43,10 +43,10 @@ use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::ValueExt;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::response::IncrementalResponse;
+use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
@@ -55,6 +55,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
+use crate::ListenAddr;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::Schema;
@@ -158,15 +159,27 @@ where
         Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
 {
     let context = req.context;
-    let body = req.originating_request.body();
+    let body = req.supergraph_request.body();
     let variables = body.variables.clone();
-    let QueryPlannerResponse { content, context } = plan_query(planning, body, context).await?;
+    let QueryPlannerResponse {
+        content,
+        context,
+        errors,
+    } = plan_query(planning, body, context).await?;
+
+    if !errors.is_empty() {
+        return Ok(SupergraphResponse::builder()
+            .context(context)
+            .errors(errors)
+            .build()
+            .expect("this response build must not fail"));
+    }
 
     match content {
-        QueryPlannerContent::Introspection { response } => Ok(
+        Some(QueryPlannerContent::Introspection { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
-        QueryPlannerContent::IntrospectionDisabled => {
+        Some(QueryPlannerContent::IntrospectionDisabled) => {
             let mut response = SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
@@ -178,10 +191,10 @@ where
             *response.response.status_mut() = StatusCode::BAD_REQUEST;
             Ok(response)
         }
-        QueryPlannerContent::Plan { query, plan } => {
+        Some(QueryPlannerContent::Plan { query, plan }) => {
             let can_be_deferred = plan.root.contains_defer();
 
-            if can_be_deferred && !accepts_multipart(req.originating_request.headers()) {
+            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -199,7 +212,7 @@ where
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
-                            .originating_request(req.originating_request)
+                            .supergraph_request(req.supergraph_request)
                             .query_plan(plan)
                             .context(context)
                             .build(),
@@ -216,6 +229,8 @@ where
                 )
             }
         }
+        // This should never happen because if we have an empty query plan we should have error in errors vec
+        None => Err(BoxError::from("cannot compute a query plan")),
     }
 }
 
@@ -283,12 +298,7 @@ fn process_execution_response(
 
     let (parts, response_stream) = response.into_parts();
     let stream = response_stream.map(move |mut response: Response| {
-        let has_next = response
-            .data
-            .as_ref()
-            .and_then(|data| data.get("hasNext"))
-            .and_then(|has_next| has_next.as_bool())
-            .unwrap_or(true);
+        let has_next = response.has_next.unwrap_or(true);
         tracing::debug_span!("format_response").in_scope(|| {
             query.format_response(
                 &mut response,
@@ -472,7 +482,7 @@ pub(crate) struct RouterCreator {
 impl NewService<http::Request<graphql::Request>> for RouterCreator {
     type Service = BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >;
     fn new_service(&self) -> Self::Service {
@@ -486,7 +496,7 @@ impl NewService<http::Request<graphql::Request>> for RouterCreator {
 impl SupergraphServiceFactory for RouterCreator {
     type SupergraphService = BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >;
 
@@ -495,16 +505,12 @@ impl SupergraphServiceFactory for RouterCreator {
             http::Request<graphql::Request>,
         >>::Future;
 
-    fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler> {
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut mm = MultiMap::new();
         self.plugins
-            .iter()
-            .filter_map(|(plugin_name, plugin)| {
-                (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
-                    .then(|| plugin.custom_endpoint().map(Handler::new))
-                    .flatten()
-                    .map(|h| (plugin_name.clone(), h))
-            })
-            .collect()
+            .values()
+            .for_each(|p| mm.extend(p.web_endpoints()));
+        mm
     }
 }
 

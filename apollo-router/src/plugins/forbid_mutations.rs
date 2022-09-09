@@ -6,7 +6,6 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -43,10 +42,9 @@ impl Plugin for ForbidMutations {
                         };
                         let res = ExecutionResponse::builder()
                             .error(error)
-                            .extensions(Object::new())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build();
+                            .build()?;
                         Ok(ControlFlow::Break(res))
                     } else {
                         Ok(ControlFlow::Continue(req))
@@ -84,7 +82,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
         let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
             .await
@@ -131,7 +129,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
         let service_stack = ForbidMutations::new(PluginInit::new(false, Default::default()))
             .await
@@ -190,7 +188,7 @@ mod forbid_http_get_mutations_tests {
             .build()
             .expect("expecting valid request");
         ExecutionRequest::fake_builder()
-            .originating_request(request)
+            .supergraph_request(request)
             .query_plan(QueryPlan::fake_builder().root(root).build())
             .build()
     }

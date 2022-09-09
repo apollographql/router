@@ -1,7 +1,8 @@
 //! Telemetry plugin.
 // With regards to ELv2 licensing, this entire file is license key functionality
+use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::error::Error;
+use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -9,18 +10,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
 use apollo_spaceport::server::ReportSpaceport;
 use apollo_spaceport::StatsContext;
+use futures::future::ready;
 use futures::future::BoxFuture;
+use futures::stream::once;
 use futures::FutureExt;
 use futures::StreamExt;
+use http::header;
+use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
-use metrics::apollo::Sender;
+use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -29,34 +34,41 @@ use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use rand::Rng;
 use router_bridge::planner::UsageReporting;
-use tower::service_fn;
-use tower::steer::Steer;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use url::Url;
 
+use self::apollo::ForwardValues;
+use self::apollo::SingleReport;
+use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Handler;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
-use crate::plugins::telemetry::metrics::apollo::studio::SingleReport;
-use crate::plugins::telemetry::metrics::apollo::studio::SingleTracesAndStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::metrics::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
@@ -65,29 +77,35 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
+use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::transport;
+use crate::subgraph::Request;
+use crate::subgraph::Response;
 use crate::Context;
 use crate::ExecutionRequest;
+use crate::ListenAddr;
 use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
 pub(crate) mod apollo;
+pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
-
-static SUPERGRAPH_SPAN_NAME: &str = "supergraph";
-static CLIENT_NAME: &str = "apollo_telemetry::client_name";
-static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const REQUEST_SPAN_NAME: &str = "request";
+pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
+pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
+const CLIENT_NAME: &str = "apollo_telemetry::client_name";
+const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
-pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
@@ -101,9 +119,10 @@ pub struct Telemetry {
     // shutdown exporter.
     _metrics_exporters: Vec<MetricsExporterHandle>,
     meter_provider: AggregateMeterProvider,
-    custom_endpoints: HashMap<String, Handler>,
+    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
-    apollo_metrics_sender: metrics::apollo::Sender,
+    apollo_metrics_sender: apollo_exporter::Sender,
+    field_level_instrumentation_ratio: f64,
 }
 
 #[derive(Debug)]
@@ -170,8 +189,21 @@ impl Plugin for Telemetry {
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
+                self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
+            .map_response(|resp: SupergraphResponse| {
+                if let Ok(Some(usage_reporting)) =
+                    resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
+                {
+                    // Record the operation signature on the router span
+                    Span::current().record(
+                        "apollo_private.operation_signature",
+                        &usage_reporting.stats_report_key.as_str(),
+                    );
+                }
+                resp
+            })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
@@ -184,7 +216,7 @@ impl Plugin for Telemetry {
                     let start = Instant::now();
                     async move {
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
-                        result = Self::update_metrics(
+                        result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
                             metrics.clone(),
@@ -192,66 +224,9 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                         )
                         .await;
-                        match result {
-                            Err(e) => {
-                                if !matches!(sender, Sender::Noop) {
-                                    Self::update_apollo_metrics(
-                                        &ctx,
-                                        sender,
-                                        true,
-                                        start.elapsed(),
-                                    );
-                                }
-                                let mut metric_attrs = Vec::new();
-                                // Fill attributes from error
-                                if let Some(subgraph_attributes_conf) = config
-                                    .metrics
-                                    .as_ref()
-                                    .and_then(|m| m.common.as_ref())
-                                    .and_then(|c| c.attributes.as_ref())
-                                    .and_then(|c| c.router.as_ref())
-                                {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_error(&e)
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_error_total.add(1, &metric_attrs);
-
-                                Err(e)
-                            }
-                            Ok(router_response) => {
-                                let mut has_errors =
-                                    !router_response.response.status().is_success();
-                                Ok(router_response.map(move |response_stream| {
-                                    let sender = sender.clone();
-                                    let ctx = ctx.clone();
-
-                                    response_stream
-                                        .map(move |response| {
-                                            if !response.errors.is_empty() {
-                                                has_errors = true;
-                                            }
-
-                                            if !response.has_next.unwrap_or(false)
-                                                && !matches!(sender, Sender::Noop)
-                                            {
-                                                Self::update_apollo_metrics(
-                                                    &ctx,
-                                                    sender.clone(),
-                                                    has_errors,
-                                                    start.elapsed(),
-                                                );
-                                            }
-                                            response
-                                        })
-                                        .boxed()
-                                }))
-                            }
-                        }
+                        Self::update_metrics_on_last_response(
+                            &ctx, config, metrics, sender, start, result,
+                        )
                     }
                 },
             )
@@ -262,14 +237,21 @@ impl Plugin for Telemetry {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
+                // disable ftv1 sampling for deferred queries
+                let do_not_sample_reason = if req.query_plan.root.contains_condition_or_defer() {
+                    req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
+                    "query is deferred"
+                } else {
+                    ""
+                };
                 let query = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .query
                     .clone()
                     .unwrap_or_default();
                 let operation_name = req
-                    .originating_request
+                    .supergraph_request
                     .body()
                     .operation_name
                     .clone()
@@ -277,7 +259,8 @@ impl Plugin for Telemetry {
                 info_span!("execution",
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal
+                    "otel.kind" = %SpanKind::Internal,
+                    ftv1.do_not_sample_reason = do_not_sample_reason
                 )
             })
             .service(service)
@@ -287,72 +270,10 @@ impl Plugin for Telemetry {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
+        let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
+        let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let name = name.to_owned();
-        let subgraph_metrics = Arc::new(
-            self.config
-                .metrics
-                .as_ref()
-                .and_then(|m| m.common.as_ref())
-                .and_then(|c| c.attributes.as_ref())
-                .and_then(|c| c.subgraph.as_ref())
-                .map(|subgraph_cfg| {
-                    macro_rules! extend_config {
-                        ($forward_kind: ident) => {{
-                            let mut cfg = subgraph_cfg
-                                .all
-                                .as_ref()
-                                .and_then(|a| a.$forward_kind.clone())
-                                .unwrap_or_default();
-                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                                cfg.extend(
-                                    subgraphs
-                                        .get(&name)
-                                        .and_then(|s| s.$forward_kind.clone())
-                                        .unwrap_or_default(),
-                                );
-                            }
-
-                            cfg
-                        }};
-                    }
-                    macro_rules! merge_config {
-                        ($forward_kind: ident) => {{
-                            let mut cfg = subgraph_cfg
-                                .all
-                                .as_ref()
-                                .and_then(|a| a.$forward_kind.clone())
-                                .unwrap_or_default();
-                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
-                                cfg.merge(
-                                    subgraphs
-                                        .get(&name)
-                                        .and_then(|s| s.$forward_kind.clone())
-                                        .unwrap_or_default(),
-                                );
-                            }
-
-                            cfg
-                        }};
-                    }
-                    let insert = extend_config!(insert);
-                    let context = extend_config!(context);
-                    let request = merge_config!(request);
-                    let response = merge_config!(response);
-                    let errors = merge_config!(errors);
-
-                    AttributesForwardConf {
-                        insert: (!insert.is_empty()).then(|| insert),
-                        request: (request.header.is_some() || request.body.is_some())
-                            .then(|| request),
-                        response: (response.header.is_some() || response.body.is_some())
-                            .then(|| response),
-                        errors: (errors.extensions.is_some() || errors.include_messages)
-                            .then(|| errors),
-                        context: (!context.is_empty()).then(|| context),
-                    }
-                }),
-        );
-        let subgraph_metrics_conf = subgraph_metrics.clone();
+        let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -368,107 +289,41 @@ impl Plugin for Telemetry {
                     .clone()
                     .unwrap_or_default();
 
-                info_span!("subgraph",
+                info_span!(SUBGRAPH_SPAN_NAME,
                     name = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
+                    "apollo_private.ftv1" = field::Empty
                 )
             })
+            .map_request(move |req| apollo_handler.request_ftv1(req))
+            .map_response(move |resp| apollo_handler.store_ftv1(resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
-                    let subgraph_metrics_conf = subgraph_metrics_conf.clone();
-                    let mut attributes = HashMap::new();
-                    if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                        attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
-                            sub_request.subgraph_request.headers(),
-                            sub_request.subgraph_request.body(),
-                        ));
-                        attributes.extend(
-                            subgraph_attributes_conf
-                                .get_attributes_from_context(&sub_request.context),
-                        );
-                    }
-                    sub_request
-                        .context
-                        .insert(SUBGRAPH_ATTRIBUTES, attributes)
-                        .unwrap();
-
+                    Self::store_subgraph_request_attributes(
+                        subgraph_metrics_conf_req.clone(),
+                        sub_request,
+                    );
                     sub_request.context.clone()
                 },
                 move |context: Context,
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
-                    let subgraph_metrics = subgraph_metrics.clone();
+                    let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
-                    f.map(move |r: Result<SubgraphResponse, BoxError>| {
-                        let subgraph_metrics_conf = subgraph_metrics.clone();
-                        let mut metric_attrs = context
-                            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
-                            .ok()
-                            .flatten()
-                            .map(|attrs| {
-                                attrs
-                                    .into_iter()
-                                    .map(|(attr_name, attr_value)| {
-                                        KeyValue::new(attr_name, attr_value)
-                                    })
-                                    .collect::<Vec<KeyValue>>()
-                            })
-                            .unwrap_or_default();
-                        metric_attrs.push(subgraph_attribute.clone());
-                        // Fill attributes from context
-                        if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                            metric_attrs.extend(
-                                subgraph_attributes_conf
-                                    .get_attributes_from_context(&context)
-                                    .into_iter()
-                                    .map(|(k, v)| KeyValue::new(k, v)),
-                            );
-                        }
-
-                        match &r {
-                            Ok(response) => {
-                                metric_attrs.push(KeyValue::new(
-                                    "status",
-                                    response.response.status().as_u16().to_string(),
-                                ));
-
-                                // Fill attributes from response
-                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_response(
-                                                response.response.headers(),
-                                                response.response.body(),
-                                            )
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_total.add(1, &metric_attrs);
-                            }
-                            Err(err) => {
-                                // Fill attributes from error
-                                if let Some(subgraph_attributes_conf) = &*subgraph_metrics_conf {
-                                    metric_attrs.extend(
-                                        subgraph_attributes_conf
-                                            .get_attributes_from_error(err)
-                                            .into_iter()
-                                            .map(|(k, v)| KeyValue::new(k, v)),
-                                    );
-                                }
-
-                                metrics.http_requests_error_total.add(1, &metric_attrs);
-                            }
-                        }
-                        metrics
-                            .http_requests_duration
-                            .record(now.elapsed().as_secs_f64(), &metric_attrs);
-                        r
+                    f.map(move |result: Result<SubgraphResponse, BoxError>| {
+                        Self::store_subgraph_response_attributes(
+                            &context,
+                            metrics,
+                            subgraph_attribute,
+                            subgraph_metrics_conf,
+                            now,
+                            &result,
+                        );
+                        result
                     })
                 },
             )
@@ -476,31 +331,8 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
-    fn custom_endpoint(&self) -> Option<transport::BoxService> {
-        let (paths, mut endpoints): (Vec<_>, Vec<_>) =
-            self.custom_endpoints.clone().into_iter().unzip();
-        endpoints.push(Self::not_found_endpoint());
-        let not_found_index = endpoints.len() - 1;
-
-        let svc = Steer::new(
-            // All services we route between
-            endpoints,
-            // How we pick which service to send the request to
-            move |req: &transport::Request, _services: &[_]| {
-                let endpoint = req
-                    .uri()
-                    .path()
-                    .trim_start_matches("/plugins/apollo.telemetry");
-                if let Some(index) = paths.iter().position(|path| path == endpoint) {
-                    index
-                } else {
-                    not_found_index
-                }
-            },
-        )
-        .boxed();
-
-        Some(svc)
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        self.custom_endpoints.clone()
     }
 }
 
@@ -612,12 +444,16 @@ impl Telemetry {
             Ok(true)
         })?;
 
+        let field_level_instrumentation_ratio =
+            config.calculate_field_level_instrumentation_ratio()?;
+
         let plugin = Ok(Telemetry {
             spaceport_shutdown: shutdown_tx,
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
+            field_level_instrumentation_ratio,
             config,
         });
 
@@ -686,9 +522,8 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        // TODO Apollo tracing at some point in the future.
-        // This is the shell of what was previously used to transmit metrics, but will in future be useful for sending traces.
-        // builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+
         let tracer_provider = builder.build();
         Ok(tracer_provider)
     }
@@ -704,7 +539,20 @@ impl Telemetry {
         {
             metrics_common_config.resources.insert(
                 String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(DEFAULT_SERVICE_NAME),
+                String::from(
+                    metrics_common_config
+                        .service_name
+                        .as_deref()
+                        .unwrap_or(DEFAULT_SERVICE_NAME),
+                ),
+            );
+        }
+        if let Some(service_namespace) = &metrics_common_config.service_namespace {
+            metrics_common_config.resources.insert(
+                String::from(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
+                ),
+                service_namespace.clone(),
             );
         }
 
@@ -716,28 +564,12 @@ impl Telemetry {
         Ok(builder)
     }
 
-    fn not_found_endpoint() -> Handler {
-        Handler::new(
-            service_fn(|_req: transport::Request| async {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body("Not found".into())
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        )
-    }
-
     fn supergraph_service_span(
+        field_level_instrumentation_ratio: f64,
         config: apollo::Config,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
-        let client_name_header = config.client_name_header;
-        let client_version_header = config.client_version_header;
-
         move |request: &SupergraphRequest| {
-            let http_request = &request.originating_request;
+            let http_request = &request.supergraph_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
@@ -746,23 +578,480 @@ impl Telemetry {
                 .clone()
                 .unwrap_or_default();
             let client_name = headers
-                .get(&client_name_header)
+                .get(&config.client_name_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let client_version = headers
-                .get(&client_version_header)
+                .get(&config.client_version_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
+
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
-                client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default(),
-                "otel.kind" = %SpanKind::Internal
+                client.name = client_name.to_str().unwrap_or_default(),
+                client.version = client_version.to_str().unwrap_or_default(),
+                otel.kind = %SpanKind::Internal,
+                apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
+                apollo_private.operation_signature = field::Empty,
+                apollo_private.graphql.variables = field::Empty,
+                apollo_private.http.request_headers = field::Empty
             );
+
+            if is_span_sampled(&request.context) {
+                span.record(
+                    "apollo_private.graphql.variables",
+                    &Self::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &config.send_variable_values,
+                    )
+                    .as_str(),
+                );
+                span.record(
+                    "apollo_private.http.request_headers",
+                    &Self::filter_headers(
+                        request.supergraph_request.headers(),
+                        &config.send_headers,
+                    )
+                    .as_str(),
+                );
+            }
+
             span
+        }
+    }
+
+    fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+        let headers_map = headers
+            .iter()
+            .filter(|(name, _value)| {
+                name != &header::AUTHORIZATION
+                    && name != &header::COOKIE
+                    && name != &header::SET_COOKIE
+            })
+            .map(|(name, value)| {
+                if match &forward_rules {
+                    ForwardHeaders::None => false,
+                    ForwardHeaders::All => true,
+                    ForwardHeaders::Only(only) => only.contains(name),
+                    ForwardHeaders::Except(except) => !except.contains(name),
+                } {
+                    (
+                        name.to_string(),
+                        value.to_str().unwrap_or("<unknown>").to_string(),
+                    )
+                } else {
+                    (name.to_string(), "".to_string())
+                }
+            })
+            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc
+            });
+
+        match serde_json::to_string(&headers_map) {
+            Ok(result) => result,
+            Err(_err) => {
+                ::tracing::warn!(
+                    "could not serialize header, trace will not have header information"
+                );
+                Default::default()
+            }
+        }
+    }
+
+    fn filter_variables_values(
+        variables: &Map<ByteString, Value>,
+        forward_rules: &ForwardValues,
+    ) -> String {
+        #[allow(clippy::mutable_key_type)] // False positive lint
+        let variables = variables
+            .iter()
+            .map(|(name, value)| {
+                if match &forward_rules {
+                    ForwardValues::None => false,
+                    ForwardValues::All => true,
+                    ForwardValues::Only(only) => only.contains(&name.as_str().to_string()),
+                    ForwardValues::Except(except) => !except.contains(&name.as_str().to_string()),
+                } {
+                    (
+                        name,
+                        serde_json::to_string(value).unwrap_or_else(|_| "<unknown>".to_string()),
+                    )
+                } else {
+                    (name, "".to_string())
+                }
+            })
+            .fold(BTreeMap::new(), |mut acc, (name, value)| {
+                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc
+            });
+
+        match serde_json::to_string(&variables) {
+            Ok(result) => result,
+            Err(_err) => {
+                ::tracing::warn!(
+                    "could not serialize variables, trace will not have variables information"
+                );
+                Default::default()
+            }
+        }
+    }
+
+    async fn update_otel_metrics(
+        config: Arc<Conf>,
+        context: Context,
+        metrics: BasicMetrics,
+        result: Result<SupergraphResponse, BoxError>,
+        request_duration: Duration,
+    ) -> Result<SupergraphResponse, BoxError> {
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
+        let res = match result {
+            Ok(response) => {
+                metric_attrs.push(KeyValue::new(
+                    "status",
+                    response.response.status().as_u16().to_string(),
+                ));
+
+                // Wait for the first response of the stream
+                let (parts, stream) = response.response.into_parts();
+                let (first_response, rest) = stream.into_future().await;
+
+                if let Some(MetricsCommon {
+                    attributes:
+                        Some(MetricsAttributesConf {
+                            router: Some(forward_attributes),
+                            ..
+                        }),
+                    ..
+                }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
+                {
+                    let attributes = forward_attributes.get_attributes_from_router_response(
+                        &parts,
+                        &context,
+                        &first_response,
+                    );
+
+                    metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
+                    metrics.http_requests_total.add(1, &metric_attrs);
+                } else {
+                    metrics.http_requests_total.add(1, &metric_attrs);
+                }
+
+                let response = http::Response::from_parts(
+                    parts,
+                    once(ready(first_response.unwrap_or_default()))
+                        .chain(rest)
+                        .boxed(),
+                );
+
+                Ok(SupergraphResponse { context, response })
+            }
+            Err(err) => {
+                metrics.http_requests_error_total.add(1, &metric_attrs);
+
+                Err(err)
+            }
+        };
+        metrics
+            .http_requests_duration
+            .record(request_duration.as_secs_f64(), &metric_attrs);
+
+        res
+    }
+
+    fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
+        let apollo_config = config.apollo.clone().unwrap_or_default();
+        let context = &req.context;
+        let http_request = &req.supergraph_request;
+        let headers = http_request.headers();
+        let client_name_header = &apollo_config.client_name_header;
+        let client_version_header = &apollo_config.client_version_header;
+        let _ = context.insert(
+            CLIENT_NAME,
+            headers
+                .get(client_name_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        let _ = context.insert(
+            CLIENT_VERSION,
+            headers
+                .get(client_version_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        if let Some(metrics_conf) = &config.metrics {
+            // List of custom attributes for metrics
+            let mut attributes: HashMap<String, String> = HashMap::new();
+            if let Some(operation_name) = &req.supergraph_request.body().operation_name {
+                attributes.insert("operation_name".to_string(), operation_name.clone());
+            }
+
+            if let Some(router_attributes_conf) = metrics_conf
+                .common
+                .as_ref()
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|a| a.router.as_ref())
+            {
+                attributes.extend(
+                    router_attributes_conf
+                        .get_attributes_from_request(headers, req.supergraph_request.body()),
+                );
+                attributes.extend(router_attributes_conf.get_attributes_from_context(context));
+            }
+
+            let _ = context.insert(ATTRIBUTES, attributes);
+        }
+    }
+
+    fn apollo_handler(&self) -> ApolloFtv1Handler {
+        let mut rng = rand::thread_rng();
+
+        if rng.gen_ratio((self.field_level_instrumentation_ratio * 100.0) as u32, 100) {
+            ApolloFtv1Handler::Enabled
+        } else {
+            ApolloFtv1Handler::Disabled
+        }
+    }
+
+    fn create_subgraph_metrics_conf(&self, name: &str) -> Arc<Option<AttributesForwardConf>> {
+        Arc::new(
+            self.config
+                .metrics
+                .as_ref()
+                .and_then(|m| m.common.as_ref())
+                .and_then(|c| c.attributes.as_ref())
+                .and_then(|c| c.subgraph.as_ref())
+                .map(|subgraph_cfg| {
+                    macro_rules! extend_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.extend(
+                                    subgraphs
+                                        .get(&name.to_owned())
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    macro_rules! merge_config {
+                        ($forward_kind: ident) => {{
+                            let mut cfg = subgraph_cfg
+                                .all
+                                .as_ref()
+                                .and_then(|a| a.$forward_kind.clone())
+                                .unwrap_or_default();
+                            if let Some(subgraphs) = &subgraph_cfg.subgraphs {
+                                cfg.merge(
+                                    subgraphs
+                                        .get(&name.to_owned())
+                                        .and_then(|s| s.$forward_kind.clone())
+                                        .unwrap_or_default(),
+                                );
+                            }
+
+                            cfg
+                        }};
+                    }
+                    let insert = extend_config!(insert);
+                    let context = extend_config!(context);
+                    let request = merge_config!(request);
+                    let response = merge_config!(response);
+                    let errors = merge_config!(errors);
+
+                    AttributesForwardConf {
+                        insert: (!insert.is_empty()).then(|| insert),
+                        request: (request.header.is_some() || request.body.is_some())
+                            .then(|| request),
+                        response: (response.header.is_some() || response.body.is_some())
+                            .then(|| response),
+                        errors: (errors.extensions.is_some() || errors.include_messages)
+                            .then(|| errors),
+                        context: (!context.is_empty()).then(|| context),
+                    }
+                }),
+        )
+    }
+
+    fn store_subgraph_request_attributes(
+        attribute_forward_config: Arc<Option<AttributesForwardConf>>,
+        sub_request: &Request,
+    ) {
+        let mut attributes = HashMap::new();
+        if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
+            attributes.extend(subgraph_attributes_conf.get_attributes_from_request(
+                sub_request.subgraph_request.headers(),
+                sub_request.subgraph_request.body(),
+            ));
+            attributes
+                .extend(subgraph_attributes_conf.get_attributes_from_context(&sub_request.context));
+        }
+        sub_request
+            .context
+            .insert(SUBGRAPH_ATTRIBUTES, attributes)
+            .unwrap();
+    }
+
+    fn store_subgraph_response_attributes(
+        context: &Context,
+        metrics: BasicMetrics,
+        subgraph_attribute: KeyValue,
+        attribute_forward_config: Arc<Option<AttributesForwardConf>>,
+        now: Instant,
+        result: &Result<Response, BoxError>,
+    ) {
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
+        metric_attrs.push(subgraph_attribute);
+        // Fill attributes from context
+        if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
+            metric_attrs.extend(
+                subgraph_attributes_conf
+                    .get_attributes_from_context(context)
+                    .into_iter()
+                    .map(|(k, v)| KeyValue::new(k, v)),
+            );
+        }
+
+        match &result {
+            Ok(response) => {
+                metric_attrs.push(KeyValue::new(
+                    "status",
+                    response.response.status().as_u16().to_string(),
+                ));
+
+                // Fill attributes from response
+                if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
+                    metric_attrs.extend(
+                        subgraph_attributes_conf
+                            .get_attributes_from_response(
+                                response.response.headers(),
+                                response.response.body(),
+                            )
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    );
+                }
+
+                metrics.http_requests_total.add(1, &metric_attrs);
+            }
+            Err(err) => {
+                // Fill attributes from error
+                if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
+                    metric_attrs.extend(
+                        subgraph_attributes_conf
+                            .get_attributes_from_error(err)
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    );
+                }
+
+                metrics.http_requests_error_total.add(1, &metric_attrs);
+            }
+        }
+        metrics
+            .http_requests_duration
+            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_metrics_on_last_response(
+        ctx: &Context,
+        config: Arc<Conf>,
+        metrics: BasicMetrics,
+        sender: Sender,
+        start: Instant,
+        result: Result<supergraph::Response, BoxError>,
+    ) -> Result<supergraph::Response, BoxError> {
+        match result {
+            Err(e) => {
+                if !matches!(sender, Sender::Noop) {
+                    Self::update_apollo_metrics(ctx, sender, true, start.elapsed());
+                }
+                let mut metric_attrs = Vec::new();
+                // Fill attributes from error
+                if let Some(subgraph_attributes_conf) = config
+                    .metrics
+                    .as_ref()
+                    .and_then(|m| m.common.as_ref())
+                    .and_then(|c| c.attributes.as_ref())
+                    .and_then(|c| c.router.as_ref())
+                {
+                    metric_attrs.extend(
+                        subgraph_attributes_conf
+                            .get_attributes_from_error(&e)
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    );
+                }
+
+                metrics.http_requests_error_total.add(1, &metric_attrs);
+
+                Err(e)
+            }
+            Ok(router_response) => {
+                let mut has_errors = !router_response.response.status().is_success();
+                Ok(router_response.map(move |response_stream| {
+                    let sender = sender.clone();
+                    let ctx = ctx.clone();
+
+                    response_stream
+                        .map(move |response| {
+                            if !response.errors.is_empty() {
+                                has_errors = true;
+                            }
+
+                            if !response.has_next.unwrap_or(false)
+                                && !matches!(sender, Sender::Noop)
+                            {
+                                Self::update_apollo_metrics(
+                                    &ctx,
+                                    sender.clone(),
+                                    has_errors,
+                                    start.elapsed(),
+                                );
+                            }
+                            response
+                        })
+                        .boxed()
+                }))
+            }
         }
     }
 
@@ -772,6 +1061,10 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
+        if is_span_sampled(context) {
+            ::tracing::trace!("span is sampled then skip the apollo metrics");
+            return;
+        }
         let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
@@ -786,16 +1079,24 @@ impl Telemetry {
                 .map_or(false, |x| x.unwrap_or_default())
             {
                 // The request was excluded don't report the details, but do report the operation count
-                SingleReport {
+                SingleStatsReport {
                     operation_count,
                     ..Default::default()
                 }
             } else {
-                metrics::apollo::studio::SingleReport {
+                SingleStatsReport {
+                    request_id: uuid::Uuid::from_bytes(
+                        Span::current()
+                            .context()
+                            .span()
+                            .span_context()
+                            .trace_id()
+                            .to_bytes(),
+                    ),
                     operation_count,
-                    traces_and_stats: HashMap::from([(
+                    stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
-                        SingleTracesAndStats {
+                        SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
                                     client_name: context
@@ -826,123 +1127,12 @@ impl Telemetry {
             }
         } else {
             // Usage reporting was missing, so it counts as one operation.
-            SingleReport {
+            SingleStatsReport {
                 operation_count: 1,
                 ..Default::default()
             }
         };
-        sender.send(metrics);
-    }
-
-    async fn update_metrics(
-        config: Arc<Conf>,
-        context: Context,
-        metrics: BasicMetrics,
-        result: Result<SupergraphResponse, BoxError>,
-        request_duration: Duration,
-    ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = context
-            .get::<_, HashMap<String, String>>(ATTRIBUTES)
-            .ok()
-            .flatten()
-            .map(|attrs| {
-                attrs
-                    .into_iter()
-                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                    .collect::<Vec<KeyValue>>()
-            })
-            .unwrap_or_default();
-        let res = match result {
-            Ok(response) => {
-                metric_attrs.push(KeyValue::new(
-                    "status",
-                    response.response.status().as_u16().to_string(),
-                ));
-                if let Some(MetricsCommon {
-                    attributes:
-                        Some(MetricsAttributesConf {
-                            router: Some(forward_attributes),
-                            ..
-                        }),
-                    ..
-                }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
-                {
-                    let (resp, attributes) = forward_attributes
-                        .get_attributes_from_router_response(response)
-                        .await;
-
-                    metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
-                    metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(resp)
-                } else {
-                    metrics.http_requests_total.add(1, &metric_attrs);
-
-                    Ok(response)
-                }
-            }
-            Err(err) => {
-                metrics.http_requests_error_total.add(1, &[]);
-
-                Err(err)
-            }
-        };
-        metrics
-            .http_requests_duration
-            .record(request_duration.as_secs_f64(), &metric_attrs);
-
-        res
-    }
-
-    fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
-        let apollo_config = config.apollo.clone().unwrap_or_default();
-        let context = &req.context;
-        let http_request = &req.originating_request;
-        let headers = http_request.headers();
-        let client_name_header = &apollo_config.client_name_header;
-        let client_version_header = &apollo_config.client_version_header;
-        let _ = context.insert(
-            CLIENT_NAME,
-            headers
-                .get(client_name_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""))
-                .to_str()
-                .unwrap_or_default()
-                .to_string(),
-        );
-        let _ = context.insert(
-            CLIENT_VERSION,
-            headers
-                .get(client_version_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""))
-                .to_str()
-                .unwrap_or_default()
-                .to_string(),
-        );
-        if let Some(metrics_conf) = &config.metrics {
-            // List of custom attributes for metrics
-            let mut attributes: HashMap<String, String> = HashMap::new();
-            if let Some(operation_name) = &req.originating_request.body().operation_name {
-                attributes.insert("operation_name".to_string(), operation_name.clone());
-            }
-
-            if let Some(router_attributes_conf) = metrics_conf
-                .common
-                .as_ref()
-                .and_then(|c| c.attributes.as_ref())
-                .and_then(|a| a.router.as_ref())
-            {
-                attributes.extend(
-                    router_attributes_conf
-                        .get_attributes_from_request(headers, req.originating_request.body()),
-                );
-                attributes.extend(router_attributes_conf.get_attributes_from_context(context));
-            }
-
-            let _ = context.insert(ATTRIBUTES, attributes);
-        }
+        sender.send(SingleReport::Stats(metrics));
     }
 }
 
@@ -979,7 +1169,50 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     }
 }
 
+pub(crate) fn is_span_sampled(context: &Context) -> bool {
+    Span::current().context().span().span_context().is_sampled()
+        && !context
+            .get(FTV1_DO_NOT_SAMPLE)
+            .unwrap_or_default()
+            .unwrap_or(false)
+}
+
 register_plugin!("apollo", "telemetry", Telemetry);
+
+/// This enum is a partial cleanup of the telemetry plugin logic.
+///
+#[derive(Copy, Clone)]
+enum ApolloFtv1Handler {
+    Enabled,
+    Disabled,
+}
+
+impl ApolloFtv1Handler {
+    fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
+        if let ApolloFtv1Handler::Enabled = self {
+            if is_span_sampled(&req.context) {
+                req.subgraph_request.headers_mut().insert(
+                    "apollo-federation-include-trace",
+                    HeaderValue::from_static("ftv1"),
+                );
+            }
+        }
+        req
+    }
+
+    fn store_ftv1(&self, resp: SubgraphResponse) -> SubgraphResponse {
+        // Stash the FTV1 data
+        if let ApolloFtv1Handler::Enabled = self {
+            if let Some(serde_json_bytes::Value::String(ftv1)) =
+                resp.response.body().extensions.get("ftv1")
+            {
+                // Record the ftv1 trace for processing later
+                Span::current().record("apollo_private.ftv1", &ftv1.as_str());
+            }
+        }
+        resp
+    }
+}
 
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
@@ -1234,9 +1467,7 @@ mod tests {
                 },
                 "metrics": {
                     "common": {
-                        "resources": {
-                            "service.name": "apollo-router"
-                        },
+                        "service_name": "apollo-router",
                         "attributes": {
                             "router": {
                                 "static": [
@@ -1385,20 +1616,32 @@ mod tests {
             .await
             .expect_err("Must be in error");
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/BADPATH/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let resp = handler.oneshot(http_req_prom).await.unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut web_endpoint = dyn_plugin
+            .web_endpoints()
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_router();
+        let resp = web_endpoint
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let http_req_prom =
-            http::Request::get("http://localhost:4000/plugins/apollo.telemetry/prometheus")
-                .body(Default::default())
-                .unwrap();
-        let handler = dyn_plugin.custom_endpoint().unwrap();
-        let mut resp = handler.oneshot(http_req_prom).await.unwrap();
+        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);
