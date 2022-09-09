@@ -3,23 +3,27 @@
 # builds to work on platforms such as Mac OS X/M1 (with some help from
 # rosetta)
 # Build is required to extract the release files
-FROM --platform=linux/amd64 alpine:latest AS build
+FROM --platform=linux/amd64 debian:bullseye-slim AS build
 
-ARG ROUTER_RELEASE
+ARG ROUTER_RELEASE=latest
 
-# Pull release from GH
-ADD https://github.com/apollographql/router/releases/download/v${ROUTER_RELEASE}/router-${ROUTER_RELEASE}-x86_64-linux.tar.gz /tmp/router.tar.gz
+WORKDIR /dist
 
-WORKDIR /tmp
+# Install curl
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
 
-# router.tar.gz extracts to "dist"
-RUN tar xvzf router.tar.gz -C /
+# Run the Router downloader which puts Router into current working directory
+RUN curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh
 
 # Make directories for config and schema
-RUN mkdir /dist/config && mkdir /dist/schema
+RUN mkdir config schema
 
 # Copy configuration for docker image
-COPY router.yaml /dist/config
+COPY router.yaml config
 
 # Required so we can copy in libz.so.1
 FROM --platform=linux/amd64 gcr.io/distroless/java17-debian11 as libz-required
@@ -27,17 +31,17 @@ FROM --platform=linux/amd64 gcr.io/distroless/java17-debian11 as libz-required
 # Final image uses distroless. Feel free to change this to an image that suits your needs.
 FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11
 
-LABEL org.opencontainers.image.authors="ApolloGraphQL https://github.com/apollographql/router"
+LABEL org.opencontainers.image.authors="Apollo Graph, Inc. https://github.com/apollographql/router"
 
 # Copy in the extracted/created files
 COPY --from=libz-required /lib/x86_64-linux-gnu/libz.so.1 /lib/x86_64-linux-gnu/libz.so.1
 
-# Copy in the extracted/created files
-COPY --from=build --chown=root:root /dist /dist
-
 WORKDIR /dist
+
+# Copy in the extracted/created files
+COPY --from=build --chown=root:root /dist .
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
 # Default executable is the router
-ENTRYPOINT ["./router"]
+ENTRYPOINT ["/dist/router"]

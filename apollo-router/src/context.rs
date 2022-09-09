@@ -4,6 +4,7 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
@@ -16,7 +17,7 @@ use crate::json_ext::Value;
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
-/// Context for a [`crate::http_ext::Request`]
+/// A map of arbitrary JSON values, for use by plugins.
 ///
 /// Context makes use of [`DashMap`] under the hood which tries to handle concurrency
 /// by allowing concurrency across threads without requiring locking. This is great
@@ -30,6 +31,9 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
+
+    /// Creation time
+    pub(crate) created_at: Instant,
 }
 
 impl Context {
@@ -37,6 +41,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
+            created_at: Instant::now(),
         }
     }
 }
@@ -88,6 +93,14 @@ impl Context {
         K: Into<String>,
     {
         self.entries.insert(key.into(), value)
+    }
+
+    /// Get a json value from the context using the provided key.
+    pub fn get_json_value<K>(&self, key: K) -> Option<Value>
+    where
+        K: Into<String>,
+    {
+        self.entries.get(&key.into()).map(|v| v.value().clone())
     }
 
     /// Upsert a value in the context using the provided key and resolving

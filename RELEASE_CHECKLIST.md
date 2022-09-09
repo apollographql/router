@@ -12,7 +12,7 @@ If you are releasing a beta or a release candidate, no official changelog is
 needed, but you're not off the hook! You'll need to write testing instructions
 in lieu of an official changelog.
 
-1. Open the associated milestone. All issues and PRs should be closed. If
+1. Open the associated GitHub milestone for the release. All issues and PRs should be closed. If
     they are not you should reassign all open issues and PRs to future
     milestones.
 2. Go through the commit history since the last release. Ensure that all PRs
@@ -25,28 +25,33 @@ in lieu of an official changelog.
     breaking change, also add a BREAKING label.
 4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
     `CHANGELOG.md`. Use the structure of previous entries.
-5. Update `docker.mdx` and `kubernetes.mdx` with the release version.
-6. Update `helm/chart/router/Chart.yaml` and in `helm/chart/router/README.md` as follows:
-   - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
-   - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
-7. cd helm/chart && helm-docs router; cd - (if required, install [helm-docs](https://github.com/norwoodj/helm-docs))
-8. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
-9. Update the version in docker-compose files in `dockerfiles` directory.
 
 ### Start a release PR
 
 1. Make sure you have `cargo` installed on your machine and in your `PATH`.
 2. Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
-3. Update the version in `*/Cargo.toml` (do not forget the ones in scaffold templates).
-4. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
-5. Put a Release date and the version number on the new `CHANGELOG.md` section
-4. Update the version in `NEXT_CHANGELOG.md`.
-5. Clear `NEXT_CHANGELOG.md` leaving only the template.
-6. Run `cargo check` so the lock file gets updated.
-7. Run `cargo xtask check-compliance`.
-8. Push up a commit with all the changes. The commit message should be "release: v#.#.#" or "release: v#.#.#-rc.#"
-9. Request review from the Router team.
+3. Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
+4. Update the `apollo-router` Git tags in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
+5. Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
+6. Update `docker.mdx` and `kubernetes.mdx` with the release version.
+7. Update `helm/chart/router/Chart.yaml` as follows:
+   - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
+   - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
+8 Update `helm/chart/router/README.md` by running this from the repo root: `(cd helm/chart && helm-docs router)`.
+  (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
+9. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+10. Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
+11. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
+    (If not installed, you can install `cargo-about` by running `cargo install cargo-about`.)
+12. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
+13. Put a Release date and the version number on the new `CHANGELOG.md` section
+14. Update the version in `NEXT_CHANGELOG.md`.
+15. Clear `NEXT_CHANGELOG.md` leaving only the template.
+16. Run `cargo check` so the lock file gets updated.
+17. Run `cargo xtask check-compliance`.
+18. Push up a commit with all the changes. The commit message should be "release: v#.#.#" or "release: v#.#.#-rc.#"
+19. Request review from the Router team.
 
 ### Review
 

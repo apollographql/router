@@ -1,0 +1,26 @@
+---
+source: apollo-router/tests/integration_tests.rs
+assertion_line: 767
+expression: first
+---
+{
+  "data": {
+    "me": {
+      "reviews": [
+        {
+          "id": "1",
+          "author": {
+            "id": "1"
+          }
+        },
+        {
+          "id": "2",
+          "author": {
+            "id": "1"
+          }
+        }
+      ]
+    }
+  },
+  "hasNext": true
+}

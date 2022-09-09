@@ -23,59 +23,57 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [0.14.1] (unreleased) - 2022-mm-dd
+# [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
+OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
-### Reference-counting for the schema string given to plugins ([PR #???](https://github.com/apollographql/router/pull/))
+* `client_name` => `client.name`
+* `client_version` => `client.version`
 
-The type of the `supergraph_sdl` field of the `apollo_router::plugin::PluginInit` struct
-was changed from `String` to `Arc<String>`.
-This reduces the number of copies of this string we keep in memory, as schemas can get large.
-
-By [@SimonSapin](https://github.com/SimonSapin)
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
 
 ## 🚀 Features
 
-### Adds `APOLLO_ROUTER_DEV_MODE` for use from Rolver ([PR #1475](https://github.com/apollographql/router/pull/1475))
+### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
 
-This environment variable enables some experimental plugins to enable development with the router. It is not intended to be used by any process other than `rover dev`.
+Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
 
-By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper)
+```yaml
+telemetry:
+    apollo:
+        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
+        # This is expensive and should be left at a low value.
+        # This cannot be higher than tracing->trace_config->sampler
+        field_level_instrumentation_sampler: 0.01 # (default)
+
+        # Include HTTP request and response headers in traces sent to Apollo Studio
+        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all headers except referer
+            - referer
+
+        # Send variable values in Apollo in traces sent to Apollo Studio
+        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all variable values except for variable named first
+            - first
+    tracing:
+        trace_config:
+            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
 ## 🐛 Fixes
-
-### Update span attributes to be compliant with the opentelemetry for GraphQL specs ([PR #1449](https://github.com/apollographql/router/pull/1449))
-
-Change attribute name `query` to `graphql.document` and `operation_name` to `graphql.operation.name` in spans.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1449 
-
-### Configuration handling enhancements ([PR #1454](https://github.com/apollographql/router/pull/1454))
-
-Router config handling now:
-* Allows completely empty configuration without error.
-* Prevents unknown tags at the root of the configuration from being silently ignored.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1454
-
-
 ## 🛠 Maintenance
 
+### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
+
+We changed `QueryPlannerResponse` to:
+
++ Add a `Vec<apollo_router::graphql::Error>`
++ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
 ## 📚 Documentation
-
-
-### CORS: Fix trailing slashes, and display defaults ([PR #1471](https://github.com/apollographql/router/pull/1471))
-
-The CORS documentation now displays a valid `origins` configuration (without trailing slash!), and the full configuration section displays its default settings.
-
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1471
-
-
-
-### Add helm OCI example ([PR #1457](https://github.com/apollographql/router/pull/1457))
-
-Update existing filesystem based example to illustrate how to do the same thing using our OCI stored helm chart.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1457

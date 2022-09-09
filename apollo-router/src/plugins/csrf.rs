@@ -6,7 +6,6 @@ use http::HeaderMap;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -15,13 +14,14 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::RouterRequest;
-use crate::RouterResponse;
+use crate::services::supergraph;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CSRFConfig {
+pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
     /// Note that setting this to true is deemed unsafe.
@@ -87,7 +87,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 /// won't execute operations at the request of origins who our CORS policy will
 /// block.
 #[derive(Debug, Clone)]
-pub struct Csrf {
+pub(crate) struct Csrf {
     config: CSRFConfig,
 }
 
@@ -101,14 +101,11 @@ impl Plugin for Csrf {
         })
     }
 
-    fn router_service(
-        &self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
-                .checkpoint(move |req: RouterRequest| {
+                .checkpoint(move |req: SupergraphRequest| {
                     if is_preflighted(&req, required_headers.as_slice()) {
                         tracing::trace!("request is preflighted");
                         Ok(ControlFlow::Continue(req))
@@ -122,7 +119,7 @@ impl Plugin for Csrf {
                                 NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
                                 required_headers.join(", ")
                             )).build();
-                        let res = RouterResponse::builder()
+                        let res = SupergraphResponse::builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
@@ -146,8 +143,8 @@ impl Plugin for Csrf {
 // - The only headers added by javascript code are part of the cors safelisted request headers (Accept,Accept-Language,Content-Language,Content-Type, and simple Range
 //
 // Given the first step is covered in our web browser, we'll take care of the two other steps below:
-fn is_preflighted(req: &RouterRequest, required_headers: &[String]) -> bool {
-    let headers = req.originating_request.headers();
+fn is_preflighted(req: &SupergraphRequest, required_headers: &[String]) -> bool {
+    let headers = req.supergraph_request.headers();
     content_type_requires_preflight(headers)
         || recommended_header_is_provided(headers, required_headers)
 }
@@ -234,27 +231,19 @@ mod csrf_tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSupergraphService;
 
     #[tokio::test]
     async fn it_lets_preflighted_request_pass_through() {
         let config = CSRFConfig::default();
-        let with_preflight_content_type = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "application/json".into())]
-                    .into_iter()
-                    .collect(),
-            )
+        let with_preflight_content_type = SupergraphRequest::fake_builder()
+            .header("content-type", "application/json")
             .build()
             .unwrap();
         assert_accepted(config.clone(), with_preflight_content_type).await;
 
-        let with_preflight_header = RouterRequest::fake_builder()
-            .headers(
-                [("apollo-require-preflight".into(), "this-is-a-test".into())]
-                    .into_iter()
-                    .collect(),
-            )
+        let with_preflight_header = SupergraphRequest::fake_builder()
+            .header("apollo-require-preflight", "this-is-a-test")
             .build()
             .unwrap();
         assert_accepted(config, with_preflight_header).await;
@@ -263,29 +252,27 @@ mod csrf_tests {
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let config = CSRFConfig::default();
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        let mut non_preflighted_request = SupergraphRequest::fake_builder().build().unwrap();
+        // fake_builder defaults to `Content-Type: application/json`,
+        // specifically to avoid the case we’re testing here.
+        non_preflighted_request
+            .supergraph_request
+            .headers_mut()
+            .remove("content-type");
         assert_rejected(config, non_preflighted_request).await
     }
 
     #[tokio::test]
     async fn it_rejects_non_preflighted_content_type_request() {
         let config = CSRFConfig::default();
-        let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain".into())]
-                    .into_iter()
-                    .collect(),
-            )
+        let non_preflighted_request = SupergraphRequest::fake_builder()
+            .header("content-type", "text/plain")
             .build()
             .unwrap();
         assert_rejected(config.clone(), non_preflighted_request).await;
 
-        let non_preflighted_request = RouterRequest::fake_builder()
-            .headers(
-                [("content-type".into(), "text/plain; charset=utf8".into())]
-                    .into_iter()
-                    .collect(),
-            )
+        let non_preflighted_request = SupergraphRequest::fake_builder()
+            .header("content-type", "text/plain; charset=utf8")
             .build()
             .unwrap();
         assert_rejected(config, non_preflighted_request).await;
@@ -297,24 +284,23 @@ mod csrf_tests {
             unsafe_disabled: true,
             ..Default::default()
         };
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        let non_preflighted_request = SupergraphRequest::fake_builder().build().unwrap();
         assert_accepted(config, non_preflighted_request).await
     }
 
-    async fn assert_accepted(config: CSRFConfig, request: RouterRequest) {
-        let mut mock_service = MockRouterService::new();
+    async fn assert_accepted(config: CSRFConfig, request: SupergraphRequest) {
+        let mut mock_service = MockSupergraphService::new();
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(RouterResponse::fake_builder()
+            Ok(SupergraphResponse::fake_builder()
                 .data(json!({ "test": 1234_u32 }))
                 .build()
                 .unwrap())
         });
 
-        let mock = mock_service.build();
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .supergraph_service(mock_service.boxed());
         let res = service_stack
             .oneshot(request)
             .await
@@ -323,15 +309,15 @@ mod csrf_tests {
             .await
             .unwrap();
 
+        assert_eq!(res.errors, []);
         assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
     }
 
-    async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
-        let mock = MockRouterService::new().build();
+    async fn assert_rejected(config: CSRFConfig, request: SupergraphRequest) {
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .router_service(mock.boxed());
+            .supergraph_service(MockSupergraphService::new().boxed());
         let res = service_stack
             .oneshot(request)
             .await
@@ -343,7 +329,7 @@ mod csrf_tests {
         assert_eq!(
             1,
             res.errors.len(),
-            "expected one(1) error in the RouterResponse, found {}\n{:?}",
+            "expected one(1) error in the SupergraphResponse, found {}\n{:?}",
             res.errors.len(),
             res.errors
         );

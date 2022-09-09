@@ -16,15 +16,15 @@ The request lifecycle looks like this:
 ```mermaid
 sequenceDiagram
     actor Client
-    participant RouterService
+    participant SupergraphService
     participant QueryPlannerService
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>RouterService: request
-    RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService: 
-    RouterService->>ExecutionService: execute
+    Client->>SupergraphService: request
+    SupergraphService->>QueryPlannerService: plan
+    QueryPlannerService-->>SupergraphService: 
+    SupergraphService->>ExecutionService: execute
     par
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
@@ -35,8 +35,8 @@ sequenceDiagram
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
     end
-    ExecutionService-->>RouterService: response
-    RouterService-->>Client: response
+    ExecutionService-->>SupergraphService: response
+    SupergraphService-->>Client: response
 ```
 
 On each subgraph response the value `upsert` is called on the context to potentially place the http response code

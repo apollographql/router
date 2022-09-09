@@ -1,4 +1,5 @@
 //! Configuration for datadog tracing.
+use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -9,14 +10,15 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Config {
+pub(crate) struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
     #[schemars(with = "String", default = "default_agent_endpoint")]
-    pub endpoint: AgentEndpoint,
+    pub(crate) endpoint: AgentEndpoint,
 }
 const fn default_agent_endpoint() -> &'static str {
     "default"
@@ -36,7 +38,11 @@ impl TracingConfigurator for Config {
             .with(&trace_config.service_name, |b, n| b.with_service_name(n))
             .with_trace_config(trace_config.into())
             .build_exporter()?;
-        Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
+        Ok(builder.with_span_processor(
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                .build()
+                .filtered(),
+        ))
     }
 }
 

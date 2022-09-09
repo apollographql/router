@@ -38,33 +38,17 @@ use crate::plugin::plugins;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
-pub enum ConfigurationError {
+#[allow(missing_docs)] // FIXME
+#[non_exhaustive]
+pub(crate) enum ConfigurationError {
     /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
-    /// missing environment variable: {0}
-    MissingEnvironmentVariable(String),
-    /// invalid environment variable: {0}
-    InvalidEnvironmentVariable(String),
-    /// could not setup OTLP tracing: {0}
-    OtlpTracing(opentelemetry::trace::TraceError),
-    /// could not setup OTLP metrics: {0}
-    Metrics(#[from] opentelemetry::metrics::MetricsError),
-    /// the configuration could not be loaded because it requires the feature {0:?}
-    MissingFeature(&'static str),
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// plugin {plugin} could not be started: {error}
-    PluginStartup { plugin: String, error: String },
-    /// plugin {plugin} could not be stopped: {error}
-    PluginShutdown { plugin: String, error: String },
-    /// unknown layer {0}
-    LayerUnknown(String),
-    /// layer {layer} could not be configured: {error}
-    LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
     InvalidConfiguration {
         message: &'static str,
@@ -75,13 +59,19 @@ pub enum ConfigurationError {
 }
 
 /// The configuration for the router.
-/// Currently maintains a mapping of subgraphs.
+///
+/// Can be created through `serde::Deserialize` from various formats,
+/// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
+
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
 
     /// Plugin configuration
     #[serde(default)]
@@ -94,6 +84,7 @@ pub struct Configuration {
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+const TELEMETRY_KEY: &str = "telemetry";
 
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -104,6 +95,7 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: bool,
@@ -118,6 +110,7 @@ impl Configuration {
 
         Self {
             server: server.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -127,7 +120,8 @@ impl Configuration {
         }
     }
 
-    pub fn boxed(self) -> Box<Self> {
+    #[cfg(test)]
+    pub(crate) fn boxed(self) -> Box<Self> {
         Box::new(self)
     }
 
@@ -153,18 +147,32 @@ impl Configuration {
 
         plugins
     }
+
+    pub(crate) fn plugin_configuration(&self, plugin_name: &str) -> Option<Value> {
+        self.plugins()
+            .iter()
+            .find(|(name, _)| name == plugin_name)
+            .map(|(_, value)| value.clone())
+    }
+
+    // checks that we can reload configuration from the current one to the new one
+    pub(crate) fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
+        if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
+            == new.apollo_plugins.plugins.get(TELEMETRY_KEY)
+        {
+            Ok(())
+        } else {
+            Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
+        }
+    }
 }
 
+/// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
-    type Err = ConfigurationError;
+    type Err = serde_yaml::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let config =
-            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "failed to parse configuration",
-                error: e.to_string(),
-            })?;
-        Ok(config)
+        serde_yaml::from_str(s)
     }
 }
 
@@ -254,10 +262,6 @@ pub(crate) struct Server {
     #[serde(default = "default_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Cors,
-
     /// introspection queries
     /// enabled by default
     #[serde(default = "default_introspection")]
@@ -268,20 +272,20 @@ pub(crate) struct Server {
     #[serde(default = "default_landing_page")]
     pub(crate) landing_page: bool,
 
-    /// GraphQL endpoint
+    /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
-    #[serde(default = "default_endpoint")]
-    pub(crate) endpoint: String,
+    #[serde(default = "default_graphql_path")]
+    pub(crate) graphql_path: String,
 
     /// healthCheck path
     /// default: "/.well-known/apollo/server-health"
     #[serde(default = "default_health_check_path")]
     pub(crate) health_check_path: String,
 
-    /// Experimental @defer directive support
-    /// default: false
+    /// Preview @defer directive support
+    /// default: true
     #[serde(default = "default_defer_support")]
-    pub(crate) experimental_defer_support: bool,
+    pub(crate) preview_defer_support: bool,
 
     /// Experimental limitation of query depth
     /// default: 4096
@@ -295,22 +299,20 @@ impl Server {
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
     pub(crate) fn new(
         listen: Option<ListenAddr>,
-        cors: Option<Cors>,
         introspection: Option<bool>,
         landing_page: Option<bool>,
-        endpoint: Option<String>,
+        graphql_path: Option<String>,
         health_check_path: Option<String>,
         defer_support: Option<bool>,
         parser_recursion_limit: Option<usize>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_listen),
-            cors: cors.unwrap_or_default(),
             introspection: introspection.unwrap_or_else(default_introspection),
             landing_page: landing_page.unwrap_or_else(default_landing_page),
-            endpoint: endpoint.unwrap_or_else(default_endpoint),
+            graphql_path: graphql_path.unwrap_or_else(default_graphql_path),
             health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
-            experimental_defer_support: defer_support.unwrap_or_else(default_defer_support),
+            preview_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }
@@ -318,7 +320,7 @@ impl Server {
 }
 
 /// Listening address.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ListenAddr {
     /// Socket address.
@@ -379,7 +381,7 @@ pub(crate) struct Cors {
 
     /// The headers to allow.
     ///
-    /// Defaults to `default_headers`.
+    /// If this value is not set, the router will mirror client's `Access-Control-Request-Headers`.
     ///
     /// Note that if you set headers here,
     /// you also want to have a look at your `CSRF` plugins configuration,
@@ -387,16 +389,8 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default = "default_headers")]
-    pub(crate) allow_headers: Vec<String>,
-
-    /// Set to true to mirror headers sent by clients.
-    ///
-    /// If this is not set, we will default to
-    /// the `mirror_request` mode, which mirrors the received
-    /// `access-control-request-headers` preflight has sent..
     #[serde(default)]
-    pub(crate) allow_any_header: bool,
+    pub(crate) allow_headers: Vec<String>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
@@ -422,14 +416,13 @@ pub(crate) struct Cors {
 impl Default for Cors {
     fn default() -> Self {
         Self {
-            allow_any_origin: Default::default(),
-            allow_any_header: Default::default(),
-            allow_credentials: Default::default(),
-            allow_headers: default_headers(),
-            expose_headers: Default::default(),
-            match_origins: Default::default(),
             origins: default_origins(),
             methods: default_cors_methods(),
+            allow_any_origin: Default::default(),
+            allow_credentials: Default::default(),
+            allow_headers: Default::default(),
+            expose_headers: Default::default(),
+            match_origins: Default::default(),
         }
     }
 }
@@ -442,14 +435,6 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
-fn default_headers() -> Vec<String> {
-    vec![
-        "content-type".into(),
-        "apollographql-client-version".into(),
-        "apollographql-client-name".into(),
-    ]
-}
-
 fn default_introspection() -> bool {
     true
 }
@@ -458,7 +443,7 @@ fn default_landing_page() -> bool {
     true
 }
 
-fn default_endpoint() -> String {
+fn default_graphql_path() -> String {
     String::from("/")
 }
 
@@ -467,7 +452,7 @@ fn default_health_check_path() -> String {
 }
 
 fn default_defer_support() -> bool {
-    false
+    true
 }
 
 fn default_parser_recursion_limit() -> usize {
@@ -490,7 +475,6 @@ impl Cors {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
-        allow_any_header: Option<bool>,
         allow_credentials: Option<bool>,
         allow_headers: Option<Vec<String>>,
         expose_headers: Option<Vec<String>>,
@@ -499,14 +483,13 @@ impl Cors {
         methods: Option<Vec<String>>,
     ) -> Self {
         Self {
-            allow_any_origin: allow_any_origin.unwrap_or_default(),
-            allow_any_header: allow_any_header.unwrap_or_default(),
-            allow_credentials: allow_credentials.unwrap_or_default(),
-            allow_headers: allow_headers.unwrap_or_else(default_headers),
             expose_headers,
             match_origins,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
+            allow_any_origin: allow_any_origin.unwrap_or_default(),
+            allow_credentials: allow_credentials.unwrap_or_default(),
+            allow_headers: allow_headers.unwrap_or_default(),
         }
     }
 }
@@ -517,7 +500,7 @@ impl Cors {
 
         self.ensure_usable_cors_rules()?;
 
-        let allow_headers = if self.allow_any_header {
+        let allow_headers = if self.allow_headers.is_empty() {
             cors::AllowHeaders::mirror_request()
         } else {
             cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
@@ -528,6 +511,7 @@ impl Cors {
             }))
         };
         let cors = CorsLayer::new()
+            .vary([])
             .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
             .expose_headers(cors::ExposeHeaders::list(
@@ -833,32 +817,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.server.endpoint.starts_with('/') {
+    if !config.server.graphql_path.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.endpoint,
-                config.server.endpoint
+                config.server.graphql_path,
+                config.server.graphql_path
             ),
         });
     }
-    if config.server.endpoint.ends_with('*') && !config.server.endpoint.ends_with("/*") {
+    if config.server.graphql_path.ends_with('*') && !config.server.graphql_path.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
+            message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.endpoint
+                config.server.graphql_path
             ),
         });
     }
-    if config.server.endpoint.contains("/*/") {
+    if config.server.graphql_path.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.endpoint' configuration",
+                    message: "invalid 'server.graphql_path' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.endpoint
+                        config.server.graphql_path
                     ),
                 },
             );
@@ -1039,19 +1023,7 @@ mod tests {
             !cors.allow_any_origin,
             "Allow any origin should be disabled by default"
         );
-        assert!(
-            !cors.allow_any_header,
-            "Allow any header should be disabled by default"
-        );
-
-        assert_eq!(
-            vec![
-                "content-type".to_string(),
-                "apollographql-client-version".to_string(),
-                "apollographql-client-name".to_string(),
-            ],
-            cors.allow_headers,
-        );
+        assert!(cors.allow_headers.is_empty());
 
         assert!(
             cors.match_origins.is_none(),
@@ -1060,27 +1032,27 @@ mod tests {
     }
 
     #[test]
-    fn bad_endpoint_configuration_without_slash() {
+    fn bad_graphql_path_configuration_without_slash() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: test
+  graphql_path: test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
     }
 
     #[test]
-    fn bad_endpoint_configuration_with_wildcard_as_prefix() {
+    fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /*/test
+  graphql_path: /*/test
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
     #[test]
@@ -1088,7 +1060,7 @@ server:
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /
+  graphql_path: /
 subgraphs:
   account: true
   "#,
@@ -1119,15 +1091,15 @@ unknown:
     }
 
     #[test]
-    fn bad_endpoint_configuration_with_bad_ending_wildcard() {
+    fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
 server:
-  endpoint: /test*
+  graphql_path: /test*
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
     }
 
     #[test]
@@ -1184,8 +1156,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, 5 ]
+cors:
+  allow_headers: [ Content-Type, 5 ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1200,10 +1172,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
+cors:
+  allow_headers:
+    - Content-Type
+    - 5
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1214,15 +1186,13 @@ server:
     fn it_does_not_allow_invalid_cors_headers() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_headers: [ "*" ]
+cors:
+  allow_credentials: true
+  allow_headers: [ "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1233,15 +1203,13 @@ server:
     fn it_does_not_allow_invalid_cors_methods() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    methods: [ GET, "*" ]
+cors:
+  allow_credentials: true
+  methods: [ GET, "*" ]
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1252,15 +1220,13 @@ server:
     fn it_does_not_allow_invalid_cors_origins() {
         let cfg = validate_configuration(
             r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_any_origin: true
+cors:
+  allow_credentials: true
+  allow_any_origin: true
         "#,
         )
         .expect("should not have resulted in an error");
         let error = cfg
-            .server
             .cors
             .into_layer()
             .expect_err("should have resulted in an error");
@@ -1346,8 +1312,8 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+cors:
+  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1364,10 +1330,10 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+cors:
+  allow_headers:
+    - Content-Type
+    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
         "#,
         )
         .expect_err("should have resulted in an error");

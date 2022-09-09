@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 146
 expression: get_spans()
 ---
 {
@@ -18,8 +17,8 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::plugins::telemetry::router": {
-      "name": "apollo_router::plugins::telemetry::router",
+    "apollo_router::plugins::telemetry::supergraph": {
+      "name": "apollo_router::plugins::telemetry::supergraph",
       "record": {
         "entries": [
           [
@@ -31,20 +30,36 @@ expression: get_spans()
             ""
           ],
           [
-            "client_name",
+            "client.name",
             ""
           ],
           [
-            "client_version",
+            "client.version",
             ""
           ],
           [
             "otel.kind",
             "internal"
+          ],
+          [
+            "apollo_private.field_level_instrumentation_ratio",
+            0.0
+          ],
+          [
+            "apollo_private.graphql.variables",
+            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+          ],
+          [
+            "apollo_private.http.request_headers",
+            "{\"content-type\":[\"\"]}"
+          ],
+          [
+            "apollo_private.operation_signature",
+            "# -\n{topProducts{name name}}"
           ]
         ],
         "metadata": {
-          "name": "router",
+          "name": "supergraph",
           "target": "apollo_router::plugins::telemetry",
           "level": "INFO",
           "module_path": "apollo_router::plugins::telemetry",
@@ -52,16 +67,20 @@ expression: get_spans()
             "names": [
               "graphql.document",
               "graphql.operation.name",
-              "client_name",
-              "client_version",
-              "otel.kind"
+              "client.name",
+              "client.version",
+              "otel.kind",
+              "apollo_private.field_level_instrumentation_ratio",
+              "apollo_private.operation_signature",
+              "apollo_private.graphql.variables",
+              "apollo_private.http.request_headers"
             ]
           }
         }
       },
       "children": {
-        "apollo_router::plugins::telemetry::query_planning": {
-          "name": "apollo_router::plugins::telemetry::query_planning",
+        "apollo_router::services::supergraph_service::query_planning": {
+          "name": "apollo_router::services::supergraph_service::query_planning",
           "record": {
             "entries": [
               [
@@ -79,9 +98,9 @@ expression: get_spans()
             ],
             "metadata": {
               "name": "query_planning",
-              "target": "apollo_router::plugins::telemetry",
+              "target": "apollo_router::services::supergraph_service",
               "level": "INFO",
-              "module_path": "apollo_router::plugins::telemetry",
+              "module_path": "apollo_router::services::supergraph_service",
               "fields": {
                 "names": [
                   "graphql.document",
@@ -134,8 +153,8 @@ expression: get_spans()
                 "internal"
               ],
               [
-                "message",
-                "flushing telemetry"
+                "ftv1.do_not_sample_reason",
+                ""
               ]
             ],
             "metadata": {
@@ -147,7 +166,8 @@ expression: get_spans()
                 "names": [
                   "graphql.document",
                   "graphql.operation.name",
-                  "otel.kind"
+                  "otel.kind",
+                  "ftv1.do_not_sample_reason"
                 ]
               }
             }
@@ -160,6 +180,14 @@ expression: get_spans()
                   [
                     "otel.kind",
                     "internal"
+                  ],
+                  [
+                    "service.name",
+                    "products"
+                  ],
+                  [
+                    "apollo_private.sent_time_offset",
+                    0
                   ]
                 ],
                 "metadata": {
@@ -169,7 +197,9 @@ expression: get_spans()
                   "module_path": "apollo_router::query_planner",
                   "fields": {
                     "names": [
-                      "otel.kind"
+                      "otel.kind",
+                      "service.name",
+                      "apollo_private.sent_time_offset"
                     ]
                   }
                 }
@@ -222,7 +252,8 @@ expression: get_spans()
                           "name",
                           "graphql.document",
                           "graphql.operation.name",
-                          "otel.kind"
+                          "otel.kind",
+                          "apollo_private.ftv1"
                         ]
                       }
                     }
@@ -341,15 +372,15 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::services::router_service::format_response": {
-          "name": "apollo_router::services::router_service::format_response",
+        "apollo_router::services::supergraph_service::format_response": {
+          "name": "apollo_router::services::supergraph_service::format_response",
           "record": {
             "entries": [],
             "metadata": {
               "name": "format_response",
-              "target": "apollo_router::services::router_service",
+              "target": "apollo_router::services::supergraph_service",
               "level": "DEBUG",
-              "module_path": "apollo_router::services::router_service",
+              "module_path": "apollo_router::services::supergraph_service",
               "fields": {
                 "names": []
               }

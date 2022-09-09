@@ -15,10 +15,10 @@ cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
 `checkpoint` and `checkpoint_async` allow you to halt request and return immediately. This is particularly useful for authentication.
 
 ```rust
-    fn router_service(
+    fn supergraph_service(
         &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service: router::BoxService,
+    ) -> router::BoxService {
         ServiceBuilder::new()
             .checkpoint(...) // Validation happens here
             .service(service)

@@ -16,18 +16,19 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 // Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint
-pub struct Config {
+pub(crate) struct Config {
     #[serde(flatten)]
     #[schemars(schema_with = "endpoint_schema")]
-    pub endpoint: Endpoint,
+    pub(crate) endpoint: Endpoint,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
-    pub scheduled_delay: Option<Duration>,
+    pub(crate) scheduled_delay: Option<Duration>,
 }
 
 // This is needed because of the use of flatten.
@@ -57,7 +58,7 @@ fn endpoint_schema(gen: &mut SchemaGenerator) -> Schema {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Endpoint {
+pub(crate) enum Endpoint {
     Agent {
         #[schemars(with = "String", default = "default_agent_endpoint")]
         #[serde(deserialize_with = "deser_endpoint")]
@@ -110,7 +111,8 @@ impl TracingConfigurator for Config {
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                 .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
-                .build(),
+                .build()
+                .filtered(),
         ))
     }
 }

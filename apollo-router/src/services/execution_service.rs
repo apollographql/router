@@ -6,9 +6,7 @@ use std::task::Poll;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -19,27 +17,16 @@ use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLay
 use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
-use crate::graphql::Response;
+use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::Schema;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
-pub struct ExecutionService<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionService<SF: SubgraphServiceFactory> {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_creator: Arc<SF>,
-}
-
-//#[buildstructor::buildstructor]
-impl<SF: SubgraphServiceFactory> ExecutionService<SF> {
-    //#[builder]
-    pub fn new(schema: Arc<Schema>, subgraph_creator: Arc<SF>) -> Self {
-        Self {
-            schema,
-            subgraph_creator,
-        }
-    }
 }
 
 impl<SF> Service<ExecutionRequest> for ExecutionService<SF>
@@ -73,7 +60,7 @@ where
                 .execute(
                     &context,
                     &this.subgraph_creator,
-                    &Arc::new(req.originating_request),
+                    &Arc::new(req.supergraph_request),
                     &this.schema,
                     sender,
                 )
@@ -84,7 +71,7 @@ where
             let stream = once(ready(first)).chain(rest).boxed();
 
             Ok(ExecutionResponse::new_from_response(
-                http::Response::new(stream as BoxStream<'static, Response>).into(),
+                http::Response::new(stream as _),
                 ctx,
             ))
         }
@@ -116,7 +103,7 @@ impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
 where
     SF: SubgraphServiceFactory,
 {
-    type Service = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    type Service = execution::BoxService;
 
     fn new_service(&self) -> Self::Service {
         ServiceBuilder::new()
@@ -136,7 +123,7 @@ where
 }
 
 impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
-    type ExecutionService = BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
+    type ExecutionService = execution::BoxService;
     type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
         ExecutionRequest,
     >>::Future;

@@ -4,12 +4,10 @@ use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
-use bytes::Bytes;
-use futures::future::ready;
-use futures::stream::once;
-use futures::StreamExt;
 use http::header::HeaderName;
+use http::response::Parts;
 use http::HeaderMap;
+use multimap::MultiMap;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
@@ -20,33 +18,30 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
-use tower::util::BoxService;
 use tower::BoxError;
 
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
-use crate::plugin::Handler;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::apollo::Sender;
-use crate::services::RouterResponse;
+use crate::router_factory::Endpoint;
 use crate::Context;
+use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
-pub(crate) type CustomEndpoint =
-    BoxService<http_ext::Request<Bytes>, http_ext::Response<Bytes>, BoxError>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Configuration to add custom attributes/labels on metrics
-pub struct MetricsAttributesConf {
+pub(crate) struct MetricsAttributesConf {
     /// Configuration to forward header values or body values from router request/response in metric attributes/labels
     pub(crate) router: Option<AttributesForwardConf>,
     /// Configuration to forward header values or body values from subgraph request/response in metric attributes/labels
@@ -255,10 +250,12 @@ impl ErrorsForward {
 }
 
 impl AttributesForwardConf {
-    pub(crate) async fn get_attributes_from_router_response(
+    pub(crate) fn get_attributes_from_router_response(
         &self,
-        response: RouterResponse,
-    ) -> (RouterResponse, HashMap<String, String>) {
+        parts: &Parts,
+        context: &Context,
+        first_response: &Option<graphql::Response>,
+    ) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -267,7 +264,6 @@ impl AttributesForwardConf {
                 attributes.insert(name.clone(), value.clone());
             }
         }
-        let context = response.context;
         // Fill from context
         if let Some(from_context) = &self.context {
             for ContextForward {
@@ -291,8 +287,7 @@ impl AttributesForwardConf {
                 };
             }
         }
-        let (parts, stream) = http::Response::from(response.response).into_parts();
-        let (first, rest) = stream.into_future().await;
+
         // Fill from response
         if let Some(from_response) = &self.response {
             if let Some(header_forward) = &from_response.header {
@@ -306,7 +301,7 @@ impl AttributesForwardConf {
             }
 
             if let Some(body_forward) = &from_response.body {
-                if let Some(body) = &first {
+                if let Some(body) = &first_response {
                     for body_fw in body_forward {
                         let output = body_fw.path.execute(body).unwrap();
                         if let Some(val) = output {
@@ -323,13 +318,7 @@ impl AttributesForwardConf {
             }
         }
 
-        let response = http::Response::from_parts(
-            parts,
-            once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-        )
-        .into();
-
-        (RouterResponse { context, response }, attributes)
+        attributes
     }
 
     /// Get attributes from context
@@ -464,7 +453,7 @@ fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::
 pub(crate) struct MetricsBuilder {
     exporters: Vec<MetricsExporterHandle>,
     meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    custom_endpoints: HashMap<String, Handler>,
+    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics: Sender,
 }
 
@@ -475,12 +464,12 @@ impl MetricsBuilder {
     pub(crate) fn meter_provider(&mut self) -> AggregateMeterProvider {
         AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
     }
-    pub(crate) fn custom_endpoints(&mut self) -> HashMap<String, Handler> {
+    pub(crate) fn custom_endpoints(&mut self) -> MultiMap<ListenAddr, Endpoint> {
         std::mem::take(&mut self.custom_endpoints)
     }
 
     pub(crate) fn apollo_metrics_provider(&mut self) -> Sender {
-        std::mem::take(&mut self.apollo_metrics)
+        self.apollo_metrics.clone()
     }
 }
 
@@ -498,9 +487,8 @@ impl MetricsBuilder {
         self
     }
 
-    fn with_custom_endpoint(mut self, path: &str, endpoint: CustomEndpoint) -> Self {
-        self.custom_endpoints
-            .insert(path.to_string(), Handler::new(endpoint));
+    fn with_custom_endpoint(mut self, listen_addr: ListenAddr, endpoint: Endpoint) -> Self {
+        self.custom_endpoints.insert(listen_addr, endpoint);
         self
     }
 

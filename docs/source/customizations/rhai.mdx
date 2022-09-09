@@ -1,357 +1,199 @@
 ---
 title: Rhai scripts for the Apollo Router
-description: Extend router functionality without compiling a custom plugin
+description: Extend your router without building a custom binary
 ---
 
-The Apollo Router provides support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
+You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is ideal for performing common scripting tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
 
-Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
+> To start familiarizing yourself with Rhai, see the [language reference](https://rhai.rs/book/language/) and some basic [syntax examples](https://rhai.rs/book/start/examples/scripts.html).
 
-## Limitations
+Rhai scripts can hook into any combination of services in the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work).
 
-Like the rest of the Apollo Router, Rhai support is in active development. At this time, functionality is limited.
+## Use cases
 
-**What you can do:**
-* Manipulate request/response HTTP headers
-* Manipulate request/response context
-* Perform `checkpoint`-style short circuiting of requests
-* Modify the status codes of requests/responses
-* Modify the body of requests
-* Modify the body of responses
+Common use cases for Apollo Router Rhai scripts include:
 
-**What you can't do (yet):**
-* Execute calls to external services
+* Modifying the details of HTTP requests and responses. This includes requests sent from clients to your router, along with requests sent from your router to your subgraphs. You can modify any combination of the following:
+    * Request and response bodies
+    * Headers
+    * Status codes
+    * Request context
+* Logging various information throughout the request lifecycle
+* Performing `checkpoint`-style short circuiting of requests
 
 ## Configuration
 
-```yaml
+```yaml title="config.yaml"
+# This is a top-level key. It MUST define at least one of the two
+# sub-keys shown, even if you don't modify its default value.
 rhai:
-  # You must have a "main" rhai file. By default this is "main.rhai"
-  # You can change this name by specifying main:
+  # Specify a different Rhai script directory path with this key.
+  # The path can be relative or absolute.
+  scripts: "/rhai/scripts/directory"
+
+  # Specify a different name for your "main" Rhai file with this key.
+  # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
-  # Your rhai scripts are loaded from relative directory "./rhai"
-  # (relative to the directory in which your router is executing)
-  # You can change this location by specifying scripts:
-  scripts: "/where/I/keep/my/rhai/scripts"
 ```
 
-## Rhai Router Execution Environment
-The main source of information about Rhai is the book (see above). That's where to look for general rhai programming questions or advice on how to interact with arrays or manipulate strings or program control flow or (...).
+To use Rhai scripts with the Apollo Router, you must do the following:
 
-This section covers functionality that the router explicitly exposes to Rhai.
+* Add the `rhai` top-level key to your router's [YAML config file](../configuration/overview/#yaml-config-file).
+    * This key must contain at least one of a `scripts` key or a `main` key (see the example above). 
+* Place all of your Rhai script files in a specific directory.
+    * By default, the Apollo Router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
+    * You can override this default with the `scripts` key (see above).
+* Define a ["main" Rhai file](#the-main-file) in your router project.
+    * This file defines all of the "entry point" hooks that the Apollo Router uses to call into your script.
+    * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
+    * You can override this default with the `main` key (see above).
 
-> **Deadlocks** The router requires that its rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within rhai could cause a deadlock. This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this a local copy of the required data is obtained and used in the closure.
+## The main file
 
+Your Rhai script's main file defines whichever combination of supported entry point hooks you want to use. Here's a skeleton `main.rhai` file that includes all available hooks and also registers all available [callbacks](#service-callbacks):
 
+<ExpansionPanel title="Click to expand">
 
+```rhai title="main.rhai"
+// You don't need to define all of these hooks! Just define
+// whichever ones your customization needs.
 
-### Global State
+fn supergraph_service(service) {
+  let request_callback = |request| {
+      print("Supergraph service: Client request received");
+  };
+  
+  let response_callback = |response| {
+      print("Supergraph service: Client response ready to send");
+  };
 
-The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
-
-```javascript
-fn router_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        let start = apollo_start.elapsed;
-        // ... Do some processing
-        let duration = apollo_start.elapsed - start;
-        print(`response processing took: ${duration}`);
-
-        // Log out any errors we may have
-        print(response.body.errors);
-    };
-    // Map our response using our closure
-    service.map_response(f);
+  service.map_request(request_callback);
+  service.map_response(response_callback);
 }
-```
-### Logging
 
-If you print() a message then it will be logged to the router logs at info level. If you want more control over the log level, then there are a series of logging functions:
+fn execution_service(service) {
+  let request_callback = |request| {
+      print("Execution service: GraphQL execution initiated");
+  };
+  
+  let response_callback = |response| {
+      print("Supergraph service: Client response assembled");
+  };
 
-```javascript
-print("this is a sample message");
-log_error("this is error level log message");
-log_warn("this is warn level log message");
-log_info("this is info level log message");
-log_debug("this is debug level log message");
-log_trace("this is trace level log message");
-```
-
-### Exceptions
-
-If you wish to indicate to the client that an error has occurred, Rhai supports exceptions. Throwing an exception will terminate processing and return an `Internal Server Error` to the client.
-
-For example:
-```javascript
-fn router_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        // Something goes wrong during response processing...
-        throw "an error occurred setting up the router_service...");
-    };
-    // Map our response using our closure
-    service.map_response(f);
+  service.map_request(request_callback);
+  service.map_response(response_callback);
 }
-```
 
-### Service hooks
+// Passed an additional `subgraph` parameter that indicates the subgraph's name
+fn subgraph_service(service, subgraph) {
+  let request_callback = |request| {
+      print(`Subgraph service: Ready to send sub-operation to subgraph ${subgraph}`);
+  };
+  
+  let response_callback = |response| {
+      print(`Subgraph service: Received sub-operation response from subgraph ${subgraph}`);
+  };
 
-Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
-
-  - `router_service`
-  - `query_planner_service`
-  - `execution_service`
-  - `subgraph_service`
-
-Each of these hooks is optional. Define only the functions you want to use custom logic for.
-
-Each function takes a single parameter: `service`, this is typed for each of the different services. The various service functions are not required to return anything. If they do, the return is ignored.
-
-```javascript
-fn router_service(service) {}
-fn query_planner_service(service) {}
-fn execution_service(service) {}
-fn subgraph_service(service) {}
-```
-
-### Service Interface
-
-The full functionality of a Rust plugin is not available. The following methods are available for service interactions.
-
-  - `map_request`
-  - `map_response`
-
-These can be invoked as methods on the supplied service object and are expected to provide a callback function (or closure) which is invoked for actual request or response processing.
-
-For example:
-```javascript
-fn router_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        // Log out any errors we may have
-        print(response.body.errors);
-    };
-    // Map our response using our closure
-    service.map_response(f);
+  service.map_request(request_callback);
+  service.map_response(response_callback);
 }
 ```
 
-### Request Interface
+</ExpansionPanel>
 
-All requests expose a mechanism for interacting with request Body, Headers, Uri and Context.
+You can provide _exactly one_ main Rhai file to the Apollo Router. This means that all of your customization's functionality must originate from these hook definitions.
 
-```
-request.context
-request.headers
-request.body.query
-request.body.operation_name
-request.body.variables
-request.body.extensions
-request.uri.host
-request.uri.path
-```
+To organize unrelated functionality within your Rhai customization, your main file can import and use symbols from any number of _other_ Rhai files (known as **modules**) in your script directory:
 
-In addition, SubgraphRequest, exposes the additional ability to interact with requests sent to subgraphs:
+```rhai title="my_module.rhai"
+// Module file
 
-```
-request.subgraph.headers
-request.subgraph.body.query
-request.subgraph.body.operation_name
-request.subgraph.body.variables
-request.subgraph.body.extensions
-request.subgraph.uri.host
-request.subgraph.uri.path
+fn process_request(request) {
+  print("Supergraph service: Client request received");
+}
 ```
 
-All of the above are read/write.
+```rhai title="main.rhai"
+// Main file
 
-#### request.context
+import "my_module" as my_mod;
 
-The context is a key/value store which has a lifespan of router request to router response. Key's must be strings, but values can be any rhai object. See [context](./native#5-define-necessary-context) for more information about contexts.
-
-```javascript
-// You can interact with request.context as an indexed variable
-request.context["contextual"] = 42; // inserts a new key in the context "contextual" with value 42
-print(`${request.context["contextual"]}`); // writes 42 into the router log at info level
-// Rhai also supports extended dot notation for indexed variables, so this is equivalent
-request.context.contextual = 42;
+fn supergraph_service(service) {
+  // Rhai convention for creating a function pointer
+  const request_callback = Fn("my_mod::process_request"); 
+  
+  service.map_request(request_callback);
+}
 ```
 
-As well as allowing simple read/write of values in context, there is an `upsert()` function which can be used to help resolve situations where either an update or an insert is required. You use `upsert()` by providing a callback function which receives an existing value and then makes changes as required before returning the final value to be upserted.
+> [Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
 
-```javascript
-// Get a reference to a cache-key
-let my_cache_key = response.headers["cache-key"];
-// Declare an upsert resolver closure
-// current is the current value to be updated.
-// Check if current is an ObjectMap (default is the unit value of ()), if not assign an empty ObjectMap
-// Update our ObjectMap with our subgraph name as key and the returned cache-key as a value
-let resolver = |current| {
-    if current == () {
-        // No map found. Create an empty object map
-        current = #{};
-    }
-    // Update our object map with a key and value
-    current[subgraph] = my_cache_key;
-    return current;
-};
-// Upsert our context with our resolver
-response.context.upsert("surrogate-cache-key", resolver);
-```
+## Service callbacks
 
-#### request.headers
+Each hook in your Rhai script's [main file](#main-file) is passed a `service` object, which provides two methods: `map_request` and `map_response`. Most of the time in a hook, you use one or both of these methods to register **callback functions** that are called during the lifecycle of a GraphQL operation.
 
-The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
+* `map_request` callbacks are called in each service as execution proceeds "to the right" from the router receiving a client request:
 
-```javascript
-// You can interact with request.headers as an indexed variable
-request.headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
-print(`${request.headers["x-my-new-header"]}`); // writes "42" into the router log at info level
-// Rhai also supports extended dot notation for indexed variables, so this is equivalent
-request.headers.x-my-new-header = 42.to_string();
-```
+    ```mermaid
+    graph LR;
+      client(Client);
+      client --> supergraph(supergraph_service);
+      subgraph Apollo Router
+      supergraph --> execution(execution_service);
+      execution --> subs_a(subgraph_service);
+      execution --> subs_b(subgraph_service);
+      end;
+      subs_a --> sub_a(Subgraph A);
+      subs_b --> sub_b(Subgraph B);
+      class client,sub_a,sub_b secondary;
+    ```
+    
+    These callbacks are each passed the current state of the client's `request` (which might have been modified by an earlier callback in the chain). Each callback can modify this `request` object directly.
+    
+    Additionally, callbacks for `subgraph_service` can access and modify the sub-operation request that the router will send to the corresponding subgraph via `request.subgraph`.
+    
+    > [See fields of `request`](./rhai-api/#request-interface)
+    
+* `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations:
 
-#### request.subgraph.*
+    ```mermaid
+    graph RL;
+      client(Client);
+      subgraph Apollo Router
+      supergraph(supergraph_service);
+      execution(execution_service);
+      subs_a(subgraph_service);
+      subs_b(subgraph_service);
+      end;
+      sub_a(Subgraph A);
+      sub_b(Subgraph B);
+      sub_a --> subs_a;
+      sub_b --> subs_b;
+      subs_a --> execution;
+      subs_b --> execution;
+      execution --> supergraph;
+      supergraph --> client;
+      class client,sub_a,sub_b secondary;
+    ```
+    
+    First, callbacks for `subgraph_service` are each passed the `response` from the corresponding subgraph.
+    
+    Afterward, callbacks for `execution_service` and then `supergraph_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
+    
 
-Only present when processing subgraph requests. The interface is exactly the same as for request.*.
 
-```javascript
-// You can interact with request.subgraph.headers as an indexed variable
-request.subgraph.headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
-print(`${request.subgraph.headers["x-my-new-header"]}`); // writes "42" into the router log at info level
-// Rhai also supports extended dot notation for indexed variables so, this is equivalent
-request.subgraph.headers.x-my-new-header = 42.to_string();
-```
+## Examples
 
-#### request.body.query
+In addition to the examples below, see more examples in the Router repo's [examples directory](https://github.com/apollographql/router/tree/main/examples). Rhai-specific examples are listed in `README.md`.
 
-The request query is accessible. If modified make sure to do this before QueryPlanning is performed (i.e.: `router_service()` or `query_planner_service()`) or the modification will have no effect on the query. For example, let's modify the query at the router_service stage and turn it into a completely invalid query.
-
-```javascript
-print(`${request.body.query}`); // log the query before modification
-request.body.query="query menotvalid { name }}"; // update the query (in this case to an invalid query)
-print(`${request.body.query}`); // log the query after modification
-```
-
-#### request.body.operation_name
-
-If an operation name was defined in the request, then it is accessible. There is a complete example of interacting with the operation name in the [examples/op-name-to-header directory](https://github.com/apollographql/router/tree/main/examples/op-name-to-header).
-
-```javascript
-print(`${request.body.operation_name}`); // log the operation_name before modification
-request.body.operation_name +="-my-suffix"; // append "-my-suffix" to the operation_name
-print(`${request.body.operation_name}`); // log the operation_name after modification
-```
-
-#### request.body.variables
-
-Request Variables may be read or written. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
-
-```javascript
-print(`${request.body.variables}`); // log the variables
-```
-
-#### request.body.extensions
-
-Request extensions may be read or modified. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
-
-```javascript
-print(`${request.body.extensions}`); // log the extensions
-```
-
-#### request.uri.host
-
-Request host may be read or modified. The host is exposed to Rhai as a string and may be set from a string.
-
-```javascript
-print(`${request.uri.host}`); // log the request host
-```
-
-#### request.uri.path
-
-Request path may be read or modified. The path is exposed to Rhai as a string and may be set from a string which is a valid Uri Path.
-
-```javascript
-print(`${request.uri.path}`); // log the request path
-request.uri.path += "/added-context"; // Add an extra element to the query path
-```
-
-### Response Interface
-
-Most responses expose a mechanism for interacting with response Body, Headers and Context. QueryPlannerResponse only exposes a Context, since there are no Body or Headers accessible at that stage.
-
-```
-response.context
-response.headers
-response.body.label
-response.body.data
-response.body.errors
-response.body.extensions
-```
-
-All of the above are read/write.
-
-Many of these variables are identical in behaviour to their `request` counterparts: context, headers, body.extensions. In addition, responses contain:
-
-#### response.body.label
-
-A response may contain a label and this may be read/written as a String.
-
-```javascript
-print(`${response.body.label}`); // logs the response label
-```
-
-#### response.body.data
-
-A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
-
-There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
-
-```javascript
-print(`${response.body.data}`); // logs the response data
-```
-
-#### response.body.errors
-
-A response may contain errors. Errors are represented in rhai as an array of Object Maps.
-
-Each Error must contain at least:
- - a message (String)
- - a location (Array)
-
-(The location can be an empty array.)
-
-Optionally, an error may also contain extensions, which are represented as an Object Map.
-
-There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
-
-```javascript
-// Create an error with our message
-let error_to_add = #{
-    message: "this is an added error",
-    locations: [],
-    // Extensions are optional, adding some arbitrary extensions to illustrate syntax
-    extensions: #{
-        field_1: "field 1",
-        field_2: "field_2"
-    }
-};
-// Add this error to any existing errors
-response.body.errors += error_to_add;
-print(`${response.body.errors}`); // logs the response errors
-```
-
-## Full Examples
-
-### Example 1
+### Handling incoming requests
 
 This example illustrates how to register router request handling.
 
-```javascript
+```rhai
 
-// At the router_service stage, register callbacks for processing requests
-fn router_service(service) {
+// At the supergraph_service stage, register callbacks for processing requests
+fn supergraph_service(service) {
     const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the callback
 }
@@ -362,14 +204,14 @@ fn process_request(request) {
 }
 ```
 
-### Example 2
+### Manipulating headers and the request context
 
 This example manipulates headers and the request context:
 
-```javascript
-// At the router_service stage, register callbacks for processing requests and
+```rhai
+// At the supergraph_service stage, register callbacks for processing requests and
 // responses.
-fn router_service(service) {
+fn supergraph_service(service) {
     const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the request callback
     const response_callback = Fn("process_response"); // This is standard Rhai functionality for creating a function pointer
@@ -401,11 +243,11 @@ fn process_response(response) {
 }
 ```
 
-### Example 3
+### Converting cookies to headers
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
 
-```javascript
+```rhai
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
 fn subgraph_service(service, subgraph) {
@@ -441,4 +283,18 @@ fn process_request(request) {
 }
 ```
 
-There are eight complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
+## Limitations
+
+Currently, Rhai scripts _cannot_ do the following:
+
+* Use Rust crates
+* Execute network requests
+* Read or write to disk
+
+If your router customization needs to do any of these, you can instead create a [native Rust plugin](./native/).
+
+### Avoiding deadlocks
+
+The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
+
+This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
