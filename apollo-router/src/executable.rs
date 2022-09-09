@@ -166,6 +166,9 @@ impl Executable {
     /// use apollo_router::{Executable, ShutdownSource};
     /// # #[tokio::main]
     /// # async fn main() -> anyhow::Result<()> {
+    /// # use futures::StreamExt;
+    /// # let schemas = futures::stream::empty().boxed();
+    /// # let configs = futures::stream::empty().boxed();
     /// use apollo_router::{ConfigurationSource, SchemaSource};
     /// Executable::builder()
     ///   .shutdown(ShutdownSource::None)
