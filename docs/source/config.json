@@ -29,9 +29,9 @@
       "Kubernetes": "/containerization/kubernetes"
     },
     "Executing Operations": {
-      "Build and run queries": "/development-workflow/build-run-queries",
-      "@defer support": "/development-workflow/defer-support",
-      "Request format": "/development-workflow/requests"
+      "Build and run queries": "/executing-operations/build-run-queries",
+      "@defer support": "/executing-operations/defer-support",
+      "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {
       "Overview": "/managed-federation/overview",
