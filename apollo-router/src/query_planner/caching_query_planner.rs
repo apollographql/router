@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -6,7 +7,6 @@ use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 use serde_json_bytes::value::Serializer;
-use tower::BoxError;
 use tower::ServiceExt;
 
 use super::QueryKey;
@@ -22,7 +22,7 @@ use crate::*;
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: Clone> {
-    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, Arc<BoxError>>>>,
+    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>>,
     delegate: T,
 }
 
@@ -39,11 +39,15 @@ where
 
 impl<T: Clone + Send + 'static> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
-    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = QueryPlannerError,
+    >,
     <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
     type Response = QueryPlannerResponse;
-    type Error = BoxError;
+    type Error = CacheResolverError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
@@ -88,41 +92,9 @@ where
                         })
                     }
                     Err(error) => {
-                        match error.downcast_ref::<QueryPlannerError>() {
-                            Some(QueryPlannerError::PlanningErrors(pe)) => {
-                                if let Err(inner_e) =
-                                    context.insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                                {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
-                            }
-                            Some(QueryPlannerError::SpecError(e)) => {
-                                let error_key = match e {
-                                    SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                                    _ => "## GraphQLValidationFailure\n",
-                                };
-                                if let Err(inner_e) = context.insert(
-                                    USAGE_REPORTING,
-                                    UsageReporting {
-                                        stats_report_key: error_key.to_string(),
-                                        referenced_fields_by_type: HashMap::new(),
-                                    },
-                                ) {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
-                            }
-                            _ => {}
-                        }
-
                         let e = Arc::new(error);
                         entry.insert(Err(e.clone())).await;
-                        Err(CacheResolverError::RetrievalError(e).into())
+                        Err(CacheResolverError::RetrievalError(e))
                     }
                 }
             } else {
@@ -153,8 +125,8 @@ where
                             .build())
                     }
                     Err(error) => {
-                        match error.downcast_ref::<QueryPlannerError>() {
-                            Some(QueryPlannerError::PlanningErrors(pe)) => {
+                        match error.deref() {
+                            QueryPlannerError::PlanningErrors(pe) => {
                                 if let Err(inner_e) = request
                                     .context
                                     .insert(USAGE_REPORTING, pe.usage_reporting.clone())
@@ -165,7 +137,7 @@ where
                                     );
                                 }
                             }
-                            Some(QueryPlannerError::SpecError(e)) => {
+                            QueryPlannerError::SpecError(e) => {
                                 let error_key = match e {
                                     SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
                                     _ => "## GraphQLValidationFailure\n",
@@ -186,7 +158,7 @@ where
                             _ => {}
                         }
 
-                        Err(CacheResolverError::RetrievalError(error).into())
+                        Err(CacheResolverError::RetrievalError(error))
                     }
                 }
             }
@@ -213,7 +185,7 @@ mod tests {
             fn sync_call(
                 &self,
                 key: QueryPlannerRequest,
-            ) -> Result<QueryPlannerResponse, BoxError>;
+            ) -> Result<QueryPlannerResponse, QueryPlannerError>;
         }
 
         impl Clone for MyQueryPlanner {
@@ -224,7 +196,7 @@ mod tests {
     impl Service<QueryPlannerRequest> for MockMyQueryPlanner {
         type Response = QueryPlannerResponse;
 
-        type Error = BoxError;
+        type Error = QueryPlannerError;
 
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -253,8 +225,7 @@ mod tests {
                         stats_report_key: "this is a test key".to_string(),
                         referenced_fields_by_type: Default::default(),
                     },
-                })
-                .into())
+                }))
             });
             planner
         });

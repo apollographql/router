@@ -261,9 +261,12 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let message = "Unknown operation named \"invalidOperationName\"";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
+        .extensions(extensions_map)
         .build();
 
     let request = supergraph::Request::fake_builder()
