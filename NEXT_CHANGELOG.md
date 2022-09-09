@@ -66,7 +66,7 @@ By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjj
 
 
 ### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
-You and now specify custom schema and config sources when constructing an executable.
+You may now specify custom schema and config sources when constructing an executable.
 ```rust
 Executable::builder()
   .shutdown(ShutdownSource::None)
