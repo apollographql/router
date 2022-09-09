@@ -81,6 +81,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    // Dev mode
+    #[serde(skip)]
+    dev: Option<bool>,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
@@ -98,10 +102,10 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-        dev: bool,
+        dev: Option<bool>,
     ) -> Self {
         let mut plugins = plugins;
-        if dev {
+        if dev.unwrap_or_default() {
             plugins.insert(
                 "experimental.include_subgraph_errors".to_string(),
                 json!({"all": true}),
@@ -117,6 +121,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
     }
 
