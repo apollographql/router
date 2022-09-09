@@ -3,9 +3,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
@@ -299,8 +297,8 @@ fn process_execution_response(
     let ExecutionResponse { response, context } = execution_response;
 
     let (parts, response_stream) = response.into_parts();
-
     let stream = response_stream.map(move |mut response: Response| {
+        let has_next = response.has_next.unwrap_or(true);
         tracing::debug_span!("format_response").in_scope(|| {
             query.format_response(
                 &mut response,
@@ -313,7 +311,7 @@ fn process_execution_response(
         match (response.path.as_ref(), response.data.as_ref()) {
             (None, _) | (_, None) => {
                 if can_be_deferred {
-                    response.has_next = Some(true);
+                    response.has_next = Some(has_next);
                 }
 
                 response
@@ -335,7 +333,7 @@ fn process_execution_response(
                 });
 
                 Response::builder()
-                    .has_next(true)
+                    .has_next(has_next)
                     .incremental(
                         sub_responses
                             .into_iter()
@@ -360,9 +358,7 @@ fn process_execution_response(
         response: http::Response::from_parts(
             parts,
             if can_be_deferred {
-                stream
-                    .chain(once(ready(Response::builder().has_next(false).build())))
-                    .left_stream()
+                stream.left_stream()
             } else {
                 stream.right_stream()
             }

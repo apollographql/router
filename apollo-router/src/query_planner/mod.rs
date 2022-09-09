@@ -495,6 +495,7 @@ impl PlanNode {
                         let mut primary_receiver = primary_sender.subscribe();
                         let mut value = parent_value.clone();
                         let fut = async move {
+                            let mut has_next = true;
                             let mut errors = Vec::new();
 
                             if is_depends_empty {
@@ -539,6 +540,7 @@ impl PlanNode {
                                 if !is_depends_empty {
                                     let primary_value =
                                         primary_receiver.recv().await.unwrap_or_default();
+                                    has_next = false;
                                     v.deep_merge(primary_value);
                                 }
 
@@ -546,6 +548,7 @@ impl PlanNode {
                                     .send(
                                         Response::builder()
                                             .data(v)
+                                            .has_next(has_next)
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection.or(node_subselection))
@@ -563,12 +566,13 @@ impl PlanNode {
                             } else {
                                 let primary_value =
                                     primary_receiver.recv().await.unwrap_or_default();
+                                has_next = false;
                                 value.deep_merge(primary_value);
-
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
                                             .data(value)
+                                            .has_next(has_next)
                                             .errors(errors)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)
@@ -1565,7 +1569,7 @@ mod tests {
             serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}}, "hasNext": false, "path":["t"]}}
         );
     }
 
