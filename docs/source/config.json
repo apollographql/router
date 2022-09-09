@@ -28,10 +28,10 @@
       "Docker": "/containerization/docker",
       "Kubernetes": "/containerization/kubernetes"
     },
-    "Development Workflow": {
+    "Executing Operations": {
       "Build and run queries": "/development-workflow/build-run-queries",
-      "Request format": "/development-workflow/requests",
-      "Apollo Studio Explorer": "https://www.apollographql.com/docs/studio/explorer/"
+      "@defer support": "/development-workflow/defer-support",
+      "Request format": "/development-workflow/requests"
     },
     "Managed Federation": {
       "Overview": "/managed-federation/overview",
