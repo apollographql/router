@@ -358,6 +358,7 @@ mod router_plugin_mod {
 pub(crate) struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
+    scope: Arc<Mutex<Scope<'static>>>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -384,9 +385,22 @@ impl Plugin for Rhai {
         };
 
         let main = scripts_path.join(&main_file);
+        let sdl = init.supergraph_sdl.clone();
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
-        Ok(Self { ast, engine })
+        let mut scope = Scope::new();
+        scope.push_constant("apollo_sdl", sdl);
+        scope.push_constant("apollo_start", Instant::now());
+
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
+
+        Ok(Self {
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -400,6 +414,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -417,6 +432,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -434,6 +450,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -489,11 +506,11 @@ macro_rules! gen_map_request {
                             )
                             .map_err(|err| err.to_string())
                     } else {
-                        let mut scope = $rhai_service.scope.clone();
+                        let mut guard = $rhai_service.scope.lock().unwrap();
                         $rhai_service
                             .engine
                             .call_fn(
-                                &mut scope,
+                                &mut guard,
                                 &$rhai_service.ast,
                                 $callback.fn_name(),
                                 (shared_request.clone(),),
@@ -605,11 +622,11 @@ macro_rules! gen_map_response {
                             )
                             .map_err(|err| err.to_string())
                     } else {
-                        let mut scope = $rhai_service.scope.clone();
+                        let mut guard = $rhai_service.scope.lock().unwrap();
                         $rhai_service
                             .engine
                             .call_fn(
-                                &mut scope,
+                                &mut guard,
                                 &$rhai_service.ast,
                                 $callback.fn_name(),
                                 (shared_response.clone(),),
@@ -948,16 +965,16 @@ fn execute(
             .call(&rhai_service.engine, &rhai_service.ast, args)
             .map_err(|err| err.to_string())
     } else {
-        let mut scope = rhai_service.scope.clone();
+        let mut guard = rhai_service.scope.lock().unwrap();
         rhai_service
             .engine
-            .call_fn(&mut scope, &rhai_service.ast, callback.fn_name(), args)
+            .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
             .map_err(|err| err.to_string())
     }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
-    scope: Scope<'static>,
+    scope: Arc<Mutex<Scope<'static>>>,
     service: ServiceStep,
     engine: Arc<Engine>,
     ast: AST,
@@ -969,20 +986,20 @@ impl Rhai {
         function_name: &str,
         subgraph: Option<&str>,
         service: ServiceStep,
+        scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let mut scope = Scope::new();
-        scope.push_constant("apollo_start", Instant::now());
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
             engine: self.engine.clone(),
             ast: self.ast.clone(),
         };
+        let mut guard = scope.lock().unwrap();
         match subgraph {
             Some(name) => {
                 self.engine
                     .call_fn(
-                        &mut scope,
+                        &mut guard,
                         &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
@@ -991,7 +1008,7 @@ impl Rhai {
             }
             None => {
                 self.engine
-                    .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
+                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1378,9 +1395,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.rhai")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-                Default::default(),
             )
             .await
             .unwrap();
@@ -1430,9 +1446,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.rhai")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-                Default::default(),
             )
             .await
             .unwrap();
@@ -1542,5 +1557,33 @@ mod tests {
             "apollo_router",
             "info log"
         ));
+    }
+
+    #[tokio::test]
+    async fn it_can_access_sdl_constant() {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .get("apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        // Get a scope to use for our test
+        let scope = rhai_instance.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // Call our function to make sure we can access the sdl
+        let sdl: Arc<String> = rhai_instance
+            .engine
+            .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
+            .expect("can get sdl");
+        assert_eq!(sdl.as_str(), "");
     }
 }
