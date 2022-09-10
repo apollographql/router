@@ -801,27 +801,27 @@ macro_rules! register_rhai_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
             // Context stuff
-            $engine.register_get_result(
+            $engine.register_get(
                 "context",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.context.clone()))
                 }
             )
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<$base::Response>| {
+                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "context",
                 |obj: &mut SharedMut<$base::Request>, context: Context| {
                     obj.with_mut(|request| request.context = context);
                     Ok(())
                 }
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<$base::Response>, context: Context| {
                     obj.with_mut(|response| response.context = context);
@@ -830,14 +830,14 @@ macro_rules! register_rhai_interface {
             );
 
             // Originating Request
-            $engine.register_get_result(
+            $engine.register_get(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "headers",
                 |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
                     if_subgraph! {
@@ -852,14 +852,14 @@ macro_rules! register_rhai_interface {
                 }
             );
 
-            $engine.register_get_result(
+            $engine.register_get(
                 "body",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "body",
                 |obj: &mut SharedMut<$base::Request>, body: Request| {
                     if_subgraph! {
@@ -874,14 +874,14 @@ macro_rules! register_rhai_interface {
                 }
             );
 
-            $engine.register_get_result(
+            $engine.register_get(
                 "uri",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
                     if_subgraph! {
@@ -1076,16 +1076,18 @@ impl Rhai {
                 |_: &mut SharedMut<execution::DeferredResponse>| -> bool { false },
             )
             // Register a HeaderMap indexer so we can get/set headers
-            .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
-                let search_name =
-                    HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-                Ok(x.get(search_name)
-                    .ok_or("")?
-                    .to_str()
-                    .map_err(|e| e.to_string())?
-                    .to_string())
-            })
-            .register_indexer_set_result(|x: &mut HeaderMap, key: &str, value: &str| {
+            .register_indexer_get(
+                |x: &mut HeaderMap, key: &str| -> Result<String, Box<EvalAltResult>> {
+                    let search_name =
+                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    Ok(x.get(search_name)
+                        .ok_or("")?
+                        .to_str()
+                        .map_err(|e| e.to_string())?
+                        .to_string())
+                },
+            )
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
                 x.insert(
                     HeaderName::from_str(key).map_err(|e| e.to_string())?,
                     HeaderValue::from_str(value).map_err(|e| e.to_string())?,
@@ -1093,19 +1095,21 @@ impl Rhai {
                 Ok(())
             })
             // Register a Context indexer so we can get/set context
-            .register_indexer_get_result(|x: &mut Context, key: &str| {
-                x.get(key)
-                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                    .map_err(|e: BoxError| e.to_string().into())
-            })
-            .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
+            .register_indexer_get(
+                |x: &mut Context, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+                    x.get(key)
+                        .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+                        .map_err(|e: BoxError| e.to_string().into())
+                },
+            )
+            .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
                 x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
             // Register Context.upsert()
-            .register_result_fn(
+            .register_fn(
                 "upsert",
                 |context: NativeCallContext,
                  x: &mut Context,
@@ -1147,24 +1151,24 @@ impl Rhai {
                 x.operation_name = Some(value.to_string());
             })
             // Request.variables
-            .register_get_result("variables", |x: &mut Request| {
+            .register_get("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
             })
-            .register_set_result("variables", |x: &mut Request, om: Map| {
+            .register_set("variables", |x: &mut Request, om: Map| {
                 x.variables = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Request.extensions
-            .register_get_result("extensions", |x: &mut Request| {
+            .register_get("extensions", |x: &mut Request| {
                 to_dynamic(x.extensions.clone())
             })
-            .register_set_result("extensions", |x: &mut Request, om: Map| {
+            .register_set("extensions", |x: &mut Request, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Request.uri.path
-            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path()))
-            .register_set_result("path", |x: &mut Uri, value: &str| {
+            .register_get("path", |x: &mut Uri| to_dynamic(x.path()))
+            .register_set("path", |x: &mut Uri, value: &str| {
                 // Because there is no simple way to update parts on an existing
                 // Uri (no parts_mut()), then we need to create a new Uri from our
                 // existing parts, preserving any query, and update our existing
@@ -1179,16 +1183,14 @@ impl Rhai {
                         PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
                             .map_err(|e| e.to_string())?,
                     ),
-                    None => {
-                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
-                    }
+                    None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
                 };
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
             // Request.uri.host
-            .register_get_result("host", |x: &mut Uri| to_dynamic(x.host()))
-            .register_set_result("host", |x: &mut Uri, value: &str| {
+            .register_get("host", |x: &mut Uri| to_dynamic(x.host()))
+            .register_set("host", |x: &mut Uri, value: &str| {
                 // Because there is no simple way to update parts on an existing
                 // Uri (no parts_mut()), then we need to create a new Uri from our
                 // existing parts, preserving any port, and update our existing
@@ -1200,10 +1202,10 @@ impl Rhai {
                             Authority::from_maybe_shared(format!("{}:{}", value, port))
                                 .map_err(|e| e.to_string())?
                         } else {
-                            Authority::from_maybe_shared(value).map_err(|e| e.to_string())?
+                            Authority::from_str(value).map_err(|e| e.to_string())?
                         }
                     }
-                    None => Authority::from_maybe_shared(value).map_err(|e| e.to_string())?,
+                    None => Authority::from_str(value).map_err(|e| e.to_string())?,
                 };
                 parts.authority = Some(new_authority);
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
@@ -1217,23 +1219,23 @@ impl Rhai {
                 x.label = Some(value.to_string());
             })
             // Response.data
-            .register_get_result("data", |x: &mut Response| to_dynamic(x.data.clone()))
-            .register_set_result("data", |x: &mut Response, om: Map| {
+            .register_get("data", |x: &mut Response| to_dynamic(x.data.clone()))
+            .register_set("data", |x: &mut Response, om: Map| {
                 x.data = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Response.path (Not Implemented)
             // Response.errors
-            .register_get_result("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
-            .register_set_result("errors", |x: &mut Response, value: Dynamic| {
+            .register_get("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
+            .register_set("errors", |x: &mut Response, value: Dynamic| {
                 x.errors = from_dynamic(&value)?;
                 Ok(())
             })
             // Response.extensions
-            .register_get_result("extensions", |x: &mut Response| {
+            .register_get("extensions", |x: &mut Response| {
                 to_dynamic(x.extensions.clone())
             })
-            .register_set_result("extensions", |x: &mut Response, om: Map| {
+            .register_set("extensions", |x: &mut Response, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
@@ -1321,13 +1323,13 @@ impl Rhai {
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 
         engine
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<supergraph::DeferredResponse>| {
+                |obj: &mut SharedMut<supergraph::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 },
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<supergraph::DeferredResponse>, context: Context| {
                     obj.with_mut(|response| response.context = context);
@@ -1336,13 +1338,13 @@ impl Rhai {
             );
 
         engine
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<execution::DeferredResponse>| {
+                |obj: &mut SharedMut<execution::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 },
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<execution::DeferredResponse>, context: Context| {
                     obj.with_mut(|response| response.context = context);
