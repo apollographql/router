@@ -104,7 +104,7 @@ pub(crate) fn make_axum_router<RF>(
 where
     RF: SupergraphServiceFactory,
 {
-    if !sandbox_on_main_endpoint(configuration) {
+    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(dbg!(configuration)) {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
             Endpoint::new(
@@ -235,9 +235,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
-
-            // TODO [igni]: I believe configuring the router
-            // To listen to port 0 would lead it to change ports on every restart Oo
 
             // serve main router
 
@@ -1223,13 +1220,8 @@ mod tests {
     async fn it_display_home_page_on_different_path() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
-        let conf = Configuration::builder()
-            .sandbox(Sandbox::builder().path("/a-custom-path").build())
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
@@ -1258,18 +1250,8 @@ mod tests {
     async fn it_display_home_page_on_different_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
-        let conf = Configuration::builder()
-            .sandbox(
-                Sandbox::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .path("/a-custom-path")
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
@@ -1571,21 +1553,10 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
             .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                crate::configuration::Graphql::fake_builder()
                     .path(String::from("/graphql"))
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1648,21 +1619,10 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
             .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                crate::configuration::Graphql::fake_builder()
                     .path(String::from("/:my_prefix/graphql"))
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1725,26 +1685,10 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
-            .sandbox(
-                crate::configuration::Sandbox::builder()
-                    .enabled(false)
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
             .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                crate::configuration::Graphql::fake_builder()
                     .path(String::from("/graphql/*"))
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1967,17 +1911,11 @@ mod tests {
     #[tokio::test]
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(Cors::builder().build())
             .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                crate::configuration::Graphql::fake_builder()
                     .path(String::from("/graphql/*"))
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -1986,7 +1924,10 @@ mod tests {
         let response = client
             .request(
                 Method::OPTIONS,
-                &format!("{}/", server.graphql_listen_address().as_ref().unwrap()),
+                &format!(
+                    "{}/graphql/",
+                    server.graphql_listen_address().as_ref().unwrap()
+                ),
             )
             .header(ACCEPT, "text/html")
             .header(ORIGIN, "https://studio.apollographql.com")
@@ -2155,15 +2096,9 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn test_custom_health_check() {
-        let conf = Configuration::builder()
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
             .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                HealthCheck::fake_builder()
                     .path("/custom-health".to_string())
                     .build(),
             )
@@ -2203,25 +2138,10 @@ Content-Type: application/json\r
     #[test(tokio::test)]
     async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
+        let conf = Configuration::fake_builder()
             .sandbox(
-                crate::configuration::Sandbox::builder()
+                crate::configuration::Sandbox::fake_builder()
                     .enabled(false)
-                    .build(),
-            )
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -2263,23 +2183,7 @@ Content-Type: application/json\r
             Endpoint::new("/an-other-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .build();
+        let conf = Configuration::fake_builder().build();
         let (server, client) = init_with_config(expectations, conf, web_endpoints).await;
 
         for path in &["/a-custom-path", "/an-other-custom-path"] {
@@ -2399,18 +2303,8 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(Cors::builder().allow_any_origin(true).build())
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
@@ -2427,20 +2321,10 @@ Content-Type: application/json\r
     async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         let valid_origin = "https://thisoriginisallowed.com";
 
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(
                 Cors::builder()
                     .origins(vec![valid_origin.to_string()])
-                    .build(),
-            )
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .health_check(
-                HealthCheck::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();
@@ -2462,16 +2346,11 @@ Content-Type: application/json\r
     async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         let apollo_subdomains = "https://([a-z0-9]+[.])*apollographql[.]com";
 
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(
                 Cors::builder()
                     .origins(vec!["https://anexactmatchorigin.com".to_string()])
                     .match_origins(vec![apollo_subdomains.to_string()])
-                    .build(),
-            )
-            .graphql(
-                crate::configuration::Graphql::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                     .build(),
             )
             .build();

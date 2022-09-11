@@ -98,6 +98,12 @@ fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
+// This isn't dead code! we use it in buildstructor's fake_new
+#[allow(dead_code)]
+fn test_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
+}
+
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
@@ -115,6 +121,33 @@ impl Configuration {
             graphql: graphql.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        server: Option<Server>,
+        graphql: Option<Graphql>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        cors: Option<Cors>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+    ) -> Self {
+        Self {
+            server: server.unwrap_or_default(),
+            graphql: graphql.unwrap_or_else(|| Graphql::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -303,6 +336,23 @@ impl Graphql {
             preview_defer_support: preview_defer_support.unwrap_or_default(),
         }
     }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_default(),
+            preview_defer_support: preview_defer_support.unwrap_or_default(),
+        }
+    }
 }
 
 impl Default for Graphql {
@@ -347,6 +397,21 @@ impl Sandbox {
             enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
 }
 
 impl Default for Sandbox {
@@ -384,6 +449,16 @@ impl HealthCheck {
     pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_health_check_path),
         }
     }
