@@ -332,8 +332,8 @@ impl Graphql {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_default(),
-            preview_defer_support: preview_defer_support.unwrap_or_default(),
+            introspection: introspection.unwrap_or_else(default_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
 
@@ -349,8 +349,8 @@ impl Graphql {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_default(),
-            preview_defer_support: preview_defer_support.unwrap_or_default(),
+            introspection: introspection.unwrap_or_else(default_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
 }

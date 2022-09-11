@@ -535,7 +535,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
-        "server": {
+        "graphql": {
             "preview_defer_support": false,
         },
         "plugins": {
@@ -725,7 +725,6 @@ async fn query_rust_with_config(
 async fn setup_router_and_registry(
     config: serde_json::Value,
 ) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
-    let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({

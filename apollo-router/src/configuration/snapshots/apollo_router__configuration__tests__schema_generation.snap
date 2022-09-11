@@ -119,8 +119,8 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "introspection": false,
-        "preview_defer_support": false
+        "introspection": true,
+        "preview_defer_support": true
       },
       "type": "object",
       "properties": {
