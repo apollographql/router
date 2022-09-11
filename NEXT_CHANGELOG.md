@@ -67,6 +67,15 @@ By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjj
 
 ## 🐛 Fixes
 
+### Pin dependency to Rhai ([#1740](https://github.com/apollographql/router/issues/1740))
+    
+Rhai just released a 1.10 version that adds deprecation notices, and changes the way variables get registered. This causes scaffold to fail to compile.
+
+This PR works around it by pinning rhai to 1.9.1, until we update our use of the crate.
+
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1742
+
 ### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
 
 You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
