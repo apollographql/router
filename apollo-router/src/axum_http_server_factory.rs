@@ -112,7 +112,7 @@ where
                 service_fn(|_req: transport::Request| async move {
                     Ok::<_, BoxError>(
                         http::Response::builder()
-                            .header("Content-Type", "text/html")
+                            .header(CONTENT_TYPE, "text/html")
                             .body(
                                 Bytes::from_static(include_bytes!("../resources/index.html"))
                                     .into(),
@@ -132,7 +132,7 @@ where
             service_fn(|_req: transport::Request| async move {
                 Ok::<_, BoxError>(
                     http::Response::builder()
-                        .header("Content-Type", "application/json")
+                        .header(CONTENT_TYPE, "application/json")
                         .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
                         .unwrap(),
                 )

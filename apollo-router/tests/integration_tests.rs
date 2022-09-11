@@ -14,6 +14,7 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
 use insta::internals::Content;
@@ -220,7 +221,7 @@ async fn queries_should_work_with_compression() {
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
         .method(Method::POST)
-        .header("content-type", "application/json")
+        .header(CONTENT_TYPE, "application/json")
         .header("accept-encoding", "gzip")
         .build()
         .expect("expecting valid request");
