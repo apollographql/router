@@ -1163,7 +1163,12 @@ impl Rhai {
                             .map_err(|e| e.to_string())?,
                     ),
                     None => {
-                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
+                        // Rustc fails to infer the lifetime of value (probably a rustc bug)
+                        #[allow(clippy::unnecessary_to_owned)]
+                        Some(
+                            PathAndQuery::from_maybe_shared(value.to_string())
+                                .map_err(|e| e.to_string())?,
+                        )
                     }
                 };
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
@@ -1183,10 +1188,16 @@ impl Rhai {
                             Authority::from_maybe_shared(format!("{}:{}", value, port))
                                 .map_err(|e| e.to_string())?
                         } else {
-                            Authority::from_maybe_shared(value).map_err(|e| e.to_string())?
+                            // Rustc fails to infer the lifetime of value (probably a rustc bug)
+                            #[allow(clippy::unnecessary_to_owned)]
+                            Authority::from_maybe_shared(value.to_string())
+                                .map_err(|e| e.to_string())?
                         }
                     }
-                    None => Authority::from_maybe_shared(value).map_err(|e| e.to_string())?,
+                    // Rustc fails to infer the lifetime of value (probably a rustc bug)
+                    #[allow(clippy::unnecessary_to_owned)]
+                    None => Authority::from_maybe_shared(value.to_string())
+                        .map_err(|e| e.to_string())?,
                 };
                 parts.authority = Some(new_authority);
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
