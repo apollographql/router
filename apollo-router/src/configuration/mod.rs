@@ -27,6 +27,7 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -80,6 +81,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    // Dev mode
+    #[serde(skip)]
+    dev: Option<bool>,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
@@ -97,7 +102,17 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
+        let mut plugins = plugins;
+        if dev.unwrap_or_default() {
+            plugins.insert("experimental.expose_query_plan".to_string(), Value::Bool(true));
+            plugins.insert(
+                "experimental.include_subgraph_errors".to_string(),
+                json!({"all": true}),
+            );
+        }
+
         Self {
             server: server.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
@@ -107,6 +122,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
     }
 
