@@ -1,4 +1,4 @@
-server:
+graphql:
   listen: "127.0.0.1:4001"
 cors:
   origins:

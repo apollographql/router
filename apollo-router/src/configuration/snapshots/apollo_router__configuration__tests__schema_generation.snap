@@ -114,6 +114,46 @@ expression: "&schema"
     "forbid_mutations": {
       "type": "boolean"
     },
+    "graphql": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:4000",
+        "path": "/",
+        "introspection": true,
+        "preview_defer_support": true
+      },
+      "type": "object",
+      "properties": {
+        "introspection": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
+          "default": "127.0.0.1:4000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
+        "preview_defer_support": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "headers": {
       "type": "object",
       "properties": {
@@ -351,6 +391,36 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:9090",
+        "path": "/health"
+      },
+      "type": "object",
+      "properties": {
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9090",
+          "default": "127.0.0.1:9090",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/health",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
@@ -400,43 +470,16 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "server": {
+    "sandbox": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "introspection": true,
-        "landing_page": true,
-        "graphql_path": "/",
-        "health_check_path": "/.well-known/apollo/server-health",
-        "preview_defer_support": true,
-        "experimental_parser_recursion_limit": 4096
+        "path": "/",
+        "enabled": true
       },
       "type": "object",
       "properties": {
-        "experimental_parser_recursion_limit": {
-          "description": "Experimental limitation of query depth default: 4096",
-          "default": 4096,
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "graphql_path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
-          "type": "string"
-        },
-        "introspection": {
-          "description": "introspection queries enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "landing_page": {
-          "description": "display landing page enabled by default",
+        "enabled": {
           "default": true,
           "type": "boolean"
         },
@@ -454,10 +497,27 @@ expression: "&schema"
             }
           ]
         },
-        "preview_defer_support": {
-          "description": "Preview @defer directive support default: true",
-          "default": true,
-          "type": "boolean"
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "experimental_parser_recursion_limit": 4096
+      },
+      "type": "object",
+      "properties": {
+        "experimental_parser_recursion_limit": {
+          "description": "Experimental limitation of query depth default: 4096",
+          "default": 4096,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false

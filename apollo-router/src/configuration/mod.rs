@@ -5,6 +5,7 @@ mod yaml;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -69,6 +70,15 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    #[serde(default)]
+    #[serde(rename = "health-check")]
+    pub(crate) health_check: HealthCheck,
+
+    #[serde(default)]
+    pub(crate) sandbox: Sandbox,
+
+    #[serde(default)]
+    pub(crate) graphql: Graphql,
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -90,8 +100,14 @@ pub struct Configuration {
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 const TELEMETRY_KEY: &str = "telemetry";
 
-fn default_listen() -> ListenAddr {
+fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
+
+// This isn't dead code! we use it in buildstructor's fake_new
+#[allow(dead_code)]
+fn test_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
 #[buildstructor::buildstructor]
@@ -99,6 +115,9 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        graphql: Option<Graphql>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -123,6 +142,36 @@ impl Configuration {
 
         Self {
             server: server.unwrap_or_default(),
+            graphql: graphql.unwrap_or_default(),
+            health_check: health_check.unwrap_or_default(),
+            sandbox: sandbox.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        server: Option<Server>,
+        graphql: Option<Graphql>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        cors: Option<Cors>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+    ) -> Self {
+        Self {
+            server: server.unwrap_or_default(),
+            graphql: graphql.unwrap_or_else(|| Graphql::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -270,37 +319,186 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Server {
+pub(crate) struct Graphql {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_listen")]
+    #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
-
-    /// introspection queries
-    /// enabled by default
-    #[serde(default = "default_introspection")]
-    pub(crate) introspection: bool,
-
-    /// display landing page
-    /// enabled by default
-    #[serde(default = "default_landing_page")]
-    pub(crate) landing_page: bool,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
     #[serde(default = "default_graphql_path")]
-    pub(crate) graphql_path: String,
+    pub(crate) path: String,
 
-    /// healthCheck path
-    /// default: "/.well-known/apollo/server-health"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) health_check_path: String,
+    #[serde(default = "default_introspection")]
+    pub(crate) introspection: bool,
 
-    /// Preview @defer directive support
-    /// default: true
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
+}
 
+fn default_introspection() -> bool {
+    true
+}
+
+fn default_defer_support() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Graphql {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+        }
+    }
+}
+
+impl Default for Graphql {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Sandbox {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_graphql_path")]
+    pub(crate) path: String,
+
+    #[serde(default = "default_sandbox")]
+    pub(crate) enabled: bool,
+}
+
+fn default_sandbox() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HealthCheck {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:9090
+    #[serde(default = "default_health_check_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_health_check_path")]
+    pub(crate) path: String,
+}
+
+fn default_health_check_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:9090").unwrap().into()
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
+}
+
+#[buildstructor::buildstructor]
+impl HealthCheck {
+    #[builder]
+    pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_health_check_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+        }
+    }
+}
+
+impl Default for HealthCheck {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Server {
     /// Experimental limitation of query depth
     /// default: 4096
     #[serde(default = "default_parser_recursion_limit")]
@@ -311,22 +509,8 @@ pub(crate) struct Server {
 impl Server {
     #[builder]
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        introspection: Option<bool>,
-        landing_page: Option<bool>,
-        graphql_path: Option<String>,
-        health_check_path: Option<String>,
-        defer_support: Option<bool>,
-        parser_recursion_limit: Option<usize>,
-    ) -> Self {
+    pub(crate) fn new(parser_recursion_limit: Option<usize>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_listen),
-            introspection: introspection.unwrap_or_else(default_introspection),
-            landing_page: landing_page.unwrap_or_else(default_landing_page),
-            graphql_path: graphql_path.unwrap_or_else(default_graphql_path),
-            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
-            preview_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }
@@ -342,6 +526,17 @@ pub enum ListenAddr {
     /// Unix socket.
     #[cfg(unix)]
     UnixSocket(std::path::PathBuf),
+}
+
+impl ListenAddr {
+    pub(crate) fn ip_and_port(&self) -> Option<(IpAddr, u16)> {
+        #[cfg_attr(not(unix), allow(irrefutable_let_patterns))]
+        if let Self::SocketAddr(addr) = self {
+            Some((addr.ip(), addr.port()))
+        } else {
+            None
+        }
+    }
 }
 
 impl From<SocketAddr> for ListenAddr {
@@ -449,24 +644,8 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
-fn default_introspection() -> bool {
-    true
-}
-
-fn default_landing_page() -> bool {
-    true
-}
-
 fn default_graphql_path() -> String {
     String::from("/")
-}
-
-fn default_health_check_path() -> String {
-    String::from("/.well-known/apollo/server-health")
-}
-
-fn default_defer_support() -> bool {
-    true
 }
 
 fn default_parser_recursion_limit() -> usize {
@@ -831,32 +1010,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.server.graphql_path.starts_with('/') {
+    if !config.graphql.path.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.graphql_path,
-                config.server.graphql_path
+                config.graphql.path,
+                config.graphql.path
             ),
         });
     }
-    if config.server.graphql_path.ends_with('*') && !config.server.graphql_path.ends_with("/*") {
+    if config.graphql.path.ends_with('*') && !config.graphql.path.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.graphql_path
+                config.graphql.path
             ),
         });
     }
-    if config.server.graphql_path.contains("/*/") {
+    if config.graphql.path.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
                     message: "invalid 'server.graphql_path' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.graphql_path
+                        config.graphql.path
                     ),
                 },
             );
@@ -1049,8 +1228,8 @@ mod tests {
     fn bad_graphql_path_configuration_without_slash() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: test
+graphql:
+  path: test
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1061,8 +1240,8 @@ server:
     fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /*/test
+graphql:
+  path: /*/test
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1073,8 +1252,8 @@ server:
     fn unknown_fields() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /
+graphql:
+  path: /
 subgraphs:
   account: true
   "#,
@@ -1108,8 +1287,8 @@ unknown:
     fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /test*
+graphql:
+  path: /test*
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1136,7 +1315,7 @@ telemetry:
     fn line_precise_config_errors_with_errors_after_first_field() {
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1152,7 +1331,7 @@ server:
     fn line_precise_config_errors_bad_type() {
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: true
@@ -1166,7 +1345,7 @@ server:
     fn line_precise_config_errors_with_inline_sequence() {
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1182,7 +1361,7 @@ cors:
     fn line_precise_config_errors_with_sequence() {
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1309,7 +1488,7 @@ cors:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+graphql:
   introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
         "#,
         )
@@ -1340,7 +1519,7 @@ cors:
 
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1358,7 +1537,7 @@ cors:
     fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
         let error = validate_configuration(
             r#"
-server:
+graphql:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000

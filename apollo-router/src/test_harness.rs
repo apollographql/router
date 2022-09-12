@@ -13,7 +13,11 @@ use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::RouterCreator;
 use crate::Schema;
+
+#[cfg(test)]
+pub(crate) mod http_client;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
 ///
@@ -40,7 +44,7 @@ use crate::Schema;
 /// use tower::util::ServiceExt;
 ///
 /// # #[tokio::main] async fn main() -> Result<(), tower::BoxError> {
-/// let config = serde_json::json!({"server": {"introspection": false}});
+/// let config = serde_json::json!({"graphql": { "introspection": false }});
 /// let request = supergraph::Request::fake_builder()
 ///     // Request building here
 ///     .build()
@@ -165,7 +169,7 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the GraphQL service
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
+    async fn build_common(self) -> Result<(Arc<Configuration>, RouterCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -195,15 +199,41 @@ impl<'a> TestHarness<'a> {
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let router_creator = YamlSupergraphServiceFactory
-            .create(config, schema, None, Some(builder.extra_plugins))
+            .create(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
+        Ok((config, router_creator))
+    }
+
+    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
+        let (_config, router_creator) = self.build_common().await?;
         Ok(tower::service_fn(move |request| {
             let service = router_creator.make();
             async move { service.oneshot(request).await }
         })
         .boxed_clone())
     }
+
+    #[cfg(test)]
+    pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
+        use crate::axum_http_server_factory::make_axum_router;
+        use crate::axum_http_server_factory::ListenAddrAndRouter;
+        use crate::router_factory::SupergraphServiceFactory;
+
+        let (config, router_creator) = self.build_common().await?;
+        let web_endpoints = router_creator.web_endpoints();
+        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
+        let ListenAddrAndRouter(_listener, router) = routers.main;
+        Ok(router.boxed())
+    }
 }
+
+/// An HTTP-level service, as would be given to Hyper’s server
+#[cfg(test)]
+pub(crate) type HttpService = tower::util::BoxService<
+    http::Request<hyper::Body>,
+    http::Response<axum::body::BoxBody>,
+    std::convert::Infallible,
+>;
 
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
