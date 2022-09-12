@@ -36,6 +36,13 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
+### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
+
+There is a new global constant `apollo_sdl` which can be use to read the
+supergraph SDL as a string.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
 
 Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
