@@ -69,6 +69,7 @@ pub mod services;
 mod spec;
 mod state_machine;
 mod test_harness;
+pub mod tracer;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -86,9 +87,9 @@ pub use crate::test_harness::TestHarness;
 #[doc(hidden)]
 pub mod _private {
     // Reexports for macros
+    pub use ctor;
     pub use router_bridge;
     pub use serde_json;
-    pub use startup;
 
     // For tests
     pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;

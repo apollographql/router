@@ -53,14 +53,14 @@ impl APQLayer {
         mut request: SupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         let maybe_query_hash: Option<Vec<u8>> = request
-            .originating_request
+            .supergraph_request
             .body()
             .extensions
             .get("persistedQuery")
             .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
             .and_then(|persisted_query| hex::decode(persisted_query.sha256hash.as_bytes()).ok());
 
-        let body_query = request.originating_request.body().query.clone();
+        let body_query = request.supergraph_request.body().query.clone();
 
         match (maybe_query_hash, body_query) {
             (Some(query_hash), Some(query)) => {
@@ -77,7 +77,7 @@ impl APQLayer {
                 if let Ok(cached_query) = self.cache.get(&apq_hash).await.get().await {
                     let _ = request.context.insert("persisted_query_hit", true);
                     tracing::trace!("apq: cache hit");
-                    request.originating_request.body_mut().query = Some(cached_query);
+                    request.supergraph_request.body_mut().query = Some(cached_query);
                     Ok(request)
                 } else {
                     tracing::trace!("apq: cache miss");
@@ -134,7 +134,7 @@ where
                 let cache = cache.clone();
                 Box::pin(async move {
                     let maybe_query_hash: Option<Vec<u8>> = req
-                        .originating_request
+                        .supergraph_request
                         .body()
                         .extensions
                         .get("persistedQuery")
@@ -145,7 +145,7 @@ where
                             hex::decode(persisted_query.sha256hash.as_bytes()).ok()
                         });
 
-                    let body_query = req.originating_request.body().query.clone();
+                    let body_query = req.supergraph_request.body().query.clone();
 
                     match (maybe_query_hash, body_query) {
                         (Some(query_hash), Some(query)) => {
@@ -164,7 +164,7 @@ where
                             if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
                                 let _ = req.context.insert("persisted_query_hit", true);
                                 tracing::trace!("apq: cache hit");
-                                req.originating_request.body_mut().query = Some(cached_query);
+                                req.supergraph_request.body_mut().query = Some(cached_query);
                                 Ok(ControlFlow::Continue(req))
                             } else {
                                 tracing::trace!("apq: cache miss");
@@ -258,7 +258,7 @@ mod apq_tests {
 
         // the second one should have the right APQ header and the full query string
         mock_service.expect_call().times(1).returning(move |req| {
-            let body = req.originating_request.body();
+            let body = req.supergraph_request.body();
 
             let as_json = body.extensions.get("persistedQuery").unwrap();
 
@@ -279,7 +279,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.originating_request.body();
+                let body = req.supergraph_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
                 let persisted_query: PersistedQuery =
@@ -370,7 +370,7 @@ mod apq_tests {
 
         // the second one should have the right APQ header and the full query string
         mock_service.expect_call().times(1).returning(move |req| {
-            let body = req.originating_request.body();
+            let body = req.supergraph_request.body();
             let as_json = body.extensions.get("persistedQuery").unwrap();
 
             let persisted_query: PersistedQuery =

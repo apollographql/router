@@ -17,7 +17,6 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
@@ -197,16 +196,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-            if parts.status != StatusCode::OK {
-                return Err(BoxError::from(FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: format!(
-                        "subgraph HTTP status error '{}': {}",
-                        parts.status,
-                        String::from_utf8_lossy(&body)
-                    ),
-                }));
-            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
@@ -342,6 +331,7 @@ mod tests {
 
     use axum::Server;
     use http::header::HOST;
+    use http::StatusCode;
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
@@ -351,6 +341,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::query_planner::fetch::OperationKind;
@@ -363,7 +354,14 @@ mod tests {
             Ok(http::Response::builder()
                 .header("Content-Type", "application/json")
                 .status(StatusCode::BAD_REQUEST)
-                .body(r#"BAD REQUEST"#.into())
+                .body(
+                    serde_json::to_string(&Response {
+                        errors: vec![Error::builder().message("This went wrong").build()],
+                        ..Response::default()
+                    })
+                    .expect("always valid")
+                    .into(),
+                )
                 .unwrap())
         }
 
@@ -441,15 +439,15 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_bad_status_code() {
+    async fn test_bad_status_code_should_not_fail() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
         let subgraph_service = SubgraphService::new("test");
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
-        let err = subgraph_service
+        let response = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
@@ -466,10 +464,10 @@ mod tests {
                 context: Context::new(),
             })
             .await
-            .unwrap_err();
+            .unwrap();
         assert_eq!(
-            err.to_string(),
-            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST"
+            response.response.body().errors[0].message,
+            "This went wrong"
         );
     }
 
@@ -482,7 +480,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")
@@ -515,7 +513,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
+                supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, "application/json")

@@ -29,3 +29,11 @@ fn execution_request(request) {
     request.context["test"] = 25;
     throw "An error occured";
 }
+
+fn get_start() {
+    return apollo_start;
+}
+
+fn get_sdl() {
+    return apollo_sdl;
+}

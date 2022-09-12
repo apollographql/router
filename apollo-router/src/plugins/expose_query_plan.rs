@@ -65,7 +65,7 @@ impl Plugin for ExposeQueryPlan {
         let conf_enabled = self.enabled;
         service
             .map_future_with_request_data(move |req: &supergraph::Request| {
-                let is_enabled = conf_enabled && req.originating_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
+                let is_enabled = conf_enabled && req.supergraph_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME) == Some(&HeaderValue::from_static("true"));
                 if is_enabled {
                     req.context.insert(ENABLED_CONTEXT_KEY, true).unwrap();
                 }
@@ -81,12 +81,12 @@ impl Plugin for ExposeQueryPlan {
                             let (mut first, rest) = stream.into_future().await;
 
                             if let Some(first) = &mut first {
-                                if let (Some(plan), Some(formatted_query_plan)) =
-                                    (res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY), res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY))
+                                if let Some(plan) =
+                                    res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
                                 {
                                     first
                                         .extensions
-                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": formatted_query_plan }));
+                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY) }));
                                 }
                             }
                             res.response = http::Response::from_parts(

@@ -3,15 +3,23 @@
 #![allow(missing_docs)] // FIXME
 
 use std::fmt;
+use std::pin::Pin;
 
+use futures::Stream;
+pub use router_bridge::planner::Location;
+use router_bridge::planner::PlanError;
+use router_bridge::planner::PlanErrorExtensions;
+use router_bridge::planner::PlannerError;
+use router_bridge::planner::WorkerError;
+use router_bridge::planner::WorkerGraphQLError;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
 use crate::error::FetchError;
-pub use crate::error::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
@@ -19,6 +27,16 @@ pub use crate::json_ext::PathElement as JsonPathElement;
 pub use crate::request::Request;
 pub use crate::response::IncrementalResponse;
 pub use crate::response::Response;
+
+/// An asynchronous [`Stream`] of GraphQL [`Response`]s.
+///
+/// In some cases such as with `@defer`, a single HTTP response from the Router
+/// may contain multiple GraphQL responses that will be sent at different times
+/// (as more data becomes available).
+///
+/// We represent this in Rust as a stream,
+/// even if that stream happens to only contain one item.
+pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
 
 /// Any GraphQL error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -29,9 +47,11 @@ pub struct Error {
     pub message: String,
 
     /// The locations of the error from the originating request.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub locations: Vec<Location>,
 
     /// The path of the error.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
@@ -107,4 +127,77 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.message.fmt(f)
     }
+}
+
+/// Trait used to convert expected errors into a list of GraphQL errors
+pub(crate) trait IntoGraphQLErrors
+where
+    Self: Sized,
+{
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self>;
+}
+
+impl From<PlanError> for Error {
+    fn from(err: PlanError) -> Self {
+        Self {
+            message: err.message.unwrap_or_else(|| String::from("plan error")),
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<PlannerError> for Error {
+    fn from(err: PlannerError) -> Self {
+        match err {
+            PlannerError::WorkerGraphQLError(err) => err.into(),
+            PlannerError::WorkerError(err) => err.into(),
+        }
+    }
+}
+
+impl From<WorkerError> for Error {
+    fn from(err: WorkerError) -> Self {
+        Self {
+            message: err.message.unwrap_or_else(|| String::from("worker error")),
+            locations: err.locations.into_iter().map(Location::from).collect(),
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<WorkerGraphQLError> for Error {
+    fn from(err: WorkerGraphQLError) -> Self {
+        Self {
+            message: err.message,
+            locations: err.locations.into_iter().map(Location::from).collect(),
+            extensions: err
+                .extensions
+                .map(convert_extensions_to_map)
+                .unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+fn convert_extensions_to_map(ext: PlanErrorExtensions) -> Object {
+    let mut extensions = Object::new();
+    extensions.insert("code", ext.code.into());
+    if let Some(exception) = ext.exception {
+        extensions.insert(
+            "exception",
+            json!({
+                "stacktrace": serde_json_bytes::Value::from(exception.stacktrace)
+            }),
+        );
+    }
+
+    extensions
 }

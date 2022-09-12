@@ -1,4 +1,11 @@
+use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::EvictedHashMap;
+use opentelemetry::sdk::trace::Span;
+use opentelemetry::sdk::trace::SpanProcessor;
+use opentelemetry::trace::TraceResult;
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use reqwest::Url;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -69,4 +76,69 @@ where
     }
     let url = parse_url_for_endpoint(s).map_err(serde::de::Error::custom)?;
     Ok(AgentEndpoint::Url(url))
+}
+
+#[derive(Debug)]
+struct ApolloFilterSpanProcessor<T: SpanProcessor> {
+    delegate: T,
+}
+
+pub(crate) static APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+
+impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
+    fn on_start(&self, span: &mut Span, cx: &Context) {
+        self.delegate.on_start(span, cx);
+    }
+
+    fn on_end(&self, span: SpanData) {
+        if span
+            .attributes
+            .iter()
+            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+        {
+            let attributes_len = span.attributes.len();
+            let span = SpanData {
+                attributes: span
+                    .attributes
+                    .into_iter()
+                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                    .fold(
+                        EvictedHashMap::new(attributes_len as u32, attributes_len),
+                        |mut m, (k, v)| {
+                            m.insert(KeyValue::new(k, v));
+                            m
+                        },
+                    ),
+                ..span
+            };
+
+            self.delegate.on_end(span);
+        } else {
+            self.delegate.on_end(span);
+        }
+    }
+
+    fn force_flush(&self) -> TraceResult<()> {
+        self.delegate.force_flush()
+    }
+
+    fn shutdown(&mut self) -> TraceResult<()> {
+        self.delegate.shutdown()
+    }
+}
+
+trait SpanProcessorExt
+where
+    Self: Sized + SpanProcessor,
+{
+    fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
+}
+
+impl<T: SpanProcessor> SpanProcessorExt for T
+where
+    Self: Sized,
+{
+    fn filtered(self) -> ApolloFilterSpanProcessor<Self> {
+        ApolloFilterSpanProcessor { delegate: self }
+    }
 }
