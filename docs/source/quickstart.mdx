@@ -74,9 +74,9 @@ Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://g
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router with the supergraph schema:
+  2. Run the Apollo Router in development mode with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --dev --supergraph starstuff.graphql
 ```
 
 This is because Apollo Router requires a supergraph schema and we aren't providing it one! Let's fix that.
@@ -175,12 +175,12 @@ type User
 
 This file is all that the router needs to communicate with our subgraphs!
 
-## 3. Run the router with the default configuration
+## 3. Run the router in development mode with the default configuration
 
 Now from your project root, run the following:
 
 ```sh
-./router --supergraph supergraph-schema.graphql
+./router --dev --supergraph supergraph-schema.graphql
 ```
 
 The console output should look like the following:
@@ -191,7 +191,9 @@ The console output should look like the following:
 2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
-That's it! Visit `http://127.0.0.1:4000` to open [Apollo Sandbox](/studio/explorer/sandbox/). You can inspect the entire federated graph and run your first queries against the Apollo Router!
+That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/studio/explorer/sandbox/) so you can run queries against the Apollo Router.  This flag also relaxes some defaults to provide a better development experiences (like exposing subgraph error messages), so you'll exclude this flag when not doing development.
+
+Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect the entire federated graph and run your first queries!
 
 ## Next steps
 
