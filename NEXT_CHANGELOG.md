@@ -73,13 +73,6 @@ By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjj
 
 
 ## 🐛 Fixes
-
-### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
-
-You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1736
-
 ## 🛠 Maintenance
 
 ### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
