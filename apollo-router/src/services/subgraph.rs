@@ -89,7 +89,7 @@ impl Response {
     ///
     /// In this case, you already have a valid response and just wish to associate it with a context
     /// and create a Response.
-    pub fn new_from_response(
+    pub(crate) fn new_from_response(
         response: http::Response<graphql::Response>,
         context: Context,
     ) -> Response {
