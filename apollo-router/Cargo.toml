@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
@@ -38,7 +38,8 @@ async-trait = "0.1.57"
 atty = "0.2.14"
 axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
-buildstructor = "0.4.1"
+base64 = "0.13.0"
+buildstructor = "0.5.0"
 bytes = "1.2.1"
 clap = { version = "3.2.20", default-features = false, features = [
     "env",
@@ -72,6 +73,7 @@ jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.132"
 lru = "0.7.8"
+mediatype = "0.19.9"
 mockall = "0.11.2"
 miette = { version = "5.3.0", features = ["fancy"] }
 mime = "0.3.16"
@@ -117,15 +119,17 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 ] }
 opentelemetry-prometheus = "0.10.0"
 paste = "1.0.9"
+pin-project-lite = "0.2.9"
 prometheus = "0.13"
-rhai = { version = "1.9.1", features = ["sync", "serde", "internals"] }
+rand = "0.8.5"
+rhai = { version = "1.10.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
     "json",
     "stream",
 ] }
-router-bridge = "0.1.2"
+router-bridge = "0.1.4"
 schemars = { version = "0.8.10", features = ["url"] }
 sha2 = "0.10.5"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
@@ -168,11 +172,10 @@ tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 
-url = { version = "2.2.2", features = ["serde"] }
+url = { version = "2.3.1", features = ["serde"] }
 urlencoding = "2.1.2"
+uuid = { version = "1.1.2", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
-pin-project-lite = "0.2.9"
-mediatype = "0.19.9"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -181,7 +184,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.19.1", features = [ "json" ] }
+insta = { version = "1.19.1", features = [ "json", "redactions" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 mockall = "0.11.2"
@@ -204,8 +207,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "fmt",
 ] }
 tracing-test = "0.2.2"
-uuid = { version = "1.1.2", features = ["serde", "v4"] }
-url = "2.2.2"
 walkdir = "2.3.2"
 [[test]]
 name = "integration_tests"

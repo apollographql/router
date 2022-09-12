@@ -1,10 +1,12 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
+assertion_line: 264
 expression: aggregated_metrics
 ---
 {
   "traces_per_query": {
     "report_key_1": {
+      "traces": [],
       "stats_with_context": [
         [
           {

@@ -34,7 +34,7 @@ mod tests {
                 .returning(move |req: supergraph::Request| {
                     // Let's make sure our request contains our new header
                     assert_eq!(
-                        req.originating_request
+                        req.supergraph_request
                             .headers()
                             .get("X-operation-name")
                             .expect("X-operation-name is present"),
