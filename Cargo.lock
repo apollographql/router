@@ -367,7 +367,8 @@ dependencies = [
 [[package]]
 name = "async-compression"
 version = "0.3.14"
-source = "git+https://github.com/geal/async-compression?tag=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "345fd392ab01f746c717b1357165b76f0b67a60192007b234058c9045fdcf695"
 dependencies = [
  "brotli",
  "flate2",

@@ -120,4 +120,25 @@ We changed `QueryPlannerResponse` to:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
 
+### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
+
+For features such a `@defer`, the Router may send a stream of multiple GraphQL responses
+in a single HTTP response.
+The body of the HTTP response is a single byte stream.
+When HTTP compression is used, that byte stream is compressed as a whole.
+Due to limitations in current versions of the `async-compression` crate,
+[issue #1572](https://github.com/apollographql/router/issues/1572) was a bug where
+some GraphQL responses might not be sent to the client until more of them became available.
+This buffering yields better compression, but defeats the point of `@defer`.
+
+Our previous work-around involved a patched `async-compression`,
+which was not trivial to apply when using the Router as a dependency
+since [Cargo patching](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)
+is done in a project’s root `Cargo.toml`.
+
+The Router now reverts to using unpatched `async-compression`,
+and instead disables compression of multipart responses.
+We aim to re-enable compression soon, with a proper solution that is being designed in
+<https://github.com/Nemo157/async-compression/issues/154>.
+
 ## 📚 Documentation
