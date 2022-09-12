@@ -262,7 +262,7 @@ impl Executable {
         let apollo_telemetry_msg = if is_telemetry_disabled {
             "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
         } else {
-            "Anonymous usage data is gathered to inform Apollo product development.  For info, see https://go.apollo.dev/o/privacy.".to_string()
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)\n{}", std::env!("CARGO_PKG_VERSION"), apollo_telemetry_msg);
