@@ -114,13 +114,13 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
     );
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'client_name')].value")?
+            .select_path("$.tags[?(@.key == 'client.name')].value")?
             .get(0),
         Some(&&Value::String("custom_name".to_string()))
     );
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'client_version')].value")?
+            .select_path("$.tags[?(@.key == 'client.version')].value")?
             .get(0),
         Some(&&Value::String("1.0".to_string()))
     );

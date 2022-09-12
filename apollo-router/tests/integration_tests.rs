@@ -16,6 +16,8 @@ use apollo_router::services::supergraph;
 use http::header::ACCEPT;
 use http::Method;
 use http::StatusCode;
+use insta::internals::Content;
+use insta::internals::Redaction;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
@@ -116,7 +118,9 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!(get_spans(), {
+      ".**.children.*.record.entries[]" => redact_dynamic()
+    });
 }
 
 #[test_span(tokio::test)]
@@ -130,7 +134,9 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!(get_spans(), {
+      ".**.children.*.record.entries[]" => redact_dynamic()
+    });
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -255,9 +261,12 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let message = "Unknown operation named \"invalidOperationName\"";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
+        .extensions(extensions_map)
         .build();
 
     let request = supergraph::Request::fake_builder()
@@ -859,4 +868,24 @@ impl ValueExt for Value {
             (a, b) => a == b,
         }
     }
+}
+
+// Useful to redact request_id in snapshot because it's not determinist
+fn redact_dynamic() -> Redaction {
+    insta::dynamic_redaction(|value, _path| {
+        if let Some(value_slice) = value.as_slice() {
+            if value_slice.get(0).and_then(|v| v.as_str()) == Some("request.id") {
+                return Content::Seq(vec![
+                    value_slice.get(0).unwrap().clone(),
+                    Content::String("[REDACTED]".to_string()),
+                ]);
+            }
+            if value_slice.get(0).and_then(|v| v.as_str())
+                == Some("apollo_private.sent_time_offset")
+            {
+                return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
+            }
+        }
+        value
+    })
 }

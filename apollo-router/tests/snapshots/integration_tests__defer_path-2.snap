@@ -1,10 +1,10 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 679
+assertion_line: 599
 expression: second
 ---
 {
-  "hasNext": true,
+  "hasNext": false,
   "incremental": [
     {
       "label": "name",

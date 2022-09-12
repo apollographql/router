@@ -26,8 +26,8 @@ use crate::graphql::Request;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
@@ -469,7 +469,7 @@ impl MetricsBuilder {
     }
 
     pub(crate) fn apollo_metrics_provider(&mut self) -> Sender {
-        std::mem::take(&mut self.apollo_metrics)
+        self.apollo_metrics.clone()
     }
 }
 

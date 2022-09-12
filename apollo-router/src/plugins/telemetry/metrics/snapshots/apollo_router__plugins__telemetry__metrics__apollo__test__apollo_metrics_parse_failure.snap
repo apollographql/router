@@ -1,10 +1,12 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
+assertion_line: 130
 expression: results
 ---
 [
   {
-    "traces_and_stats": {
+    "request_id": "[REDACTED]",
+    "stats": {
       "## GraphQLParseFailure\n": {
         "stats_with_context": {
           "context": {

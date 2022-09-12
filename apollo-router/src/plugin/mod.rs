@@ -209,6 +209,15 @@ pub trait Plugin: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    /// Support downcasting.
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any
+    where
+        Self: Sized,
+    {
+        self
+    }
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -246,6 +255,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
 
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 #[async_trait]
@@ -273,6 +285,11 @@ where
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.web_endpoints()
+    }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self.as_any()
     }
 }
 

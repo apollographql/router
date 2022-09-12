@@ -88,7 +88,7 @@ impl AxumHttpServerFactory {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
+pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
 
 #[derive(Debug)]
 pub(crate) struct ListenersAndRouters {
@@ -170,7 +170,9 @@ where
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(PropagatingMakeSpan::new())
-                .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
+                    // Duration here is instant based
+                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
                     if resp.status() >= StatusCode::BAD_REQUEST {
                         span.record(
                             "otel.status_code",
@@ -821,6 +823,8 @@ impl PropagatingMakeSpan {
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // This method needs to be moved to the telemetry plugin once we have a hook for the http request.
+
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
@@ -838,7 +842,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -849,7 +854,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         }
     }

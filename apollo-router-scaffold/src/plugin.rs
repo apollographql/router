@@ -98,7 +98,6 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         Value::Boolean(true),
     );
 
-    dbg!(&params);
     desc.scaffold_with_parameters(params)?;
 
     let mod_path = mod_path();

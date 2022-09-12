@@ -358,6 +358,7 @@ mod router_plugin_mod {
 pub(crate) struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
+    scope: Arc<Mutex<Scope<'static>>>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -384,9 +385,22 @@ impl Plugin for Rhai {
         };
 
         let main = scripts_path.join(&main_file);
+        let sdl = init.supergraph_sdl.clone();
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
-        Ok(Self { ast, engine })
+        let mut scope = Scope::new();
+        scope.push_constant("apollo_sdl", sdl);
+        scope.push_constant("apollo_start", Instant::now());
+
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
+
+        Ok(Self {
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -400,6 +414,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -417,6 +432,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -434,6 +450,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
+            self.scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -468,7 +485,6 @@ macro_rules! gen_map_request {
                     fn failure_message(
                         context: Context,
                         msg: String,
-                        status: StatusCode,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
                         let res = $base::Response::error_builder()
@@ -476,7 +492,6 @@ macro_rules! gen_map_request {
                                 message: msg,
                                 ..Default::default()
                             }])
-                            .status_code(status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
@@ -491,11 +506,11 @@ macro_rules! gen_map_request {
                             )
                             .map_err(|err| err.to_string())
                     } else {
-                        let mut scope = $rhai_service.scope.clone();
+                        let mut guard = $rhai_service.scope.lock().unwrap();
                         $rhai_service
                             .engine
                             .call_fn(
-                                &mut scope,
+                                &mut guard,
                                 &$rhai_service.ast,
                                 $callback.fn_name(),
                                 (shared_request.clone(),),
@@ -509,7 +524,6 @@ macro_rules! gen_map_request {
                         return failure_message(
                             request_opt.unwrap().context,
                             format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
                         );
                     }
                     let mut guard = shared_request.lock().unwrap();
@@ -587,17 +601,12 @@ macro_rules! gen_map_response {
                     // the significantly different treatment of errors in different
                     // response types makes this extremely painful. This needs to be
                     // re-visited at some point post GA.
-                    fn failure_message(
-                        context: Context,
-                        msg: String,
-                        status: StatusCode,
-                    ) -> $base::Response {
+                    fn failure_message(context: Context, msg: String) -> $base::Response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
                                 message: msg,
                                 ..Default::default()
                             }])
-                            .status_code(status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
@@ -613,11 +622,11 @@ macro_rules! gen_map_response {
                             )
                             .map_err(|err| err.to_string())
                     } else {
-                        let mut scope = $rhai_service.scope.clone();
+                        let mut guard = $rhai_service.scope.lock().unwrap();
                         $rhai_service
                             .engine
                             .call_fn(
-                                &mut scope,
+                                &mut guard,
                                 &$rhai_service.ast,
                                 $callback.fn_name(),
                                 (shared_response.clone(),),
@@ -631,7 +640,6 @@ macro_rules! gen_map_response {
                         return failure_message(
                             response_opt.unwrap().context,
                             format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
                         );
                     }
                     let mut guard = shared_response.lock().unwrap();
@@ -793,27 +801,27 @@ macro_rules! register_rhai_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
             // Context stuff
-            $engine.register_get_result(
+            $engine.register_get(
                 "context",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.context.clone()))
                 }
             )
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<$base::Response>| {
+                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "context",
                 |obj: &mut SharedMut<$base::Request>, context: Context| {
                     obj.with_mut(|request| request.context = context);
                     Ok(())
                 }
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<$base::Response>, context: Context| {
                     obj.with_mut(|response| response.context = context);
@@ -822,14 +830,14 @@ macro_rules! register_rhai_interface {
             );
 
             // Originating Request
-            $engine.register_get_result(
+            $engine.register_get(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "headers",
                 |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
                     if_subgraph! {
@@ -844,14 +852,14 @@ macro_rules! register_rhai_interface {
                 }
             );
 
-            $engine.register_get_result(
+            $engine.register_get(
                 "body",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "body",
                 |obj: &mut SharedMut<$base::Request>, body: Request| {
                     if_subgraph! {
@@ -866,14 +874,14 @@ macro_rules! register_rhai_interface {
                 }
             );
 
-            $engine.register_get_result(
+            $engine.register_get(
                 "uri",
-                |obj: &mut SharedMut<$base::Request>| {
+                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
                 }
             );
 
-            $engine.register_set_result(
+            $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
                     if_subgraph! {
@@ -957,16 +965,16 @@ fn execute(
             .call(&rhai_service.engine, &rhai_service.ast, args)
             .map_err(|err| err.to_string())
     } else {
-        let mut scope = rhai_service.scope.clone();
+        let mut guard = rhai_service.scope.lock().unwrap();
         rhai_service
             .engine
-            .call_fn(&mut scope, &rhai_service.ast, callback.fn_name(), args)
+            .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
             .map_err(|err| err.to_string())
     }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
-    scope: Scope<'static>,
+    scope: Arc<Mutex<Scope<'static>>>,
     service: ServiceStep,
     engine: Arc<Engine>,
     ast: AST,
@@ -978,20 +986,20 @@ impl Rhai {
         function_name: &str,
         subgraph: Option<&str>,
         service: ServiceStep,
+        scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let mut scope = Scope::new();
-        scope.push_constant("apollo_start", Instant::now());
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
             engine: self.engine.clone(),
             ast: self.ast.clone(),
         };
+        let mut guard = scope.lock().unwrap();
         match subgraph {
             Some(name) => {
                 self.engine
                     .call_fn(
-                        &mut scope,
+                        &mut guard,
                         &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
@@ -1000,7 +1008,7 @@ impl Rhai {
             }
             None => {
                 self.engine
-                    .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
+                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1068,16 +1076,18 @@ impl Rhai {
                 |_: &mut SharedMut<execution::DeferredResponse>| -> bool { false },
             )
             // Register a HeaderMap indexer so we can get/set headers
-            .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
-                let search_name =
-                    HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-                Ok(x.get(search_name)
-                    .ok_or("")?
-                    .to_str()
-                    .map_err(|e| e.to_string())?
-                    .to_string())
-            })
-            .register_indexer_set_result(|x: &mut HeaderMap, key: &str, value: &str| {
+            .register_indexer_get(
+                |x: &mut HeaderMap, key: &str| -> Result<String, Box<EvalAltResult>> {
+                    let search_name =
+                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    Ok(x.get(search_name)
+                        .ok_or("")?
+                        .to_str()
+                        .map_err(|e| e.to_string())?
+                        .to_string())
+                },
+            )
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
                 x.insert(
                     HeaderName::from_str(key).map_err(|e| e.to_string())?,
                     HeaderValue::from_str(value).map_err(|e| e.to_string())?,
@@ -1085,19 +1095,21 @@ impl Rhai {
                 Ok(())
             })
             // Register a Context indexer so we can get/set context
-            .register_indexer_get_result(|x: &mut Context, key: &str| {
-                x.get(key)
-                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                    .map_err(|e: BoxError| e.to_string().into())
-            })
-            .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
+            .register_indexer_get(
+                |x: &mut Context, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+                    x.get(key)
+                        .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+                        .map_err(|e: BoxError| e.to_string().into())
+                },
+            )
+            .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
                 x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
             // Register Context.upsert()
-            .register_result_fn(
+            .register_fn(
                 "upsert",
                 |context: NativeCallContext,
                  x: &mut Context,
@@ -1139,24 +1151,24 @@ impl Rhai {
                 x.operation_name = Some(value.to_string());
             })
             // Request.variables
-            .register_get_result("variables", |x: &mut Request| {
+            .register_get("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
             })
-            .register_set_result("variables", |x: &mut Request, om: Map| {
+            .register_set("variables", |x: &mut Request, om: Map| {
                 x.variables = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Request.extensions
-            .register_get_result("extensions", |x: &mut Request| {
+            .register_get("extensions", |x: &mut Request| {
                 to_dynamic(x.extensions.clone())
             })
-            .register_set_result("extensions", |x: &mut Request, om: Map| {
+            .register_set("extensions", |x: &mut Request, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Request.uri.path
-            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path()))
-            .register_set_result("path", |x: &mut Uri, value: &str| {
+            .register_get("path", |x: &mut Uri| to_dynamic(x.path()))
+            .register_set("path", |x: &mut Uri, value: &str| {
                 // Because there is no simple way to update parts on an existing
                 // Uri (no parts_mut()), then we need to create a new Uri from our
                 // existing parts, preserving any query, and update our existing
@@ -1171,16 +1183,14 @@ impl Rhai {
                         PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
                             .map_err(|e| e.to_string())?,
                     ),
-                    None => {
-                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
-                    }
+                    None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
                 };
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
             // Request.uri.host
-            .register_get_result("host", |x: &mut Uri| to_dynamic(x.host()))
-            .register_set_result("host", |x: &mut Uri, value: &str| {
+            .register_get("host", |x: &mut Uri| to_dynamic(x.host()))
+            .register_set("host", |x: &mut Uri, value: &str| {
                 // Because there is no simple way to update parts on an existing
                 // Uri (no parts_mut()), then we need to create a new Uri from our
                 // existing parts, preserving any port, and update our existing
@@ -1192,10 +1202,10 @@ impl Rhai {
                             Authority::from_maybe_shared(format!("{}:{}", value, port))
                                 .map_err(|e| e.to_string())?
                         } else {
-                            Authority::from_maybe_shared(value).map_err(|e| e.to_string())?
+                            Authority::from_str(value).map_err(|e| e.to_string())?
                         }
                     }
-                    None => Authority::from_maybe_shared(value).map_err(|e| e.to_string())?,
+                    None => Authority::from_str(value).map_err(|e| e.to_string())?,
                 };
                 parts.authority = Some(new_authority);
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
@@ -1209,23 +1219,23 @@ impl Rhai {
                 x.label = Some(value.to_string());
             })
             // Response.data
-            .register_get_result("data", |x: &mut Response| to_dynamic(x.data.clone()))
-            .register_set_result("data", |x: &mut Response, om: Map| {
+            .register_get("data", |x: &mut Response| to_dynamic(x.data.clone()))
+            .register_set("data", |x: &mut Response, om: Map| {
                 x.data = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Response.path (Not Implemented)
             // Response.errors
-            .register_get_result("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
-            .register_set_result("errors", |x: &mut Response, value: Dynamic| {
+            .register_get("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
+            .register_set("errors", |x: &mut Response, value: Dynamic| {
                 x.errors = from_dynamic(&value)?;
                 Ok(())
             })
             // Response.extensions
-            .register_get_result("extensions", |x: &mut Response| {
+            .register_get("extensions", |x: &mut Response| {
                 to_dynamic(x.extensions.clone())
             })
-            .register_set_result("extensions", |x: &mut Response, om: Map| {
+            .register_set("extensions", |x: &mut Response, om: Map| {
                 x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
@@ -1313,13 +1323,13 @@ impl Rhai {
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 
         engine
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<supergraph::DeferredResponse>| {
+                |obj: &mut SharedMut<supergraph::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 },
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<supergraph::DeferredResponse>, context: Context| {
                     obj.with_mut(|response| response.context = context);
@@ -1328,13 +1338,13 @@ impl Rhai {
             );
 
         engine
-            .register_get_result(
+            .register_get(
                 "context",
-                |obj: &mut SharedMut<execution::DeferredResponse>| {
+                |obj: &mut SharedMut<execution::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 },
             )
-            .register_set_result(
+            .register_set(
                 "context",
                 |obj: &mut SharedMut<execution::DeferredResponse>, context: Context| {
                     obj.with_mut(|response| response.context = context);
@@ -1387,9 +1397,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.rhai")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-                Default::default(),
             )
             .await
             .unwrap();
@@ -1439,9 +1448,8 @@ mod tests {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .get("apollo.rhai")
             .expect("Plugin not found")
-            .create_instance(
+            .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-                Default::default(),
             )
             .await
             .unwrap();
@@ -1551,5 +1559,33 @@ mod tests {
             "apollo_router",
             "info log"
         ));
+    }
+
+    #[tokio::test]
+    async fn it_can_access_sdl_constant() {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .get("apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        // Get a scope to use for our test
+        let scope = rhai_instance.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // Call our function to make sure we can access the sdl
+        let sdl: Arc<String> = rhai_instance
+            .engine
+            .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
+            .expect("can get sdl");
+        assert_eq!(sdl.as_str(), "");
     }
 }
