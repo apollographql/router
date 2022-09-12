@@ -3,10 +3,9 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use futures::future::ready;
+use futures::channel::mpsc::Receiver;
+use futures::channel::mpsc::SendError;
 use futures::future::BoxFuture;
-use futures::stream::once;
-use futures::stream::FusedStream;
 use futures::SinkExt;
 use futures::StreamExt;
 use tower::BoxError;
@@ -19,6 +18,7 @@ use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLay
 use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
+use crate::graphql::Response;
 use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -55,7 +55,7 @@ where
         let fut = async move {
             let context = req.context;
             let ctx = context.clone();
-            let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+            let (sender, receiver) = futures::channel::mpsc::channel(10);
 
             let first = req
                 .query_plan
@@ -68,45 +68,7 @@ where
                 )
                 .await;
 
-            //let rest = receiver;
-
-            let (mut sender2, receiver2) = futures::channel::mpsc::channel(10);
-
-            tokio::task::spawn(async move {
-                sender2.send(first).await;
-                while let Some(mut current_response) = receiver.next().await {
-                    //let next_response = None;
-                    loop {
-                        match receiver.try_next() {
-                            // no messages available, but the channel is not closed
-                            Err(_) => {
-                                println!("receiver is not terminated 1");
-
-                                sender2.send(current_response).await;
-
-                                break;
-                            }
-
-                            Ok(Some(response)) => {
-                                println!("receiver is not terminated 2");
-
-                                sender2.send(current_response).await;
-                                // there might be other responses in the channel, so we call `try_next` again
-                                current_response = response;
-                            }
-                            // the channel is closed
-                            Ok(None) => {
-                                println!("receiver is terminated, setting has_next to false");
-                                current_response.has_next = Some(false);
-                                sender2.send(current_response).await;
-                                break;
-                            }
-                        }
-                    }
-                }
-                println!("end task");
-            });
-            let stream = receiver2.boxed();
+            let stream = filter_stream(first, receiver).boxed();
 
             Ok(ExecutionResponse::new_from_response(
                 http::Response::new(stream as _),
@@ -116,6 +78,46 @@ where
         .in_current_span();
         Box::pin(fut)
     }
+}
+
+// modifies the response stream to set `has_next` to `false` on the last response
+fn filter_stream(first: Response, mut stream: Receiver<Response>) -> Receiver<Response> {
+    let (mut sender, receiver) = futures::channel::mpsc::channel(10);
+
+    tokio::task::spawn(async move {
+        sender.send(first).await?;
+        while let Some(mut current_response) = stream.next().await {
+            loop {
+                match stream.try_next() {
+                    // no messages available, but the channel is not closed
+                    // this means more deferred responses can come
+                    Err(_) => {
+                        sender.send(current_response).await?;
+
+                        break;
+                    }
+
+                    // there might be other deferred responses after this one,
+                    // so we should call `try_next` again
+                    Ok(Some(response)) => {
+                        sender.send(current_response).await?;
+                        current_response = response;
+                    }
+                    // the channel is closed
+                    // there will be no other deferred responses after that,
+                    // so we set `has_next` to `false`
+                    Ok(None) => {
+                        current_response.has_next = Some(false);
+                        sender.send(current_response).await?;
+                        break;
+                    }
+                }
+            }
+        }
+        Ok::<_, SendError>(())
+    });
+
+    receiver
 }
 
 pub(crate) trait ExecutionServiceFactory:

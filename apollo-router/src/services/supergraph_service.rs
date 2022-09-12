@@ -3,9 +3,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use futures::future::ready;
 use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::header::ACCEPT;
