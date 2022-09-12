@@ -33,7 +33,7 @@ async-compression = { version = "0.3.14", features = [
 ] }
 async-trait = "0.1.57"
 atty = "0.2.14"
-axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.5.16", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 base64 = "0.13.0"
 buildstructor = "0.5.0"
@@ -43,7 +43,7 @@ clap = { version = "3.2.20", default-features = false, features = [
     "derive",
     "std",
 ] }
-console-subscriber = { version = "0.1.7", optional = true }
+console-subscriber = { version = "0.1.8", optional = true }
 ctor = "0.1.23"
 dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
@@ -143,7 +143,7 @@ sys-info = "0.9.1"
 thiserror = "1.0.34"
 tokio = { version = "1.21.0", features = ["full"] }
 tokio-stream = { version = "0.1.9", features = ["sync", "net"] }
-tokio-util = { version = "0.7.3", features = ["net", "codec"] }
+tokio-util = { version = "0.7.4", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.3.4", features = [
