@@ -506,6 +506,7 @@ pub enum ListenAddr {
 
 impl ListenAddr {
     pub(crate) fn ip_and_port(&self) -> Option<(IpAddr, u16)> {
+        #[cfg_attr(not(unix), allow(irrefutable_let_patterns))]
         if let Self::SocketAddr(addr) = self {
             Some((addr.ip(), addr.port()))
         } else {
