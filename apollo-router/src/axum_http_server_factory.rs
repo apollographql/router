@@ -391,14 +391,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
 async fn get_extra_listeners(
     previous_listeners: Vec<(ListenAddr, Listener)>,
-    extra_routers: MultiMap<ListenAddr, Router>,
+    mut extra_routers: MultiMap<ListenAddr, Router>,
 ) -> Result<Vec<((ListenAddr, Listener), axum::Router)>, ApolloRouterError> {
     let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
         Vec::with_capacity(extra_routers.len());
 
     // reuse previous extra listen addrs
     for (listen_addr, listener) in previous_listeners.into_iter() {
-        if let Some(routers) = extra_routers.get_vec(&listen_addr) {
+        if let Some(routers) = extra_routers.remove(&listen_addr) {
             listeners_and_routers.push((
                 (listen_addr, listener),
                 routers
