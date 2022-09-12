@@ -53,7 +53,10 @@ use tokio::sync::Notify;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::DefaultPredicate;
+use tower_http::compression::Predicate;
 use tower_http::trace::MakeSpan;
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
@@ -189,7 +192,11 @@ where
         .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
         .layer(cors)
-        .layer(CompressionLayer::new()); // To compress response body
+        // Compress the response body, except for multipart responses such as with `@defer`.
+        // This is a work-around for https://github.com/apollographql/router/issues/1572
+        .layer(CompressionLayer::new().compress_when(
+            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
+        ));
 
     let listener = configuration.server.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
@@ -2621,7 +2628,7 @@ Content-Type: application/json\r
             "variables": {"first": 2_u32},
         }))
         .await;
-        assert_compressed(&response, true);
+        assert_compressed(&response, false);
         let status = response.status().as_u16();
         assert_eq!(status, 200);
         let counter: GraphQLResponseCounter = response.extensions_mut().remove().unwrap();
