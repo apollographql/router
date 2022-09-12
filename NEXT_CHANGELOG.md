@@ -81,6 +81,13 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
+### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
+
+to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
+
+To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1632
 
 ### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
 You may now specify custom schema and config sources when constructing an executable.
