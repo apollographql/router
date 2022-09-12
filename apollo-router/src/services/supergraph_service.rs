@@ -318,10 +318,14 @@ fn process_execution_response(
                 schema.api_schema(),
             )
         });
+        println!(
+            "supergraphservice got response: {}",
+            serde_json::to_string(&response).unwrap()
+        );
 
         match (response.path.as_ref(), response.data.as_ref()) {
             (None, _) | (_, None) => {
-                if can_be_deferred {
+                if can_be_deferred && response.has_next.is_none() {
                     response.has_next = Some(true);
                 }
 
@@ -343,8 +347,10 @@ fn process_execution_response(
                     sub_responses.push((path.clone(), value.clone()));
                 });
 
+                let has_next = response.has_next.unwrap_or(true);
+
                 Response::builder()
-                    .has_next(true)
+                    .has_next(has_next)
                     .incremental(
                         sub_responses
                             .into_iter()
@@ -366,18 +372,7 @@ fn process_execution_response(
 
     Ok(SupergraphResponse {
         context,
-        response: http::Response::from_parts(
-            parts,
-            if can_be_deferred {
-                stream
-                    .chain(once(ready(Response::builder().has_next(false).build())))
-                    .left_stream()
-            } else {
-                stream.right_stream()
-            }
-            .in_current_span()
-            .boxed(),
-        ),
+        response: http::Response::from_parts(parts, stream.in_current_span().boxed()),
     })
 }
 

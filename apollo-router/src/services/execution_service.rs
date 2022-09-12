@@ -6,6 +6,8 @@ use std::task::Poll;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
+use futures::stream::FusedStream;
+use futures::SinkExt;
 use futures::StreamExt;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -53,7 +55,7 @@ where
         let fut = async move {
             let context = req.context;
             let ctx = context.clone();
-            let (sender, receiver) = futures::channel::mpsc::channel(10);
+            let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
             let first = req
                 .query_plan
@@ -66,9 +68,24 @@ where
                 )
                 .await;
 
-            let rest = receiver;
+            //let rest = receiver;
 
-            let stream = once(ready(first)).chain(rest).boxed();
+            let (mut sender2, receiver2) = futures::channel::mpsc::channel(10);
+
+            tokio::task::spawn(async move {
+                sender2.send(first).await;
+                while let Some(mut response) = receiver.next().await {
+                    if receiver.is_terminated() {
+                        println!("receiver is terminated, setting has_next to false");
+                        response.has_next = Some(false);
+                    } else {
+                        println!("receiver is not terminated");
+                    }
+                    sender2.send(response).await;
+                }
+                println!("end task");
+            });
+            let stream = receiver2.boxed();
 
             Ok(ExecutionResponse::new_from_response(
                 http::Response::new(stream as _),
