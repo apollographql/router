@@ -25,8 +25,18 @@ const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
 pub(crate) struct SupergraphSdl;
 
+// FIXME: remove these?
+#[allow(dead_code)]
+fn _unused(e: Error, s: Schema) {
+    if let Error::UpLink { code, message } = e {
+        let _ = code;
+        let _ = message;
+    }
+    let _ = s.id;
+}
+
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     Reqwest(reqwest::Error),
     EmptyResponse,
     UpLink {
@@ -42,13 +52,13 @@ impl From<reqwest::Error> for Error {
 }
 
 #[derive(Clone, Debug)]
-pub struct Schema {
-    pub id: String,
-    pub schema: String,
+pub(crate) struct Schema {
+    pub(crate) id: String,
+    pub(crate) schema: String,
 }
 
 /// regularly download a schema from Uplink
-pub fn stream_supergraph(
+pub(crate) fn stream_supergraph(
     api_key: String,
     graph_ref: String,
     urls: Option<Vec<Url>>,
@@ -123,7 +133,7 @@ pub fn stream_supergraph(
     ReceiverStream::new(receiver)
 }
 
-pub async fn fetch_supergraph(
+pub(crate) async fn fetch_supergraph(
     api_key: String,
     graph_ref: String,
     composition_id: Option<String>,

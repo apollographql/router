@@ -30,7 +30,7 @@ static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
-pub struct ReportSpaceport {
+pub(crate) struct ReportSpaceport {
     shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     listener: Option<TcpListener>,
     addr: SocketAddr,
@@ -45,7 +45,7 @@ impl ReportSpaceport {
     ///
     /// The spaceport will attempt to make the transfer 5 times before failing. If
     /// the spaceport fails, the data is discarded.
-    pub async fn new(
+    pub(crate) async fn new(
         addr: SocketAddr,
         shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     ) -> Result<Self, std::io::Error> {
@@ -76,12 +76,12 @@ impl ReportSpaceport {
         })
     }
 
-    pub fn address(&self) -> &SocketAddr {
+    pub(crate) fn address(&self) -> &SocketAddr {
         &self.addr
     }
 
     /// Start serving requests.
-    pub async fn serve(mut self) -> Result<(), Error> {
+    pub(crate) async fn serve(mut self) -> Result<(), Error> {
         let shutdown_signal = self
             .shutdown_signal
             .take()

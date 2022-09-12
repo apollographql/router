@@ -1,22 +1,24 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
-pub mod report {
+
+#[allow(unreachable_pub)]
+mod report {
     tonic::include_proto!("report");
 }
 
+#[allow(unreachable_pub)]
 mod agent {
     tonic::include_proto!("agent");
 }
 
 /// The server module contains the server components
-pub mod server;
+pub(crate) mod server;
 
 use std::error::Error;
 
 use agent::reporter_client::ReporterClient;
-pub use agent::*;
-pub use prost::*;
-pub use prost_types::Timestamp;
-pub use report::*;
+pub(crate) use agent::*;
+pub(crate) use prost::*;
+pub(crate) use report::*;
 use serde::ser::SerializeStruct;
 use sys_info::hostname;
 use tokio::task::JoinError;
@@ -27,9 +29,16 @@ use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 
+// FIXME: remove these?
+#[allow(dead_code)]
+fn _unused() {
+    let _ = Report::try_new;
+    let _ = Reporter::try_new_with_static;
+}
+
 /// Reporting Error type
 #[derive(Debug)]
-pub struct ReporterError {
+pub(crate) struct ReporterError {
     source: Box<dyn Error + Send + Sync + 'static>,
     msg: String,
 }
@@ -95,7 +104,7 @@ impl Report {
     /// Try to create a new Report.
     ///
     /// This can fail if the ReportHeader is not created.
-    pub fn try_new(graph: &str) -> Result<Self, ReporterError> {
+    pub(crate) fn try_new(graph: &str) -> Result<Self, ReporterError> {
         let header = Some(ReportHeader::try_new(graph)?);
 
         Ok(Report {
@@ -152,7 +161,7 @@ impl ReportHeader {
 /// The Reporter accepts requests from clients to transfer statistics
 /// and traces to the Apollo spaceport.
 #[derive(Debug)]
-pub struct Reporter {
+pub(crate) struct Reporter {
     client: ReporterClient<Channel>,
 }
 
@@ -162,7 +171,7 @@ impl Reporter {
     /// This can fail if:
     ///  - the address cannot be parsed
     ///  - the reporter can't connect to the address
-    pub async fn try_new<T: AsRef<str>>(addr: T) -> Result<Self, ReporterError>
+    pub(crate) async fn try_new<T: AsRef<str>>(addr: T) -> Result<Self, ReporterError>
     where
         prost::bytes::Bytes: From<T>,
     {
@@ -176,7 +185,7 @@ impl Reporter {
     /// This can fail if:
     ///  - the address cannot be parsed
     ///  - the reporter can't connect to the address
-    pub async fn try_new_with_static(addr: &'static str) -> Result<Self, ReporterError> {
+    pub(crate) async fn try_new_with_static(addr: &'static str) -> Result<Self, ReporterError> {
         let ep = Endpoint::from_static(addr);
         let client = ReporterClient::connect(ep).await?;
         Ok(Self { client })
@@ -185,7 +194,7 @@ impl Reporter {
     /// Submit a report onto the spaceport for eventual processing.
     ///
     /// The spaceport will buffer reports, transferring them when convenient.
-    pub async fn submit(
+    pub(crate) async fn submit(
         &mut self,
         request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
@@ -193,7 +202,7 @@ impl Reporter {
     }
 }
 
-pub fn serialize_timestamp<S>(
+pub(crate) fn serialize_timestamp<S>(
     timestamp: &Option<prost_types::Timestamp>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
