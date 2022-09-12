@@ -25,22 +25,15 @@ const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
 pub(crate) struct SupergraphSdl;
 
-// FIXME: remove these?
-#[allow(dead_code)]
-fn _unused(e: Error, s: Schema) {
-    if let Error::UpLink { code, message } = e {
-        let _ = code;
-        let _ = message;
-    }
-    let _ = s.id;
-}
-
 #[derive(Debug)]
 pub(crate) enum Error {
     Reqwest(reqwest::Error),
     EmptyResponse,
     UpLink {
+        // The lint ignores uses in the `Debug` impl, but this is where these fields are useful.
+        #[allow(dead_code)]
         code: FetchErrorCode,
+        #[allow(dead_code)]
         message: String,
     },
 }
@@ -53,7 +46,6 @@ impl From<reqwest::Error> for Error {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Schema {
-    pub(crate) id: String,
     pub(crate) schema: String,
 }
 
@@ -86,7 +78,6 @@ pub(crate) fn stream_supergraph(
                         composition_id = Some(schema_config.id.clone());
                         if sender
                             .send(Ok(Schema {
-                                id: schema_config.id,
                                 schema: schema_config.supergraph_sdl,
                             }))
                             .await
