@@ -106,7 +106,11 @@ impl Configuration {
     ) -> Self {
         let mut plugins = plugins;
         if dev.unwrap_or_default() {
-            plugins.insert("experimental.expose_query_plan".to_string(), Value::Bool(true));
+            tracing::info!("Development mode has been enabled.  This mode of operation is only meant for development!");
+            plugins.insert(
+                "experimental.expose_query_plan".to_string(),
+                Value::Bool(true),
+            );
             plugins.insert(
                 "experimental.include_subgraph_errors".to_string(),
                 json!({"all": true}),
