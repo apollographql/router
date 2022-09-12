@@ -4,6 +4,7 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
@@ -31,6 +32,11 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
+
+    /// Creation time
+    #[serde(skip)]
+    #[serde(default = "Instant::now")]
+    pub(crate) created_at: Instant,
 }
 
 impl Context {
@@ -38,6 +44,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
+            created_at: Instant::now(),
         }
     }
 }

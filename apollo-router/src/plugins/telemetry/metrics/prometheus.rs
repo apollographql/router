@@ -17,12 +17,36 @@ use tower_service::Service;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::router_factory::Endpoint;
 use crate::services::transport;
+use crate::ListenAddr;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
-    enabled: bool,
+    pub(crate) enabled: bool,
+    #[serde(default = "prometheus_default_listen_addr")]
+    pub(crate) listen: ListenAddr,
+    #[serde(default = "prometheus_default_path")]
+    pub(crate) path: String,
+}
+
+fn prometheus_default_listen_addr() -> ListenAddr {
+    ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr"))
+}
+
+fn prometheus_default_path() -> String {
+    "/metrics".to_string()
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen: prometheus_default_listen_addr(),
+            path: prometheus_default_path(),
+        }
+    }
 }
 
 impl MetricsConfigurator for Config {
@@ -44,12 +68,16 @@ impl MetricsConfigurator for Config {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 ))
                 .try_init()?;
+
             builder = builder.with_custom_endpoint(
-                "/prometheus",
-                PrometheusService {
-                    registry: exporter.registry().clone(),
-                }
-                .boxed(),
+                self.listen.clone(),
+                Endpoint::new(
+                    self.path.clone(),
+                    PrometheusService {
+                        registry: exporter.registry().clone(),
+                    }
+                    .boxed(),
+                ),
             );
             builder = builder.with_meter_provider(exporter.provider()?);
             builder = builder.with_exporter(exporter);

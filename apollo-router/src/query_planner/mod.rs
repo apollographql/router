@@ -32,6 +32,11 @@ mod bridge_query_planner;
 mod caching_query_planner;
 mod selection;
 
+pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
+pub(crate) const FLATTEN_SPAN_NAME: &str = "flatten";
+pub(crate) const SEQUENCE_SPAN_NAME: &str = "sequence";
+pub(crate) const PARALLEL_SPAN_NAME: &str = "parallel";
+
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub(crate) struct QueryPlanOptions {
@@ -139,6 +144,17 @@ impl PlanNode {
                 }
                 false
             }
+        }
+    }
+
+    pub(crate) fn contains_condition_or_defer(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_condition_or_defer()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_condition_or_defer()),
+            Self::Flatten(node) => node.node.contains_condition_or_defer(),
+            Self::Fetch(..) => false,
+            Self::Defer { .. } => true,
+            Self::Condition { .. } => true,
         }
     }
 
@@ -267,7 +283,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SF>,
-        originating_request: &'a Arc<http::Request<Request>>,
+        supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Schema,
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response
@@ -285,7 +301,7 @@ impl QueryPlan {
                     context,
                     service_factory,
                     schema,
-                    originating_request,
+                    supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     options: &self.options,
                 },
@@ -312,7 +328,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     context: &'a Context,
     service_factory: &'a Arc<SF>,
     schema: &'a Schema,
-    originating_request: &'a Arc<http::Request<Request>>,
+    supergraph_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     options: &'a QueryPlanOptions,
 }
@@ -338,7 +354,7 @@ impl PlanNode {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
                     errors = Vec::new();
-                    let span = tracing::info_span!("sequence");
+                    let span = tracing::info_span!(SEQUENCE_SPAN_NAME);
                     for node in nodes {
                         let (v, subselect, err) = node
                             .execute_recursively(parameters, current_dir, &value, sender.clone())
@@ -354,7 +370,7 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    let span = tracing::info_span!("parallel");
+                    let span = tracing::info_span!(PARALLEL_SPAN_NAME);
                     let mut stream: stream::FuturesUnordered<_> = nodes
                         .iter()
                         .map(|plan| {
@@ -379,15 +395,19 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
+                    // Note that the span must be `info` as we need to pick this up in apollo tracing
+                    let current_dir = current_dir.join(path);
                     let (v, subselect, err) = node
                         .execute_recursively(
                             parameters,
                             // this is the only command that actually changes the "current dir"
-                            &current_dir.join(path),
+                            &current_dir,
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::trace_span!("flatten"))
+                        .instrument(
+                            tracing::info_span!(FLATTEN_SPAN_NAME, apollo_private.path = %current_dir),
+                        )
                         .await;
 
                     value = v;
@@ -395,11 +415,15 @@ impl PlanNode {
                     subselection = subselect;
                 }
                 PlanNode::Fetch(fetch_node) => {
+                    let fetch_time_offset =
+                        parameters.context.created_at.elapsed().as_nanos() as i64;
                     match fetch_node
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
-                            "fetch",
+                            FETCH_SPAN_NAME,
                             "otel.kind" = %SpanKind::Internal,
+                            "service.name" = fetch_node.service_name.as_str(),
+                            "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
                         .await
                     {
@@ -464,13 +488,14 @@ impl PlanNode {
                         let label = deferred_node.label.clone();
                         let mut tx = sender.clone();
                         let sc = parameters.schema.clone();
-                        let orig = parameters.originating_request.clone();
+                        let orig = parameters.supergraph_request.clone();
                         let sf = parameters.service_factory.clone();
                         let ctx = parameters.context.clone();
                         let opt = parameters.options.clone();
                         let mut primary_receiver = primary_sender.subscribe();
                         let mut value = parent_value.clone();
                         let fut = async move {
+                            let mut has_next = true;
                             let mut errors = Vec::new();
 
                             if is_depends_empty {
@@ -500,7 +525,7 @@ impl PlanNode {
                                             context: &ctx,
                                             service_factory: &sf,
                                             schema: &sc,
-                                            originating_request: &orig,
+                                            supergraph_request: &orig,
                                             deferred_fetches: &deferred_fetches,
                                             options: &opt,
                                         },
@@ -515,6 +540,7 @@ impl PlanNode {
                                 if !is_depends_empty {
                                     let primary_value =
                                         primary_receiver.recv().await.unwrap_or_default();
+                                    has_next = false;
                                     v.deep_merge(primary_value);
                                 }
 
@@ -522,6 +548,7 @@ impl PlanNode {
                                     .send(
                                         Response::builder()
                                             .data(v)
+                                            .has_next(has_next)
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection.or(node_subselection))
@@ -539,12 +566,13 @@ impl PlanNode {
                             } else {
                                 let primary_value =
                                     primary_receiver.recv().await.unwrap_or_default();
+                                has_next = false;
                                 value.deep_merge(primary_value);
-
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
                                             .data(value)
+                                            .has_next(has_next)
                                             .errors(errors)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)
@@ -582,7 +610,7 @@ impl PlanNode {
                                     context: parameters.context,
                                     service_factory: parameters.service_factory,
                                     schema: parameters.schema,
-                                    originating_request: parameters.originating_request,
+                                    supergraph_request: parameters.supergraph_request,
                                     deferred_fetches: &deferred_fetches,
                                     options: parameters.options,
                                 },
@@ -616,7 +644,7 @@ impl PlanNode {
                     errors = Vec::new();
 
                     if let Some(&Value::Bool(true)) = parameters
-                        .originating_request
+                        .supergraph_request
                         .body()
                         .variables
                         .get(condition.as_str())
@@ -928,7 +956,7 @@ pub(crate) mod fetch {
                 data,
                 current_dir,
                 // Needs the original request here
-                parameters.originating_request,
+                parameters.supergraph_request,
                 parameters.schema,
                 parameters.options.enable_deduplicate_variables,
             )
@@ -941,7 +969,7 @@ pub(crate) mod fetch {
             };
 
             let subgraph_request = SubgraphRequest::builder()
-                .originating_request(parameters.originating_request.clone())
+                .supergraph_request(parameters.supergraph_request.clone())
                 .subgraph_request(
                     http_ext::Request::builder()
                         .method(http::Method::POST)
@@ -1541,7 +1569,7 @@ mod tests {
             serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}}, "hasNext": false, "path":["t"]}}
         );
     }
 
