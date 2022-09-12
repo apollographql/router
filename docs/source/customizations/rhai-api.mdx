@@ -71,7 +71,7 @@ fn supergraph_service(service) {
 
 ## Timing execution
 
-Your Rhai customization can use the global `apollo_start` variable to calculate durations. This is similar to `Epoch` in Unix environments.
+Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
 fn supergraph_service(service) {
@@ -92,6 +92,15 @@ fn supergraph_service(service) {
 }
 ```
 
+## Accessing the SDL
+
+Your Rhai customization can use the global `apollo_sdl` constant to examine the supergraph.
+
+```rhai
+fn supergraph_service(service) {
+    print(`${apollo_sdl}`);
+}
+```
 
 ## `Request` interface
 

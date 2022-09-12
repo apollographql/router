@@ -1,5 +1,6 @@
 //! Calls out to nodejs query planner
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,8 +10,8 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
 
@@ -151,7 +152,7 @@ impl BridgeQueryPlanner {
 impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     type Response = QueryPlannerResponse;
 
-    type Error = BoxError;
+    type Error = QueryPlannerError;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -169,11 +170,45 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
-                    query_planner_content,
-                    req.context,
-                )),
-                Err(e) => Err(tower::BoxError::from(e)),
+                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
+                    .content(query_planner_content)
+                    .context(req.context)
+                    .build()),
+                Err(e) => {
+                    match &e {
+                        QueryPlannerError::PlanningErrors(pe) => {
+                            if let Err(inner_e) = req
+                                .context
+                                .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                            {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        }
+                        QueryPlannerError::SpecError(e) => {
+                            let error_key = match e {
+                                SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                                _ => "## GraphQLValidationFailure\n",
+                            };
+                            if let Err(inner_e) = req.context.insert(
+                                USAGE_REPORTING,
+                                UsageReporting {
+                                    stats_report_key: error_key.to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                },
+                            ) {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        }
+                        _ => (),
+                    }
+                    Err(e)
+                }
             }
         };
 

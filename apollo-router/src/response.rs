@@ -219,13 +219,14 @@ impl IncrementalResponse {
         self.errors.append(errors)
     }
 }
+
 #[cfg(test)]
 mod tests {
+    use router_bridge::planner::Location;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
 
     use super::*;
-    use crate::error::Location;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

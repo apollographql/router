@@ -310,7 +310,7 @@ impl Server {
 }
 
 /// Listening address.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ListenAddr {
     /// Socket address.
