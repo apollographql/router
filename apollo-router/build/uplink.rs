@@ -6,9 +6,9 @@ pub fn main() {
     use std::io::Write;
     use std::path::PathBuf;
 
-    use launchpad::blocking::GraphQLClient;
-    use launchpad::introspect::GraphIntrospectInput;
-    use launchpad::introspect::{self};
+    use introspector_gadget::blocking::GraphQLClient;
+    use introspector_gadget::introspect;
+    use introspector_gadget::introspect::GraphIntrospectInput;
 
     if let Ok("debug") = std::env::var("PROFILE").as_deref() {
         let client = GraphQLClient::new(
@@ -17,11 +17,13 @@ pub fn main() {
         )
         .unwrap();
 
+        let should_retry = true;
         let introspection_response = introspect::run(
             GraphIntrospectInput {
                 headers: HashMap::new(),
             },
             &client,
+            should_retry,
         )
         .unwrap();
 
