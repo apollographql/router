@@ -104,7 +104,7 @@ pub(crate) fn make_axum_router<RF>(
 where
     RF: SupergraphServiceFactory,
 {
-    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(dbg!(configuration)) {
+    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(configuration) {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
             Endpoint::new(
