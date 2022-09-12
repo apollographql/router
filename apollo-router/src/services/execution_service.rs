@@ -74,14 +74,35 @@ where
 
             tokio::task::spawn(async move {
                 sender2.send(first).await;
-                while let Some(mut response) = receiver.next().await {
-                    if receiver.is_terminated() {
-                        println!("receiver is terminated, setting has_next to false");
-                        response.has_next = Some(false);
-                    } else {
-                        println!("receiver is not terminated");
+                while let Some(mut current_response) = receiver.next().await {
+                    //let next_response = None;
+                    loop {
+                        match receiver.try_next() {
+                            // no messages available, but the channel is not closed
+                            Err(_) => {
+                                println!("receiver is not terminated 1");
+
+                                sender2.send(current_response).await;
+
+                                break;
+                            }
+
+                            Ok(Some(response)) => {
+                                println!("receiver is not terminated 2");
+
+                                sender2.send(current_response).await;
+                                // there might be other responses in the channel, so we call `try_next` again
+                                current_response = response;
+                            }
+                            // the channel is closed
+                            Ok(None) => {
+                                println!("receiver is terminated, setting has_next to false");
+                                current_response.has_next = Some(false);
+                                sender2.send(current_response).await;
+                                break;
+                            }
+                        }
                     }
-                    sender2.send(response).await;
                 }
                 println!("end task");
             });
