@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/query_planner/bridge_query_planner.rs
-expression: result.usage_reporting
+expression: plan.usage_reporting
 ---
 {
   "statsReportKey": "# -\n{me{name{first last}}}",
