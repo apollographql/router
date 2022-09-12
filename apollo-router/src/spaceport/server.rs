@@ -20,11 +20,11 @@ use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 
-use crate::agent::reporter_server::Reporter;
-use crate::agent::reporter_server::ReporterServer;
-use crate::agent::ReporterRequest;
-use crate::agent::ReporterResponse;
-use crate::report::Report;
+use crate::spaceport::agent::reporter_server::Reporter;
+use crate::spaceport::agent::reporter_server::ReporterServer;
+use crate::spaceport::agent::ReporterRequest;
+use crate::spaceport::agent::ReporterResponse;
+use crate::spaceport::report::Report;
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";

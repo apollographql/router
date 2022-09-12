@@ -141,8 +141,6 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-parser",
- "apollo-spaceport",
- "apollo-uplink",
  "async-compression",
  "async-trait",
  "atty",
@@ -161,7 +159,9 @@ dependencies = [
  "directories",
  "displaydoc",
  "envmnt",
+ "flate2",
  "futures",
+ "graphql_client",
  "hex 0.4.3",
  "hotwatch",
  "http",
@@ -175,6 +175,7 @@ dependencies = [
  "itertools",
  "jsonpath_lib",
  "jsonschema",
+ "launchpad",
  "lazy_static",
  "libc",
  "lru",
@@ -197,6 +198,8 @@ dependencies = [
  "paste",
  "pin-project-lite",
  "prometheus",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
  "rand",
  "regex",
  "reqwest",
@@ -219,6 +222,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.3",
  "tonic 0.6.2",
+ "tonic-build",
  "tower",
  "tower-http",
  "tower-service",
@@ -277,42 +281,6 @@ dependencies = [
  "apollo-parser",
  "arbitrary",
  "once_cell",
-]
-
-[[package]]
-name = "apollo-spaceport"
-version = "1.0.0-alpha.3"
-dependencies = [
- "bytes",
- "clap 3.2.20",
- "flate2",
- "prost 0.9.0",
- "prost-types 0.9.0",
- "reqwest",
- "serde",
- "sys-info",
- "tokio",
- "tokio-stream",
- "tonic 0.6.2",
- "tonic-build",
- "tracing",
- "tracing-subscriber",
- "uname",
-]
-
-[[package]]
-name = "apollo-uplink"
-version = "1.0.0-alpha.3"
-dependencies = [
- "futures",
- "graphql_client",
- "launchpad",
- "reqwest",
- "serde",
- "tokio",
- "tokio-stream",
- "tracing",
- "url",
 ]
 
 [[package]]

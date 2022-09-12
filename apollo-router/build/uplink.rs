@@ -1,9 +1,10 @@
 #[cfg(not(windows))]
-fn main() {
+pub fn main() {
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::Read;
     use std::io::Write;
+    use std::path::PathBuf;
 
     use launchpad::blocking::GraphQLClient;
     use launchpad::introspect::GraphIntrospectInput;
@@ -26,8 +27,12 @@ fn main() {
 
         let data = introspection_response.schema_sdl;
 
-        match File::open("uplink.graphql") {
-            Err(_) => File::create("uplink.graphql")
+        let path = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("src")
+            .join("uplink")
+            .join("uplink.graphql");
+        match File::open(&path) {
+            Err(_) => File::create(path)
                 .expect("could not create uplink.graphql file")
                 .write_all(data.as_bytes())
                 .expect("could not write downloaded uplink schema"),
@@ -48,4 +53,4 @@ fn main() {
 // the uplink schema check will fail on Windows due to different line endings
 // this is already tested on other platforms and in CI
 #[cfg(windows)]
-fn main() {}
+pub fn main() {}

@@ -5,6 +5,7 @@ authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
 publish = false
+build = "build/main.rs"
 
 [[bin]]
 name = "router"
@@ -24,10 +25,6 @@ console = ["tokio/tracing", "console-subscriber"]
 access-json = "0.1.0"
 anyhow = "1.0.64"
 apollo-parser = "0.2.10"
-# ELv2 licensing: The apollo-spaceport crate is license key functionality
-apollo-spaceport = { path = "../apollo-spaceport" }
-# ELv2 licensing: The apollo-uplink crate is license key functionality
-apollo-uplink = { path = "../uplink" }
 async-compression = { version = "0.3.14", features = [
     "tokio",
     "brotli",
@@ -58,7 +55,9 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 directories = "4.0.1"
 displaydoc = "0.2"
 envmnt = "0.10.4"
+flate2 = "1.0.24"
 futures = { version = "0.3.24", features = ["thread-pool"] }
+graphql_client = "0.11.0"
 hex = "0.4.3"
 hotwatch = "0.4.6"
 http = "0.2.8"
@@ -121,6 +120,8 @@ opentelemetry-prometheus = "0.10.0"
 paste = "1.0.9"
 pin-project-lite = "0.2.9"
 prometheus = "0.13"
+prost = "0.9.0"
+prost-types = "0.9.0"
 rand = "0.8.5"
 rhai = { version = "1.10.0", features = ["sync", "serde", "internals"] }
 regex = "1.6.0"
@@ -141,7 +142,7 @@ static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.34"
 tokio = { version = "1.21.0", features = ["full"] }
-tokio-stream = { version = "0.1.9", features = ["sync"] }
+tokio-stream = { version = "0.1.9", features = ["sync", "net"] }
 tokio-util = { version = "0.7.3", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls"] }
 tower = { version = "0.4.13", features = ["full"] }
@@ -209,6 +210,16 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
+
+[build-dependencies]
+launchpad = { git = "https://github.com/apollographql/rover.git", rev = "d72ad078d9d845112bd33bd100a723a1fa0e72ff" }
+reqwest = { version = "0.11.11", default-features = false, features = [
+    "rustls-tls",
+    "blocking",
+] }
+tonic-build = "0.6.2"
+
+
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"

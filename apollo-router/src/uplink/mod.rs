@@ -16,8 +16,8 @@ const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
 #[derive(GraphQLQuery)]
 #[graphql(
-    query_path = "query.graphql",
-    schema_path = "uplink.graphql",
+    query_path = "src/uplink/query.graphql",
+    schema_path = "src/uplink/uplink.graphql",
     request_derives = "Debug",
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
