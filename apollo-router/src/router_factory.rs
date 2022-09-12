@@ -1,11 +1,14 @@
-use std::collections::HashMap;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
+use axum::response::IntoResponse;
+use http::StatusCode;
+use multimap::MultiMap;
 use serde_json::Map;
 use serde_json::Value;
+use tower::service_fn;
 use tower::BoxError;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
@@ -16,9 +19,48 @@ use crate::plugin::Handler;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::transport;
+use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
+#[derive(Clone)]
+pub struct Endpoint {
+    path: String,
+    // Plugins need to be Send + Sync
+    // BoxCloneService isn't enough
+    handler: Handler,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
+impl Endpoint {
+    pub fn new(path: String, handler: transport::BoxService) -> Self {
+        Self {
+            path,
+            handler: Handler::new(handler),
+        }
+    }
+    pub(crate) fn into_router(self) -> axum::Router {
+        let handler = move |req: http::Request<hyper::Body>| {
+            let endpoint = self.handler.clone();
+            async move {
+                Ok(endpoint
+                    .oneshot(req)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                    .into_response())
+            }
+        };
+        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+    }
+}
 /// Factory for creating a SupergraphService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
@@ -32,13 +74,13 @@ pub(crate) trait SupergraphServiceFactory:
 {
     type SupergraphService: Service<
             http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            Response = http::Response<graphql::ResponseStream>,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
     type Future: Send;
 
-    fn custom_endpoints(&self) -> HashMap<String, Handler>;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
 /// Factory for creating a SupergraphServiceFactory

@@ -1,311 +1,493 @@
-//! # Apollo-Telemetry Span Exporter
-//!
-//! The apollo-telemetry [`SpanExporter`] sends [`Report`]s to its configured
-//! [`Reporter`] instance. By default it will write to the Apollo Ingress.
-//!
-//! [`SpanExporter`]: SpanExporter
-//! [`Span`]: crate::trace::Span
-//! [`Report`]: apollo_spaceport::report::Report
-//! [`Reporter`]: apollo_spaceport::Reporter
-//!
-//! # Examples
-//!
-//! ```ignore
-//! use apollo_router::apollo_telemetry;
-//! use opentelemetry::trace::Tracer;
-//! use opentelemetry::global::shutdown_tracer_provider;
-//!
-//! fn main() {
-//!     let tracer = apollo_telemetry::new_pipeline()
-//!         .install_simple();
-//!
-//!     tracer.in_span("doing_work", |cx| {
-//!         // Traced app logic here...
-//!     });
-//!
-//!     shutdown_tracer_provider(); // sending remaining spans
-//! }
-//! ```
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::Debug;
-use std::str::FromStr;
+use std::io::Cursor;
+use std::time::SystemTimeError;
 
-use apollo_spaceport::Reporter;
+use apollo_spaceport::trace::http::Values;
+use apollo_spaceport::trace::query_plan_node::FetchNode;
+use apollo_spaceport::trace::query_plan_node::FlattenNode;
+use apollo_spaceport::trace::query_plan_node::ParallelNode;
+use apollo_spaceport::trace::query_plan_node::ResponsePathElement;
+use apollo_spaceport::trace::query_plan_node::SequenceNode;
+use apollo_spaceport::trace::Details;
+use apollo_spaceport::trace::Http;
+use apollo_spaceport::trace::QueryPlanNode;
+use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
-use opentelemetry::global;
-use opentelemetry::runtime::Tokio;
-use opentelemetry::sdk;
+use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::export::ExportError;
-use opentelemetry::trace::TracerProvider;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use tokio::task::JoinError;
+use opentelemetry::trace::SpanId;
+use opentelemetry::Key;
+use opentelemetry::Value;
+use thiserror::Error;
+use url::Url;
 
-const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
+use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_exporter::Sender;
+use crate::plugins::telemetry::config;
+use crate::plugins::telemetry::config::Sampler;
+use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::tracing::apollo::TracesReport;
+use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
+use crate::query_planner::FETCH_SPAN_NAME;
+use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::SEQUENCE_SPAN_NAME;
 
-pub(crate) fn default_collector() -> String {
-    DEFAULT_SERVER_URL.to_string()
-}
+const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
+const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
+    Key::from_static_str("apollo_private.sent_time_offset");
+const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
+    Key::from_static_str("apollo_private.graphql.variables");
+const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.request_headers");
+const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
+    Key::from_static_str("apollo_private.operation_signature");
+const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
+const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
+const FTV1_DO_NOT_SAMPLE_REASON: Key = Key::from_static_str("ftv1.do_not_sample_reason");
+const SERVICE_NAME: Key = Key::from_static_str("service.name");
+const CLIENT_NAME: Key = Key::from_static_str("client.name");
+const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+const HTTP_METHOD: Key = Key::from_static_str("http.method");
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) struct SpaceportConfig {
-    #[serde(default = "default_collector")]
-    pub(crate) collector: String,
-}
+#[derive(Error, Debug)]
+pub(crate) enum Error {
+    #[error("subgraph protobuf decode error")]
+    ProtobufDecode(#[from] apollo_spaceport::DecodeError),
 
-#[allow(dead_code)]
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
-#[derivative(Debug)]
-pub(crate) struct StudioGraph {
-    #[serde(skip, default = "apollo_graph_reference")]
-    pub(crate) reference: String,
+    #[error("subgraph trace payload was not base64")]
+    Base64Decode(#[from] base64::DecodeError),
 
-    #[serde(skip, default = "apollo_key")]
-    #[derivative(Debug = "ignore")]
-    pub(crate) key: String,
-}
+    #[error("ftv1 span attribute should have been a string")]
+    Ftv1SpanAttribute,
 
-fn apollo_key() -> String {
-    std::env::var("APOLLO_KEY")
-        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
-}
+    #[error("there were multiple tracing errors")]
+    MultipleErrors(Vec<Error>),
 
-fn apollo_graph_reference() -> String {
-    std::env::var("APOLLO_GRAPH_REF").expect(
-        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
-    )
-}
+    #[error("duration could not be calculated")]
+    SystemTime(#[from] SystemTimeError),
 
-impl Default for SpaceportConfig {
-    fn default() -> Self {
-        Self {
-            collector: default_collector(),
-        }
-    }
-}
-/// Pipeline builder
-#[derive(Debug)]
-pub(crate) struct PipelineBuilder {
-    graph_config: Option<StudioGraph>,
-    spaceport_config: Option<SpaceportConfig>,
-    trace_config: Option<sdk::trace::Config>,
-}
-
-/// Create a new apollo telemetry exporter pipeline builder.
-pub(crate) fn new_pipeline() -> PipelineBuilder {
-    PipelineBuilder::default()
-}
-
-impl Default for PipelineBuilder {
-    /// Return the default pipeline builder.
-    fn default() -> Self {
-        Self {
-            graph_config: None,
-            spaceport_config: None,
-            trace_config: None,
-        }
-    }
-}
-
-#[allow(dead_code)]
-impl PipelineBuilder {
-    const DEFAULT_BATCH_SIZE: usize = 65_536;
-    const DEFAULT_QUEUE_SIZE: usize = 65_536;
-
-    /// Assign the SDK trace configuration.
-    #[allow(dead_code)]
-    pub(crate) fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
-        self.trace_config = Some(config);
-        self
-    }
-
-    /// Assign graph identification configuration
-    pub(crate) fn with_graph_config(mut self, config: &Option<StudioGraph>) -> Self {
-        self.graph_config = config.clone();
-        self
-    }
-
-    /// Assign spaceport reporting configuration
-    pub(crate) fn with_spaceport_config(mut self, config: &Option<SpaceportConfig>) -> Self {
-        self.spaceport_config = config.clone();
-        self
-    }
-
-    /// Install the apollo telemetry exporter pipeline with the recommended defaults.
-    pub(crate) fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
-        let exporter = self.build_exporter()?;
-
-        // Users can override the default batch and queue sizes, but they can't
-        // set them to be lower than our specified defaults;
-        let queue_size = match std::env::var("OTEL_BSP_MAX_QUEUE_SIZE")
-            .ok()
-            .and_then(|queue_size| usize::from_str(&queue_size).ok())
-        {
-            Some(v) => {
-                let result = usize::max(PipelineBuilder::DEFAULT_QUEUE_SIZE, v);
-                if result > v {
-                    tracing::warn!(
-                        "Ignoring 'OTEL_BSP_MAX_QUEUE_SIZE' setting. Cannot set max queue size lower than {}",
-                        PipelineBuilder::DEFAULT_QUEUE_SIZE
-                    );
-                }
-                result
-            }
-            None => PipelineBuilder::DEFAULT_QUEUE_SIZE,
-        };
-        let batch_size = match std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
-            .ok()
-            .and_then(|batch_size| usize::from_str(&batch_size).ok())
-        {
-            Some(v) => {
-                let result = usize::max(PipelineBuilder::DEFAULT_BATCH_SIZE, v);
-                if result > v {
-                    tracing::warn!(
-                        "Ignoring 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE' setting. Cannot set max export batch size lower than {}",
-                        PipelineBuilder::DEFAULT_BATCH_SIZE
-                    );
-                }
-                // Batch size must be <= queue size
-                if result > queue_size {
-                    tracing::warn!(
-                        "Clamping 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE' setting to {}. Cannot set max export batch size greater than max queue size",
-                        queue_size
-                    );
-                    queue_size
-                } else {
-                    result
-                }
-            }
-            None => PipelineBuilder::DEFAULT_BATCH_SIZE,
-        };
-        let batch = sdk::trace::BatchSpanProcessor::builder(exporter, Tokio)
-            .with_max_queue_size(queue_size)
-            .with_max_export_batch_size(batch_size)
-            .build();
-
-        let mut provider_builder = sdk::trace::TracerProvider::builder().with_span_processor(batch);
-        if let Some(config) = self.trace_config.take() {
-            provider_builder = provider_builder.with_config(config);
-        }
-        let provider = provider_builder.build();
-
-        let tracer = provider.versioned_tracer(
-            "apollo-opentelemetry",
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
-        // This code will hang unless we execute from a separate
-        // thread.  See:
-        // https://github.com/apollographql/router/issues/331
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
-        // for more details and description.
-        let jh = tokio::task::spawn_blocking(|| {
-            opentelemetry::global::force_flush_tracer_provider();
-            opentelemetry::global::set_tracer_provider(provider);
-        });
-        futures::executor::block_on(jh)?;
-
-        Ok(tracer)
-    }
-
-    // XXX CANNOT USE SIMPLE WITH OUR IMPLEMENTATION AS NO RUNTIME EXISTS
-    // WHEN TRYING TO EXPORT...
-    /// Install the apollo telemetry exporter pipeline with the recommended defaults.
-    #[allow(dead_code)]
-    pub(crate) fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
-        let exporter = self.build_exporter()?;
-
-        let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
-        if let Some(config) = self.trace_config.take() {
-            provider_builder = provider_builder.with_config(config);
-        }
-        let provider = provider_builder.build();
-
-        let tracer = provider.versioned_tracer(
-            "apollo-opentelemetry",
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
-        let _prev_global_provider = global::set_tracer_provider(provider);
-
-        Ok(tracer)
-    }
-
-    /// Create a client to talk to our spaceport and return an exporter.
-    pub(crate) fn build_exporter(&self) -> Result<Exporter, ApolloError> {
-        let collector = match self.spaceport_config.clone() {
-            Some(cfg) => cfg.collector,
-            None => DEFAULT_SERVER_URL.to_string(),
-        };
-        let graph = self.graph_config.clone();
-
-        tracing::debug!("collector: {}", collector);
-        tracing::debug!("graph: {:?}", graph);
-
-        Ok(Exporter::new(collector, graph))
-    }
+    #[error("this trace should not be sampled")]
+    DoNotSample(Cow<'static, str>),
 }
 
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: apollo_spaceport::Reporter
-#[derive(Debug)]
-#[allow(dead_code)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct Exporter {
-    collector: String,
-    graph: Option<StudioGraph>,
-    reporter: tokio::sync::OnceCell<Reporter>,
-    normalized_queries: HashMap<String, String>,
+    trace_config: config::Trace,
+    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
+    endpoint: Url,
+    schema_id: String,
+    #[derivative(Debug = "ignore")]
+    apollo_sender: Sender,
+    field_execution_weight: f64,
 }
 
+enum TreeData {
+    Request(Result<Box<apollo_spaceport::Trace>, Error>),
+    Supergraph {
+        http: Http,
+        client_name: Option<String>,
+        client_version: Option<String>,
+        operation_signature: String,
+    },
+    QueryPlan(QueryPlanNode),
+    Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
+}
+
+#[buildstructor::buildstructor]
 impl Exporter {
-    /// Create a new apollo telemetry `Exporter`.
-    pub(crate) fn new(collector: String, graph: Option<StudioGraph>) -> Self {
-        Self {
-            collector,
-            graph,
-            reporter: tokio::sync::OnceCell::new(),
-            normalized_queries: HashMap::new(),
+    #[builder]
+    pub(crate) fn new(
+        trace_config: config::Trace,
+        endpoint: Url,
+        apollo_key: String,
+        apollo_graph_ref: String,
+        schema_id: String,
+        buffer_size: usize,
+        field_execution_sampler: Option<SamplerOption>,
+    ) -> Result<Self, BoxError> {
+        let apollo_exporter =
+            ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
+        Ok(Self {
+            spans_by_parent_id: LruCache::new(buffer_size),
+            trace_config,
+            endpoint,
+            schema_id,
+            apollo_sender: apollo_exporter.provider(),
+            field_execution_weight: match field_execution_sampler {
+                Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
+                Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
+                Some(SamplerOption::TraceIdRatioBased(ratio)) => 1.0 / ratio,
+                None => 0.0,
+            },
+        })
+    }
+
+    fn extract_root_trace(
+        &mut self,
+        span: &SpanData,
+        child_nodes: Vec<TreeData>,
+    ) -> Result<Box<apollo_spaceport::Trace>, Error> {
+        let variables = span
+            .attributes
+            .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
+            .map(|data| data.as_str())
+            .unwrap_or_default();
+        let variables_json = if variables != "{}" {
+            serde_json::from_str(&variables).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+        let details = Details {
+            variables_json,
+            ..Default::default()
+        };
+
+        let http = self.extract_http_data(span);
+
+        let mut root_trace = apollo_spaceport::Trace {
+            start_time: Some(span.start_time.into()),
+            end_time: Some(span.end_time.into()),
+            duration_ns: span
+                .attributes
+                .get(&APOLLO_PRIVATE_DURATION_NS)
+                .and_then(Self::extract_i64)
+                .map(|e| e as u64)
+                .unwrap_or_default(),
+            root: None,
+            details: Some(details),
+            http: Some(http),
+            ..Default::default()
+        };
+
+        for node in child_nodes {
+            match node {
+                TreeData::QueryPlan(query_plan) => {
+                    root_trace.query_plan = Some(Box::new(query_plan))
+                }
+                TreeData::Supergraph {
+                    http,
+                    client_name,
+                    client_version,
+                    operation_signature,
+                } => {
+                    root_trace
+                        .http
+                        .as_mut()
+                        .expect("http was extracted earlier, qed")
+                        .request_headers = http.request_headers;
+                    root_trace.client_name = client_name.unwrap_or_default();
+                    root_trace.client_version = client_version.unwrap_or_default();
+                    root_trace.field_execution_weight = self.field_execution_weight;
+                    // This will be moved out later
+                    root_trace.signature = operation_signature;
+                }
+                _ => panic!("should never have had other node types"),
+            }
+        }
+
+        Ok(Box::new(root_trace))
+    }
+
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<apollo_spaceport::Trace>, Error> {
+        self.extract_data_from_spans(&span, &span)?
+            .pop()
+            .and_then(|node| {
+                if let TreeData::Request(trace) = node {
+                    Some(trace)
+                } else {
+                    None
+                }
+            })
+            .expect("root trace must exist because it is constructed on the request span, qed")
+    }
+
+    fn extract_data_from_spans(
+        &mut self,
+        root_span: &SpanData,
+        span: &SpanData,
+    ) -> Result<Vec<TreeData>, Error> {
+        let (mut child_nodes, errors) = self
+            .spans_by_parent_id
+            .pop_entry(&span.span_context.span_id())
+            .map(|(_, spans)| spans)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|span| self.extract_data_from_spans(root_span, &span))
+            .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
+                match next {
+                    Ok(mut children) => oks.append(&mut children),
+                    Err(err) => errors.push(err),
+                }
+                (oks, errors)
+            });
+        if !errors.is_empty() {
+            return Err(Error::MultipleErrors(errors));
+        }
+        if let Some(Value::String(reason)) = span.attributes.get(&FTV1_DO_NOT_SAMPLE_REASON) {
+            if !reason.is_empty() {
+                return Err(Error::DoNotSample(reason.clone()));
+            }
+        }
+
+        Ok(match span.name.as_ref() {
+            PARALLEL_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
+                node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
+                    ParallelNode {
+                        nodes: child_nodes
+                            .into_iter()
+                            .filter_map(|child| match child {
+                                TreeData::QueryPlan(node) => Some(node),
+                                _ => None,
+                            })
+                            .collect(),
+                    },
+                )),
+            })],
+            SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
+                node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
+                    SequenceNode {
+                        nodes: child_nodes
+                            .into_iter()
+                            .filter_map(|child| match child {
+                                TreeData::QueryPlan(node) => Some(node),
+                                _ => None,
+                            })
+                            .collect(),
+                    },
+                )),
+            })],
+            FETCH_SPAN_NAME => {
+                let (trace_parsing_failed, trace) = match child_nodes.pop() {
+                    Some(TreeData::Trace(Ok(trace))) => (false, trace),
+                    Some(TreeData::Trace(Err(_err))) => (true, None),
+                    _ => (false, None),
+                };
+                let service_name = (span
+                    .attributes
+                    .get(&SERVICE_NAME)
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("unknown service".into()))
+                    .as_str())
+                .to_string();
+                vec![TreeData::QueryPlan(QueryPlanNode {
+                    node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
+                        Box::new(FetchNode {
+                            service_name,
+                            trace_parsing_failed,
+                            trace,
+                            sent_time_offset: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
+                                .and_then(Self::extract_i64)
+                                .map(|f| f as u64)
+                                .unwrap_or_default(),
+                            sent_time: Some(span.start_time.into()),
+                            received_time: Some(span.end_time.into()),
+                        }),
+                    )),
+                })]
+            }
+            FLATTEN_SPAN_NAME => {
+                vec![TreeData::QueryPlan(QueryPlanNode {
+                    node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
+                        Box::new(FlattenNode {
+                            response_path: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_PATH)
+                                .and_then(Self::extract_string)
+                                .map(|v| {
+                                    v.split('/').filter(|v|!v.is_empty() && *v != "@").map(|v| {
+                                        if let Ok(index) = v.parse::<u32>() {
+                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
+                                        } else {
+                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
+                                        }
+                                    }).collect()
+                                }).unwrap_or_default(),
+                            node: child_nodes
+                                .into_iter()
+                                .filter_map(|child| match child {
+                                    TreeData::QueryPlan(node) => Some(Box::new(node)),
+                                    _ => None,
+                                })
+                                .next(),
+                        }),
+                    )),
+                })]
+            }
+            SUBGRAPH_SPAN_NAME => {
+                vec![TreeData::Trace(self.find_ftv1_trace(span))]
+            }
+            SUPERGRAPH_SPAN_NAME => {
+                //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
+                child_nodes.push(TreeData::Supergraph {
+                    http: self.extract_http_data(span),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME)
+                        .and_then(Self::extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .and_then(Self::extract_string),
+                    operation_signature: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .and_then(Self::extract_string)
+                        .unwrap_or_default(),
+                });
+                child_nodes
+            }
+            REQUEST_SPAN_NAME => {
+                vec![TreeData::Request(
+                    self.extract_root_trace(span, child_nodes),
+                )]
+            }
+            _ => child_nodes,
+        })
+    }
+
+    fn extract_string(v: &Value) -> Option<String> {
+        if let Value::String(v) = v {
+            Some(v.to_string())
+        } else {
+            None
         }
     }
-}
 
-/// Apollo Telemetry exporter's error
-#[derive(thiserror::Error, Debug)]
-#[error(transparent)]
-pub(crate) struct ApolloError(#[from] apollo_spaceport::ReporterError);
-
-impl From<std::io::Error> for ApolloError {
-    fn from(error: std::io::Error) -> Self {
-        ApolloError(error.into())
+    fn extract_i64(v: &Value) -> Option<i64> {
+        if let Value::I64(v) = v {
+            Some(*v)
+        } else {
+            None
+        }
     }
-}
 
-impl From<JoinError> for ApolloError {
-    fn from(error: JoinError) -> Self {
-        ApolloError(error.into())
+    fn find_ftv1_trace(
+        &mut self,
+        span: &SpanData,
+    ) -> Result<Option<Box<apollo_spaceport::Trace>>, Error> {
+        span.attributes
+            .get(&APOLLO_PRIVATE_FTV1)
+            .map(|data| {
+                if let Value::String(data) = data {
+                    Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
+                        base64::decode(data.to_string())?,
+                    ))?))
+                } else {
+                    Err(Error::Ftv1SpanAttribute)
+                }
+            })
+            .transpose()
     }
-}
 
-impl ExportError for ApolloError {
-    fn exporter_name(&self) -> &'static str {
-        "apollo-telemetry"
+    fn extract_http_data(&self, span: &SpanData) -> Http {
+        let method = match span
+            .attributes
+            .get(&HTTP_METHOD)
+            .map(|data| data.as_str())
+            .unwrap_or_default()
+            .as_ref()
+        {
+            "OPTIONS" => apollo_spaceport::trace::http::Method::Options,
+            "GET" => apollo_spaceport::trace::http::Method::Get,
+            "HEAD" => apollo_spaceport::trace::http::Method::Head,
+            "POST" => apollo_spaceport::trace::http::Method::Post,
+            "PUT" => apollo_spaceport::trace::http::Method::Put,
+            "DELETE" => apollo_spaceport::trace::http::Method::Delete,
+            "TRACE" => apollo_spaceport::trace::http::Method::Trace,
+            "CONNECT" => apollo_spaceport::trace::http::Method::Connect,
+            "PATCH" => apollo_spaceport::trace::http::Method::Patch,
+            _ => apollo_spaceport::trace::http::Method::Unknown,
+        };
+        let headers = span
+            .attributes
+            .get(&APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
+            .map(|data| data.as_str())
+            .unwrap_or_default();
+        let request_headers = serde_json::from_str::<HashMap<String, Vec<String>>>(&headers)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+            .collect();
+
+        Http {
+            method: method.into(),
+            request_headers,
+            response_headers: Default::default(),
+            status_code: 0,
+        }
     }
 }
 
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    async fn export(&mut self, _batch: Vec<SpanData>) -> ExportResult {
-        todo!("Apollo tracing is not yet implemented");
-        //return ExportResult::Ok(());
+    async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
+        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
+        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
+
+        // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
+        let mut traces: Vec<(String, apollo_spaceport::Trace)> = Vec::new();
+        for span in batch {
+            if span.name == REQUEST_SPAN_NAME {
+                match self.extract_trace(span) {
+                    Ok(mut trace) => {
+                        let mut operation_signature = Default::default();
+                        std::mem::swap(&mut trace.signature, &mut operation_signature);
+                        if !operation_signature.is_empty() {
+                            traces.push((operation_signature, *trace));
+                        }
+                    }
+                    Err(Error::MultipleErrors(errors)) => {
+                        if let Some(Error::DoNotSample(reason)) = errors.first() {
+                            tracing::debug!(
+                                "sampling is disabled on this trace: {}, skipping",
+                                reason
+                            );
+                        } else {
+                            tracing::error!(
+                                "failed to construct trace: {}, skipping",
+                                Error::MultipleErrors(errors)
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!("failed to construct trace: {}, skipping", error);
+                    }
+                }
+            } else {
+                // Not a root span, we may need it later so stash it.
+
+                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
+                self.spans_by_parent_id
+                    .get_or_insert(span.parent_span_id, Vec::new);
+                self.spans_by_parent_id
+                    .get_mut(&span.parent_span_id)
+                    .expect("capacity of cache was zero")
+                    .push(span);
+            }
+        }
+        self.apollo_sender
+            .send(SingleReport::Traces(TracesReport { traces }));
+
+        return ExportResult::Ok(());
     }
 }

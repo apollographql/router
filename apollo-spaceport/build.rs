@@ -42,13 +42,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     let proto_files = vec!["proto/agents.proto", "proto/reports.proto"];
 
     tonic_build::configure()
-        .type_attribute("ContextualizedStats", "#[derive(serde::Serialize)]")
-        .type_attribute("StatsContext", "#[derive(serde::Serialize)]")
-        .type_attribute("QueryLatencyStats", "#[derive(serde::Serialize)]")
-        .type_attribute("TypeStat", "#[derive(serde::Serialize)]")
-        .type_attribute("PathErrorStats", "#[derive(serde::Serialize)]")
-        .type_attribute("FieldStat", "#[derive(serde::Serialize)]")
-        .type_attribute("ReferencedFieldsForType", "#[derive(serde::Serialize)]")
+        .field_attribute(
+            "Trace.start_time",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
+        .field_attribute(
+            "Trace.end_time",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
+        .field_attribute(
+            "FetchNode.sent_time",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
+        .field_attribute(
+            "FetchNode.received_time",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
+        .field_attribute(
+            "Report.end_time",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
+        .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .build_server(true)
         .compile(&proto_files, &["."])?;

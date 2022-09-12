@@ -25,19 +25,21 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
-use Event::NoMoreConfiguration;
-use Event::NoMoreSchema;
-use Event::Shutdown;
-use Event::UpdateConfiguration;
-use Event::UpdateSchema;
 
+use self::Event::NoMoreConfiguration;
+use self::Event::NoMoreSchema;
+use self::Event::Shutdown;
+use self::Event::UpdateConfiguration;
+use self::Event::UpdateSchema;
 use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
+use crate::axum_http_server_factory::ListenAddrAndRouter;
 use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
+use crate::router_factory::SupergraphServiceFactory;
 use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::services::transport;
 use crate::spec::Schema;
@@ -59,8 +61,11 @@ async fn make_transport_service<RF>(
     let service_factory = YamlSupergraphServiceFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
-    let extra = Default::default();
-    Ok(make_axum_router(service_factory, &configuration, extra)?
+    let web_endpoints = service_factory.web_endpoints();
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+    // FIXME: how should
+    let ListenAddrAndRouter(_listener, router) = routers.main;
+    Ok(router
         .map_response(|response| {
             response.map(|body| {
                 // Axum makes this `body` have type:
@@ -428,7 +433,8 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -483,7 +489,8 @@ impl RouterHttpServer {
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let listen_address = state_machine.listen_address.clone();
+        let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
+        let graphql_listen_address = state_machine.graphql_listen_address.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -502,22 +509,28 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            listen_address,
+            graphql_listen_address,
+            extra_listen_adresses,
         }
     }
 
-    /// Returns the listen address when the router is ready to receive requests.
+    /// Returns the listen address when the router is ready to receive GraphQL requests.
     ///
     /// This can be useful when the `server.listen` configuration specifies TCP port 0,
     /// which instructs the operating system to pick an available port number.
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
-    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
-        self.listen_address
-            .read()
-            .await
-            .clone()
-            .ok_or(ApolloRouterError::StartupError)
+    pub async fn listen_address(&self) -> Option<ListenAddr> {
+        self.graphql_listen_address.read().await.clone()
+    }
+
+    /// Returns the extra listen addresses the router can receive requests to.
+    ///
+    /// Combine it with `listen_address` to have an exhaustive list
+    /// of all addresses used by the router.
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn extra_listen_adresses(&self) -> Vec<ListenAddr> {
+        self.extra_listen_adresses.read().await.clone()
     }
 
     /// Trigger and wait for graceful shutdown
@@ -617,6 +630,7 @@ mod tests {
             .listen_address()
             .await
             .expect("router failed to start");
+
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         router_handle.shutdown().await.unwrap();
     }

@@ -24,39 +24,71 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
+
 ## ❗ BREAKING ❗
+### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
+OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
+
+* `client_name` => `client.name`
+* `client_version` => `client.version`
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
+
 ## 🚀 Features
 
-### Add `service_name` and `service_namespace` in `telemetry.metrics.common` ([PR #1492](https://github.com/apollographql/router/pull/1492))
+### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
 
-Add `service_name` and `service_namespace` in `telemetry.metrics.common` to reflect the same configuration than tracing.
+There is a new global constant `apollo_sdl` which can be use to read the
+supergraph SDL as a string.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
+### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+
+Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
 
 ```yaml
 telemetry:
-  metrics:
-    common:
-      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "apollo-router"
-      # (Optional)
-      service_namespace: "apollo"
+    apollo:
+        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
+        # This is expensive and should be left at a low value.
+        # This cannot be higher than tracing->trace_config->sampler
+        field_level_instrumentation_sampler: 0.01 # (default)
+        
+        # Include HTTP request and response headers in traces sent to Apollo Studio
+        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all headers except referer
+            - referer
+
+        # Send variable values in Apollo in traces sent to Apollo Studio
+        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
+            except: # Send all variable values except for variable named first
+            - first
+    tracing:
+        trace_config:
+            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1492 
+By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
+
 
 ## 🐛 Fixes
 
-### Fix telemetry propagation with headers ([#1701](https://github.com/apollographql/router/issues/1701))
+### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
 
-Span context is now correctly propagated if you're trying to propagate tracing context to the router.
+You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1701
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1736
 
 ## 🛠 Maintenance
 
-### replace `startup` crate with `ctor` crate ([#1704](https://github.com/apollographql/router/issues/1703))
+### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
 
-At startup, the router registers plugins. The crate we used to use (`startup`) has been yanked from crates.io. We've decided to move to the `ctor` crate.
+We changed `QueryPlannerResponse` to:
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1704
++ Add a `Vec<apollo_router::graphql::Error>`
++ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
 
 ## 📚 Documentation
