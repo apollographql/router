@@ -27,6 +27,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
+
+Instead of being dependencies, they are now part of the `apollo-router` crate.
+Therefore, they can not longer be used separately.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1751
+
 ### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
 
 The following functions are only required for router implementation, so removing from external API.
@@ -140,5 +147,7 @@ The Router now reverts to using unpatched `async-compression`,
 and instead disables compression of multipart responses.
 We aim to re-enable compression soon, with a proper solution that is being designed in
 <https://github.com/Nemo157/async-compression/issues/154>.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1749
 
 ## 📚 Documentation

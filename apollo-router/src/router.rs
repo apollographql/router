@@ -206,7 +206,7 @@ impl SchemaSource {
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
+                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
