@@ -168,6 +168,17 @@ where
     })
 }
 
+/// Binding different listen addresses to the same port will "relax" the requirements, which
+/// could result in a security issue:
+/// If endpoint A is exposed to 127.0.0.1:4000/foo and endpoint B is exposed to 0.0.0.0:4000/bar
+/// 0.0.0.0:4000/foo would be accessible.
+///
+/// `ensure_listenaddrs_consistency` makes sure listen addresses that bind to the same port
+/// have the same IP:
+/// 127.0.0.1:4000 and 127.0.0.1:4000 will not trigger an error
+/// 127.0.0.1:4000 and 0.0.0.0:4001 will not trigger an error
+///
+/// 127.0.0.1:4000 and 0.0.0.0:4000 will not trigger an error
 fn ensure_listenaddrs_consistency(
     configuration: &Configuration,
     endpoints: &MultiMap<ListenAddr, Endpoint>,
