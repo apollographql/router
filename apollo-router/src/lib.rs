@@ -66,10 +66,12 @@ mod response;
 mod router;
 mod router_factory;
 pub mod services;
+mod spaceport;
 mod spec;
 mod state_machine;
 mod test_harness;
 pub mod tracer;
+mod uplink;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;

@@ -15,8 +15,6 @@ use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
-use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::StatsContext;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -81,6 +79,8 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spaceport::server::ReportSpaceport;
+use crate::spaceport::StatsContext;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
 use crate::Context;
@@ -1162,8 +1162,8 @@ fn operation_count(stats_report_key: &str) -> u64 {
 
 fn convert(
     referenced_fields: router_bridge::planner::ReferencedFieldsForType,
-) -> apollo_spaceport::ReferencedFieldsForType {
-    apollo_spaceport::ReferencedFieldsForType {
+) -> crate::spaceport::ReferencedFieldsForType {
+    crate::spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
         is_interface: referenced_fields.is_interface,
     }
