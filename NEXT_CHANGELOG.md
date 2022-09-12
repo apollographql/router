@@ -82,6 +82,18 @@ telemetry:
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
 
+### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
+You may now specify custom schema and config sources when constructing an executable.
+```rust
+Executable::builder()
+  .shutdown(ShutdownSource::None)
+  .schema(SchemaSource::Stream(schemas))
+  .config(ConfigurationSource::Stream(configs))
+  .start()
+  .await
+```
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
+
 ## 🐛 Fixes
 
 ### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
