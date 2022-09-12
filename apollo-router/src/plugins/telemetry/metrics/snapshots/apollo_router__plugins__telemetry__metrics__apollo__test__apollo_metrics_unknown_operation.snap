@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 142
 expression: results
 ---
 [

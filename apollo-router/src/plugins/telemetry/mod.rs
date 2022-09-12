@@ -415,31 +415,45 @@ impl Telemetry {
                 .map(|s| s.as_str())
                 .unwrap_or("info");
 
-            let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-            );
-
-            if let Some(sub) = subscriber {
+            #[cfg(feature = "console")]
+            {
+                use tracing_subscriber::util::SubscriberInitExt;
                 let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                let subscriber = sub.with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            } else if atty::is(atty::Stream::Stdout) {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                tracing_subscriber::registry()
+                    .with(console_subscriber::spawn())
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(telemetry)
+                    .init();
+            }
 
-                let subscriber = sub_builder.finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            } else {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            #[cfg(not(feature = "console"))]
+            {
+                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
+                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
+                );
 
-                let subscriber = sub_builder.json().finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            };
+                if let Some(sub) = subscriber {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                    let subscriber = sub.with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                } else if atty::is(atty::Stream::Stdout) {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                    let subscriber = sub_builder.finish().with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                } else {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                    let subscriber = sub_builder.json().finish().with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                };
+            }
 
             Ok(true)
         })?;

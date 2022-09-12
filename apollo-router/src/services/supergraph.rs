@@ -259,7 +259,7 @@ impl Response {
         )
     }
 
-    pub fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
+    pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
             context,
@@ -272,7 +272,7 @@ impl Response {
         self.response.body_mut().next().await
     }
 
-    pub fn new_from_response(
+    pub(crate) fn new_from_response(
         response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {

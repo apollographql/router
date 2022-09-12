@@ -15,6 +15,10 @@ path = "src/main.rs"
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
+# Enables usage of tokio-console with the router
+# tokio-console also requires at build time the environment variable
+# RUSTFLAGS="--cfg tokio_unstable"
+console = ["tokio/tracing", "console-subscriber"]
 
 [dependencies]
 access-json = "0.1.0"
@@ -42,6 +46,7 @@ clap = { version = "3.2.20", default-features = false, features = [
     "derive",
     "std",
 ] }
+console-subscriber = { version = "0.1.7", optional = true }
 ctor = "0.1.23"
 dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
@@ -182,6 +187,7 @@ uname = "0.1.1"
 insta = { version = "1.19.1", features = [ "json", "redactions" ] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
+memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.2"
 once_cell = "1.14.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
