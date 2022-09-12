@@ -29,7 +29,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
 
-The web endpoints exposed by the router by default listen to 120.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+The web endpoints exposed by the router listen to 120.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
 
 Here's the list of the endpoints exposed by the router:
 
@@ -41,7 +41,7 @@ Here's the list of the endpoints exposed by the router:
 While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
 
 In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
-Likewise, `introspection` has moved from the `server` section to the `graphql` section:
+Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `graphql` section:
 
 This previous configuration: 
 ```yaml
@@ -49,7 +49,8 @@ server:
   listen: 127.0.0.1:4000
   graphql_path: /graphql
   health_check_path: /health
-  introspection: true
+  introspection: false
+  preview_defer_support: true
   landing_page: true
 telemetry:
   metrics:
@@ -67,6 +68,8 @@ sandbox:
 graphql:
   listen: 127.0.0.1:4000
   path: /
+  introspection: false
+  preview_defer_support: true
 # health_check_path confiiguration
 health-check:
   listen: 127.0.0.1:9090
