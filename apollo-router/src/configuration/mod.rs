@@ -106,7 +106,11 @@ impl Configuration {
     ) -> Self {
         let mut plugins = plugins;
         if dev.unwrap_or_default() {
-            tracing::info!("Development mode has been enabled.  This mode of operation is only meant for development!");
+            if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
+                tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
+            } else {
+                tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
+            }
             plugins.insert(
                 "experimental.expose_query_plan".to_string(),
                 Value::Bool(true),
