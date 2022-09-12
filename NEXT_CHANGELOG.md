@@ -27,14 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Remove over-exposed functions from the public API ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
 
 The following functions are only required for router implementation, so removing from external API.
 subgraph::new_from_response
 supergraph::new_from_response
 supergraph::new_from_graphql_response
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
 
 ### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
