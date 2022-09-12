@@ -152,6 +152,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
     }
 
@@ -166,6 +167,7 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
