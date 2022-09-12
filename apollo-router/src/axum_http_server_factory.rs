@@ -1,4 +1,5 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -104,6 +105,7 @@ pub(crate) fn make_axum_router<RF>(
 where
     RF: SupergraphServiceFactory,
 {
+    ensure_listenaddrs_consistency(configuration, &endpoints)?;
     if configuration.sandbox.enabled && !sandbox_on_main_endpoint(configuration) {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
@@ -161,6 +163,44 @@ where
         main: main_endpoint,
         extra: extra_endpoints,
     })
+}
+
+fn ensure_listenaddrs_consistency(
+    configuration: &Configuration,
+    endpoints: &MultiMap<ListenAddr, Endpoint>,
+) -> Result<(), ApolloRouterError> {
+    let mut all_ports = HashMap::new();
+    if let Some((main_ip, main_port)) = configuration.graphql.listen.ip_and_port() {
+        all_ports.insert(main_port, main_ip);
+    }
+
+    if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
+        if let Some(previous_ip) = all_ports.insert(port, ip) {
+            if ip != previous_ip {
+                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                    previous_ip,
+                    ip,
+                    port,
+                ));
+            }
+        }
+    }
+
+    for addr in endpoints.keys() {
+        if let Some((ip, port)) = addr.ip_and_port() {
+            if let Some(previous_ip) = all_ports.insert(port, ip) {
+                if ip != previous_ip {
+                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                        previous_ip,
+                        ip,
+                        port,
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn main_endpoint<RF>(
@@ -969,6 +1009,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::Graphql;
     use crate::configuration::HealthCheck;
     use crate::configuration::Sandbox;
     use crate::json_ext::Path;
@@ -1429,11 +1470,6 @@ mod tests {
 
     #[tokio::test]
     async fn response() -> Result<(), ApolloRouterError> {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -1490,11 +1526,6 @@ mod tests {
         );
 
         server.shutdown().await?;
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
         Ok(())
     }
 
@@ -2579,5 +2610,65 @@ Content-Type: application/json\r
         for value in vary {
             assert!(value == "one" || value == "two");
         }
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_same_listenaddrs_are_accepted() {
+        let configuration = Configuration::fake_builder().build();
+
+        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new()).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(
+        expected = "Failed to create server factory: DifferentListenAddrsOnSamePort(127.0.0.1, 0.0.0.0, 4000)"
+    )]
+    async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
+        let configuration = Configuration::fake_builder()
+            .graphql(
+                Graphql::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                    .build(),
+            )
+            .sandbox(
+                Sandbox::fake_builder()
+                    .listen(SocketAddr::from_str("0.0.0.0:4000").unwrap())
+                    .build(),
+            )
+            .build();
+
+        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new()).await;
+    }
+
+    // TODO: axum just panics here.
+    // While this is ok for now, we probably want to check it ourselves and return a meaningful error
+    #[tokio::test]
+    #[should_panic(
+        expected = "Invalid route: insertion failed due to conflict with previously registered route: /"
+    )]
+    async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
+        let configuration = Configuration::fake_builder()
+            .graphql(
+                Graphql::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                    .build(),
+            )
+            .build();
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut mm = MultiMap::new();
+        mm.insert(
+            SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        init_with_config(MockSupergraphService::new(), configuration, mm).await;
     }
 }

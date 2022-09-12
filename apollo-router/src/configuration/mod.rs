@@ -5,6 +5,7 @@ mod yaml;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -501,6 +502,16 @@ pub enum ListenAddr {
     /// Unix socket.
     #[cfg(unix)]
     UnixSocket(std::path::PathBuf),
+}
+
+impl ListenAddr {
+    pub(crate) fn ip_and_port(&self) -> Option<(IpAddr, u16)> {
+        if let Self::SocketAddr(addr) = self {
+            Some((addr.ip(), addr.port()))
+        } else {
+            None
+        }
+    }
 }
 
 impl From<SocketAddr> for ListenAddr {
