@@ -36,8 +36,7 @@ in lieu of an official changelog.
 5. Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
 6. Update `docker.mdx` and `kubernetes.mdx` with the release version.
 7. Update `helm/chart/router/Chart.yaml` as follows:
-   - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
-   - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
+   - update the version and the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
 8 Update `helm/chart/router/README.md` by running this from the repo root: `(cd helm/chart && helm-docs router)`.
   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
 9. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
