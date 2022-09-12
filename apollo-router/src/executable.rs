@@ -219,10 +219,13 @@ impl Executable {
 
     async fn inner_start(
         shutdown: Option<ShutdownSource>,
-        opt: Opt,
+        mut opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+
+        // Enable hot reload when dev mode is enabled
+        opt.hot_reload = opt.hot_reload || opt.dev;
 
         let configuration = opt
             .config_path
