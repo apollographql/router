@@ -13,7 +13,7 @@ executors:
   rust_linux: &rust_linux_executor
     docker:
       - image: cimg/base:stable
-    resource_class: large
+    resource_class: xlarge
   rust_macos: &rust_macos_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -24,7 +24,7 @@ executors:
   rust_windows: &rust_windows_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
-    resource_class: windows.large
+    resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
 parameters:
