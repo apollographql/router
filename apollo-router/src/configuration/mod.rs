@@ -123,23 +123,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
     ) -> Self {
-        let mut plugins = plugins;
-        if dev.unwrap_or_default() {
-            if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
-                tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
-            } else {
-                tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
-            }
-            plugins.insert(
-                "experimental.expose_query_plan".to_string(),
-                Value::Bool(true),
-            );
-            plugins.insert(
-                "experimental.include_subgraph_errors".to_string(),
-                json!({"all": true}),
-            );
-        }
-
+        let plugins = plugins;
         Self {
             server: server.unwrap_or_default(),
             graphql: graphql.unwrap_or_default(),
@@ -183,6 +167,29 @@ impl Configuration {
             },
             dev,
         }
+    }
+
+    pub(crate) fn enable_dev_mode(&mut self) {
+        if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
+            tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
+        } else {
+            tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
+        }
+
+        if self.plugins.plugins.is_none() {
+            self.plugins.plugins = Some(Map::new());
+        }
+
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.expose_query_plan".to_string(),
+            Value::Bool(true),
+        );
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.include_subgraph_errors".to_string(),
+            json!({"all": true}),
+        );
+        self.graphql.introspection = self.graphql.introspection.or(Some(true));
+        self.sandbox.enabled = self.sandbox.enabled.or(Some(true));
     }
 
     #[cfg(test)]
@@ -332,15 +339,12 @@ pub(crate) struct Graphql {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    #[serde(default = "default_introspection")]
-    pub(crate) introspection: bool,
+    /// Enable introspection
+    /// Default: false
+    pub(crate) introspection: Option<bool>,
 
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
-}
-
-fn default_introspection() -> bool {
-    true
 }
 
 fn default_defer_support() -> bool {
@@ -359,7 +363,7 @@ impl Graphql {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection,
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -376,7 +380,7 @@ impl Graphql {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection,
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -402,12 +406,9 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    #[serde(default = "default_sandbox")]
-    pub(crate) enabled: bool,
-}
-
-fn default_sandbox() -> bool {
-    true
+    /// Enable sandbox
+    /// Default: false
+    pub(crate) enabled: Option<bool>, // It's an option to know if it's overrided when in dev mode
 }
 
 #[buildstructor::buildstructor]
@@ -421,7 +422,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox),
+            enabled,
         }
     }
 
@@ -436,7 +437,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox),
+            enabled,
         }
     }
 }

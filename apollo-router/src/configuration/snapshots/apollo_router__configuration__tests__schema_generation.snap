@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 1118
 expression: "&schema"
 ---
 {
@@ -119,14 +120,15 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "introspection": true,
+        "introspection": null,
         "preview_defer_support": true
       },
       "type": "object",
       "properties": {
         "introspection": {
-          "default": true,
-          "type": "boolean"
+          "description": "Enable introspection Default: false",
+          "type": "boolean",
+          "nullable": true
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
@@ -475,13 +477,14 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "enabled": true
+        "enabled": null
       },
       "type": "object",
       "properties": {
         "enabled": {
-          "default": true,
-          "type": "boolean"
+          "description": "Enable sandbox Default: false",
+          "type": "boolean",
+          "nullable": true
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",

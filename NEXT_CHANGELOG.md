@@ -27,6 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
+
+By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
+
+```yaml
+sandbox:
+  # ...
+  enabled: true
+graphql:
+    # ...
+  introspection: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
+
 ### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
 
 The following functions are only required for router implementation, so removing from external API.

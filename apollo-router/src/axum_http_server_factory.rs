@@ -109,7 +109,8 @@ where
     RF: SupergraphServiceFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(configuration) {
+    if configuration.sandbox.enabled.unwrap_or_default() && !sandbox_on_main_endpoint(configuration)
+    {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
             Endpoint::new(
@@ -701,7 +702,7 @@ async fn handle_get(
 
 // Returns true if the sandbox is enabled, and on the same url as the graphql endpoint
 fn sandbox_on_main_endpoint(configuration: &Configuration) -> bool {
-    configuration.sandbox.enabled
+    configuration.sandbox.enabled.unwrap_or_default()
         && configuration.sandbox.listen == configuration.graphql.listen
         && configuration.sandbox.path == configuration.graphql.path
 }
@@ -1129,11 +1130,13 @@ mod tests {
                     Configuration::builder()
                         .sandbox(
                             crate::configuration::Sandbox::builder()
+                                .enabled(true)
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
                         .graphql(
                             crate::configuration::Graphql::builder()
+                                .introspection(true)
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
@@ -1275,7 +1278,12 @@ mod tests {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
-            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
+            .sandbox(
+                Sandbox::fake_builder()
+                    .path("/a-custom-path")
+                    .enabled(true)
+                    .build(),
+            )
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
@@ -1305,7 +1313,12 @@ mod tests {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
-            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
+            .sandbox(
+                Sandbox::fake_builder()
+                    .path("/a-custom-path")
+                    .enabled(true)
+                    .build(),
+            )
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
