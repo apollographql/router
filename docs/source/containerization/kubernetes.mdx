@@ -140,7 +140,7 @@ metadata:
     app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
     app.kubernetes.io/managed-by: Helm
-  
+
   annotations:
     prometheus.io/path: /metrics
     prometheus.io/port: 9090
@@ -185,12 +185,18 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /health
-              port: 9494
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: "/?query={__typename}"
+              port: 80
           readinessProbe:
             httpGet:
-              path: /health
-              port: 9494
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: "/?query={__typename}"
+              port: 80
           resources:
             {}
           volumeMounts:
@@ -225,16 +231,6 @@ spec:
   restartPolicy: Never
 ```
 
-## The health endpoint
+## Health checks
 
-The router supports a health endpoint. You can see from the examples above how it can be used in a kubernetes deployment.
-
-If you had a router running on port 9090 on your localhost, you could exercise the health endpoint as follows:
-
-```bash
-curl "http://localhost:9090/health"
-{"status":"pass"}
-```
-
-This health endpoint can be used to check the health of the router. It will always return a status of pass if all is well.
-
+For more information on how to configure both `livenessProbe` and `readinessProbe` see [Health Checks](../configuration/health-checks/).

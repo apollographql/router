@@ -32,7 +32,6 @@ pub(crate) mod http_client;
 /// this test harness is lacking:
 ///
 /// * Custom endpoints from plugins
-/// * The health check endpoint
 /// * CORS (FIXME: should this include CORS?)
 /// * HTTP compression
 ///

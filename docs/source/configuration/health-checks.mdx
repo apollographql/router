@@ -5,11 +5,96 @@ description: Determining the router's status
 
 Health checks are often used by load balancers to determine whether a server is available and ready to start serving traffic.
 
-The Apollo Router supports a basic HTTP-level health check. This is enabled by default and is served at the URL path `/health`. This returns a `200` status code if the HTTP server is successfully serving. It does not invoke any GraphQL execution machinery.
-You can change this path by setting `health-check`:
-```yaml title="router.yaml"
-health-check:
-  listen: 127.0.0.1:9494
-  path: /health
-  enabled: true
+Since GraphQL queries can be sent as `GET` requests, a GraphQL query acts as an excellent health check.  We recommend sending a simple query as a `GET` request with an appropriate `Content-type: application/json` header:
+
 ```
+/?query={__typename}
+```
+
+This query can be further customized to include making requests to subgraphs by changing the query as desired and using a GraphQL operation has the added benefit of exercising the GraphQL layers of the Apollo Router.  It's important to send the `Content-type: application/json` header to meet the requirements for [CSRF protection](./csrf/).
+
+### Testing with `curl`
+
+To test the above health-check endpoint suggestion against an Apollo Router running on `127.0.0.1:4000`, you can send a request using the `{__typename}` query by running this `curl` command and observing its response:
+
+```sh
+$ curl -v -H 'content-type: application/json' "http://127.0.0.1:43765/?query=\{__typename\}"
+{"data":{"__typename":"Query"}}
+$ curl -v -H 'content-type: application/json' "http://127.0.0.1:43765/?query=\{__typename\}"
+*   Trying 127.0.0.1:43765...
+* TCP_NODELAY set
+* Connected to 127.0.0.1 (127.0.0.1) port 43765 (#0)
+> GET /?query={__typename} HTTP/1.1
+> Host: 127.0.0.1:43765
+> User-Agent: curl/7.68.0
+> Accept: */*
+> content-type: application/json
+>
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 200 OK
+< vary: origin
+< content-type: application/json
+< content-length: 31
+< date: Tue, 13 Sep 2022 16:50:35 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+{"data":{"__typename":"Query"}}
+```
+
+The key lines to observe here are the HTTP status code of 200:
+
+```
+< HTTP/1.1 200 OK
+```
+
+And the `data` response as well:
+
+```json
+{"data":{"__typename":"Query"}}
+```
+
+### Kubernetes
+
+In Kubernetes, these health checks can be set by configured by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
+
+```yaml
+      # ... snipped for partial example ...
+      containers:
+        - name: router
+          # ... snipped for partial example ...
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              # You may also use a more custom query if you'd like.
+              path: "/?query={__typename}"
+              port: 80
+          readinessProbe:
+            httpGet:
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              # You may also use a more custom query if you'd like.
+              path: "/?query={__typename}"
+              port: 80
+          # ... snipped for partial example ...
+```
+
+There is a more developed example in our [Kubernetes documentation](../containerization/kubernetes/).
+
+### Docker
+
+Docker has a `HEALTHCHECK` instruction that tells Docker how to test a container to check that it is still working.  These are defined in the `Dockerfile` when building your container.
+
+```
+HEALTHCHECK CMD curl --fail \
+  -H 'content-type: application/json' \
+  "http://127.0.0.1:41123/?query=\{__typename\}" || exit 1
+```
+
+We don't define these in our example `Dockerfile`s since their usage isn't particularly common, though you can add them to your own images if you desire them.

@@ -85,12 +85,18 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: {{ (index .Values.router.configuration "health-check").path | default "/health" }}
-              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":9494") | last }}
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: "/?query={__typename}"
+              port: {{ .Values.containerPorts.http }}
           readinessProbe:
             httpGet:
-              path: {{ (index .Values.router.configuration "health-check").path  | default "/health" }}
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":9494")) | last }}
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: "/?query={__typename}"
+              port: {{ .Values.containerPorts.http }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
