@@ -224,8 +224,7 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 #
 graphql:
   # The socket address and port to listen on
-  # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1
+  listen: 127.0.0.1:4000
 ```
 
 The router can also listen on a Unix socket (not supported on Windows):
@@ -282,6 +281,8 @@ By default, the router does _not_ display a landing page if you access its endpo
 # router: Configuration of the GraphQL server
 #
 sandbox:
+  listen: 127.0.0.1:4000
+  path: /
   enabled: true
 ```
 

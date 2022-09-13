@@ -1240,9 +1240,9 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
+                    Configuration::fake_builder()
                         .graphql(
-                            crate::configuration::Graphql::builder()
+                            crate::configuration::Graphql::fake_builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
@@ -2706,6 +2706,61 @@ Content-Type: application/json\r
         );
 
         init_with_config(MockSupergraphService::new(), configuration, mm).await;
+    }
+
+    #[tokio::test]
+    async fn it_supports_server_restart() {
+        let configuration = Arc::new(
+            Configuration::fake_builder()
+                .graphql(
+                    Graphql::fake_builder()
+                        .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                        .build(),
+                )
+                .build(),
+        );
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            SocketAddr::from_str("127.0.0.1:5000").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let server_factory = AxumHttpServerFactory::new();
+        let (service, _) = tower_test::mock::spawn();
+
+        let supergraph_service_factory = TestSupergraphServiceFactory {
+            inner: service.into_inner(),
+        };
+
+        let server = server_factory
+            .create(
+                supergraph_service_factory.clone(),
+                Arc::clone(&configuration),
+                None,
+                vec![],
+                web_endpoints.clone(),
+            )
+            .await
+            .expect("Failed to create server factory");
+
+        server
+            .restart(
+                &server_factory,
+                supergraph_service_factory,
+                Arc::clone(&configuration),
+                web_endpoints,
+            )
+            .await
+            .unwrap();
     }
 
     /// A counter of how many GraphQL responses have been sent by an Apollo Router

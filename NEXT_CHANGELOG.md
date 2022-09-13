@@ -42,6 +42,71 @@ graphql:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
 
+### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
+
+The web endpoints exposed by the router listen to 120.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+
+Here's the list of the endpoints exposed by the router:
+
+- GraphQL: http://127.0.0.1:4000/ (unchanged)
+- The GraphQL sandbox: http://127.0.0.1:4000/ (unchanged)
+- Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
+- Healthcheck: http://127.0.0.1:9090/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
+
+While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
+
+In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
+Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `graphql` section:
+
+This previous configuration: 
+```yaml
+server:
+  listen: 127.0.0.1:4000
+  graphql_path: /graphql
+  health_check_path: /health
+  introspection: false
+  preview_defer_support: true
+  landing_page: true
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+```
+
+Now becomes:
+```yaml
+# landing_page configuration
+sandbox:
+  listen: 127.0.0.1:4000
+  path: /
+# graphql_path configuration
+graphql:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: false
+  preview_defer_support: true
+# health_check_path confiiguration
+health-check:
+  listen: 127.0.0.1:9090
+  path: /health
+# prometheus scraper configuration
+telemetry:
+  metrics:
+    prometheus:
+      listen: 127.0.0.1:9090
+      path: /metrics
+      enabled: true
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
+### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
+
+Instead of being dependencies, they are now part of the `apollo-router` crate.
+Therefore, they can not longer be used separately.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1751
+
 ### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
 
 The following functions are only required for router implementation, so removing from external API.
@@ -171,5 +236,7 @@ The Router now reverts to using unpatched `async-compression`,
 and instead disables compression of multipart responses.
 We aim to re-enable compression soon, with a proper solution that is being designed in
 <https://github.com/Nemo157/async-compression/issues/154>.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1749
 
 ## 📚 Documentation

@@ -2,7 +2,7 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::net::SocketAddr;
 
-use apollo_spaceport::server::ReportSpaceport;
+use crate::spaceport::server::ReportSpaceport;
 use clap::Parser;
 use tracing_subscriber::filter::EnvFilter;
 

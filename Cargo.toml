@@ -1,7 +1,6 @@
 [workspace]
 default-members = ["apollo-router"]
 members = [
-    "apollo-spaceport",
     "apollo-router",
     "apollo-router-benchmarks",
     "apollo-router-scaffold",
@@ -22,7 +21,6 @@ members = [
     "examples/supergraph_sdl",
     "examples/jwt-auth",
     "fuzz",
-    "uplink",
     "xtask",
 ]
 
