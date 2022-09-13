@@ -44,7 +44,7 @@ pub(crate) mod http_client;
 /// use tower::util::ServiceExt;
 ///
 /// # #[tokio::main] async fn main() -> Result<(), tower::BoxError> {
-/// let config = serde_json::json!({"server": {"introspection": false}});
+/// let config = serde_json::json!({"supergraph": { "introspection": false }});
 /// let request = supergraph::Request::fake_builder()
 ///     // Request building here
 ///     .build()
@@ -84,7 +84,7 @@ impl<'a> TestHarness<'a> {
     /// Panics if called more than once.
     ///
     /// If this isn’t called, a default “canned” schema is used.
-    /// It can be found in the Router repository at `examples/graphql/local.graphql`.
+    /// It can be found in the Router repository at `apollo-router/testing_schema.graphql`.
     /// In that case, subgraph responses are overridden with some “canned” data.
     pub fn schema(mut self, schema: &'a str) -> Self {
         assert!(self.schema.is_none(), "schema was specified twice");
@@ -195,7 +195,7 @@ impl<'a> TestHarness<'a> {
             })
         };
         let config = builder.configuration.unwrap_or_default();
-        let canned_schema = include_str!("../../examples/graphql/local.graphql");
+        let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let router_creator = YamlSupergraphServiceFactory

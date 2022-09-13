@@ -7,8 +7,8 @@ metadata:
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
-    prometheus.io/path: /plugins/apollo.telemetry/prometheus
-    prometheus.io/port: "{{ .Values.containerPorts.http }}"
+    prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
+    prometheus.io/port: {{ (splitList ":"  (.Values.router.configuration.telemetry.metrics.prometheus.listen | default ":9090")) | last }}
     prometheus.io/scrape: "true"
   {{- end }}
 spec:
@@ -85,12 +85,12 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: {{ (index .Values.router.configuration "health-check").path | default "/health" }}
+              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":9494") | last }}
           readinessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: {{ (index .Values.router.configuration "health-check").path  | default "/health" }}
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":9494")) | last }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
