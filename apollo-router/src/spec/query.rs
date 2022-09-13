@@ -1860,6 +1860,26 @@ mod tests {
     }
 
     #[test]
+    fn solve_query_with_single_typename() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }
+
+            ",
+            "{ __typename }",
+            json! {{}},
+            None,
+            json! {{
+                "__typename": "Query"
+            }},
+        );
+    }
+
+    #[test]
     fn reformat_response_array_of_id_duplicate() {
         assert_format_response!(
             "type Query {

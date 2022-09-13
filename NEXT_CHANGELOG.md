@@ -53,6 +53,12 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
+### Add support of query resolution with single `__typename` field ([Issue #1761](https://github.com/apollographql/router/issues/1761))
+
+For queries like `query { __typename }`, we added support to returns a GraphQL response even if the introspection has been disabled
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1762
+
 ### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
 
 There is a new global constant `apollo_sdl` which can be use to read the
