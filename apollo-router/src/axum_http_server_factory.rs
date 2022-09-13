@@ -2644,7 +2644,7 @@ Content-Type: application/json\r
 
     #[tokio::test]
     #[should_panic(
-        expected = "Failed to create server factory: DifferentListenAddrsOnSamePort(127.0.0.1, 0.0.0.0, 4000)"
+        expected = "Failed to create server factory: DifferentListenAddrsOnSamePort(127.0.0.1, 0.0.0.0, 4010)"
     )]
     async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
         let configuration = Configuration::fake_builder()
