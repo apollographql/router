@@ -8,6 +8,7 @@ use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
 pub(crate) use query::Query;
+pub(crate) use query::TYPENAME;
 pub(crate) use schema::Schema;
 pub(crate) use selection::*;
 use thiserror::Error;

@@ -1,7 +1,4 @@
 use std::error::Error;
-use std::fs::File;
-use std::io::copy;
-use std::io::Read;
 use std::path::PathBuf;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -23,30 +20,17 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     content = content.replace("[(js_use_toArray)=true]", "");
     content = content.replace("[(js_preEncoded)=true]", "");
 
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let src = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("src");
     let proto_dir = src.join("spaceport").join("proto");
-    // Try to avoid writing out the same content since it will trigger unnecessary re-builds, which wastes time
-    let write_content = match File::open(proto_dir.join("reports.proto")) {
-        Ok(mut existing) => {
-            let mut existing_content = String::new();
-            existing.read_to_string(&mut existing_content)?;
-            content != existing_content
-        }
-        Err(_) => true,
-    };
+    let agents = proto_dir.join("agents.proto");
+    let reports = out_dir.join("reports.proto");
 
-    // Write the content out if they differ or an error occured trying to open proto file
-    if write_content {
-        let mut dest = File::create(proto_dir.join("reports.proto"))?;
-        copy(&mut content.as_bytes(), &mut dest)?;
-    }
+    std::fs::write(&reports, &content)?;
+    println!("cargo:rerun-if-changed={}", agents.to_str().unwrap());
 
     // Process the proto files
-    let proto_files = vec![
-        proto_dir.join("agents.proto"),
-        proto_dir.join("reports.proto"),
-    ];
-
+    let proto_files = [agents, reports];
     tonic_build::configure()
         .field_attribute(
             "Trace.start_time",
@@ -71,14 +55,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .build_server(true)
-        .compile(&proto_files, &[&proto_dir])?;
-
-    for file in proto_files {
-        println!(
-            "cargo:rerun-if-changed={}",
-            src.join(file).to_str().unwrap()
-        );
-    }
+        .compile(&proto_files, &[&out_dir, &proto_dir])?;
 
     Ok(())
 }
