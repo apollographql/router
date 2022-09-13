@@ -53,7 +53,10 @@ use tokio::sync::Notify;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::DefaultPredicate;
+use tower_http::compression::Predicate;
 use tower_http::trace::MakeSpan;
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
@@ -199,7 +202,11 @@ where
         .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
         .layer(cors)
-        .layer(CompressionLayer::new()); // To compress response body
+        // Compress the response body, except for multipart responses such as with `@defer`.
+        // This is a work-around for https://github.com/apollographql/router/issues/1572
+        .layer(CompressionLayer::new().compress_when(
+            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
+        ));
 
     let listener = configuration.server.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
@@ -889,6 +896,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
 
     use async_compression::tokio::write::GzipEncoder;
     use http::header::ACCEPT_ENCODING;
@@ -908,6 +917,7 @@ mod tests {
     use reqwest::StatusCode;
     use serde_json::json;
     use test_log::test;
+    use tokio::io::BufReader;
     use tower::service_fn;
 
     use super::*;
@@ -918,7 +928,10 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+    use crate::test_harness::http_client;
+    use crate::test_harness::http_client::MaybeMultipart;
     use crate::Context;
+    use crate::TestHarness;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -1920,7 +1933,6 @@ mod tests {
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
         use tokio::io::AsyncBufReadExt;
-        use tokio::io::BufReader;
         use tokio::io::Interest;
         use tokio::net::UnixStream;
 
@@ -2516,5 +2528,173 @@ Content-Type: application/json\r
         for value in vary {
             assert!(value == "one" || value == "two");
         }
+    }
+
+    /// A counter of how many GraphQL responses have been sent by an Apollo Router
+    ///
+    /// When `@defer` is used, it should increment multiple times for a single HTTP request.
+    #[derive(Clone, Default)]
+    struct GraphQLResponseCounter(Arc<AtomicU32>);
+
+    impl GraphQLResponseCounter {
+        fn increment(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn get(&self) -> u32 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn http_service() -> impl Service<
+        http::Request<serde_json::Value>,
+        Response = http::Response<MaybeMultipart<serde_json::Value>>,
+        Error = BoxError,
+    > {
+        let counter = GraphQLResponseCounter::default();
+        let service = TestHarness::builder()
+            .configuration_json(json!({
+                "plugins": {
+                    "experimental.include_subgraph_errors": {
+                        "all": true
+                    }
+                }
+            }))
+            .unwrap()
+            .supergraph_hook(move |service| {
+                let counter = counter.clone();
+                service
+                    .map_response(move |mut response| {
+                        response.response.extensions_mut().insert(counter.clone());
+                        response.map_stream(move |graphql_response| {
+                            counter.increment();
+                            graphql_response
+                        })
+                    })
+                    .boxed()
+            })
+            .build_http_service()
+            .await
+            .unwrap()
+            .map_err(Into::into);
+        let service = http_client::response_decompression(service);
+        let service = http_client::defer_spec_20220824_multipart(service);
+        http_client::json(service)
+    }
+
+    /// Creates an Apollo Router as an HTTP-level Tower service and makes one request.
+    async fn make_request(
+        request_body: serde_json::Value,
+    ) -> http::Response<MaybeMultipart<serde_json::Value>> {
+        let request = http::Request::builder()
+            .method(http::Method::POST)
+            .header("host", "127.0.0.1")
+            .body(request_body)
+            .unwrap();
+        http_service().await.oneshot(request).await.unwrap()
+    }
+
+    fn assert_compressed<B>(response: &http::Response<B>, expected: bool) {
+        assert_eq!(
+            response
+                .extensions()
+                .get::<http_client::ResponseBodyWasCompressed>()
+                .unwrap()
+                .0,
+            expected
+        )
+    }
+
+    #[tokio::test]
+    async fn test_compressed_response() {
+        let response = make_request(json!({
+            "query": "
+                query TopProducts($first: Int) { 
+                    topProducts(first: $first) { 
+                        upc 
+                        name 
+                        reviews { 
+                            id 
+                            product { name } 
+                            author { id name } 
+                        } 
+                    } 
+                }
+            ",
+            "variables": {"first": 2_u32},
+        }))
+        .await;
+        assert_compressed(&response, true);
+        let status = response.status().as_u16();
+        let graphql_response = response.into_body().expect_not_multipart();
+        assert_eq!(graphql_response["errors"], json!(null));
+        assert_eq!(status, 200);
+    }
+
+    #[tokio::test]
+    async fn test_defer_is_not_buffered() {
+        let mut response = make_request(json!({
+            "query": "
+                query TopProducts($first: Int) { 
+                    topProducts(first: $first) { 
+                        upc 
+                        name 
+                        reviews { 
+                            id 
+                            product { name } 
+                            ... @defer { author { id name } }
+                        } 
+                    } 
+                }
+            ",
+            "variables": {"first": 2_u32},
+        }))
+        .await;
+        assert_compressed(&response, false);
+        let status = response.status().as_u16();
+        assert_eq!(status, 200);
+        let counter: GraphQLResponseCounter = response.extensions_mut().remove().unwrap();
+        let parts = response.into_body().expect_multipart();
+
+        let (parts, counts): (Vec<_>, Vec<_>) =
+            parts.map(|part| (part, counter.get())).unzip().await;
+        let parts = serde_json::Value::Array(parts);
+        assert_eq!(
+            parts,
+            json!([
+                {
+                    "data": {
+                        "topProducts": [
+                            {"upc": "1", "name": "Table", "reviews": null},
+                            {"upc": "2", "name": "Couch", "reviews": null}
+                        ]
+                    },
+                    "errors": [
+                        {
+                            "message": "invalid content: Missing key `_entities`!",
+                            "path": ["topProducts", "@"],
+                            "extensions": {
+                                "type": "ExecutionInvalidContent",
+                                "reason": "Missing key `_entities`!"
+                            }
+                        }],
+                    "hasNext": true,
+                },
+                {"hasNext": false}
+            ]),
+            "{}",
+            serde_json::to_string(&parts).unwrap()
+        );
+
+        // Non-regression test for https://github.com/apollographql/router/issues/1572
+        //
+        // With unpatched async-compression 0.3.14 as used by tower-http 0.3.4,
+        // `counts` is `[2, 2]` since both parts have to be generated on the server side
+        // before the first one reaches the client.
+        //
+        // Conversly, observing the value `1` after receiving the first part
+        // means the didn’t wait for all parts to be in the compression buffer
+        // before sending any.
+        assert_eq!(counts, [1, 2]);
     }
 }
