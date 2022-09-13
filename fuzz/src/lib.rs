@@ -8,6 +8,7 @@ use libfuzzer_sys::arbitrary::Unstructured;
 use log::debug;
 
 /// This generate an arbitrary valid GraphQL operation
+#[cfg(not(windows))]
 pub fn generate_valid_operation(input: &[u8], schema_path: &'static str) -> Result<String> {
     drop(env_logger::try_init());
 
