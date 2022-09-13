@@ -132,38 +132,6 @@ impl Configuration {
         }
     }
 
-    // Used in tests
-    #[allow(dead_code)]
-    #[builder]
-    pub(crate) fn fake_new(
-        server: Option<Server>,
-        supergraph: Option<Supergraph>,
-        health_check: Option<HealthCheck>,
-        sandbox: Option<Sandbox>,
-        cors: Option<Cors>,
-        plugins: Map<String, Value>,
-        apollo_plugins: Map<String, Value>,
-    ) -> Self {
-        Self {
-            server: server.unwrap_or_default(),
-            supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
-            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
-            cors: cors.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
-
     pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
         let mut plugins = vec![];
 
@@ -203,6 +171,39 @@ impl Configuration {
         } else {
             Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
         }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Configuration {
+    #[builder]
+    pub(crate) fn fake_new(
+        server: Option<Server>,
+        supergraph: Option<Supergraph>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        cors: Option<Cors>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+    ) -> Self {
+        Self {
+            server: server.unwrap_or_default(),
+            supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            cors: cors.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+        }
+    }
+
+    pub(crate) fn boxed(self) -> Box<Self> {
+        Box::new(self)
     }
 }
 
@@ -337,8 +338,11 @@ impl Supergraph {
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Supergraph {
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
@@ -397,8 +401,11 @@ impl Sandbox {
             enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Sandbox {
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
