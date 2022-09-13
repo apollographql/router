@@ -121,9 +121,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-encoder"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
+checksum = "344a1afec31ce0273dc2061105b04e5c4ab620fe0748a76244338aa893db42f3"
 
 [[package]]
 name = "apollo-parser"
@@ -141,8 +141,6 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-parser",
- "apollo-spaceport",
- "apollo-uplink",
  "async-compression",
  "async-trait",
  "atty",
@@ -151,7 +149,7 @@ dependencies = [
  "base64 0.13.0",
  "buildstructor 0.5.0",
  "bytes",
- "clap 3.2.20",
+ "clap 3.2.21",
  "console-subscriber",
  "ctor",
  "dashmap 5.4.0",
@@ -161,7 +159,9 @@ dependencies = [
  "directories",
  "displaydoc",
  "envmnt",
+ "flate2",
  "futures",
+ "graphql_client",
  "hex 0.4.3",
  "hotwatch",
  "http",
@@ -172,6 +172,7 @@ dependencies = [
  "hyper-rustls",
  "indexmap",
  "insta",
+ "introspector-gadget",
  "itertools",
  "jsonpath_lib",
  "jsonschema",
@@ -197,6 +198,8 @@ dependencies = [
  "paste",
  "pin-project-lite",
  "prometheus",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
  "rand",
  "regex",
  "reqwest",
@@ -217,8 +220,9 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tonic 0.6.2",
+ "tonic-build",
  "tower",
  "tower-http",
  "tower-service",
@@ -259,7 +263,7 @@ version = "1.0.0-alpha.3"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.2.20",
+ "clap 3.2.21",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -277,42 +281,6 @@ dependencies = [
  "apollo-parser",
  "arbitrary",
  "once_cell",
-]
-
-[[package]]
-name = "apollo-spaceport"
-version = "1.0.0-alpha.3"
-dependencies = [
- "bytes",
- "clap 3.2.20",
- "flate2",
- "prost 0.9.0",
- "prost-types 0.9.0",
- "reqwest",
- "serde",
- "sys-info",
- "tokio",
- "tokio-stream",
- "tonic 0.6.2",
- "tonic-build",
- "tracing",
- "tracing-subscriber",
- "uname",
-]
-
-[[package]]
-name = "apollo-uplink"
-version = "1.0.0-alpha.3"
-dependencies = [
- "futures",
- "graphql_client",
- "launchpad",
- "reqwest",
- "serde",
- "tokio",
- "tokio-stream",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -438,9 +406,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axum"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de18bc5f2e9df8f52da03856bf40e29b747de5a84e43aefff90e3dc4a21529b"
+checksum = "c9e3356844c4d6a6d6467b8da2cffb4a2820be256f50a3a386c9d152bab31043"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -470,9 +438,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f44a0e6200e9d11a1cdc989e4b358f6e3d354fbf48478f345a17f4e43f8635"
+checksum = "d9f0c0a60006f2a293d82d571f635042a72edf927539b7685bd62d361963839b"
 dependencies = [
  "async-trait",
  "bytes",
@@ -480,6 +448,8 @@ dependencies = [
  "http",
  "http-body",
  "mime",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
@@ -726,7 +696,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.2.20",
+ "clap 3.2.21",
  "crates-io",
  "crossbeam-utils",
  "curl",
@@ -895,9 +865,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.20"
+version = "3.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
+checksum = "1ed5341b2301a26ab80be5cbdced622e80ed808483c52e45e3310a877d3b37d7"
 dependencies = [
  "atty",
  "bitflags",
@@ -1068,9 +1038,9 @@ dependencies = [
 
 [[package]]
 name = "console-subscriber"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e933c43a5db3779b3600cdab18856af2411ca2237e33ba8ab476d5d5b1a6c1e7"
+checksum = "22a3a81dfaf6b66bce5d159eddae701e3a002f194d378cbf7be5f053c281d9be"
 dependencies = [
  "console-api",
  "crossbeam-channel",
@@ -2200,7 +2170,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tracing",
 ]
 
@@ -2619,6 +2589,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e85a1509a128c855368e135cffcde7eac17d8e1083f41e2b98c58bc1a5074be"
 
 [[package]]
+name = "introspector-gadget"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6a5345dd15741225868a205140b730de97b4f00b7d22a8520ae9d3e6266518"
+dependencies = [
+ "apollo-encoder",
+ "backoff",
+ "graphql_client",
+ "humantime",
+ "hyper",
+ "reqwest",
+ "semver 1.0.7",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "iovec"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2798,24 +2787,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b310ccceade8121d7d77fee406160e457c2f4e7c7982d589da3499bc7ea4526"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "launchpad"
-version = "0.1.0"
-source = "git+https://github.com/apollographql/rover.git?rev=d72ad078d9d845112bd33bd100a723a1fa0e72ff#d72ad078d9d845112bd33bd100a723a1fa0e72ff"
-dependencies = [
- "apollo-encoder",
- "backoff",
- "graphql_client",
- "humantime",
- "hyper",
- "reqwest",
- "semver 1.0.7",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -4239,7 +4210,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.23.3",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -4386,9 +4357,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3355e0c609386f2a13ffe00012d4ae24ffe5678d2cc7d4b573cbd81aadaa2e31"
+checksum = "f4b82497e9189775aceeab176ee860f5517de1fcda11ec513258daebd15455de"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5495,7 +5466,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
 ]
 
 [[package]]
@@ -5527,9 +5498,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
+checksum = "0bb2e075f03b3d66d8d8785356224ba688d2906a371015e225beeb65ca92c740"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5617,7 +5588,7 @@ dependencies = [
  "prost-derive 0.11.0",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower",
  "tower-layer",
  "tower-service",
@@ -5652,7 +5623,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5674,7 +5645,7 @@ dependencies = [
  "http-range-header",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower",
  "tower-layer",
  "tower-service",
