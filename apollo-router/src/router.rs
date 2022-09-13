@@ -111,6 +111,9 @@ pub enum ApolloRouterError {
 
     /// tried to bind {0} and {1} on port {2}
     DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
+
+    /// tried to register two endpoints on `{0}:{1}{2}`
+    SameRouteUsedTwice(IpAddr, u16, String),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.

@@ -1,5 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -183,6 +184,8 @@ where
         ),
     );
 
+    ensure_endpoints_consistency(configuration, &endpoints)?;
+
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
@@ -251,6 +254,64 @@ fn ensure_listenaddrs_consistency(
         }
     }
 
+    Ok(())
+}
+
+/// Merging `axum::Router`s that use the same path panics (yes it doesn't raise an error, it panics.)
+///
+/// In order to not crash the router if paths clash using hot reload, we make sure the configuration is consistent,
+/// and raise an error instead.
+fn ensure_endpoints_consistency(
+    configuration: &Configuration,
+    endpoints: &MultiMap<ListenAddr, Endpoint>,
+) -> Result<(), ApolloRouterError> {
+    // This mistake is easy to make, so we'll check for this first:
+    // check the sandbox and homepage
+    if configuration.homepage.enabled
+        && configuration.sandbox.enabled
+        && configuration.homepage.listen == configuration.sandbox.listen
+        && configuration.homepage.path == configuration.sandbox.path
+    {
+        if let Some((ip, port)) = configuration.homepage.listen.ip_and_port() {
+            return Err(ApolloRouterError::SameRouteUsedTwice(
+                ip,
+                port,
+                configuration.homepage.path.clone(),
+            ));
+        }
+    }
+
+    // check the main endpoint
+    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
+        if supergraph_listen_endpoint
+            .iter()
+            .any(|e| e.path == configuration.supergraph.path)
+        {
+            if let Some((ip, port)) = configuration.supergraph.listen.ip_and_port() {
+                return Err(ApolloRouterError::SameRouteUsedTwice(
+                    ip,
+                    port,
+                    configuration.supergraph.path.clone(),
+                ));
+            }
+        }
+    }
+
+    // check the extra endpoints
+    let mut listen_addrs_and_paths = HashSet::new();
+    for (listen, endpoints) in endpoints.iter_all() {
+        for endpoint in endpoints {
+            if let Some((ip, port)) = listen.ip_and_port() {
+                if !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone())) {
+                    return Err(ApolloRouterError::SameRouteUsedTwice(
+                        ip,
+                        port,
+                        endpoint.path.clone(),
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1117,6 +1178,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use crate::configuration::HealthCheck;
+    use crate::configuration::Homepage;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::json_ext::Path;
@@ -1244,7 +1306,7 @@ mod tests {
         mut mock: MockSupergraphService,
         conf: Configuration,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-    ) -> (HttpServerHandle, Client) {
+    ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
 
@@ -1268,8 +1330,7 @@ mod tests {
                 vec![],
                 web_endpoints,
             )
-            .await
-            .expect("Failed to create server factory");
+            .await?;
         let mut default_headers = HeaderMap::new();
         default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -1278,7 +1339,7 @@ mod tests {
             .redirect(Policy::none())
             .build()
             .unwrap();
-        (server, client)
+        Ok((server, client))
     }
 
     #[cfg(unix)]
@@ -1329,9 +1390,10 @@ mod tests {
 
         let conf = Configuration::fake_builder()
             .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1367,7 +1429,7 @@ mod tests {
             )
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, Default::default()).await;
+        let (server, client) = init_with_config(expectations, conf, Default::default()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1402,7 +1464,7 @@ mod tests {
             )
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, Default::default()).await;
+        let (server, client) = init_with_config(expectations, conf, Default::default()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1698,7 +1760,7 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/graphql",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1764,7 +1826,7 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/prefix/graphql",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1830,7 +1892,7 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         for url in &[
             format!(
                 "{}/graphql/test",
@@ -2057,7 +2119,7 @@ mod tests {
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         let response = client
             .request(
@@ -2232,7 +2294,7 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
-    async fn test_custom_health_check() {
+    async fn test_custom_health_check() -> Result<(), ApolloRouterError> {
         let conf = Configuration::fake_builder()
             .health_check(
                 HealthCheck::fake_builder()
@@ -2241,7 +2303,7 @@ Content-Type: application/json\r
             )
             .build();
         let expectations = MockSupergraphService::new();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/custom-health",
             server.graphql_listen_address().as_ref().unwrap()
@@ -2249,6 +2311,7 @@ Content-Type: application/json\r
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        Ok(())
     }
 
     #[test(tokio::test)]
@@ -2283,7 +2346,7 @@ Content-Type: application/json\r
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
                 "{}/",
@@ -2309,7 +2372,7 @@ Content-Type: application/json\r
                     .build(),
             )
             .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
                 "{}/",
@@ -2353,7 +2416,7 @@ Content-Type: application/json\r
         );
 
         let conf = Configuration::fake_builder().build();
-        let (server, client) = init_with_config(expectations, conf, web_endpoints).await;
+        let (server, client) = init_with_config(expectations, conf, web_endpoints).await?;
 
         for path in &["/a-custom-path", "/an-other-custom-path"] {
             let response = client
@@ -2404,7 +2467,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
 
         let sandbox_response = client
             .get(&format!(
@@ -2440,7 +2503,6 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    #[should_panic(message = "oopsie")]
     async fn it_refuses_to_start_if_homepage_and_sandbox_are_on_the_same_endpoint() {
         let conf = Configuration::fake_builder()
             .homepage(crate::configuration::Homepage::fake_builder().build())
@@ -2451,7 +2513,47 @@ Content-Type: application/json\r
             )
             .build();
 
-        init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+        let error = init_with_config(MockSupergraphService::new(), conf, MultiMap::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:0/`",
+            error.to_string()
+        )
+    }
+
+    #[test(tokio::test)]
+    async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
+        let endpoint = service_fn(|req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(format!("{} + {}", req.method(), req.uri().path()).into())
+                    .unwrap(),
+            )
+        })
+        .boxed_clone();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        );
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.boxed()),
+        );
+
+        let conf = Configuration::fake_builder().build();
+        let error = init_with_config(MockSupergraphService::new(), conf, web_endpoints)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:0/a-custom-path`",
+            error.to_string()
+        )
     }
 
     #[test(tokio::test)]
@@ -2543,7 +2645,7 @@ Content-Type: application/json\r
             .cors(Cors::builder().allow_any_origin(true).build())
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response =
@@ -2565,7 +2667,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
@@ -2591,7 +2693,7 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // regex tests
@@ -2821,13 +2923,12 @@ Content-Type: application/json\r
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build();
 
-        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new()).await;
+        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
-    #[should_panic(
-        expected = "Failed to create server factory: DifferentListenAddrsOnSamePort(127.0.0.1, 0.0.0.0, 4010)"
-    )]
     async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
         let configuration = Configuration::fake_builder()
             .supergraph(
@@ -2842,15 +2943,16 @@ Content-Type: application/json\r
             )
             .build();
 
-        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new()).await;
+        let error = init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
+            error.to_string()
+        )
     }
 
-    // TODO: axum just panics here.
-    // While this is ok for now, we probably want to check it ourselves and return a meaningful error
     #[tokio::test]
-    #[should_panic(
-        expected = "Invalid route: insertion failed due to conflict with previously registered route: /"
-    )]
     async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
         let configuration = Configuration::fake_builder()
             .supergraph(
@@ -2874,7 +2976,14 @@ Content-Type: application/json\r
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        init_with_config(MockSupergraphService::new(), configuration, mm).await;
+        let error = init_with_config(MockSupergraphService::new(), configuration, mm)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:4010/`",
+            error.to_string()
+        )
     }
 
     #[tokio::test]
