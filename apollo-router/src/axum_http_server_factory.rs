@@ -2663,12 +2663,12 @@ Content-Type: application/json\r
         let configuration = Configuration::fake_builder()
             .graphql(
                 Graphql::fake_builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
             .sandbox(
                 Sandbox::fake_builder()
-                    .listen(SocketAddr::from_str("0.0.0.0:4000").unwrap())
+                    .listen(SocketAddr::from_str("0.0.0.0:4010").unwrap())
                     .build(),
             )
             .build();
@@ -2686,7 +2686,7 @@ Content-Type: application/json\r
         let configuration = Configuration::fake_builder()
             .graphql(
                 Graphql::fake_builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
             .build();
@@ -2701,7 +2701,7 @@ Content-Type: application/json\r
 
         let mut mm = MultiMap::new();
         mm.insert(
-            SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
+            SocketAddr::from_str("127.0.0.1:4010").unwrap().into(),
             Endpoint::new("/".to_string(), endpoint),
         );
 
@@ -2714,7 +2714,7 @@ Content-Type: application/json\r
             Configuration::fake_builder()
                 .graphql(
                     Graphql::fake_builder()
-                        .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                        .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                         .build(),
                 )
                 .build(),

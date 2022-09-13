@@ -368,8 +368,7 @@ impl Graphql {
         }
     }
 
-    // Used in tests
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
@@ -426,8 +425,7 @@ impl Sandbox {
         }
     }
 
-    // Used in tests
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
