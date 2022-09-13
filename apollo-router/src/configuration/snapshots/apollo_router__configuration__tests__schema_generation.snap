@@ -114,46 +114,6 @@ expression: "&schema"
     "forbid_mutations": {
       "type": "boolean"
     },
-    "graphql": {
-      "description": "Configuration options pertaining to the http server component.",
-      "default": {
-        "listen": "127.0.0.1:4000",
-        "path": "/",
-        "introspection": true,
-        "preview_defer_support": true
-      },
-      "type": "object",
-      "properties": {
-        "introspection": {
-          "default": true,
-          "type": "boolean"
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "preview_defer_support": {
-          "default": true,
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
     "headers": {
       "type": "object",
       "properties": {
@@ -518,6 +478,46 @@ expression: "&schema"
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "supergraph": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:4000",
+        "path": "/",
+        "introspection": true,
+        "preview_defer_support": true
+      },
+      "type": "object",
+      "properties": {
+        "introspection": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
+          "default": "127.0.0.1:4000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
+        "preview_defer_support": {
+          "default": true,
+          "type": "boolean"
         }
       },
       "additionalProperties": false

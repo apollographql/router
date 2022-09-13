@@ -77,7 +77,7 @@ pub struct Configuration {
     pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
-    pub(crate) graphql: Graphql,
+    pub(crate) supergraph: Supergraph,
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -110,7 +110,7 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
-        graphql: Option<Graphql>,
+        supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         cors: Option<Cors>,
@@ -119,7 +119,7 @@ impl Configuration {
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
-            graphql: graphql.unwrap_or_default(),
+            supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
@@ -137,7 +137,7 @@ impl Configuration {
     #[builder]
     pub(crate) fn fake_new(
         server: Option<Server>,
-        graphql: Option<Graphql>,
+        supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         cors: Option<Cors>,
@@ -146,7 +146,7 @@ impl Configuration {
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
-            graphql: graphql.unwrap_or_else(|| Graphql::fake_builder().build()),
+            supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             cors: cors.unwrap_or_default(),
@@ -295,7 +295,7 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Graphql {
+pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_graphql_listen")]
@@ -322,7 +322,7 @@ fn default_defer_support() -> bool {
 }
 
 #[buildstructor::buildstructor]
-impl Graphql {
+impl Supergraph {
     #[builder]
     pub(crate) fn new(
         listen: Option<ListenAddr>,
@@ -355,7 +355,7 @@ impl Graphql {
     }
 }
 
-impl Default for Graphql {
+impl Default for Supergraph {
     fn default() -> Self {
         Self::builder().build()
     }
@@ -424,7 +424,7 @@ impl Default for Sandbox {
 #[serde(deny_unknown_fields)]
 pub(crate) struct HealthCheck {
     /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:9090
+    /// Defaults to 127.0.0.1:9494
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
@@ -435,7 +435,7 @@ pub(crate) struct HealthCheck {
 }
 
 fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:9090").unwrap().into()
+    SocketAddr::from_str("127.0.0.1:9494").unwrap().into()
 }
 
 fn default_health_check_path() -> String {
@@ -984,32 +984,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.graphql.path.starts_with('/') {
+    if !config.supergraph.path.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.graphql.path,
-                config.graphql.path
+                config.supergraph.path,
+                config.supergraph.path
             ),
         });
     }
-    if config.graphql.path.ends_with('*') && !config.graphql.path.ends_with("/*") {
+    if config.supergraph.path.ends_with('*') && !config.supergraph.path.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.graphql.path
+                config.supergraph.path
             ),
         });
     }
-    if config.graphql.path.contains("/*/") {
+    if config.supergraph.path.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
                     message: "invalid 'server.graphql_path' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.graphql.path
+                        config.supergraph.path
                     ),
                 },
             );
@@ -1202,7 +1202,7 @@ mod tests {
     fn bad_graphql_path_configuration_without_slash() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   path: test
   "#,
         )
@@ -1214,7 +1214,7 @@ graphql:
     fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   path: /*/test
   "#,
         )
@@ -1226,7 +1226,7 @@ graphql:
     fn unknown_fields() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   path: /
 subgraphs:
   account: true
@@ -1261,7 +1261,7 @@ unknown:
     fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   path: /test*
   "#,
         )
@@ -1289,7 +1289,7 @@ telemetry:
     fn line_precise_config_errors_with_errors_after_first_field() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1305,7 +1305,7 @@ graphql:
     fn line_precise_config_errors_bad_type() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: true
@@ -1319,7 +1319,7 @@ graphql:
     fn line_precise_config_errors_with_inline_sequence() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1335,7 +1335,7 @@ cors:
     fn line_precise_config_errors_with_sequence() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1462,7 +1462,7 @@ cors:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
         "#,
         )
@@ -1493,7 +1493,7 @@ cors:
 
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1511,7 +1511,7 @@ cors:
     fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
         let error = validate_configuration(
             r#"
-graphql:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000

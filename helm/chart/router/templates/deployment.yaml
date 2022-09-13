@@ -86,11 +86,11 @@ spec:
           livenessProbe:
             httpGet:
               path: {{ (index .Values.router.configuration "health-check").path | default "/health" }}
-              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":9090") | last }}
+              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":9494") | last }}
           readinessProbe:
             httpGet:
               path: {{ (index .Values.router.configuration "health-check").path  | default "/health" }}
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":9090")) | last }}
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":9494")) | last }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}

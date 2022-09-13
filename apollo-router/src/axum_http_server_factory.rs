@@ -150,7 +150,7 @@ where
         service_factory,
         configuration,
         endpoints
-            .remove(&configuration.graphql.listen)
+            .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
@@ -184,7 +184,7 @@ fn ensure_listenaddrs_consistency(
     endpoints: &MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(), ApolloRouterError> {
     let mut all_ports = HashMap::new();
-    if let Some((main_ip, main_port)) = configuration.graphql.listen.ip_and_port() {
+    if let Some((main_ip, main_port)) = configuration.supergraph.listen.ip_and_port() {
         all_ports.insert(main_port, main_ip);
     }
 
@@ -262,7 +262,7 @@ where
         .into_iter()
         .fold(main_route, |acc, r| acc.merge(r.into_router()));
 
-    let listener = configuration.graphql.listen.clone();
+    let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
 }
 
@@ -323,7 +323,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
                 actual_main_listen_address,
-                configuration.graphql.path
+                configuration.supergraph.path
             );
 
             // serve extra routers
@@ -645,7 +645,7 @@ fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: SupergraphServiceFactory,
 {
-    let mut graphql_configuration = configuration.graphql.clone();
+    let mut graphql_configuration = configuration.supergraph.clone();
     if graphql_configuration.path.ends_with("/*") {
         // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
@@ -713,8 +713,8 @@ async fn handle_get(
 // Returns true if the sandbox is enabled, and on the same url as the graphql endpoint
 fn sandbox_on_main_endpoint(configuration: &Configuration) -> bool {
     configuration.sandbox.enabled
-        && configuration.sandbox.listen == configuration.graphql.listen
-        && configuration.sandbox.path == configuration.graphql.path
+        && configuration.sandbox.listen == configuration.supergraph.listen
+        && configuration.sandbox.path == configuration.supergraph.path
 }
 
 async fn handle_post(
@@ -1030,9 +1030,9 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
-    use crate::configuration::Graphql;
     use crate::configuration::HealthCheck;
     use crate::configuration::Sandbox;
+    use crate::configuration::Supergraph;
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
@@ -1143,8 +1143,8 @@ mod tests {
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
-                        .graphql(
-                            crate::configuration::Graphql::builder()
+                        .supergraph(
+                            crate::configuration::Supergraph::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
@@ -1238,8 +1238,8 @@ mod tests {
                 },
                 Arc::new(
                     Configuration::fake_builder()
-                        .graphql(
-                            crate::configuration::Graphql::fake_builder()
+                        .supergraph(
+                            crate::configuration::Supergraph::fake_builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
@@ -1609,8 +1609,8 @@ mod tests {
                 ))
             });
         let conf = Configuration::fake_builder()
-            .graphql(
-                crate::configuration::Graphql::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
                     .path(String::from("/graphql"))
                     .build(),
             )
@@ -1675,8 +1675,8 @@ mod tests {
                 ))
             });
         let conf = Configuration::fake_builder()
-            .graphql(
-                crate::configuration::Graphql::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
                     .path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
@@ -1741,8 +1741,8 @@ mod tests {
                 ))
             });
         let conf = Configuration::fake_builder()
-            .graphql(
-                crate::configuration::Graphql::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
                     .path(String::from("/graphql/*"))
                     .build(),
             )
@@ -1968,8 +1968,8 @@ mod tests {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::fake_builder()
             .cors(Cors::builder().build())
-            .graphql(
-                crate::configuration::Graphql::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
                     .path(String::from("/graphql/*"))
                     .build(),
             )
@@ -2648,8 +2648,8 @@ Content-Type: application/json\r
     )]
     async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
         let configuration = Configuration::fake_builder()
-            .graphql(
-                Graphql::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
                     .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
@@ -2671,8 +2671,8 @@ Content-Type: application/json\r
     )]
     async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
         let configuration = Configuration::fake_builder()
-            .graphql(
-                Graphql::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
                     .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
@@ -2699,8 +2699,8 @@ Content-Type: application/json\r
     async fn it_supports_server_restart() {
         let configuration = Arc::new(
             Configuration::fake_builder()
-                .graphql(
-                    Graphql::fake_builder()
+                .supergraph(
+                    Supergraph::fake_builder()
                         .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                         .build(),
                 )

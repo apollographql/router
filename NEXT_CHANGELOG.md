@@ -36,12 +36,12 @@ Here's the list of the endpoints exposed by the router:
 - GraphQL: http://127.0.0.1:4000/ (unchanged)
 - The GraphQL sandbox: http://127.0.0.1:4000/ (unchanged)
 - Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
-- Healthcheck: http://127.0.0.1:9090/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
+- Healthcheck: http://127.0.0.1:9494/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
 
 While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
 
 In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
-Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `graphql` section:
+Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
 
 This previous configuration: 
 ```yaml
@@ -61,19 +61,21 @@ telemetry:
 Now becomes:
 ```yaml
 # landing_page configuration
-sandbox:
+sandbox: 
   listen: 127.0.0.1:4000
   path: /
+  enabled: false # default
 # graphql_path configuration
-graphql:
+supergraph:
   listen: 127.0.0.1:4000
   path: /
   introspection: false
   preview_defer_support: true
-# health_check_path confiiguration
+# health_check_path configuration
 health-check:
-  listen: 127.0.0.1:9090
+  listen: 127.0.0.1:9494
   path: /health
+  enabled: true # default
 # prometheus scraper configuration
 telemetry:
   metrics:

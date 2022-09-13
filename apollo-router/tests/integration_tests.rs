@@ -536,7 +536,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
-        "graphql": {
+        "supergraph": {
             "preview_defer_support": false,
         },
         "plugins": {
