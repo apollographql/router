@@ -55,7 +55,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.graphql.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.preview_defer_support),
                         }),
                     },
                 )

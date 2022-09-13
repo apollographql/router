@@ -220,9 +220,9 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 
 ```yaml title="router_unix.yaml"
 #
-# graphql: Configuration of the GraphQL server
+# supergraph: Configuration of the Supergraph server
 #
-graphql:
+supergraph:
   # The socket address and port to listen on
   listen: 127.0.0.1:4000
 ```
@@ -230,7 +230,7 @@ graphql:
 The router can also listen on a Unix socket (not supported on Windows):
 
 ```yaml title="router_unix.yaml"
-graphql:
+supergraph:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
 ```
@@ -243,9 +243,9 @@ You can change this path by setting `server.path`:
 
 ```yaml title="router.yaml"
 #
-# graphql: Configuration of the GraphQL server
+# supergraph: Configuration of the Supergraph server
 #
-graphql:
+supergraph:
   # The path for GraphQL execution
   # (Defaults to /)
   path: /graphql
@@ -266,10 +266,10 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 
 ```yaml title="router.yaml"
 #
-# graphql: Configuration of the GraphQL server
+# supergraph: Configuration of the Supergraph server
 #
-graphql:
-  introspection: true
+supergraph:
+  introspection: false
 ```
 
 ### Landing page
@@ -344,7 +344,7 @@ Unix-style expansion is used. For example:
 Environment variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
-graphql:
+supergraph:
   listen: "${MY_LISTEN_ADDRESS}"
 example:
   password: "${MY_PASSWORD}"
