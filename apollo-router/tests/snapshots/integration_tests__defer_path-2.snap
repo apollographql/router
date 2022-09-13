@@ -4,7 +4,7 @@ assertion_line: 679
 expression: second
 ---
 {
-  "hasNext": true,
+  "hasNext": false,
   "incremental": [
     {
       "label": "name",
