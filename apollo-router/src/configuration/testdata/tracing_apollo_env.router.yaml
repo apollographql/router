@@ -2,7 +2,7 @@ server:
   listen: 1.2.3.4:5
 telemetry:
   apollo:
-    endpoint: "${ENDPOINT}"
+    endpoint: "${env.TEST_CONFIG_ENDPOINT}"
     client_version_header: apollographql-client-version
     client_name_header: apollographql-client-name
 

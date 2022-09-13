@@ -7,5 +7,5 @@ configuration had errors:
 
 
 server:
-  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
-                 ^----- "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}" is not of type "boolean"
+  introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
+                 ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "boolean"

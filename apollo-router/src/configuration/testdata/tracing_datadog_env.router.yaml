@@ -3,5 +3,5 @@ server:
 telemetry:
   tracing:
     datadog:
-      endpoint: ${ENDPOINT}
+      endpoint: ${env.TEST_CONFIG_ENDPOINT}
 
