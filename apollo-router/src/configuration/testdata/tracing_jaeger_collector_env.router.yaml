@@ -4,4 +4,4 @@ telemetry:
   tracing:
     jaeger:
       collector:
-        endpoint: ${COLLECTOR_ENV}
+        endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}
