@@ -56,7 +56,6 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 directories = "4.0.1"
 displaydoc = "0.2"
-envmnt = "0.10.4"
 flate2 = "1.0.24"
 futures = { version = "0.3.24", features = ["thread-pool"] }
 graphql_client = "0.11.0"
@@ -134,6 +133,7 @@ reqwest = { version = "0.11.11", default-features = false, features = [
 ] }
 router-bridge = "0.1.6"
 schemars = { version = "0.8.10", features = ["url"] }
+shellexpand = "2.1.2"
 sha2 = "0.10.5"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }

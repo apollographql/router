@@ -118,6 +118,19 @@ supergraph::new_from_graphql_response
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
 
+
+### Environment variable expansion enhancements ([#1759](https://github.com/apollographql/router/issues/1759))
+
+* Environment expansions must be prefixed with `env.`. This will allow us to add other expansion types in future.
+* Change defaulting token from `:` to `:-`. For example:
+
+  `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
+* Failed expansions result in an error.
+  
+  Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
 ### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
@@ -205,6 +218,19 @@ Executable::builder()
 ```
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
 
+### Environment variable expansion prefixing ([#1759](https://github.com/apollographql/router/issues/1759))
+
+The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
+
+For example: 
+
+`APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
+
+Would cause:
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
 ## 🐛 Fixes
 
 ### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
@@ -223,6 +249,22 @@ We changed `QueryPlannerResponse` to:
 + Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
+### A copy of the usage reporting Protobuf interface file in the Router source repository
+
+Previously this file was downloaded when compiling the Router,
+but we had no good way to automatically check when to re-download it
+without causing the Router to be compiled all the time.
+
+Instead a copy now resides in the repository, with a test checking that it is up to date.
+This file can be updated by running this command then sending a PR:
+
+```
+curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
+    > apollo-router/src/spaceport/proto/reports.proto
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
 
