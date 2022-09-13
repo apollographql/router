@@ -143,6 +143,7 @@ where
     }
 }
 
+#[cfg(not(windows))] // git checkout converts \n to \r\n, making == below fail
 #[test]
 fn check_reports_proto_is_up_to_date() {
     let proto_url = "https://usage-reporting.api.apollographql.com/proto/reports.proto";
