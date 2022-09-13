@@ -193,6 +193,22 @@ We changed `QueryPlannerResponse` to:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
 
+### A copy of the usage reporting Protobuf interface file in the Router source repository
+
+Previously this file was downloaded when compiling the Router,
+but we had no good way to automatically check when to re-download it
+without causing the Router to be compiled all the time.
+
+Instead a copy now resides in the repository, with a test checking that it is up to date.
+This file can be updated by running this command then sending a PR:
+
+```
+curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
+    > apollo-router/src/spaceport/proto/reports.proto
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
+
 ### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
 
 For features such a `@defer`, the Router may send a stream of multiple GraphQL responses
