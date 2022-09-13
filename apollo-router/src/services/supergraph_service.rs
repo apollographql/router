@@ -445,7 +445,7 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
 
-        let introspection = if configuration.supergraph.introspection.unwrap_or_default() {
+        let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
         } else {
             None

@@ -184,33 +184,16 @@ impl Configuration {
         if self.plugins.plugins.is_none() {
             self.plugins.plugins = Some(Map::new());
         }
-
-        if !self
-            .plugins
-            .plugins
-            .as_ref()
-            .unwrap()
-            .contains_key("experimental.expose_query_plan")
-        {
-            self.plugins.plugins.as_mut().unwrap().insert(
-                "experimental.expose_query_plan".to_string(),
-                Value::Bool(true),
-            );
-        }
-        if !self
-            .plugins
-            .plugins
-            .as_ref()
-            .unwrap()
-            .contains_key("experimental.include_subgraph_errors")
-        {
-            self.plugins.plugins.as_mut().unwrap().insert(
-                "experimental.include_subgraph_errors".to_string(),
-                json!({"all": true}),
-            );
-        }
-        self.supergraph.introspection = self.supergraph.introspection.or(Some(true));
-        self.sandbox.enabled = self.sandbox.enabled.or(Some(true));
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.expose_query_plan".to_string(),
+            Value::Bool(true),
+        );
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.include_subgraph_errors".to_string(),
+            json!({"all": true}),
+        );
+        self.supergraph.introspection = true;
+        self.sandbox.enabled = true;
     }
 
     #[cfg(test)]
@@ -393,7 +376,8 @@ pub(crate) struct Supergraph {
 
     /// Enable introspection
     /// Default: false
-    pub(crate) introspection: Option<bool>,
+    #[serde(default = "default_graphql_introspection")]
+    pub(crate) introspection: bool,
 
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
@@ -415,7 +399,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection,
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -434,7 +418,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection,
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -462,7 +446,8 @@ pub(crate) struct Sandbox {
 
     /// Enable sandbox
     /// Default: false
-    pub(crate) enabled: Option<bool>, // It's an option to know if it's overrided when in dev mode
+    #[serde(default = "default_sandbox_enabled")]
+    pub(crate) enabled: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -476,7 +461,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled,
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
         }
     }
 }
@@ -493,7 +478,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled,
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
         }
     }
 }
@@ -722,6 +707,14 @@ fn default_cors_methods() -> Vec<String> {
 
 fn default_graphql_path() -> String {
     String::from("/")
+}
+
+fn default_graphql_introspection() -> bool {
+    false
+}
+
+fn default_sandbox_enabled() -> bool {
+    false
 }
 
 fn default_parser_recursion_limit() -> usize {

@@ -109,8 +109,7 @@ where
     RF: SupergraphServiceFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-    if configuration.sandbox.enabled.unwrap_or_default() && !sandbox_on_main_endpoint(configuration)
-    {
+    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(configuration) {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
             Endpoint::new(
@@ -713,7 +712,7 @@ async fn handle_get(
 
 // Returns true if the sandbox is enabled, and on the same url as the graphql endpoint
 fn sandbox_on_main_endpoint(configuration: &Configuration) -> bool {
-    configuration.sandbox.enabled.unwrap_or_default()
+    configuration.sandbox.enabled
         && configuration.sandbox.listen == configuration.supergraph.listen
         && configuration.sandbox.path == configuration.supergraph.path
 }

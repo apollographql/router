@@ -730,8 +730,8 @@ mod tests {
             UpdateConfiguration(configuration) => configuration,
             _ => panic!("the event from the stream must be UpdateConfiguration"),
         };
-        assert!(cfg.supergraph.introspection.unwrap());
-        assert!(cfg.sandbox.enabled.unwrap());
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
         assert!(cfg.plugins().iter().any(
             |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
         ));
@@ -747,8 +747,8 @@ mod tests {
             UpdateConfiguration(configuration) => configuration,
             _ => panic!("the event from the stream must be UpdateConfiguration"),
         };
-        assert!(cfg.supergraph.introspection.unwrap());
-        assert!(cfg.sandbox.enabled.unwrap());
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
         assert!(cfg.plugins().iter().any(
             |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
         ));
