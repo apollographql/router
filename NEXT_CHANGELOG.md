@@ -35,7 +35,7 @@ By default, `sandbox` and `introspection` configuration are disabled. You have t
 sandbox:
   # ...
   enabled: true
-graphql:
+supergraph:
     # ...
   introspection: true
 ```

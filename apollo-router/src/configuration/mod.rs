@@ -140,35 +140,6 @@ impl Configuration {
         }
     }
 
-    // // Used in tests
-    // #[allow(dead_code)]
-    // #[builder]
-    // pub(crate) fn fake_new(
-    //     server: Option<Server>,
-    //     supergraph: Option<Supergraph>,
-    //     health_check: Option<HealthCheck>,
-    //     sandbox: Option<Sandbox>,
-    //     cors: Option<Cors>,
-    //     plugins: Map<String, Value>,
-    //     apollo_plugins: Map<String, Value>,
-    //     dev: Option<bool>,
-    // ) -> Self {
-    //     Self {
-    //         server: server.unwrap_or_default(),
-    //         supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-    //         health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
-    //         sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
-    //         cors: cors.unwrap_or_default(),
-    //         plugins: UserPlugins {
-    //             plugins: Some(plugins),
-    //         },
-    //         apollo_plugins: ApolloPlugins {
-    //             plugins: apollo_plugins,
-    //         },
-    //         dev,
-    //     }
-    // }
-
     pub(crate) fn enable_dev_mode(&mut self) {
         if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
             tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
