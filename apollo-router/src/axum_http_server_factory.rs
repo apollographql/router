@@ -178,7 +178,7 @@ where
 /// 127.0.0.1:4000 and 127.0.0.1:4000 will not trigger an error
 /// 127.0.0.1:4000 and 0.0.0.0:4001 will not trigger an error
 ///
-/// 127.0.0.1:4000 and 0.0.0.0:4000 will not trigger an error
+/// 127.0.0.1:4000 and 0.0.0.0:4000 will trigger an error
 fn ensure_listenaddrs_consistency(
     configuration: &Configuration,
     endpoints: &MultiMap<ListenAddr, Endpoint>,
