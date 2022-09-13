@@ -369,7 +369,7 @@ fn process_execution_response(
         .filter(|response| {
             ready(
                 // this is a single response
-                response.has_next.is_none()
+                response.data.is_some()
                     // the formatting step for incremental responses returned an empty array
                     || !response.incremental.is_empty()
                     // even if the response is empty, we have to send a final response with `has_next` set to false
