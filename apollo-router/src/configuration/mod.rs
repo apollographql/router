@@ -123,7 +123,6 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
     ) -> Self {
-        let plugins = plugins;
         Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
@@ -140,6 +139,7 @@ impl Configuration {
         }
     }
 
+    /// This should be executed after normal configuration processing
     pub(crate) fn enable_dev_mode(&mut self) {
         if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
             tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
@@ -151,14 +151,30 @@ impl Configuration {
             self.plugins.plugins = Some(Map::new());
         }
 
-        self.plugins.plugins.as_mut().unwrap().insert(
-            "experimental.expose_query_plan".to_string(),
-            Value::Bool(true),
-        );
-        self.plugins.plugins.as_mut().unwrap().insert(
-            "experimental.include_subgraph_errors".to_string(),
-            json!({"all": true}),
-        );
+        if !self
+            .plugins
+            .plugins
+            .as_ref()
+            .unwrap()
+            .contains_key("experimental.expose_query_plan")
+        {
+            self.plugins.plugins.as_mut().unwrap().insert(
+                "experimental.expose_query_plan".to_string(),
+                Value::Bool(true),
+            );
+        }
+        if !self
+            .plugins
+            .plugins
+            .as_ref()
+            .unwrap()
+            .contains_key("experimental.include_subgraph_errors")
+        {
+            self.plugins.plugins.as_mut().unwrap().insert(
+                "experimental.include_subgraph_errors".to_string(),
+                json!({"all": true}),
+            );
+        }
         self.supergraph.introspection = self.supergraph.introspection.or(Some(true));
         self.sandbox.enabled = self.sandbox.enabled.or(Some(true));
     }
