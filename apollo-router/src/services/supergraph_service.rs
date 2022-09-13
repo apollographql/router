@@ -316,10 +316,6 @@ fn process_execution_response(
                 schema.api_schema(),
             )
         });
-        println!(
-            "supergraphservice got response: {}",
-            serde_json::to_string(&response).unwrap()
-        );
 
         match (response.path.as_ref(), response.data.as_ref()) {
             (None, _) | (_, None) => {
