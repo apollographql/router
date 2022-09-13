@@ -1237,9 +1237,9 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
+                    Configuration::fake_builder()
                         .graphql(
-                            crate::configuration::Graphql::builder()
+                            crate::configuration::Graphql::fake_builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )

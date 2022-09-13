@@ -33,7 +33,7 @@ async-compression = { version = "0.3.14", features = [
 ] }
 async-trait = "0.1.57"
 atty = "0.2.14"
-axum = { version = "0.5.15", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.5.16", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 base64 = "0.13.0"
 buildstructor = "0.5.0"
