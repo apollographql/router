@@ -77,6 +77,9 @@ pub struct Configuration {
     pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
+    pub(crate) homepage: Homepage,
+
+    #[serde(default)]
     pub(crate) supergraph: Supergraph,
     /// Cross origin request headers.
     #[serde(default)]
@@ -113,6 +116,7 @@ impl Configuration {
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -122,6 +126,7 @@ impl Configuration {
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
+            homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -183,6 +188,7 @@ impl Configuration {
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -192,6 +198,7 @@ impl Configuration {
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -293,7 +300,7 @@ impl JsonSchema for UserPlugins {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the supergraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Supergraph {
@@ -365,7 +372,7 @@ impl Default for Supergraph {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
@@ -374,7 +381,7 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// The HTTP path on which GraphQL requests will be served.
+    /// The HTTP path on which the sandbox page will be served.
     /// default: "/"
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
@@ -421,6 +428,67 @@ impl Sandbox {
 }
 
 impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the home page.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Homepage {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which the homepage will be served.
+    /// default: "/"
+    #[serde(default = "default_graphql_path")]
+    pub(crate) path: String,
+
+    #[serde(default = "default_homepage")]
+    pub(crate) enabled: bool,
+}
+
+fn default_homepage() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_homepage),
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_homepage),
+        }
+    }
+}
+
+impl Default for Homepage {
     fn default() -> Self {
         Self::builder().build()
     }

@@ -109,7 +109,13 @@ where
     RF: SupergraphServiceFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-    if configuration.sandbox.enabled && !sandbox_on_main_endpoint(configuration) {
+    if configuration.sandbox.enabled
+        && !on_supergraph_endpoint(
+            configuration,
+            &configuration.sandbox.listen,
+            &configuration.sandbox.path,
+        )
+    {
         endpoints.insert(
             configuration.sandbox.listen.clone(),
             Endpoint::new(
@@ -119,8 +125,39 @@ where
                         http::Response::builder()
                             .header(CONTENT_TYPE, "text/html")
                             .body(
-                                Bytes::from_static(include_bytes!("../resources/index.html"))
-                                    .into(),
+                                Bytes::from_static(include_bytes!(
+                                    "../resources/sandbox_index.html"
+                                ))
+                                .into(),
+                            )
+                            .unwrap(),
+                    )
+                })
+                .boxed(),
+            ),
+        );
+    }
+
+    if configuration.homepage.enabled
+        && !on_supergraph_endpoint(
+            configuration,
+            &configuration.homepage.listen,
+            &configuration.homepage.path,
+        )
+    {
+        endpoints.insert(
+            configuration.homepage.listen.clone(),
+            Endpoint::new(
+                configuration.homepage.path.clone(),
+                service_fn(|_req: transport::Request| async move {
+                    Ok::<_, BoxError>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, "text/html")
+                            .body(
+                                Bytes::from_static(include_bytes!(
+                                    "../resources/homepage_index.html"
+                                ))
+                                .into(),
                             )
                             .unwrap(),
                     )
@@ -612,35 +649,6 @@ struct CustomRejection {
     msg: String,
 }
 
-async fn handle_get_with_sandbox(
-    Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
-    http_request: Request<Body>,
-) -> impl IntoResponse {
-    if prefers_html(http_request.headers()) {
-        return display_home_page().into_response();
-    }
-
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
-            .await
-            .into_response();
-    }
-
-    (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
-}
-
 fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: SupergraphServiceFactory,
@@ -651,10 +659,27 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    let get_handler = if sandbox_on_main_endpoint(configuration) {
+    let get_handler = if configuration.sandbox.enabled
+        && on_supergraph_endpoint(
+            configuration,
+            &configuration.sandbox.listen,
+            &configuration.sandbox.path,
+        ) {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_sandbox(host, service.new_service().boxed(), http_request)
+            }
+        })
+    } else if configuration.homepage.enabled
+        && on_supergraph_endpoint(
+            configuration,
+            &configuration.homepage.listen,
+            &configuration.homepage.path,
+        )
+    {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get_with_homepage(host, service.new_service().boxed(), http_request)
             }
         })
     } else {
@@ -685,6 +710,64 @@ where
     )
 }
 
+async fn handle_get_with_homepage(
+    Host(host): Host,
+    service: BoxService<
+        http::Request<graphql::Request>,
+        http::Response<graphql::ResponseStream>,
+        BoxError,
+    >,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    if prefers_html(http_request.headers()) {
+        return display_home_page().into_response();
+    }
+
+    if let Some(request) = http_request
+        .uri()
+        .query()
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    {
+        let mut http_request = http_request.map(|_| request);
+        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+            .expect("the URL is already valid because it comes from axum; qed");
+        return run_graphql_request(service, http_request)
+            .await
+            .into_response();
+    }
+
+    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
+}
+
+async fn handle_get_with_sandbox(
+    Host(host): Host,
+    service: BoxService<
+        http::Request<graphql::Request>,
+        http::Response<graphql::ResponseStream>,
+        BoxError,
+    >,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    if prefers_html(http_request.headers()) {
+        return display_sandbox_page().into_response();
+    }
+
+    if let Some(request) = http_request
+        .uri()
+        .query()
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    {
+        let mut http_request = http_request.map(|_| request);
+        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+            .expect("the URL is already valid because it comes from axum; qed");
+        return run_graphql_request(service, http_request)
+            .await
+            .into_response();
+    }
+
+    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
+}
+
 async fn handle_get(
     Host(host): Host,
     service: BoxService<
@@ -710,11 +793,9 @@ async fn handle_get(
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
-// Returns true if the sandbox is enabled, and on the same url as the graphql endpoint
-fn sandbox_on_main_endpoint(configuration: &Configuration) -> bool {
-    configuration.sandbox.enabled
-        && configuration.sandbox.listen == configuration.supergraph.listen
-        && configuration.sandbox.path == configuration.supergraph.path
+// Returns true if the provided url and path targets the supergraph endpoint
+fn on_supergraph_endpoint(configuration: &Configuration, listen: &ListenAddr, path: &str) -> bool {
+    listen == &configuration.supergraph.listen && path == configuration.supergraph.path
 }
 
 async fn handle_post(
@@ -741,8 +822,13 @@ async fn handle_post(
         .into_response()
 }
 
+fn display_sandbox_page() -> Html<Bytes> {
+    let html = Bytes::from_static(include_bytes!("../resources/sandbox_index.html"));
+    Html(html)
+}
+
 fn display_home_page() -> Html<Bytes> {
-    let html = Bytes::from_static(include_bytes!("../resources/index.html"));
+    let html = Bytes::from_static(include_bytes!("../resources/homepage_index.html"));
     Html(html)
 }
 
@@ -1136,25 +1222,7 @@ mod tests {
                 TestSupergraphServiceFactory {
                     inner: service.into_inner(),
                 },
-                Arc::new(
-                    Configuration::builder()
-                        .sandbox(
-                            crate::configuration::Sandbox::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .build(),
-                        )
-                        .supergraph(
-                            crate::configuration::Supergraph::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .build(),
-                        )
-                        .health_check(
-                            crate::configuration::HealthCheck::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .build(),
-                        )
-                        .build(),
-                ),
+                Arc::new(Configuration::fake_builder().build()),
                 None,
                 vec![],
                 MultiMap::new(),
@@ -1256,7 +1324,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_home_page_on_same_endpoint() -> Result<(), ApolloRouterError> {
+    async fn it_display_sandbox_page_on_same_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
@@ -1281,13 +1349,13 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
+        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn it_display_home_page_on_different_path() -> Result<(), ApolloRouterError> {
+    async fn it_display_sandbox_page_on_different_path() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
@@ -1317,12 +1385,12 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
+        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
         Ok(())
     }
 
     #[tokio::test]
-    async fn it_display_home_page_on_different_endpoint() -> Result<(), ApolloRouterError> {
+    async fn it_display_sandbox_page_on_different_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
@@ -1352,7 +1420,7 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
+        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
         Ok(())
     }
 
@@ -2205,11 +2273,12 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
+    async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
         let conf = Configuration::fake_builder()
-            .sandbox(
-                crate::configuration::Sandbox::fake_builder()
+            // sandbox is disabled by default, but homepage will take over if we dont disable it
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
                     .enabled(false)
                     .build(),
             )
@@ -2226,6 +2295,37 @@ Content-Type: application/json\r
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
+        let expectations = MockSupergraphService::new();
+        let conf = Configuration::fake_builder()
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
+                    .enabled(false)
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+        let response = client
+            .get(&format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{:?}",
+            response.text().await
+        );
 
         server.shutdown().await
     }
