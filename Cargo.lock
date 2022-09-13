@@ -1032,7 +1032,7 @@ checksum = "e57ff02e8ad8e06ab9731d5dc72dc23bef9200778eae1a89d555d8c42e5d4a86"
 dependencies = [
  "prost 0.11.0",
  "prost-types 0.11.1",
- "tonic 0.8.0",
+ "tonic 0.8.1",
  "tracing-core",
 ]
 
@@ -1054,7 +1054,7 @@ dependencies = [
  "thread_local",
  "tokio",
  "tokio-stream",
- "tonic 0.8.0",
+ "tonic 0.8.1",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -4357,9 +4357,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4b82497e9189775aceeab176ee860f5517de1fcda11ec513258daebd15455de"
+checksum = "acc79f3a3701d7192aeca0f712a3787e76a9bf29d08bf2af3abf67ff2b70cebe"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5566,9 +5566,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "498f271adc46acce75d66f639e4d35b31b2394c295c82496727dafa16d465dd2"
+checksum = "11cd56bdb54ef93935a6a79dbd1d91f1ebd4c64150fd61654031fd6b8b775c91"
 dependencies = [
  "async-stream",
  "async-trait",

@@ -1,6 +1,7 @@
 #![allow(missing_docs)] // FIXME
 
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -107,6 +108,9 @@ pub enum ApolloRouterError {
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// tried to bind {0} and {1} on port {2}
+    DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
