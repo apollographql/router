@@ -1558,7 +1558,7 @@ supergraph:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1610,7 +1610,7 @@ supergraph:
     fn expansion_failure_missing_variable() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         )
@@ -1622,7 +1622,7 @@ server:
     fn expansion_failure_unknown_mode() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   introspection: ${unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         )
@@ -1635,7 +1635,7 @@ server:
         std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
         validate_configuration_internal(
             r#"
-server:
+supergraph:
   introspection: ${env.NEEDS_PREFIX}
         "#,
             Expansion::Prefixed("TEST_CONFIG".to_string()),
