@@ -30,7 +30,7 @@ where
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
             |req: ExecutionRequest| {
-                if req.originating_request.method() != Method::POST
+                if req.supergraph_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
                     let errors = vec![Error {
@@ -226,7 +226,7 @@ mod forbid_http_get_mutations_tests {
             .expect("expecting valid request");
 
         ExecutionRequest::fake_builder()
-            .originating_request(request)
+            .supergraph_request(request)
             .query_plan(QueryPlan::fake_builder().root(root).build())
             .build()
     }

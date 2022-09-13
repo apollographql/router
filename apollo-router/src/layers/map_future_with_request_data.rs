@@ -101,7 +101,7 @@ mod test {
         let mut service = ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &SupergraphRequest| {
-                    req.originating_request
+                    req.supergraph_request
                         .headers()
                         .get("hello")
                         .cloned()

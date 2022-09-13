@@ -26,7 +26,6 @@ use futures::future::join_all;
 use futures::future::ready;
 use futures::prelude::*;
 use futures::stream::once;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
@@ -89,7 +88,7 @@ impl AxumHttpServerFactory {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ListenAddrAndRouter(ListenAddr, Router);
+pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
 
 #[derive(Debug)]
 pub(crate) struct ListenersAndRouters {
@@ -171,7 +170,9 @@ where
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(PropagatingMakeSpan::new())
-                .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
+                    // Duration here is instant based
+                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
                     if resp.status() >= StatusCode::BAD_REQUEST {
                         span.record(
                             "otel.status_code",
@@ -547,7 +548,7 @@ async fn handle_get(
     Host(host): Host,
     service: BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >,
     http_request: Request<Body>,
@@ -579,7 +580,7 @@ async fn handle_post(
     Json(request): Json<graphql::Request>,
     service: BoxService<
         http::Request<graphql::Request>,
-        http::Response<BoxStream<'static, graphql::Response>>,
+        http::Response<graphql::ResponseStream>,
         BoxError,
     >,
     header_map: HeaderMap,
@@ -620,7 +621,7 @@ async fn run_graphql_request<RS>(
 where
     RS: Service<
             http::Request<graphql::Request>,
-            Response = http::Response<BoxStream<'static, graphql::Response>>,
+            Response = http::Response<graphql::ResponseStream>,
             Error = BoxError,
         > + Send,
 {
@@ -822,6 +823,8 @@ impl PropagatingMakeSpan {
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // This method needs to be moved to the telemetry plugin once we have a hook for the http request.
+
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
@@ -839,7 +842,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -850,7 +854,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "apollo_private.duration_ns" = tracing::field::Empty
             )
         }
     }
@@ -930,7 +935,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         SupergraphService {
-            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<BoxStream<'static, graphql::Response>>, BoxError>;
+            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<graphql::ResponseStream>, BoxError>;
         }
     }
 
