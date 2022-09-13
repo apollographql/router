@@ -8,6 +8,7 @@ use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use prost::Message;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::error::TrySendError;
@@ -127,7 +128,7 @@ impl ReportSpaceport {
             .body(compressed_content)
             .header("X-Api-Key", key)
             .header("Content-Encoding", "gzip")
-            .header("Content-Type", "application/protobuf")
+            .header(CONTENT_TYPE, "application/protobuf")
             .header("Accept", "application/json")
             .header(
                 "User-Agent",

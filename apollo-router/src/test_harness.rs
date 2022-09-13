@@ -46,7 +46,7 @@ pub(crate) mod http_client;
 /// use tower::util::ServiceExt;
 ///
 /// # #[tokio::main] async fn main() -> Result<(), tower::BoxError> {
-/// let config = serde_json::json!({"server": {"introspection": false}});
+/// let config = serde_json::json!({"supergraph": { "introspection": false }});
 /// let request = supergraph::Request::fake_builder()
 ///     // Request building here
 ///     .build()

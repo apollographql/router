@@ -29,7 +29,7 @@ router docker images.
 You can use helm to install charts from an OCI registry as follows:
 
 ```bash
-helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 0.1.20 --values router/values.yaml
+helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-alpha.3 --values router/values.yaml
 ```
 
 For more details about using helm with OCI based registries, see [here](https://helm.sh/docs/topics/registries/)
@@ -62,39 +62,48 @@ Note: This example is generated using the helm template capability to generate t
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: router-test
+  name: release-name-router
   labels:
+    helm.sh/chart: router-1.0.0-alpha.3
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: router-test
+  name: "release-name-router"
   labels:
+    helm.sh/chart: router-1.0.0-alpha.3
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
 data:
-  managedFederationApiKey: "REDACTED"
+  managedFederationApiKey: "UkVEQUNURUQ="
 ---
 # Source: router/templates/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: router-test
+  name: release-name-router
   labels:
+    helm.sh/chart: router-1.0.0-alpha.3
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
-    server:
+    graphql:
       listen: 0.0.0.0:80
     telemetry:
       metrics:
+        common:
+          resources:
+            service.name: release-name-router
         prometheus:
           enabled: true
 ---
@@ -102,11 +111,13 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: router-test
+  name: release-name-router
   labels:
+    helm.sh/chart: router-1.0.0-alpha.3
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
   ports:
@@ -116,34 +127,37 @@ spec:
       name: http
   selector:
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
 ---
 # Source: router/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: router-test
+  name: release-name-router
   labels:
+    helm.sh/chart: router-1.0.0-alpha.3
     app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
+    app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
+  
   annotations:
-    prometheus.io/path: /plugins/apollo.telemetry/prometheus
-    prometheus.io/port: "80"
+    prometheus.io/path: /metrics
+    prometheus.io/port: 9090
     prometheus.io/scrape: "true"
 spec:
   replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: router
-      app.kubernetes.io/instance: router-test
+      app.kubernetes.io/instance: release-name
   template:
     metadata:
       labels:
         app.kubernetes.io/name: router
-        app.kubernetes.io/instance: router-test
+        app.kubernetes.io/instance: release-name
     spec:
-      serviceAccountName: router-test
+      serviceAccountName: release-name-router
       securityContext:
         {}
       containers:
@@ -160,22 +174,23 @@ spec:
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
-                  name: router-test
+                  name: "release-name-router"
                   key: managedFederationApiKey
+                  optional: true
             - name: APOLLO_GRAPH_REF
-              value: "REDACTED"
+              value: REDACTED
           ports:
             - name: http
               containerPort: 80
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: /health
+              port: 9494
           readinessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: /health
+              port: 9494
           resources:
             {}
           volumeMounts:
@@ -186,17 +201,38 @@ spec:
       volumes:
         - name: router-configuration
           configMap:
-            name: router-test
+            name: release-name-router
+---
+# Source: router/templates/tests/test-connection.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "release-name-router-test-connection"
+  labels:
+    helm.sh/chart: router-1.0.0-alpha.3
+    app.kubernetes.io/name: router
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "v1.0.0-alpha.3"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['release-name-router:80']
+  restartPolicy: Never
 ```
 
 ## The health endpoint
 
 The router supports a health endpoint. You can see from the examples above how it can be used in a kubernetes deployment.
 
-If you had a router running on port 4000 on your localhost, you could exercise the health endpoint as follows:
+If you had a router running on port 9090 on your localhost, you could exercise the health endpoint as follows:
 
 ```bash
-curl "http://localhost:4000/.well-known/apollo/server-health"
+curl "http://localhost:9090/health"
 {"status":"pass"}
 ```
 
