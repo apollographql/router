@@ -12,12 +12,14 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use serde_json_bytes::json;
 use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
+use super::TYPENAME;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -222,7 +224,18 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(key.0).await;
+            // If we have only one operation containing a single root field `__typename`
+            if selections.contains_only_typename() {
+                return Ok(QueryPlannerContent::Introspection {
+                    response: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
+                            .build(),
+                    ),
+                });
+            } else {
+                return self.introspection(key.0).await;
+            }
         }
 
         self.plan(key.0, key.1, selections).await
