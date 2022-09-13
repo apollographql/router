@@ -220,18 +220,17 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 
 ```yaml title="router_unix.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   # The socket address and port to listen on
-  # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1
+  listen: 127.0.0.1:4000
 ```
 
 The router can also listen on a Unix socket (not supported on Windows):
 
 ```yaml title="router_unix.yaml"
-server:
+supergraph:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
 ```
@@ -240,16 +239,16 @@ server:
 
 By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.graphql_path`:
+You can change this path by setting `server.path`:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   # The path for GraphQL execution
   # (Defaults to /)
-  graphql_path: /graphql
+  path: /graphql
 ```
 
 The path must start with `/`.
@@ -267,22 +266,24 @@ By default, the router answers to some introspection queries. You can override t
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   introspection: false
 ```
 
 ### Landing page
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
+By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page by changing the defaults:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# router: Configuration of the GraphQL server
 #
-server:
-  landing_page: false
+sandbox:
+  listen: 127.0.0.1:4000
+  path: /
+  enabled: true
 ```
 
 ### Subgraph routing URLs
@@ -331,22 +332,24 @@ plugins:
     var2: 1
 ```
 
-### Environment variable expansion
+### Variable expansion
 
-You can reference environment variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+You can reference variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+
+Only environment variable expansion is currently supported, and variables must be prefixed with `env.`
 
 Unix-style expansion is used. For example:
 
-- `${ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
-- `${ENV_VAR_NAME:some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
+- `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
 
 Environment variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
-server:
-  listen: "${MY_LISTEN_ADDRESS}"
+supergraph:
+  listen: "${env.MY_LISTEN_ADDRESS}"
 example:
-  password: "${MY_PASSWORD}"
+  password: "${env.MY_PASSWORD}"
 ```
 
 ### Reusing configuration

@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use http::header::CONTENT_TYPE;
 use http::Request;
 use http::Response;
 use http::StatusCode;
@@ -262,7 +263,7 @@ async fn subgraph() {
             std::str::from_utf8(&body_bytes).unwrap()
         );
         Ok(Response::builder()
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .status(StatusCode::OK)
             .body(
                 r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#

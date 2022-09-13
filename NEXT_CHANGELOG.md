@@ -27,6 +27,66 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
+
+The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+
+Here's the list of the endpoints exposed by the router:
+
+- GraphQL: http://127.0.0.1:4000/ (unchanged)
+- The GraphQL sandbox: http://127.0.0.1:4000/ (unchanged)
+- Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
+- Healthcheck: http://127.0.0.1:9494/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
+
+While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
+
+In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
+Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
+
+This previous configuration: 
+```yaml
+server:
+  listen: 127.0.0.1:4000
+  graphql_path: /graphql
+  health_check_path: /health
+  introspection: false
+  preview_defer_support: true
+  landing_page: true
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+```
+
+Now becomes:
+```yaml
+# landing_page configuration
+sandbox: 
+  listen: 127.0.0.1:4000
+  path: /
+  enabled: false # default
+# graphql_path configuration
+supergraph:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: false
+  preview_defer_support: true
+# health_check_path configuration
+health-check:
+  listen: 127.0.0.1:9494
+  path: /health
+  enabled: true # default
+# prometheus scraper configuration
+telemetry:
+  metrics:
+    prometheus:
+      listen: 127.0.0.1:9090
+      path: /metrics
+      enabled: true
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
 ### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
 
 Instead of being dependencies, they are now part of the `apollo-router` crate.
@@ -43,6 +103,19 @@ supergraph::new_from_graphql_response
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
 
+
+### Environment variable expansion enhancements ([#1759](https://github.com/apollographql/router/issues/1759))
+
+* Environment expansions must be prefixed with `env.`. This will allow us to add other expansion types in future.
+* Change defaulting token from `:` to `:-`. For example:
+
+  `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
+* Failed expansions result in an error.
+  
+  Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
 ### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
@@ -52,6 +125,12 @@ OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
 
 ## 🚀 Features
+
+### Add support of query resolution with single `__typename` field ([Issue #1761](https://github.com/apollographql/router/issues/1761))
+
+For queries like `query { __typename }`, we added support to returns a GraphQL response even if the introspection has been disabled
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1762
 
 ### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
 
@@ -108,6 +187,19 @@ Executable::builder()
 ```
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
 
+### Environment variable expansion prefixing ([#1759](https://github.com/apollographql/router/issues/1759))
+
+The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
+
+For example: 
+
+`APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
+
+Would cause:
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
 ## 🐛 Fixes
 
 ### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
@@ -126,6 +218,22 @@ We changed `QueryPlannerResponse` to:
 + Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
+### A copy of the usage reporting Protobuf interface file in the Router source repository
+
+Previously this file was downloaded when compiling the Router,
+but we had no good way to automatically check when to re-download it
+without causing the Router to be compiled all the time.
+
+Instead a copy now resides in the repository, with a test checking that it is up to date.
+This file can be updated by running this command then sending a PR:
+
+```
+curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
+    > apollo-router/src/spaceport/proto/reports.proto
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
 
