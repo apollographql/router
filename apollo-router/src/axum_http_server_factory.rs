@@ -2388,6 +2388,73 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
+    async fn it_displays_homepage_and_sandbox_in_custom_endpoints() -> Result<(), ApolloRouterError>
+    {
+        let conf = Configuration::fake_builder()
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
+                    .path("/homepage")
+                    .build(),
+            )
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .enabled(true)
+                    .path("/sandbox")
+                    .build(),
+            )
+            .build();
+        let (server, client) =
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+
+        let sandbox_response = client
+            .get(&format!(
+                "{}/sandbox",
+                server.graphql_listen_address().as_ref().unwrap(),
+            ))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(sandbox_response.status(), StatusCode::OK);
+        assert_eq!(
+            sandbox_response.text().await.unwrap(),
+            include_str!("../resources/sandbox_index.html")
+        );
+
+        let homepage_response = client
+            .get(&format!(
+                "{}/homepage",
+                server.graphql_listen_address().as_ref().unwrap(),
+            ))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(homepage_response.status(), StatusCode::OK);
+        assert_eq!(
+            homepage_response.text().await.unwrap(),
+            include_str!("../resources/homepage_index.html")
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    #[should_panic(message = "oopsie")]
+    async fn it_refuses_to_start_if_homepage_and_sandbox_are_on_the_same_endpoint() {
+        let conf = Configuration::fake_builder()
+            .homepage(crate::configuration::Homepage::fake_builder().build())
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .enabled(true)
+                    .build(),
+            )
+            .build();
+
+        init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+    }
+
+    #[test(tokio::test)]
     async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError> {
         let mut expectations = MockSupergraphService::new();
         expectations
