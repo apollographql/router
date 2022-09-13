@@ -26,6 +26,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
+
+Instead of being dependencies, they are now part of the `apollo-router` crate.
+Therefore, they can not longer be used separately.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1751
+
+### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
+
+The following functions are only required for router implementation, so removing from external API.
+subgraph::new_from_response
+supergraph::new_from_response
+supergraph::new_from_graphql_response
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
+
 ### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
@@ -41,7 +58,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 There is a new global constant `apollo_sdl` which can be use to read the
 supergraph SDL as a string.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1737
 
 ### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
 
@@ -71,6 +88,25 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
+### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
+
+to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
+
+To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1632
+
+### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
+You may now specify custom schema and config sources when constructing an executable.
+```rust
+Executable::builder()
+  .shutdown(ShutdownSource::None)
+  .schema(SchemaSource::Stream(schemas))
+  .config(ConfigurationSource::Stream(configs))
+  .start()
+  .await
+```
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
 
 ## 🐛 Fixes
 ## 🛠 Maintenance
@@ -83,5 +119,28 @@ We changed `QueryPlannerResponse` to:
 + Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
+### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
+
+For features such a `@defer`, the Router may send a stream of multiple GraphQL responses
+in a single HTTP response.
+The body of the HTTP response is a single byte stream.
+When HTTP compression is used, that byte stream is compressed as a whole.
+Due to limitations in current versions of the `async-compression` crate,
+[issue #1572](https://github.com/apollographql/router/issues/1572) was a bug where
+some GraphQL responses might not be sent to the client until more of them became available.
+This buffering yields better compression, but defeats the point of `@defer`.
+
+Our previous work-around involved a patched `async-compression`,
+which was not trivial to apply when using the Router as a dependency
+since [Cargo patching](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)
+is done in a project’s root `Cargo.toml`.
+
+The Router now reverts to using unpatched `async-compression`,
+and instead disables compression of multipart responses.
+We aim to re-enable compression soon, with a proper solution that is being designed in
+<https://github.com/Nemo157/async-compression/issues/154>.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1749
 
 ## 📚 Documentation
