@@ -338,7 +338,7 @@ impl Supergraph {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
@@ -398,7 +398,7 @@ impl Sandbox {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[builder]
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
