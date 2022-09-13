@@ -1,3 +1,5 @@
+// The fuzzer won't compile on windows as of 1.63.0
+#![cfg(not(windows))]
 use std::fs;
 
 use apollo_parser::Parser;
@@ -8,7 +10,6 @@ use libfuzzer_sys::arbitrary::Unstructured;
 use log::debug;
 
 /// This generate an arbitrary valid GraphQL operation
-#[cfg(not(windows))]
 pub fn generate_valid_operation(input: &[u8], schema_path: &'static str) -> Result<String> {
     drop(env_logger::try_init());
 
