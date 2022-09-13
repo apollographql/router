@@ -769,8 +769,12 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, (ty, _))| {
-                let value = request.variables.get(*name).unwrap_or(&Value::Null);
+            .filter_map(|(name, (ty, default_value))| {
+                let value = request
+                    .variables
+                    .get(*name)
+                    .or(default_value.as_ref())
+                    .unwrap_or(&Value::Null);
                 ty.validate_input_value(value, schema).err().map(|_| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
@@ -1962,6 +1966,8 @@ mod tests {
         // https://spec.graphql.org/June2018/#sec-Int
         assert_validation!(schema, "query($foo:Int){x}", json!({}));
         assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
+        assert_validation!(schema, "query($foo:Int=1){x}", json!({}));
+        assert_validation!(schema, "query($foo:Int!=1){x}", json!({}));
         // When expected as an input type, only integer input values are accepted.
         assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
         assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
@@ -2018,6 +2024,9 @@ mod tests {
         assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
         assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": 0}));
         assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": "no"}));
+
+        assert_validation!(schema, "query($foo:Boolean=true){x}", json!({}));
+        assert_validation!(schema, "query($foo:Boolean!=true){x}", json!({}));
 
         // https://spec.graphql.org/June2018/#sec-ID
         assert_validation!(schema, "query($foo:ID){x}", json!({}));

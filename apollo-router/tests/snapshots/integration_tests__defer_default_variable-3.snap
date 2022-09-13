@@ -1,12 +1,13 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 712
+assertion_line: 729
 expression: first
 ---
 {
   "data": {
     "me": {
-      "id": "1"
+      "id": "1",
+      "name": "Ada Lovelace"
     }
   },
   "hasNext": true
