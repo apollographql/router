@@ -27,6 +27,66 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
+
+The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+
+Here's the list of the endpoints exposed by the router:
+
+- GraphQL: http://127.0.0.1:4000/ (unchanged)
+- The GraphQL sandbox: http://127.0.0.1:4000/ (unchanged)
+- Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
+- Healthcheck: http://127.0.0.1:9494/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
+
+While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
+
+In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
+Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
+
+This previous configuration: 
+```yaml
+server:
+  listen: 127.0.0.1:4000
+  graphql_path: /graphql
+  health_check_path: /health
+  introspection: false
+  preview_defer_support: true
+  landing_page: true
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+```
+
+Now becomes:
+```yaml
+# landing_page configuration
+sandbox: 
+  listen: 127.0.0.1:4000
+  path: /
+  enabled: false # default
+# graphql_path configuration
+supergraph:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: false
+  preview_defer_support: true
+# health_check_path configuration
+health-check:
+  listen: 127.0.0.1:9494
+  path: /health
+  enabled: true # default
+# prometheus scraper configuration
+telemetry:
+  metrics:
+    prometheus:
+      listen: 127.0.0.1:9090
+      path: /metrics
+      enabled: true
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
 ### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
 
 Instead of being dependencies, they are now part of the `apollo-router` crate.
@@ -65,6 +125,12 @@ OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
 
 ## 🚀 Features
+
+### Add support of query resolution with single `__typename` field ([Issue #1761](https://github.com/apollographql/router/issues/1761))
+
+For queries like `query { __typename }`, we added support to returns a GraphQL response even if the introspection has been disabled
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1762
 
 ### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
 

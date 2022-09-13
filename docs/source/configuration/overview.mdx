@@ -220,18 +220,17 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 
 ```yaml title="router_unix.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   # The socket address and port to listen on
-  # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1
+  listen: 127.0.0.1:4000
 ```
 
 The router can also listen on a Unix socket (not supported on Windows):
 
 ```yaml title="router_unix.yaml"
-server:
+supergraph:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
 ```
@@ -240,16 +239,16 @@ server:
 
 By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.graphql_path`:
+You can change this path by setting `server.path`:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   # The path for GraphQL execution
   # (Defaults to /)
-  graphql_path: /graphql
+  path: /graphql
 ```
 
 The path must start with `/`.
@@ -267,22 +266,24 @@ By default, the router answers to some introspection queries. You can override t
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# supergraph: Configuration of the Supergraph server
 #
-server:
+supergraph:
   introspection: false
 ```
 
 ### Landing page
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
+By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page by changing the defaults:
 
 ```yaml title="router.yaml"
 #
-# server: Configuration of the HTTP server
+# router: Configuration of the GraphQL server
 #
-server:
-  landing_page: false
+sandbox:
+  listen: 127.0.0.1:4000
+  path: /
+  enabled: true
 ```
 
 ### Subgraph routing URLs
@@ -345,7 +346,7 @@ Unix-style expansion is used. For example:
 Environment variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
-server:
+supergraph:
   listen: "${env.MY_LISTEN_ADDRESS}"
 example:
   password: "${env.MY_PASSWORD}"

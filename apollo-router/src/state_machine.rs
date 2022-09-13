@@ -545,8 +545,8 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateConfiguration(
                         Configuration::builder()
-                            .server(
-                                crate::configuration::Server::builder()
+                            .supergraph(
+                                crate::configuration::Supergraph::builder()
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
@@ -785,7 +785,7 @@ mod tests {
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
-                        Some(configuration.server.listen.clone()),
+                        Some(configuration.supergraph.listen.clone()),
                         vec![],
                     ))
                 },

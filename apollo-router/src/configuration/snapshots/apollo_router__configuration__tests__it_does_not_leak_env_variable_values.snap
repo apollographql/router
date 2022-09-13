@@ -3,9 +3,9 @@ source: apollo-router/src/configuration/mod.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /server/introspection
+1. /supergraph/introspection
 
 
-server:
+supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
                  ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "boolean"
