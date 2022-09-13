@@ -121,9 +121,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-encoder"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
+checksum = "344a1afec31ce0273dc2061105b04e5c4ab620fe0748a76244338aa893db42f3"
 
 [[package]]
 name = "apollo-parser"
@@ -141,8 +141,6 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-parser",
- "apollo-spaceport",
- "apollo-uplink",
  "async-compression",
  "async-trait",
  "atty",
@@ -151,7 +149,8 @@ dependencies = [
  "base64 0.13.0",
  "buildstructor 0.5.0",
  "bytes",
- "clap 3.2.20",
+ "clap 3.2.21",
+ "console-subscriber",
  "ctor",
  "dashmap 5.4.0",
  "deadpool",
@@ -160,7 +159,9 @@ dependencies = [
  "directories",
  "displaydoc",
  "envmnt",
+ "flate2",
  "futures",
+ "graphql_client",
  "hex 0.4.3",
  "hotwatch",
  "http",
@@ -171,6 +172,7 @@ dependencies = [
  "hyper-rustls",
  "indexmap",
  "insta",
+ "introspector-gadget",
  "itertools",
  "jsonpath_lib",
  "jsonschema",
@@ -179,6 +181,7 @@ dependencies = [
  "lru",
  "maplit",
  "mediatype",
+ "memchr",
  "miette 5.3.0",
  "mime",
  "mockall",
@@ -195,6 +198,8 @@ dependencies = [
  "paste",
  "pin-project-lite",
  "prometheus",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
  "rand",
  "regex",
  "reqwest",
@@ -215,8 +220,9 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.3",
- "tonic",
+ "tokio-util 0.7.4",
+ "tonic 0.6.2",
+ "tonic-build",
  "tower",
  "tower-http",
  "tower-service",
@@ -257,7 +263,7 @@ version = "1.0.0-alpha.3"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 3.2.20",
+ "clap 3.2.21",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -275,42 +281,6 @@ dependencies = [
  "apollo-parser",
  "arbitrary",
  "once_cell",
-]
-
-[[package]]
-name = "apollo-spaceport"
-version = "1.0.0-alpha.3"
-dependencies = [
- "bytes",
- "clap 3.2.20",
- "flate2",
- "prost",
- "prost-types",
- "reqwest",
- "serde",
- "sys-info",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-build",
- "tracing",
- "tracing-subscriber",
- "uname",
-]
-
-[[package]]
-name = "apollo-uplink"
-version = "1.0.0-alpha.3"
-dependencies = [
- "futures",
- "graphql_client",
- "launchpad",
- "reqwest",
- "serde",
- "tokio",
- "tokio-stream",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -365,7 +335,8 @@ dependencies = [
 [[package]]
 name = "async-compression"
 version = "0.3.14"
-source = "git+https://github.com/geal/async-compression?tag=encoder-flush#9800cd0d36be7f3414fbb98b25f9f61900ec8c7c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "345fd392ab01f746c717b1357165b76f0b67a60192007b234058c9045fdcf695"
 dependencies = [
  "brotli",
  "flate2",
@@ -435,9 +406,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axum"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de18bc5f2e9df8f52da03856bf40e29b747de5a84e43aefff90e3dc4a21529b"
+checksum = "c9e3356844c4d6a6d6467b8da2cffb4a2820be256f50a3a386c9d152bab31043"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -467,9 +438,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f44a0e6200e9d11a1cdc989e4b358f6e3d354fbf48478f345a17f4e43f8635"
+checksum = "d9f0c0a60006f2a293d82d571f635042a72edf927539b7685bd62d361963839b"
 dependencies = [
  "async-trait",
  "bytes",
@@ -477,6 +448,8 @@ dependencies = [
  "http",
  "http-body",
  "mime",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
@@ -723,7 +696,7 @@ dependencies = [
  "bytesize",
  "cargo-platform",
  "cargo-util",
- "clap 3.2.20",
+ "clap 3.2.21",
  "crates-io",
  "crossbeam-utils",
  "curl",
@@ -892,9 +865,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.20"
+version = "3.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
+checksum = "1ed5341b2301a26ab80be5cbdced622e80ed808483c52e45e3310a877d3b37d7"
 dependencies = [
  "atty",
  "bitflags",
@@ -1049,6 +1022,42 @@ dependencies = [
  "terminal_size",
  "unicode-width",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "console-api"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57ff02e8ad8e06ab9731d5dc72dc23bef9200778eae1a89d555d8c42e5d4a86"
+dependencies = [
+ "prost 0.11.0",
+ "prost-types 0.11.1",
+ "tonic 0.8.0",
+ "tracing-core",
+]
+
+[[package]]
+name = "console-subscriber"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22a3a81dfaf6b66bce5d159eddae701e3a002f194d378cbf7be5f053c281d9be"
+dependencies = [
+ "console-api",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "futures",
+ "hdrhistogram",
+ "humantime",
+ "prost-types 0.11.1",
+ "serde",
+ "serde_json",
+ "thread_local",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.8.0",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2161,7 +2170,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tracing",
 ]
 
@@ -2200,7 +2209,10 @@ version = "7.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31672b7011be2c4f7456c4ddbcb40e7e9a4a9fad8efe49a6ebaf5f307d0109c0"
 dependencies = [
+ "base64 0.13.0",
  "byteorder",
+ "flate2",
+ "nom",
  "num-traits",
 ]
 
@@ -2577,6 +2589,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e85a1509a128c855368e135cffcde7eac17d8e1083f41e2b98c58bc1a5074be"
 
 [[package]]
+name = "introspector-gadget"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6a5345dd15741225868a205140b730de97b4f00b7d22a8520ae9d3e6266518"
+dependencies = [
+ "apollo-encoder",
+ "backoff",
+ "graphql_client",
+ "humantime",
+ "hyper",
+ "reqwest",
+ "semver 1.0.7",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "iovec"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2759,24 +2790,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "launchpad"
-version = "0.1.0"
-source = "git+https://github.com/apollographql/rover.git?rev=d72ad078d9d845112bd33bd100a723a1fa0e72ff#d72ad078d9d845112bd33bd100a723a1fa0e72ff"
-dependencies = [
- "apollo-encoder",
- "backoff",
- "graphql_client",
- "humantime",
- "hyper",
- "reqwest",
- "semver 1.0.7",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2936,9 +2949,9 @@ checksum = "90da6e15720cff55898a02a2ed6e9a21b152f0283a5ad89465f8d8f80c9750ca"
 
 [[package]]
 name = "memchr"
-version = "2.4.1"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
+checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memoffset"
@@ -3498,12 +3511,12 @@ dependencies = [
  "http",
  "opentelemetry",
  "opentelemetry-http",
- "prost",
+ "prost 0.9.0",
  "prost-build",
  "reqwest",
  "thiserror",
  "tokio",
- "tonic",
+ "tonic 0.6.2",
  "tonic-build",
 ]
 
@@ -3951,7 +3964,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "444879275cb4fd84958b1a1d5420d15e6fcf7c235fe47f053c9c2a80aceb6001"
 dependencies = [
  "bytes",
- "prost-derive",
+ "prost-derive 0.9.0",
+]
+
+[[package]]
+name = "prost"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "399c3c31cdec40583bb68f0b18403400d01ec4289c383aa047560439952c4dd7"
+dependencies = [
+ "bytes",
+ "prost-derive 0.11.0",
 ]
 
 [[package]]
@@ -3967,8 +3990,8 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prost",
- "prost-types",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
  "regex",
  "tempfile",
  "which",
@@ -3988,13 +4011,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7345d5f0e08c0536d7ac7229952590239e77abf0a0100a1b1d890add6ea96364"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "534b7a0e836e3c482d2693070f982e39e7611da9695d4d1f5a4b186b51faef0a"
 dependencies = [
  "bytes",
- "prost",
+ "prost 0.9.0",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dfaa718ad76a44b3415e6c4d53b17c8f99160dcb3a99b10470fce8ad43f6e3e"
+dependencies = [
+ "bytes",
+ "prost 0.11.0",
 ]
 
 [[package]]
@@ -4164,7 +4210,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.23.3",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -4311,9 +4357,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3355e0c609386f2a13ffe00012d4ae24ffe5678d2cc7d4b573cbd81aadaa2e31"
+checksum = "f4b82497e9189775aceeab176ee860f5517de1fcda11ec513258daebd15455de"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5354,6 +5400,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "winapi 0.3.9",
 ]
 
@@ -5419,7 +5466,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
 ]
 
 [[package]]
@@ -5451,9 +5498,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
+checksum = "0bb2e075f03b3d66d8d8785356224ba688d2906a371015e225beeb65ca92c740"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5504,12 +5551,44 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost",
- "prost-derive",
+ "prost 0.9.0",
+ "prost-derive 0.9.0",
  "tokio",
  "tokio-rustls 0.22.0",
  "tokio-stream",
  "tokio-util 0.6.9",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "tracing-futures",
+]
+
+[[package]]
+name = "tonic"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498f271adc46acce75d66f639e4d35b31b2394c295c82496727dafa16d465dd2"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.13.0",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost 0.11.0",
+ "prost-derive 0.11.0",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.4",
  "tower",
  "tower-layer",
  "tower-service",
@@ -5544,7 +5623,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5566,7 +5645,7 @@ dependencies = [
  "http-range-header",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util 0.7.4",
  "tower",
  "tower-layer",
  "tower-service",
