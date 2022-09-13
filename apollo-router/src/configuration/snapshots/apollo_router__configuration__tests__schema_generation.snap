@@ -355,10 +355,15 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:9494",
-        "path": "/health"
+        "path": "/health",
+        "enabled": true
       },
       "type": "object",
       "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:9494",
           "default": "127.0.0.1:9494",
@@ -435,12 +440,12 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "enabled": true
+        "enabled": false
       },
       "type": "object",
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "type": "boolean"
         },
         "listen": {

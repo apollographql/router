@@ -380,7 +380,7 @@ pub(crate) struct Sandbox {
 }
 
 fn default_sandbox() -> bool {
-    true
+    false
 }
 
 #[buildstructor::buildstructor]
@@ -432,6 +432,9 @@ pub(crate) struct HealthCheck {
     /// default: "/"
     #[serde(default = "default_health_check_path")]
     pub(crate) path: String,
+
+    #[serde(default = "default_health_check")]
+    pub(crate) enabled: bool,
 }
 
 fn default_health_check_listen() -> ListenAddr {
@@ -442,23 +445,37 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
+fn default_health_check() -> bool {
+    true
+}
+
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
             path: path.unwrap_or_else(default_health_check_path),
+            enabled: enabled.unwrap_or_else(default_health_check),
         }
     }
 
     // Used in tests
     #[allow(dead_code)]
     #[builder]
-    pub(crate) fn fake_new(listen: Option<ListenAddr>, path: Option<String>) -> Self {
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_health_check_path),
+            enabled: enabled.unwrap_or_else(default_health_check),
         }
     }
 }

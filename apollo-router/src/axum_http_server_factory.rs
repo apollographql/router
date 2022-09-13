@@ -1258,7 +1258,12 @@ mod tests {
     #[tokio::test]
     async fn it_display_home_page_on_same_endpoint() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let (server, client) = init(expectations).await;
+
+        let conf = Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .build();
+
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
 
         // Regular studio redirect
         let response = client
@@ -1286,7 +1291,12 @@ mod tests {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
-            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
+            .sandbox(
+                Sandbox::fake_builder()
+                    .path("/a-custom-path")
+                    .enabled(true)
+                    .build(),
+            )
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
@@ -1316,7 +1326,12 @@ mod tests {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
-            .sandbox(Sandbox::fake_builder().path("/a-custom-path").build())
+            .sandbox(
+                Sandbox::fake_builder()
+                    .path("/a-custom-path")
+                    .enabled(true)
+                    .build(),
+            )
             .build();
 
         let (server, client) = init_with_config(expectations, conf, Default::default()).await;
