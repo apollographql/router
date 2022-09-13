@@ -29,7 +29,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
 
-The web endpoints exposed by the router listen to 120.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
 
 Here's the list of the endpoints exposed by the router:
 
