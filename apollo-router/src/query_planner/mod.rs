@@ -560,6 +560,7 @@ impl PlanNode {
                                         e
                                     );
                                 };
+                                tx.disconnect();
                             } else {
                                 let primary_value =
                                     primary_receiver.recv().await.unwrap_or_default();
@@ -583,6 +584,7 @@ impl PlanNode {
                                         e
                                     );
                                 }
+                                tx.disconnect();
                             };
                         };
 

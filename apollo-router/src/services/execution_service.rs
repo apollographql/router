@@ -137,8 +137,8 @@ async fn consume_responses(
 
                 current_response.has_next = Some(false);
                 println!(
-                    "FILTER setting has next to false on  {:?}",
-                    current_response
+                    "FILTER setting has next to false on {}",
+                    serde_json::to_string(&current_response).unwrap()
                 );
 
                 sender.send(current_response).await?;
