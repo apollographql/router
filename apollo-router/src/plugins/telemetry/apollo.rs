@@ -4,10 +4,6 @@ use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
-use apollo_spaceport::ReferencedFieldsForType;
-use apollo_spaceport::ReportHeader;
-use apollo_spaceport::StatsContext;
-use apollo_spaceport::Trace;
 use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
@@ -23,6 +19,10 @@ use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::spaceport::ReferencedFieldsForType;
+use crate::spaceport::ReportHeader;
+use crate::spaceport::StatsContext;
+use crate::spaceport::Trace;
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -182,8 +182,8 @@ impl Report {
         aggregated_report
     }
 
-    pub(crate) fn into_report(self, header: ReportHeader) -> apollo_spaceport::Report {
-        let mut report = apollo_spaceport::Report {
+    pub(crate) fn into_report(self, header: ReportHeader) -> crate::spaceport::Report {
+        let mut report = crate::spaceport::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count: self.operation_count,
@@ -237,7 +237,7 @@ pub(crate) struct TracesAndStats {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
+impl From<TracesAndStats> for crate::spaceport::TracesAndStats {
     fn from(stats: TracesAndStats) -> Self {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),

@@ -15,8 +15,6 @@ use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
-use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::StatsContext;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -81,6 +79,8 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spaceport::server::ReportSpaceport;
+use crate::spaceport::StatsContext;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
 use crate::Context;
@@ -415,31 +415,45 @@ impl Telemetry {
                 .map(|s| s.as_str())
                 .unwrap_or("info");
 
-            let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-            );
-
-            if let Some(sub) = subscriber {
+            #[cfg(feature = "console")]
+            {
+                use tracing_subscriber::util::SubscriberInitExt;
                 let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                let subscriber = sub.with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            } else if atty::is(atty::Stream::Stdout) {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                tracing_subscriber::registry()
+                    .with(console_subscriber::spawn())
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(telemetry)
+                    .init();
+            }
 
-                let subscriber = sub_builder.finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            } else {
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            #[cfg(not(feature = "console"))]
+            {
+                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
+                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
+                );
 
-                let subscriber = sub_builder.json().finish().with(telemetry);
-                if let Err(e) = set_global_default(subscriber) {
-                    ::tracing::error!("cannot set global subscriber: {:?}", e);
-                }
-            };
+                if let Some(sub) = subscriber {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                    let subscriber = sub.with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                } else if atty::is(atty::Stream::Stdout) {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                    let subscriber = sub_builder.finish().with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                } else {
+                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                    let subscriber = sub_builder.json().finish().with(telemetry);
+                    if let Err(e) = set_global_default(subscriber) {
+                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                    }
+                };
+            }
 
             Ok(true)
         })?;
@@ -1148,8 +1162,8 @@ fn operation_count(stats_report_key: &str) -> u64 {
 
 fn convert(
     referenced_fields: router_bridge::planner::ReferencedFieldsForType,
-) -> apollo_spaceport::ReferencedFieldsForType {
-    apollo_spaceport::ReferencedFieldsForType {
+) -> crate::spaceport::ReferencedFieldsForType {
+    crate::spaceport::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
         is_interface: referenced_fields.is_interface,
     }
