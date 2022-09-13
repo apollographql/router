@@ -49,6 +49,7 @@
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
-    }
+    },
+    "Privacy": "/privacy"
   }
 }
