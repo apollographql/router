@@ -27,6 +27,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let reports = out_dir.join("reports.proto");
 
     std::fs::write(&reports, &content)?;
+    println!("cargo:rerun-if-changed={}", agents.to_str().unwrap());
 
     // Process the proto files
     let proto_files = [agents, reports];
@@ -55,13 +56,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .build_server(true)
         .compile(&proto_files, &[&out_dir, &proto_dir])?;
-
-    for file in proto_files {
-        println!(
-            "cargo:rerun-if-changed={}",
-            src.join(file).to_str().unwrap()
-        );
-    }
 
     Ok(())
 }
