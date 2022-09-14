@@ -251,11 +251,14 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
-### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
+### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687) [#1745](https://github.com/apollographql/router/issues/1745))
 
-You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
+There will no longer be an empty last response `{"hasNext": false}`, the `hasNext` field will be set on the
+last deferred response. There can still be one edge case where that empty message can appear, if some
+deferred queries were cancelled too quickly.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1736
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1687
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1745
 
 ## 🛠 Maintenance
 

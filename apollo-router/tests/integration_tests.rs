@@ -638,9 +638,13 @@ async fn defer_path_in_array() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+    assert_eq!(first.has_next, Some(true));
 
     let second = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(second);
+    assert_eq!(second.has_next, Some(false));
+
+    assert_eq!(stream.next_response().await, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
