@@ -738,7 +738,7 @@ mod tests {
         assert!(cfg
             .plugins()
             .iter()
-            .any(|(name, val)| name == "experimental.include_subgraph_errors"
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
 
         // Modify the file and try again
@@ -755,7 +755,7 @@ mod tests {
         assert!(cfg
             .plugins()
             .iter()
-            .any(|(name, val)| name == "experimental.include_subgraph_errors"
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
 
         // This time write garbage, there should not be an update.

@@ -166,7 +166,7 @@ async fn create_plugins(
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
     let mandatory_plugins = vec![
-        "experimental.include_subgraph_errors",
+        "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
     ];
