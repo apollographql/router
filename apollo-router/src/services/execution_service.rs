@@ -72,7 +72,6 @@ where
                 .await;
 
             let stream = if req.query_plan.root.contains_defer() {
-                println!("contains defer, will filter stream");
                 filter_stream(first, receiver).boxed()
             } else {
                 once(ready(first)).chain(receiver).boxed()
@@ -93,39 +92,45 @@ fn filter_stream(first: Response, mut stream: Receiver<Response>) -> Receiver<Re
     let (mut sender, receiver) = futures::channel::mpsc::channel(10);
 
     tokio::task::spawn(async move {
-        consume_responses(first, &mut stream, &mut sender).await?;
+        let mut seen_last_message = consume_responses(first, &mut stream, &mut sender).await?;
 
         while let Some(current_response) = stream.next().await {
-            consume_responses(current_response, &mut stream, &mut sender).await?;
+            seen_last_message =
+                consume_responses(current_response, &mut stream, &mut sender).await?;
         }
-        println!("done");
+
+        // the response stream disconnected early so we could not add `has_next = false` to the
+        // last message, so we add an empty one
+        if !seen_last_message {
+            sender
+                .send(Response::builder().has_next(false).build())
+                .await?;
+        }
         Ok::<_, SendError>(())
     });
 
     receiver
 }
 
+// returns Ok(true) when we saw the last message
 async fn consume_responses(
     mut current_response: Response,
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
-) -> Result<(), SendError> {
+) -> Result<bool, SendError> {
     loop {
         match stream.try_next() {
             // no messages available, but the channel is not closed
             // this means more deferred responses can come
             Err(_) => {
-                println!("[{}]consume", line!());
                 sender.send(current_response).await?;
 
-                break;
+                return Ok(false);
             }
 
             // there might be other deferred responses after this one,
             // so we should call `try_next` again
             Ok(Some(response)) => {
-                println!("[{}]consume", line!());
-
                 sender.send(current_response).await?;
                 current_response = response;
             }
@@ -133,20 +138,13 @@ async fn consume_responses(
             // there will be no other deferred responses after that,
             // so we set `has_next` to `false`
             Ok(None) => {
-                println!("[{}]consume", line!());
-
                 current_response.has_next = Some(false);
-                println!(
-                    "FILTER setting has next to false on {}",
-                    serde_json::to_string(&current_response).unwrap()
-                );
 
                 sender.send(current_response).await?;
-                break;
+                return Ok(true);
             }
         }
     }
-    Ok::<_, SendError>(())
 }
 
 pub(crate) trait ExecutionServiceFactory:
