@@ -265,7 +265,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Environment variable expansion mode configuration ([#1772](https://github.com/apollographql/router/issues/1772))
 
-The environment variable: `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES` can be used restrict which modes can be used for environment expansion. This feature is undocumented and unsupported and may change at any time.
+The environment variable: `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES` can be used to restrict which modes can be used for environment expansion. This feature is undocumented and unsupported and may change at any time.
 
 For example:
 
