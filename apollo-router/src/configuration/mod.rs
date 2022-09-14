@@ -233,10 +233,9 @@ impl Configuration {
             "experimental.expose_query_plan".to_string(),
             Value::Bool(true),
         );
-        self.plugins.plugins.as_mut().unwrap().insert(
-            "apollo.include_subgraph_errors".to_string(),
-            json!({"all": true}),
-        );
+        self.apollo_plugins
+            .plugins
+            .insert("include_subgraph_errors".to_string(), json!({"all": true}));
         self.supergraph.introspection = true;
         self.sandbox.enabled = true;
     }
