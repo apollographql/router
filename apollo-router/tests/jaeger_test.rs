@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use http::header::CONTENT_TYPE;
 use http::Request;
 use http::Response;
 use http::StatusCode;
@@ -114,13 +115,13 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
     );
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'client_name')].value")?
+            .select_path("$.tags[?(@.key == 'client.name')].value")?
             .get(0),
         Some(&&Value::String("custom_name".to_string()))
     );
     assert_eq!(
         router_span
-            .select_path("$.tags[?(@.key == 'client_version')].value")?
+            .select_path("$.tags[?(@.key == 'client.version')].value")?
             .get(0),
         Some(&&Value::String("1.0".to_string()))
     );
@@ -262,7 +263,7 @@ async fn subgraph() {
             std::str::from_utf8(&body_bytes).unwrap()
         );
         Ok(Response::builder()
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .status(StatusCode::OK)
             .body(
                 r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#

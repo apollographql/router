@@ -1,11 +1,11 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 279
 expression: results
 ---
 [
   {
-    "traces_and_stats": {
+    "request_id": "[REDACTED]",
+    "stats": {
       "# -\n{topProducts{name}}": {
         "stats_with_context": {
           "context": {

@@ -4,7 +4,8 @@ expression: results
 ---
 [
   {
-    "traces_and_stats": {
+    "request_id": "[REDACTED]",
+    "stats": {
       "## GraphQLValidationFailure\n": {
         "stats_with_context": {
           "context": {

@@ -144,7 +144,7 @@ impl Plugin for Csrf {
 //
 // Given the first step is covered in our web browser, we'll take care of the two other steps below:
 fn is_preflighted(req: &SupergraphRequest, required_headers: &[String]) -> bool {
-    let headers = req.originating_request.headers();
+    let headers = req.supergraph_request.headers();
     content_type_requires_preflight(headers)
         || recommended_header_is_provided(headers, required_headers)
 }
@@ -227,6 +227,7 @@ mod csrf_tests {
             .unwrap();
     }
 
+    use http::header::CONTENT_TYPE;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
@@ -237,7 +238,7 @@ mod csrf_tests {
     async fn it_lets_preflighted_request_pass_through() {
         let config = CSRFConfig::default();
         let with_preflight_content_type = SupergraphRequest::fake_builder()
-            .header("content-type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .build()
             .unwrap();
         assert_accepted(config.clone(), with_preflight_content_type).await;
@@ -256,7 +257,7 @@ mod csrf_tests {
         // fake_builder defaults to `Content-Type: application/json`,
         // specifically to avoid the case we’re testing here.
         non_preflighted_request
-            .originating_request
+            .supergraph_request
             .headers_mut()
             .remove("content-type");
         assert_rejected(config, non_preflighted_request).await
@@ -266,13 +267,13 @@ mod csrf_tests {
     async fn it_rejects_non_preflighted_content_type_request() {
         let config = CSRFConfig::default();
         let non_preflighted_request = SupergraphRequest::fake_builder()
-            .header("content-type", "text/plain")
+            .header(CONTENT_TYPE, "text/plain")
             .build()
             .unwrap();
         assert_rejected(config.clone(), non_preflighted_request).await;
 
         let non_preflighted_request = SupergraphRequest::fake_builder()
-            .header("content-type", "text/plain; charset=utf8")
+            .header(CONTENT_TYPE, "text/plain; charset=utf8")
             .build()
             .unwrap();
         assert_rejected(config, non_preflighted_request).await;

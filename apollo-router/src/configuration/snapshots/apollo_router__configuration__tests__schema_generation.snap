@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 912
+assertion_line: 1204
 expression: "&schema"
 ---
 {
@@ -352,6 +352,41 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:9494",
+        "path": "/health",
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9494",
+          "default": "127.0.0.1:9494",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/health",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
@@ -401,44 +436,18 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "server": {
+    "sandbox": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "introspection": true,
-        "landing_page": true,
-        "graphql_path": "/",
-        "health_check_path": "/.well-known/apollo/server-health",
-        "preview_defer_support": true,
-        "experimental_parser_recursion_limit": 4096
+        "path": "/",
+        "enabled": false
       },
       "type": "object",
       "properties": {
-        "experimental_parser_recursion_limit": {
-          "description": "Experimental limitation of query depth default: 4096",
-          "default": 4096,
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "graphql_path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
-          "type": "string"
-        },
-        "introspection": {
-          "description": "introspection queries enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "landing_page": {
-          "description": "display landing page enabled by default",
-          "default": true,
+        "enabled": {
+          "description": "Enable sandbox Default: false",
+          "default": false,
           "type": "boolean"
         },
         "listen": {
@@ -455,8 +464,66 @@ expression: "&schema"
             }
           ]
         },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "experimental_parser_recursion_limit": 4096
+      },
+      "type": "object",
+      "properties": {
+        "experimental_parser_recursion_limit": {
+          "description": "Experimental limitation of query depth default: 4096",
+          "default": 4096,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "supergraph": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:4000",
+        "path": "/",
+        "introspection": false,
+        "preview_defer_support": true
+      },
+      "type": "object",
+      "properties": {
+        "introspection": {
+          "description": "Enable introspection Default: false",
+          "default": false,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
+          "default": "127.0.0.1:4000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
         "preview_defer_support": {
-          "description": "Preview @defer directive support default: true",
           "default": true,
           "type": "boolean"
         }
@@ -469,19 +536,131 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
+            "buffer_size": {
+              "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
+              "default": 10000,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
             "client_name_header": {
+              "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-name",
               "type": "string",
               "nullable": true
             },
             "client_version_header": {
+              "description": "The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-version",
               "type": "string",
               "nullable": true
             },
             "endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
               "type": "string",
               "nullable": true
+            },
+            "field_level_instrumentation_sampler": {
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
+              "anyOf": [
+                {
+                  "description": "Sample a given fraction. Fractions >= 1 will always sample.",
+                  "type": "number",
+                  "format": "double"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "always_on",
+                    "always_off"
+                  ]
+                }
+              ],
+              "nullable": true
+            },
+            "send_headers": {
+              "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "send_variable_values": {
+              "description": "To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -1270,6 +1449,16 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "string"
                   }
+                },
+                "service_name": {
+                  "description": "Set a service.name resource in your metrics",
+                  "type": "string",
+                  "nullable": true
+                },
+                "service_namespace": {
+                  "description": "Set a service.namespace attribute in your metrics",
+                  "type": "string",
+                  "nullable": true
                 }
               },
               "additionalProperties": false,
@@ -1426,6 +1615,24 @@ expression: "&schema"
               "properties": {
                 "enabled": {
                   "type": "boolean"
+                },
+                "listen": {
+                  "description": "Listening address.",
+                  "default": "127.0.0.1:9090",
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "path": {
+                  "default": "/metrics",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
@@ -1786,7 +1993,7 @@ expression: "&schema"
                 "sampler": {
                   "anyOf": [
                     {
-                      "description": "Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                      "description": "Sample a given fraction. Fractions >= 1 will always sample.",
                       "type": "number",
                       "format": "double"
                     },

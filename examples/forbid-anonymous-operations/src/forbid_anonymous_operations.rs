@@ -44,7 +44,7 @@ impl Plugin for ForbidAnonymousOperations {
                 // - Zero or one operation_name
                 // - Zero or more variables
                 // - Zero or more extensions
-                let maybe_operation_name = req.originating_request.body().operation_name.as_ref();
+                let maybe_operation_name = req.supergraph_request.body().operation_name.as_ref();
                 if maybe_operation_name.is_none()
                     || maybe_operation_name
                         .expect("is_none() has been checked before; qed")
@@ -211,7 +211,7 @@ mod tests {
                     operation_name,
                     // we're ok with unwrap's here because we're running a test
                     // we would not do this in actual code
-                    req.originating_request
+                    req.supergraph_request
                         .body()
                         .operation_name
                         .as_ref()
