@@ -27,6 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Homepage ([PR #1768](https://github.com/apollographql/router/pull/1768))
+
+The router now displays a homepage by default, instead of the studio sandbox.
+
+You can still disable the homepage, and enable the sandbox by editing your configuration:
+
+```yaml
+homepage:
+  enabled: false
+sandbox:
+  enabled: true
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1768
+
 ### Promote `include_subgraph_errors` out of "experimental" status ([Issue #1773](https://github.com/apollographql/router/issues/1773))
 
 The `include_subraph_errors` plugin has been promoted out of "experimental" and will require a small configuration changes.  For example:
