@@ -27,6 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
+
+By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
+
+```yaml
+sandbox:
+  # ...
+  enabled: true
+supergraph:
+    # ...
+  introspection: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
+
 ### Configuration overhaul ([#1500](https://github.com/apollographql/router/issues/1500))
 
 The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for Sandbox and Prometheus have changed.
@@ -129,7 +144,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
   `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
 * Failed expansions result in an error.
-  
+
   Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
@@ -185,9 +200,25 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
+### Adds a development mode that can be enabled with the `--dev` flag ([#1474](https://github.com/apollographql/router/issues/1474))
+
+By default, the Apollo Router is configured with production best-practices.  When developing, it is often desired to have some of those features relaxed to make it easier to iterate.  A `--dev` flag has been introduced to make the user experience easier while maintaining a default configuration which targets a productionized environment.
+
+The `--dev` mode will enable a few options _for development_ which are not normally on by default:
+
+- Introspection will be enabled, allowing client tooling to obtain the latest version of the schema.
+- The Apollo Sandbox Explorer will be served instead of the Apollo Router landing page, allowing you to run queries against your development Router.
+- Hot-reloading of configuration will be enabled.
+- It will be possible for Apollo Sandbox Explorer to request a query plan to be returned with any operations it executes. These query plans will allow you to observe how the operation will be executed against the underlying subgraphs.
+- Errors received from subgraphs will not have their contents redacted to facilitate debugging.
+
+Additional considerations will be made in the future as we introduce new features that might necessitate a "development" workflow which is different than the default mode of operation.  We will try to minimize these differences to avoid surprises in a production deployment while providing an execellent development experience.  In the future, the (upcoming) `rover dev` experience will become our suggested pattern, but this should serve the purpose in the near term.
+
+By [@bnjjj](https://github.com/bnjjj) and [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) and [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1748
+
 ### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
 
-to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
+To aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
 
 To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
 
@@ -209,12 +240,12 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
 
-For example: 
+For example:
 
 `APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
 
 Would cause:
-`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
 

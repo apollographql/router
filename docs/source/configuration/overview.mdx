@@ -262,7 +262,7 @@ Path parameters and wildcards are supported. For example:
 
 ### Introspection
 
-By default, the router answers to some introspection queries. You can override this behavior to disable the introspection like so:
+By default, the router does _not_ resolve introspection queries. You can enable introspection like so:
 
 ```yaml title="router.yaml"
 #
@@ -274,7 +274,7 @@ supergraph:
 
 ### Landing page
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page by changing the defaults:
+By default, the router does _not_ display a landing page if you access its endpoint path via your browser. You can override this behavior to enable the landing page like so:
 
 ```yaml title="router.yaml"
 #
