@@ -526,16 +526,6 @@ impl Sandbox {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Homepage {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_graphql_listen")]
-    pub(crate) listen: ListenAddr,
-
-    /// The HTTP path on which the homepage will be served.
-    /// default: "/"
-    #[serde(default = "default_graphql_path")]
-    pub(crate) path: String,
-
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -547,14 +537,8 @@ fn default_homepage() -> bool {
 #[buildstructor::buildstructor]
 impl Homepage {
     #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_graphql_listen),
-            path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
         }
     }
@@ -564,14 +548,8 @@ impl Homepage {
 #[buildstructor::buildstructor]
 impl Homepage {
     #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(test_listen),
-            path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
         }
     }

@@ -389,8 +389,6 @@ expression: "&schema"
     "homepage": {
       "description": "Configuration options pertaining to the home page.",
       "default": {
-        "listen": "127.0.0.1:4000",
-        "path": "/",
         "enabled": true
       },
       "type": "object",
@@ -398,25 +396,6 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "type": "boolean"
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "path": {
-          "description": "The HTTP path on which the homepage will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
         }
       },
       "additionalProperties": false

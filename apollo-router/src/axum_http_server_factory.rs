@@ -141,30 +141,6 @@ where
         );
     }
 
-    if configuration.homepage.enabled
-        && !on_supergraph_endpoint(
-            configuration,
-            &configuration.homepage.listen,
-            &configuration.homepage.path,
-        )
-    {
-        endpoints.insert(
-            configuration.homepage.listen.clone(),
-            Endpoint::new(
-                configuration.homepage.path.clone(),
-                service_fn(move |_req: transport::Request| async move {
-                    Ok::<_, BoxError>(
-                        http::Response::builder()
-                            .header(CONTENT_TYPE, "text/html")
-                            .body(Homepage::display_page().into())
-                            .unwrap(),
-                    )
-                })
-                .boxed(),
-            ),
-        );
-    }
-
     endpoints.insert(
         configuration.health_check.listen.clone(),
         Endpoint::new(
@@ -237,18 +213,6 @@ fn ensure_listenaddrs_consistency(
         }
     }
 
-    if let Some((ip, port)) = configuration.homepage.listen.ip_and_port() {
-        if let Some(previous_ip) = all_ports.insert(port, ip) {
-            if ip != previous_ip {
-                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                    previous_ip,
-                    ip,
-                    port,
-                ));
-            }
-        }
-    }
-
     for addr in endpoints.keys() {
         if let Some((ip, port)) = addr.ip_and_port() {
             if let Some(previous_ip) = all_ports.insert(port, ip) {
@@ -275,17 +239,17 @@ fn ensure_endpoints_consistency(
     endpoints: &MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(), ApolloRouterError> {
     // This mistake is easy to make, so we'll check for this first:
-    // check the sandbox and homepage
+    // check that sandbox and homepage aren't both enabled on the supergraph endpoint
     if configuration.homepage.enabled
         && configuration.sandbox.enabled
-        && configuration.homepage.listen == configuration.sandbox.listen
-        && configuration.homepage.path == configuration.sandbox.path
+        && configuration.supergraph.listen == configuration.sandbox.listen
+        && configuration.supergraph.path == configuration.sandbox.path
     {
-        if let Some((ip, port)) = configuration.homepage.listen.ip_and_port() {
+        if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
             return Err(ApolloRouterError::SameRouteUsedTwice(
                 ip,
                 port,
-                configuration.homepage.path.clone(),
+                configuration.sandbox.path.clone(),
             ));
         }
     }
@@ -746,13 +710,7 @@ where
                 )
             }
         })
-    } else if configuration.homepage.enabled
-        && on_supergraph_endpoint(
-            configuration,
-            &configuration.homepage.listen,
-            &configuration.homepage.path,
-        )
-    {
+    } else if configuration.homepage.enabled {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
@@ -2464,14 +2422,10 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_displays_homepage_and_sandbox_in_custom_endpoints() -> Result<(), ApolloRouterError>
-    {
+    async fn it_displays_homepage_and_sandbox_in_separate_endpoints(
+    ) -> Result<(), ApolloRouterError> {
         let conf = Configuration::fake_builder()
-            .homepage(
-                crate::configuration::Homepage::fake_builder()
-                    .path("/homepage")
-                    .build(),
-            )
+            .homepage(crate::configuration::Homepage::fake_builder().build())
             .sandbox(
                 crate::configuration::Sandbox::fake_builder()
                     .enabled(true)
@@ -2502,9 +2456,10 @@ Content-Type: application/json\r
 
         let homepage_response = client
             .get(&format!(
-                "{}/homepage",
+                "{}/",
                 server.graphql_listen_address().as_ref().unwrap(),
             ))
+            .header(ACCEPT, "text/html")
             .send()
             .await
             .unwrap();
