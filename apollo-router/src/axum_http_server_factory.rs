@@ -238,6 +238,18 @@ fn ensure_listenaddrs_consistency(
         }
     }
 
+    if let Some((ip, port)) = configuration.homepage.listen.ip_and_port() {
+        if let Some(previous_ip) = all_ports.insert(port, ip) {
+            if ip != previous_ip {
+                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                    previous_ip,
+                    ip,
+                    port,
+                ));
+            }
+        }
+    }
+
     for addr in endpoints.keys() {
         if let Some((ip, port)) = addr.ip_and_port() {
             if let Some(previous_ip) = all_ports.insert(port, ip) {
