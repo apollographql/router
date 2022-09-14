@@ -316,7 +316,6 @@ See [Tracing in the Apollo Router](./tracing/).
 ### Automatic persisted queries (APQ)
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
-
 The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
@@ -342,8 +341,10 @@ Unix-style expansion is used. For example:
 
 - `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
 - `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${file.a.txt}` expands to the content of `a.txt`.
+- `${file.a.txt:-some_default}` expands to the content of `a.txt`, or falls back to the value `some_default` if the file does not exist.
 
-Environment variable expansions are valid only for YAML _values_, not keys:
+Variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
 supergraph:
