@@ -225,16 +225,19 @@ impl PlanNode {
             Self::Defer { primary, deferred } => {
                 // TODO rebuilt subselection from the root thanks to the path
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
-                let query = reconstruct_full_query(&primary_path, &primary.subselection);
-                // ----------------------- Parse ---------------------------------
-                let sub_selection = Query::parse(&query, schema, &Default::default())
-                    .expect("it must respect the schema");
-                // ----------------------- END Parse ---------------------------------
+                if let Some(primary_subselection) = &primary.subselection {
+                    let query = reconstruct_full_query(&primary_path, primary_subselection);
+                    // ----------------------- Parse ---------------------------------
+                    let sub_selection = Query::parse(&query, schema, &Default::default())
+                        .expect("it must respect the schema");
+                    // ----------------------- END Parse ---------------------------------
 
-                subselections.insert(
-                    (Some(primary_path), primary.subselection.clone()),
-                    sub_selection,
-                );
+                    subselections.insert(
+                        (Some(primary_path), primary_subselection.clone()),
+                        sub_selection,
+                    );
+                }
+
                 deferred.iter().fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
                         // TODO rebuilt subselection from the root thanks to the path
@@ -1136,7 +1139,7 @@ pub(crate) struct Primary {
 
     /// The part of the original query that "selects" the data to
     /// send in that primary response (once the plan in `node` completes).
-    subselection: String,
+    subselection: Option<String>,
 
     // The plan to get all the data for that primary part
     node: Option<Box<PlanNode>>,
@@ -1169,7 +1172,7 @@ impl DeferredNode {
     fn subselection(&self) -> Option<String> {
         self.subselection.clone().or_else(|| {
             self.node.as_ref().and_then(|node| match node.as_ref() {
-                PlanNode::Defer { primary, .. } => Some(primary.subselection.clone()),
+                PlanNode::Defer { primary, .. } => primary.subselection.clone(),
                 _ => None,
             })
         })
@@ -1435,7 +1438,7 @@ mod tests {
             root: PlanNode::Defer {
                 primary: Primary {
                     path: None,
-                    subselection: "{ t { x } }".to_string(),
+                    subselection: Some("{ t { x } }".to_string()),
                     node: Some(Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "X".to_string(),
                         requires: vec![],
