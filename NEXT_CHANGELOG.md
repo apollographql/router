@@ -27,72 +27,70 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Homepage ([PR #1768](https://github.com/apollographql/router/pull/1768))
+> **Note**
+> We are entering our release candidate ("RC") stage and expect this to be the last of our breaking changes.  Overall, most of the breaking changes in this release revolve around three key factors which were motivators for most of the changes:
+>
+> 1. Having **safe and security defaults** which are suitable for production
+> 2. Polishing our YAML configuration ergonomics and patterns
+> 3. The introduction of a development mode activated with the `--dev` flag
+>
+> See the full changelog below for details on these (including the "Features" section for the `--dev` changes!)
 
-The router now displays a homepage by default, instead of the studio sandbox.
+### Adjusted socket ("listener") addresses for more secure default behaviors
 
-You can still disable the homepage, and enable the sandbox by editing your configuration:
+- The Router will not listen on "all interfaces" in its default configuration (i.e., by binding to `0.0.0.0`).  You may specify a specific socket by specifying the `interface:port` combination.  If you desire behavior which binds to all interfaces, your configuration can specify a socket of `0.0.0.0:4000` (for port `4000` on all interfaces).
+- By default, Prometheus (if enabled) no longer listens on the same socket as the GraphQL socket.  You can change this behavior by binding it to the same socket as your GraphQL socket in your configuration.
+- The health check endpoint is no longer available on the same socket as the GraphQL endpoint (In fact, the health check suggestion has changed in ways that are described elsewhere in this release's notes.  Please review them separately!)
 
-```yaml
-homepage:
-  enabled: false
-sandbox:
-  enabled: true
-```
+### Safer out-of-the box defaults with `sandbox` and `introspection` disabled ([PR #1748](https://github.com/apollographql/router/pull/1748))
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1768
+To reflect the fact that it is not recomended to have introspection on in production (and since Sandbox uses introspection to power its development features) the `sandbox` and `introspection` configuration are now **disabled unless you are running the Router with `--dev`**.
 
-### Promote `include_subgraph_errors` out of "experimental" status ([Issue #1773](https://github.com/apollographql/router/issues/1773))
-
-The `include_subraph_errors` plugin has been promoted out of "experimental" and will require a small configuration changes.  For example:
-
-```diff
--plugins:
--  experimental.include_subgraph_errors:
--    all: true # Propagate errors from all subraphs
--    subgraphs:
--      products: false # Do not propagate errors from the products subgraph
-+include_subgraph_errors:
-+  all: true # Propagate errors from all subraphs
-+  subgraphs:
-+    products: false # Do not propagate errors from the products subgraph
- ```
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1776
-
-### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
-
-By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
+If you would like to force them on even when outside of `--dev` mode, you can set them to `true` explicitly in your YAML configuration:
 
 ```yaml
 sandbox:
-  # ...
   enabled: true
 supergraph:
-    # ...
   introspection: true
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
 
-### Configuration overhaul ([#1500](https://github.com/apollographql/router/issues/1500))
+### Landing page ("home page") replaces Sandbox in default "production" mode ([PR #1768](https://github.com/apollographql/router/pull/1768))
 
-The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for Sandbox and Prometheus have changed.
+As an extension of Sandbox and Introspection being disabled by default (see above), the Router now displays a simple landing page when running in its default mode.  When you run the Apollo Router with the new `--dev` flag (see "Features" section below) you will still see the existing "Apollo Studio Sandbox" experience.
 
-Here's a list of the endpoints exposed by the router:
+We will offer additional options to customize the landing page in the future but for now you can disable the homepage entirely (leaving a _very_ generic page with a GraphQL message) by disabling the homepage entirely in your configuration:
 
-- GraphQL: http://127.0.0.1:4000/ (unchanged)
-- Apollo Sandbox: http://127.0.0.1:4000/ (unchanged)
-- Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
+```yaml
+homepage:
+  enabled: false
+```
 
-As another section (below) in the CHANGELOG notes, we have *removed* the health check and instead recommend users to configure their health checks (in, e.g, Kubernetes, Docker, etc.) to use a simple GraphQL query: `/?query={__typename}`.  This has the added benefit of actually testing GraphQL!
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1768
 
-While you could previously only customize the _path_ for these endpoints, you can now customize the full IP address, PORT and PATH.
+### Listeners, paths and paths can be configured individually  ([Issue #1500](https://github.com/apollographql/router/issues/1500))
 
-In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
-Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
+It is now possible to individually configure the following features' socket/listener addresses (i.e., the IP address and port) in addition to the URL path:
 
-This previous configuration:
+- GraphQL execution (default: `http://127.0.0.1:4000/`)
+- Sandbox (default when using `--dev`: `http://127.0.0.1:4000/`)
+- Prometheus (default when enabled: `http://127.0.0.1:9090/metrics`)
+
+Examples of how to configure these can be seen in the YAML configuration overhaul section of this changelog (just below) as well as in our documentation.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
+### Overhaul/reorganization of YAML configuration ([#1500](https://github.com/apollographql/router/issues/1500))
+
+To facilitate the changes in the previous bullet-points, we have moved configuration parameters which previously lived in the `server` section to new homes in the configuration, including `listen`, `graphql_path`, `landing_page`, and `introspection`.  Additionally, `preview_defer_support` has moved, but is on by default and no longer necessary to be set explicitly unless you wish to disable it.
+
+As another section (below) notes, we have *removed* the health check and instead recommend users to configure their health checks (in, e.g, Kubernetes, Docker, etc.) to use a simple GraphQL query: `/?query={__typename}`.  Read more about that in the other section, however this is reflected by its removal in the configuration.
+
+To exemplify the changes, this previous configuration will turn into the configuration that follows it:
+
+#### Before
 
 ```yaml
 server:
@@ -108,23 +106,28 @@ telemetry:
       enabled: true
 ```
 
-Now becomes:
+#### After
 
 ```yaml
-# landing_page configuration
+# This section is just for Sandbox configuration
 sandbox:
   listen: 127.0.0.1:4000
   path: /
-  enabled: false # default
-# graphql_path configuration
+  enabled: false # Disabled by default, but on with `--dev`.
+
+# This section represents general supergraph GraphQL execution
 supergraph:
   listen: 127.0.0.1:4000
   path: /
   introspection: false
+  # Can be removed unless it needs to be set to `false`.
   preview_defer_support: true
+
 # The health check has been removed.  See the section below in the CHANGELOG
 # for more information on how to configure health checks going forward.
-# Prometheus scraper configuration
+
+# Prometheus scraper endpoint configuration
+# The `listen` and `path` are not necessary if `127.0.0.1:9090/metrics` is okay
 telemetry:
   metrics:
     prometheus:
@@ -134,6 +137,20 @@ telemetry:
 ```
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
+### Environment variable expansion adjustments ([#1759](https://github.com/apollographql/router/issues/1759))
+
+- Environment expansions **must** be prefixed with `env.`.
+- File expansions **must** be prefixed with `file.`.
+- The "default" designator token changes from `:` to `:-`. For example:
+
+  `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
+
+- Failed expansions now result in an error
+
+  Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default value using the above syntax if optional expansion is needed.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
 
 ### Dedicated health check endpoint removed with new recommendation to use `/query={__typename}` query ([Issue #1765](https://github.com/apollographql/router/issues/1765))
 
@@ -153,37 +170,44 @@ In the future, we will likely reintroduce a dedicated health check "liveliness" 
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
 
+### Promote `include_subgraph_errors` out of "experimental" status ([Issue #1773](https://github.com/apollographql/router/issues/1773))
+
+The `include_subraph_errors` plugin has been promoted out of "experimental" and will require a small configuration changes.  For example:
+
+```diff
+-plugins:
+-  experimental.include_subgraph_errors:
+-    all: true # Propagate errors from all subraphs
+-    subgraphs:
+-      products: false # Do not propagate errors from the products subgraph
++include_subgraph_errors:
++  all: true # Propagate errors from all subraphs
++  subgraphs:
++    products: false # Do not propagate errors from the products subgraph
+ ```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1776
+
 ### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
 
-Instead of being dependencies, they are now part of the `apollo-router` crate.
-Therefore, they can not longer be used separately.
+Instead of being dependencies, they are now part of the `apollo-router` crate.  They were not meant to be used independently.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1751
 
 ### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
 
-The following functions are only required for router implementation, so removing from external API.
+The following functions are only required for router implementation, so removing from external API:
+
+```
 subgraph::new_from_response
 supergraph::new_from_response
 supergraph::new_from_graphql_response
+```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
 
+### Span `client_name` and `client_version` attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 
-### Environment variable expansion enhancements ([#1759](https://github.com/apollographql/router/issues/1759))
-
-* Environment expansions must be prefixed with `env.`.
-* File expansions must be prefixed with `file.`.
-* Change defaulting token from `:` to `:-`. For example:
-
-  `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
-* Failed expansions result in an error.
-
-  Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
-
-### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
 * `client_name` => `client.name`
@@ -224,20 +248,23 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
-### Add support of query resolution with single `__typename` field ([Issue #1761](https://github.com/apollographql/router/issues/1761))
+### Adds a development mode that can be enabled with the `--dev` flag ([#1474](https://github.com/apollographql/router/issues/1474))
 
-For queries like `query { __typename }`, we added support to returns a GraphQL response even if the introspection has been disabled
+By default, the Apollo Router is configured with production best-practices.  When developing, it is often desired to have some of those features relaxed to make it easier to iterate.  A `--dev` flag has been introduced to make the user experience easier while maintaining a default configuration which targets a productionized environment.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1762
+The `--dev` mode will enable a few options _for development_ which are not normally on by default:
 
-### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
+- The Apollo Sandbox Explorer will be served instead of the Apollo Router landing page, allowing you to run queries against your development Router.
+- Introspection will be enabled, allowing client tooling (and Sandbox!) to obtain the latest version of the schema.
+- Hot-reloading of configuration will be enabled. (Also available with `--hot-reload` when running without `--dev`)
+- It will be possible for Apollo Sandbox Explorer to request a query plan to be returned with any operations it executes. These query plans will allow you to observe how the operation will be executed against the underlying subgraphs.
+- Errors received from subgraphs will not have their contents redacted to facilitate debugging.
 
-There is a new global constant `apollo_sdl` which can be use to read the
-supergraph SDL as a string.
+Additional considerations will be made in the future as we introduce new features that might necessitate a "development" workflow which is different than the default mode of operation.  We will try to minimize these differences to avoid surprises in a production deployment while providing an execellent development experience.  In the future, the (upcoming) `rover dev` experience will become our suggested pattern, but this should serve the purpose in the near term.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1737
+By [@bnjjj](https://github.com/bnjjj) and [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) and [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1748
 
-### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+### Apollo Studio Federated Tracing ([#1514](https://github.com/apollographql/router/issues/1514))
 
 Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
 
@@ -265,21 +292,12 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
-### Adds a development mode that can be enabled with the `--dev` flag ([#1474](https://github.com/apollographql/router/issues/1474))
+### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
 
-By default, the Apollo Router is configured with production best-practices.  When developing, it is often desired to have some of those features relaxed to make it easier to iterate.  A `--dev` flag has been introduced to make the user experience easier while maintaining a default configuration which targets a productionized environment.
+There is a new global constant `apollo_sdl` which can be use to read the
+supergraph SDL as a string.
 
-The `--dev` mode will enable a few options _for development_ which are not normally on by default:
-
-- Introspection will be enabled, allowing client tooling to obtain the latest version of the schema.
-- The Apollo Sandbox Explorer will be served instead of the Apollo Router landing page, allowing you to run queries against your development Router.
-- Hot-reloading of configuration will be enabled.
-- It will be possible for Apollo Sandbox Explorer to request a query plan to be returned with any operations it executes. These query plans will allow you to observe how the operation will be executed against the underlying subgraphs.
-- Errors received from subgraphs will not have their contents redacted to facilitate debugging.
-
-Additional considerations will be made in the future as we introduce new features that might necessitate a "development" workflow which is different than the default mode of operation.  We will try to minimize these differences to avoid surprises in a production deployment while providing an execellent development experience.  In the future, the (upcoming) `rover dev` experience will become our suggested pattern, but this should serve the purpose in the near term.
-
-By [@bnjjj](https://github.com/bnjjj) and [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) and [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1748
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1737
 
 ### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
 
@@ -290,7 +308,9 @@ To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unst
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1632
 
 ### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
-You may now specify custom schema and config sources when constructing an executable.
+
+You may now, once again, specify custom schema and config sources when constructing an executable.  We had previously omitted this behavior in our API pruning with the expectation that it was still possible to specify via command line arguments and we almost immediately regretted it.  We're happy to have it back!
+
 ```rust
 Executable::builder()
   .shutdown(ShutdownSource::None)
@@ -303,7 +323,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Environment variable expansion prefixing ([#1759](https://github.com/apollographql/router/issues/1759))
 
-The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This feature is undocumented and unsupported and may change at any time.
+The environment variable `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This feature is undocumented and unsupported and may change at any time.  **We do not recommend using this.**
 
 For example:
 
@@ -316,23 +336,27 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Environment variable expansion mode configuration ([#1772](https://github.com/apollographql/router/issues/1772))
 
-The environment variable: `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES` can be used to restrict which modes can be used for environment expansion. This feature is undocumented and unsupported and may change at any time.
+The environment variable `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES` can be used to restrict which modes can be used for environment expansion. This feature is undocumented and unsupported and may change at any time.  **We do not recommend using this.**
 
 For example:
 
 `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES=env,file` env and file expansion
-`APOLLO_ROUTER_CONFIG_SUPPORTED_MODES=env` - only env expansion allowed
+`APOLLO_ROUTER_CONFIG_SUPPORTED_MODES=env` - only env variable expansion allowed
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1774
 
 
 ## 🐛 Fixes
 
-### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687) [#1745](https://github.com/apollographql/router/issues/1745))
+### Support execution of the bare `__typename` field ([Issue #1761](https://github.com/apollographql/router/issues/1761))
 
-There will no longer be an empty last response `{"hasNext": false}`, the `hasNext` field will be set on the
-last deferred response. There can still be one edge case where that empty message can appear, if some
-deferred queries were cancelled too quickly.
+For queries like `query { __typename }`, we now perform the expected behavior and return a GraphQL response even if the introspection has been disabled.  (`introspection: false` should only apply to _schema introspeciton_ **not** _type-name introspection_.)
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1762
+
+### Set `hasNext` for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687) [#1745](https://github.com/apollographql/router/issues/1745))
+
+There will no longer be an empty last response `{"hasNext": false}` and the `hasNext` field will be set on the last deferred response. There can still be one edge case where that empty message can occur, if some deferred queries were cancelled too quickly.  Generally speaking, clients should expect this to happen to allow future behaviors and this is specified in the `@defer` draft specification.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1687
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1745
@@ -343,19 +367,18 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 We changed `QueryPlannerResponse` to:
 
-+ Add a `Vec<apollo_router::graphql::Error>`
-+ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+- Add a `Vec<apollo_router::graphql::Error>`
+- Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+
+This should improve the messages returned during query planning.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
 
-### A copy of the usage reporting Protobuf interface file in the Router source repository
+### Store the Apollo usage reporting Protobuf interface file in the repository
 
-Previously this file was downloaded when compiling the Router,
-but we had no good way to automatically check when to re-download it
-without causing the Router to be compiled all the time.
+Previously this file was downloaded when compiling the Router, but we had no good way to automatically check when to re-download it without causing the Router to be compiled all the time.
 
-Instead a copy now resides in the repository, with a test checking that it is up to date.
-This file can be updated by running this command then sending a PR:
+Instead a copy now resides in the repository, with a test checking that it is up to date.  This file can be updated by running this command then sending a PR:
 
 ```
 curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
@@ -364,26 +387,15 @@ curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
 
 By [@SimonSapin](https://github.com/SimonSapin)
 
-### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
+### Disable compression on `multipart/mixed` HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
 
-For features such a `@defer`, the Router may send a stream of multiple GraphQL responses
-in a single HTTP response.
-The body of the HTTP response is a single byte stream.
-When HTTP compression is used, that byte stream is compressed as a whole.
-Due to limitations in current versions of the `async-compression` crate,
-[issue #1572](https://github.com/apollographql/router/issues/1572) was a bug where
-some GraphQL responses might not be sent to the client until more of them became available.
-This buffering yields better compression, but defeats the point of `@defer`.
+The Router now reverts to using unpatched `async-compression`, and instead disables compression of multipart responses.  We aim to re-enable compression soon, with a proper solution that is being designed in <https://github.com/Nemo157/async-compression/issues/154>.
 
-Our previous work-around involved a patched `async-compression`,
-which was not trivial to apply when using the Router as a dependency
-since [Cargo patching](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)
-is done in a project’s root `Cargo.toml`.
+As context to why we've made this change: features such as `@defer` require the Apollo Router to send a stream of multiple GraphQL responses in a single HTTP response with the body being a single byte stream.  Due to current limitations with our upstream compression library, that entire byte stream is compressed as a whole, which causes the entire deferred response to be held back before being returned.  This obviously isn't ideal for the `@defer` feature which tries to get reponses to client soon possible.
 
-The Router now reverts to using unpatched `async-compression`,
-and instead disables compression of multipart responses.
-We aim to re-enable compression soon, with a proper solution that is being designed in
-<https://github.com/Nemo157/async-compression/issues/154>.
+This change replaces our previous work-around which involved a patched `async-compression`, which was not trivial to apply when using the Router as a dependency since [Cargo patching](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html) is done in a project’s root `Cargo.toml`.
+
+Again, we aim to re-visit this as soon as possible but found this to be the more approachable work-around.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1749
 
