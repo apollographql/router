@@ -265,7 +265,13 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(?plugin_details, "list of plugins");
+    tracing::info!(
+        "enabled plugins: {:?}",
+        plugin_details
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&&String>>()
+    );
 
     if !errors.is_empty() {
         for error in &errors {
