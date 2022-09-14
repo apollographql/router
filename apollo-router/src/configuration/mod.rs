@@ -617,15 +617,11 @@ impl Default for Homepage {
 
 #[derive(Template)]
 #[template(path = "homepage_index.html")]
-struct HomepageTemplate {
-    supergraph_endpoint_url: String,
-}
+struct HomepageTemplate {}
 
 impl Homepage {
     pub(crate) fn display_page(&self) -> Bytes {
-        let template = HomepageTemplate {
-            supergraph_endpoint_url: self.supergraph_endpoint_url.to_string(),
-        };
+        let template = HomepageTemplate {};
         template.render().unwrap().into()
     }
 }
