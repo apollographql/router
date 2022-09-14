@@ -27,6 +27,24 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Promote include_subgraph_errors from experimental ([Issue #1773](https://github.com/apollographql/router/issues/1773))
+
+The include_subraph_errors plugin is promoted from experimental. Configuration changes are required. For example:
+
+```diff
+-plugins:
+-  experimental.include_subgraph_errors:
+-    all: true # Propagate errors from all subraphs
+-    subgraphs:
+-      products: false # Do not propagate errors from the products subgraph
++include_subgraph_errors:
++  all: true # Propagate errors from all subraphs
++  subgraphs:
++    products: false # Do not propagate errors from the products subgraph
+ ```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1776
+
 ### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
 
 By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
