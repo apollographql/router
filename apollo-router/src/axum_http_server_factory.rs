@@ -204,14 +204,16 @@ fn ensure_listenaddrs_consistency(
         all_ports.insert(main_port, main_ip);
     }
 
-    if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
-        if let Some(previous_ip) = all_ports.insert(port, ip) {
-            if ip != previous_ip {
-                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                    previous_ip,
-                    ip,
-                    port,
-                ));
+    if configuration.sandbox.enabled {
+        if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
+            if let Some(previous_ip) = all_ports.insert(port, ip) {
+                if ip != previous_ip {
+                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                        previous_ip,
+                        ip,
+                        port,
+                    ));
+                }
             }
         }
     }
@@ -2904,6 +2906,27 @@ Content-Type: application/json\r
             "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
             error.to_string()
         )
+    }
+
+    #[test(tokio::test)]
+    async fn it_makes_sure_conflicting_listenaddrs_for_disabled_sandbox_are_accepted() {
+        let conf = Configuration::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .listen(SocketAddr::from_str("0.0.0.0:4000").unwrap())
+                    .build(),
+            )
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
+                    .enabled(false)
+                    .build(),
+            )
+            .build();
+
+        init_with_config(MockSupergraphService::new(), conf, MultiMap::new())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
