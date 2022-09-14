@@ -27,6 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Homepage ([PR #1768](https://github.com/apollographql/router/pull/1768))
+
+The router now displays a homepage by default, instead of the studio sandbox.
+
+You can still disable the homepage, and enable the sandbox by editing your configuration:
+
+```yaml
+homepage:
+  enabled: false
+sandbox:
+  enabled: true
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1768
+
 ### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
 
 By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
