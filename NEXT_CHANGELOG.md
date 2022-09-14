@@ -28,5 +28,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+
+### ### Do not check for listen adddress conflicts with a disabled sandbox. [PR #1781](https://github.com/apollographql/router/pull/1781)
+
+Setting `supergraph.listen` to `0.0.0.0:4000` would conflict with the sandbox's default `127.0.0.1:4000` regardless of whether the sandbox is enabled or not.
+
+A workaround before next release is to change `sandbox.listen` to either match `supergraph.listen` or bind it to an other port:
+
+```yaml
+supergraph:
+  listen: 0.0.0.0:4000
+sandbox:
+  listen: 0.0.0.0:4000
+  enabled: false
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1781
+
 ## 🛠 Maintenance
 ## 📚 Documentation
