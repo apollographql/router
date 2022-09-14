@@ -1397,7 +1397,8 @@ mod tests {
             .homepage(Homepage::fake_builder().enabled(false).build())
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+        let (server, client) =
+            init_with_config(expectations, conf.clone(), MultiMap::new()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1415,7 +1416,7 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
+        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
 
         Ok(())
     }
@@ -1433,7 +1434,8 @@ mod tests {
             )
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, Default::default()).await?;
+        let (server, client) =
+            init_with_config(expectations, conf.clone(), Default::default()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1451,7 +1453,7 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
+        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
         Ok(())
     }
 
@@ -1468,7 +1470,8 @@ mod tests {
             )
             .build();
 
-        let (server, client) = init_with_config(expectations, conf, Default::default()).await?;
+        let (server, client) =
+            init_with_config(expectations, conf.clone(), Default::default()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1486,7 +1489,7 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_sandbox_page().0);
+        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
         Ok(())
     }
 

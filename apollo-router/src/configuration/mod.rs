@@ -838,10 +838,6 @@ fn default_graphql_introspection() -> bool {
     false
 }
 
-fn default_sandbox_enabled() -> bool {
-    false
-}
-
 fn default_parser_recursion_limit() -> usize {
     // This is `apollo-parser`’s default, which protects against stack overflow
     // but is still very high for "reasonable" queries.
