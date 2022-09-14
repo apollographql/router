@@ -5,27 +5,25 @@ description: Determining the router's status
 
 Health checks are often used by load balancers to determine whether a server is available and ready to start serving traffic.
 
-Since GraphQL queries can be sent as `GET` requests, a GraphQL query acts as an excellent health check.  We recommend sending a simple query as a `GET` request with an appropriate `Content-type: application/json` header:
+Because GraphQL queries can be sent as `GET` requests, a GraphQL query acts as an excellent health check. We recommend sending a simple query as a `GET` request with an appropriate `Content-type: application/json` header:
 
 ```
 /?query={__typename}
 ```
 
-This query can be further customized to include making requests to subgraphs by changing the query as desired and using a GraphQL operation has the added benefit of exercising the GraphQL layers of the Apollo Router.  It's important to send the `Content-type: application/json` header to meet the requirements for [CSRF protection](./csrf/).
+You can optionally use a different query string that includes fields from one or more of your subgraphs. This has the added benefit of exercising the router's entire request lifecycle. Make sure to include the `Content-type: application/json` header in your request to meet the requirements for [CSRF protection](./csrf/).
 
-### Testing with `curl`
+## Testing with `curl`
 
-To test the above health-check endpoint suggestion against an Apollo Router running on `127.0.0.1:4000`, you can send a request using the `{__typename}` query by running this `curl` command and observing its response:
+The following example demonstrates using the `curl` command to send a basic health check query to an Apollo Router instance running at `127.0.0.1:4000`:
 
 ```sh
-$ curl -v -H 'content-type: application/json' "http://127.0.0.1:43765/?query=\{__typename\}"
-{"data":{"__typename":"Query"}}
-$ curl -v -H 'content-type: application/json' "http://127.0.0.1:43765/?query=\{__typename\}"
-*   Trying 127.0.0.1:43765...
+$ curl -v -H 'content-type: application/json' "http://127.0.0.1:4000/?query=\{__typename\}"
+*   Trying 127.0.0.1:4000...
 * TCP_NODELAY set
-* Connected to 127.0.0.1 (127.0.0.1) port 43765 (#0)
+* Connected to 127.0.0.1 (127.0.0.1) port 4000 (#0)
 > GET /?query={__typename} HTTP/1.1
-> Host: 127.0.0.1:43765
+> Host: 127.0.0.1:4000
 > User-Agent: curl/7.68.0
 > Accept: */*
 > content-type: application/json
@@ -53,9 +51,9 @@ And the `data` response as well:
 {"data":{"__typename":"Query"}}
 ```
 
-### Kubernetes
+## Using with Kubernetes
 
-In Kubernetes, these health checks can be set by configured by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
+In Kubernetes, you can configure health checks by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
 
 ```yaml
       # ... snipped for partial example ...
@@ -71,7 +69,7 @@ In Kubernetes, these health checks can be set by configured by setting `readines
               httpHeaders:
                 - name: Content-Type
                   value: application/json
-              # You may also use a more custom query if you'd like.
+              # Customize this query string as needed.
               path: "/?query={__typename}"
               port: 80
           readinessProbe:
@@ -79,17 +77,17 @@ In Kubernetes, these health checks can be set by configured by setting `readines
               httpHeaders:
                 - name: Content-Type
                   value: application/json
-              # You may also use a more custom query if you'd like.
+              # Customize this query string as needed.
               path: "/?query={__typename}"
               port: 80
           # ... snipped for partial example ...
 ```
 
-There is a more developed example in our [Kubernetes documentation](../containerization/kubernetes/).
+See a more complete example in our [Kubernetes documentation](../containerization/kubernetes/).
 
-### Docker
+## Using with Docker
 
-Docker has a `HEALTHCHECK` instruction that tells Docker how to test a container to check that it is still working.  These are defined in the `Dockerfile` when building your container.
+Docker has a `HEALTHCHECK` instruction that tells Docker how to test whether a container is still working. These are defined in the `Dockerfile` when building your container:
 
 ```
 HEALTHCHECK CMD curl --fail \
@@ -97,4 +95,4 @@ HEALTHCHECK CMD curl --fail \
   "http://127.0.0.1:41123/?query=\{__typename\}" || exit 1
 ```
 
-We don't define these in our example `Dockerfile`s since their usage isn't particularly common, though you can add them to your own images if you desire them.
+We don't define these in our example `Dockerfile`s, because they aren't commonly used. You can add them to your own images as needed.

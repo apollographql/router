@@ -52,7 +52,7 @@ Here's a list of the endpoints exposed by the router:
 - Apollo Sandbox: http://127.0.0.1:4000/ (unchanged)
 - Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
 
-As the another section (below) in the CHANGELOG notes, we have *removed* the health check and instead recommend users to configure their health checks (in, e.g, Kubernetes, Docker, etc.) to use a simple GraphQL query: `/?query={__typename}`.  This has the added benefit of actually testing GraphQL!
+As another section (below) in the CHANGELOG notes, we have *removed* the health check and instead recommend users to configure their health checks (in, e.g, Kubernetes, Docker, etc.) to use a simple GraphQL query: `/?query={__typename}`.  This has the added benefit of actually testing GraphQL!
 
 While you could previously only customize the _path_ for these endpoints, you can now customize the full IP address, PORT and PATH.
 
@@ -106,7 +106,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 We have *removed* the dedicated health check endpoint and now recommend users to configure their health checks (in, e.g, Kubernetes, Docker) to use a simple GraphQL query instead.
 
-Use the following query with a `content-type: application/json` heaader as a health check instead of `/.well-known/apollo/server-health`:
+Use the following query with a `content-type: application/json` header as a health check instead of `/.well-known/apollo/server-health`:
 
 ```
 /?query={__typename}
