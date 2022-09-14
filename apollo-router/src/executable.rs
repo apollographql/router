@@ -210,8 +210,11 @@ impl Executable {
         );
 
         let dispatcher = if atty::is(atty::Stream::Stdout) {
-            builder.with_target(!opt.log_level.eq_ignore_ascii_case("info"));
-            Dispatch::new(builder_chain.finish())
+            Dispatch::new(
+                builder
+                    .with_target(!opt.log_level.eq_ignore_ascii_case("info"))
+                    .finish(),
+            )
         } else {
             Dispatch::new(builder.json().finish())
         };
