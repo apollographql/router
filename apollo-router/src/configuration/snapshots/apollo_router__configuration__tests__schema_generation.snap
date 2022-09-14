@@ -351,6 +351,20 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "homepage": {
+      "description": "Configuration options pertaining to the home page.",
+      "default": {
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "include_subgraph_errors": {
       "type": "object",
       "properties": {
@@ -401,7 +415,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "sandbox": {
-      "description": "Configuration options pertaining to the http server component.",
+      "description": "Configuration options pertaining to the sandbox page.",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
@@ -410,7 +424,6 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Enable sandbox Default: false",
           "default": false,
           "type": "boolean"
         },
@@ -429,7 +442,7 @@ expression: "&schema"
           ]
         },
         "path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "description": "The HTTP path on which the sandbox page will be served. default: \"/\"",
           "default": "/",
           "type": "string"
         }
@@ -454,7 +467,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "supergraph": {
-      "description": "Configuration options pertaining to the http server component.",
+      "description": "Configuration options pertaining to the supergraph server component.",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",

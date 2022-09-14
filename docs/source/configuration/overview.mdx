@@ -269,21 +269,57 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 # supergraph: Configuration of the Supergraph server
 #
 supergraph:
-  introspection: false
+  introspection: true
 ```
 
 ### Landing page
 
-By default, the router does _not_ display a landing page if you access its endpoint path via your browser. You can override this behavior to enable the landing page like so:
+By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
 
 ```yaml title="router.yaml"
-#
-# router: Configuration of the GraphQL server
-#
+homepage:
+  enabled: false
+```
+
+### Sandbox
+
+You can enable the sandbox by editing your configuration file. Make sure introspection is enabled as well:
+
+```yaml title="router.yaml"
 sandbox:
   listen: 127.0.0.1:4000
-  path: /
+  path: /sandbox
   enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
+```
+
+The sandbox default path is `/`, which will conflict with the homepage if both are enabled.
+You can work around this by either disabling the homepage...:
+
+```yaml title="router.yaml"
+homepage:
+  enabled: false
+sandbox:
+  listen: 127.0.0.1:4000
+  path: /sandbox
+  enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
+```
+
+...or changing the sandbox port or path:
+
+```yaml title="router.yaml"
+sandbox:
+  listen: 127.0.0.1:4010
+  path: /sandbox
+  enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
 ```
 
 ### Subgraph routing URLs
