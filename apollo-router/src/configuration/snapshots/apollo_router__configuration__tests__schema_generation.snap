@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 1325
 expression: "&schema"
 ---
 {
@@ -476,7 +475,6 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "supergraph_endpoint_url": "http://127.0.0.1:4000/",
         "enabled": false
       },
       "type": "object",
@@ -503,12 +501,6 @@ expression: "&schema"
           "description": "The HTTP path on which the sandbox page will be served. default: \"/\"",
           "default": "/",
           "type": "string"
-        },
-        "supergraph_endpoint_url": {
-          "description": "The url of the endpoint serving supergraph queries. Use this setting to point the Sandbox to a reachable URL default: \"http://127.0.0.1:4000/\"",
-          "default": "http://127.0.0.1:4000/",
-          "type": "string",
-          "format": "uri"
         }
       },
       "additionalProperties": false
