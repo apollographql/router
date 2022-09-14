@@ -1,4 +1,5 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::pin::Pin;
@@ -66,7 +67,9 @@ use tracing::Level;
 use tracing::Span;
 
 use crate::configuration::Configuration;
+use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
+use crate::configuration::Sandbox;
 use crate::graphql;
 use crate::http_ext;
 use crate::http_server_factory::HttpServerFactory;
@@ -117,18 +120,18 @@ where
             &configuration.sandbox.path,
         )
     {
-        let sandbox = Arc::new(configuration.sandbox.clone());
+        let supergraph_endpoint_url: Cow<'_, str> = configuration.supergraph.endpoint_url().into();
         endpoints.insert(
-            sandbox.listen.clone(),
+            configuration.sandbox.listen.clone(),
             Endpoint::new(
-                sandbox.path.clone(),
+                configuration.sandbox.path.clone(),
                 service_fn(move |_req: transport::Request| {
-                    let sandbox = Arc::clone(&sandbox);
+                    let supergraph_endpoint_url = supergraph_endpoint_url.clone();
                     async move {
                         Ok::<_, BoxError>(
                             http::Response::builder()
                                 .header(CONTENT_TYPE, "text/html")
-                                .body(sandbox.display_page().into())
+                                .body(Sandbox::display_page(&*supergraph_endpoint_url).into())
                                 .unwrap(),
                         )
                     }
@@ -145,21 +148,17 @@ where
             &configuration.homepage.path,
         )
     {
-        let homepage = Arc::new(configuration.homepage.clone());
         endpoints.insert(
-            homepage.listen.clone(),
+            configuration.homepage.listen.clone(),
             Endpoint::new(
-                homepage.path.clone(),
-                service_fn(move |_req: transport::Request| {
-                    let homepage = Arc::clone(&homepage);
-                    async move {
-                        Ok::<_, BoxError>(
-                            http::Response::builder()
-                                .header(CONTENT_TYPE, "text/html")
-                                .body(homepage.display_page().into())
-                                .unwrap(),
-                        )
-                    }
+                configuration.homepage.path.clone(),
+                service_fn(move |_req: transport::Request| async move {
+                    Ok::<_, BoxError>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, "text/html")
+                            .body(Homepage::display_page().into())
+                            .unwrap(),
+                    )
                 })
                 .boxed(),
             ),
@@ -736,11 +735,11 @@ where
             &configuration.sandbox.listen,
             &configuration.sandbox.path,
         ) {
-        let sandbox = Arc::new(configuration.sandbox.clone());
+        let supergraph_endpoint_url: Cow<'_, str> = configuration.supergraph.endpoint_url().into();
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
-                    Arc::clone(&sandbox).display_page(),
+                    Sandbox::display_page(&*supergraph_endpoint_url),
                     host,
                     service.new_service().boxed(),
                     http_request,
@@ -754,11 +753,10 @@ where
             &configuration.homepage.path,
         )
     {
-        let homepage = Arc::new(configuration.homepage.clone());
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
-                    Arc::clone(&homepage).display_page(),
+                    Homepage::display_page(),
                     host,
                     service.new_service().boxed(),
                     http_request,
@@ -1415,7 +1413,10 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
+        );
 
         Ok(())
     }
@@ -1452,7 +1453,10 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
+        );
         Ok(())
     }
 
@@ -1488,7 +1492,10 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), conf.sandbox.display_page());
+        assert_eq!(
+            response.bytes().await.unwrap(),
+            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
+        );
         Ok(())
     }
 
