@@ -27,9 +27,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Promote include_subgraph_errors from experimental ([Issue #1773](https://github.com/apollographql/router/issues/1773))
+### Promote `include_subgraph_errors` out of "experimental" status ([Issue #1773](https://github.com/apollographql/router/issues/1773))
 
-The include_subraph_errors plugin is promoted from experimental. Configuration changes are required. For example:
+The `include_subraph_errors` plugin has been promoted out of "experimental" and will require a small configuration changes.  For example:
 
 ```diff
 -plugins:
