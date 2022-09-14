@@ -130,6 +130,22 @@ where
         );
     }
 
+    endpoints.insert(
+        configuration.supergraph.listen.clone(),
+        Endpoint::new(
+            "/.well-known/apollo/server-health".to_string(),
+            service_fn(|_req: transport::Request| async move {
+                Ok::<_, BoxError>(
+                    http::Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Bytes::from_static(b"The health check is no longer at this endpoint").into())
+                        .unwrap(),
+                )
+            })
+            .boxed(),
+        ),
+    );
+
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
@@ -2128,6 +2144,19 @@ Content-Type: application/json\r
         let body = stream.buffer().to_vec();
         assert!(header_first_line.contains(" 200 "), "");
         body
+    }
+
+    #[tokio::test]
+    async fn test_health_check_returns_four_oh_four() {
+        let expectations = MockSupergraphService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!(
+            "{}/.well-known/apollo/server-health",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test(tokio::test)]
