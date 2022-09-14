@@ -122,8 +122,8 @@ telemetry:
     jaeger:
       collector:
         endpoint: "http://my-jaeger-collector"
-        username: "${JAEGER_USERNAME}"
-        password: "${JAEGER_PASSWORD}"
+        username: "${env.JAEGER_USERNAME}"
+        password: "${env.JAEGER_PASSWORD}"
 ```
 
 ## OpenTelemetry Collector via OTLP

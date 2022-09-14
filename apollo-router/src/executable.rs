@@ -62,6 +62,10 @@ pub(crate) struct Opt {
     )]
     config_path: Option<PathBuf>,
 
+    /// Enable development mode.
+    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", hide(true))]
+    dev: bool,
+
     /// Schema location relative to the project directory.
     #[clap(
         short,
@@ -227,10 +231,12 @@ impl Executable {
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
-        opt: Opt,
+        mut opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+        // Enable hot reload when dev mode is enabled
+        opt.hot_reload = opt.hot_reload || opt.dev;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -253,12 +259,20 @@ impl Executable {
                         path,
                         watch: opt.hot_reload,
                         delay: None,
+                        dev: opt.dev,
                     }
                 })
-                .unwrap_or_else(|| Configuration::builder().build().into()),
+                .unwrap_or_else(|| Configuration::builder().dev(opt.dev).build().into()),
         };
 
-        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
+        let apollo_telemetry_msg = if is_telemetry_disabled {
+            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        } else {
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
+        };
+
+        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)\n{}", std::env!("CARGO_PKG_VERSION"), apollo_telemetry_msg);
         let schema = match (schema, opt.supergraph_path, opt.apollo_key) {
             (Some(_), Some(_), _) => {
                 return Err(anyhow!(
@@ -334,9 +348,9 @@ impl Executable {
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router with the supergraph schema:
+  2. Run the Apollo Router in development mode with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --dev --supergraph starstuff.graphql
 
     "#
                 ));

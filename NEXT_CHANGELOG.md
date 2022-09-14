@@ -27,6 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
+
+By default, `sandbox` and `introspection` configuration are disabled. You have to force it in your configuration file with:
+
+```yaml
+sandbox:
+  # ...
+  enabled: true
+supergraph:
+    # ...
+  introspection: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
+
 ### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
 
 The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
@@ -103,6 +118,19 @@ supergraph::new_from_graphql_response
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
 
+
+### Environment variable expansion enhancements ([#1759](https://github.com/apollographql/router/issues/1759))
+
+* Environment expansions must be prefixed with `env.`. This will allow us to add other expansion types in future.
+* Change defaulting token from `:` to `:-`. For example:
+
+  `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
+* Failed expansions result in an error.
+  
+  Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
 ### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
 OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
@@ -137,7 +165,7 @@ telemetry:
         # This is expensive and should be left at a low value.
         # This cannot be higher than tracing->trace_config->sampler
         field_level_instrumentation_sampler: 0.01 # (default)
-        
+
         # Include HTTP request and response headers in traces sent to Apollo Studio
         send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
             except: # Send all headers except referer
@@ -154,9 +182,25 @@ telemetry:
 
 By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
 
+### Adds a development mode that can be enabled with the `--dev` flag ([#1474](https://github.com/apollographql/router/issues/1474))
+
+By default, the Apollo Router is configured with production best-practices.  When developing, it is often desired to have some of those features relaxed to make it easier to iterate.  A `--dev` flag has been introduced to make the user experience easier while maintaining a default configuration which targets a productionized environment.
+
+The `--dev` mode will enable a few options _for development_ which are not normally on by default:
+
+- Introspection will be enabled, allowing client tooling to obtain the latest version of the schema.
+- The Apollo Sandbox Explorer will be served instead of the Apollo Router landing page, allowing you to run queries against your development Router.
+- Hot-reloading of configuration will be enabled.
+- It will be possible for Apollo Sandbox Explorer to request a query plan to be returned with any operations it executes. These query plans will allow you to observe how the operation will be executed against the underlying subgraphs.
+- Errors received from subgraphs will not have their contents redacted to facilitate debugging.
+
+Additional considerations will be made in the future as we introduce new features that might necessitate a "development" workflow which is different than the default mode of operation.  We will try to minimize these differences to avoid surprises in a production deployment while providing an execellent development experience.  In the future, the (upcoming) `rover dev` experience will become our suggested pattern, but this should serve the purpose in the near term.
+
+By [@bnjjj](https://github.com/bnjjj) and [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) and [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1748
+
 ### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
 
-to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
+To aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
 
 To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
 
@@ -173,6 +217,19 @@ Executable::builder()
   .await
 ```
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
+
+### Environment variable expansion prefixing ([#1759](https://github.com/apollographql/router/issues/1759))
+
+The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
+
+For example: 
+
+`APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
+
+Would cause:
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
 
 ## 🐛 Fixes
 
@@ -192,6 +249,22 @@ We changed `QueryPlannerResponse` to:
 + Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+
+### A copy of the usage reporting Protobuf interface file in the Router source repository
+
+Previously this file was downloaded when compiling the Router,
+but we had no good way to automatically check when to re-download it
+without causing the Router to be compiled all the time.
+
+Instead a copy now resides in the repository, with a test checking that it is up to date.
+This file can be updated by running this command then sending a PR:
+
+```
+curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto \
+    > apollo-router/src/spaceport/proto/reports.proto
+```
+
+By [@SimonSapin](https://github.com/SimonSapin)
 
 ### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
 
