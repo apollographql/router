@@ -1140,11 +1140,13 @@ mod tests {
                     Configuration::builder()
                         .sandbox(
                             crate::configuration::Sandbox::builder()
+                                .enabled(true)
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
                         .supergraph(
                             crate::configuration::Supergraph::builder()
+                                .introspection(true)
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
