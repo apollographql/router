@@ -43,7 +43,7 @@ The include_subraph_errors plugin is promoted from experimental. Configuration c
 +    products: false # Do not propagate errors from the products subgraph
  ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1776
 
 ### Different default value for `sandbox` and `introspection` configuration ([PR #1748](https://github.com/apollographql/router/pull/1748))
 
