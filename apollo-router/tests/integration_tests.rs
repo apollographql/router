@@ -14,8 +14,11 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
+use insta::internals::Content;
+use insta::internals::Redaction;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
@@ -116,7 +119,9 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!(get_spans(), {
+      ".**.children.*.record.entries[]" => redact_dynamic()
+    });
 }
 
 #[test_span(tokio::test)]
@@ -130,7 +135,9 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!(get_spans(), {
+      ".**.children.*.record.entries[]" => redact_dynamic()
+    });
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -192,7 +199,7 @@ async fn simple_queries_should_not_work() {
         .build()
         .expect("expecting valid request");
     request
-        .originating_request
+        .supergraph_request
         .headers_mut()
         .remove("content-type");
 
@@ -214,7 +221,7 @@ async fn queries_should_work_with_compression() {
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
         .method(Method::POST)
-        .header("content-type", "application/json")
+        .header(CONTENT_TYPE, "application/json")
         .header("accept-encoding", "gzip")
         .build()
         .expect("expecting valid request");
@@ -255,9 +262,12 @@ async fn queries_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
-    let message = "value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"";
+    let message = "Unknown operation named \"invalidOperationName\"";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
+        .extensions(extensions_map)
         .build();
 
     let request = supergraph::Request::fake_builder()
@@ -526,7 +536,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
-        "server": {
+        "supergraph": {
             "preview_defer_support": false,
         },
         "plugins": {
@@ -628,9 +638,13 @@ async fn defer_path_in_array() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+    assert_eq!(first.has_next, Some(true));
 
     let second = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(second);
+    assert_eq!(second.has_next, Some(false));
+
+    assert_eq!(stream.next_response().await, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -673,7 +687,7 @@ async fn defer_query_without_accept() {
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
-        .json(request.originating_request.body())
+        .json(request.supergraph_request.body())
         .send()
         .await
         .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
@@ -716,7 +730,6 @@ async fn query_rust_with_config(
 async fn setup_router_and_registry(
     config: serde_json::Value,
 ) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
-    let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
@@ -859,4 +872,24 @@ impl ValueExt for Value {
             (a, b) => a == b,
         }
     }
+}
+
+// Useful to redact request_id in snapshot because it's not determinist
+fn redact_dynamic() -> Redaction {
+    insta::dynamic_redaction(|value, _path| {
+        if let Some(value_slice) = value.as_slice() {
+            if value_slice.get(0).and_then(|v| v.as_str()) == Some("request.id") {
+                return Content::Seq(vec![
+                    value_slice.get(0).unwrap().clone(),
+                    Content::String("[REDACTED]".to_string()),
+                ]);
+            }
+            if value_slice.get(0).and_then(|v| v.as_str())
+                == Some("apollo_private.sent_time_offset")
+            {
+                return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
+            }
+        }
+        value
+    })
 }

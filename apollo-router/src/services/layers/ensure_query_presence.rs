@@ -31,7 +31,7 @@ where
         CheckpointService::new(
             |req: SupergraphRequest| {
                 // A query must be available at this point
-                let query = req.originating_request.body().query.as_ref();
+                let query = req.supergraph_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
                     let errors = vec![crate::error::Error {
                         message: "Must provide query string.".to_string(),

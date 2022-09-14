@@ -13,6 +13,7 @@ use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use http::header;
+use http::header::HeaderName;
 use http::HeaderValue;
 use multimap::MultiMap;
 
@@ -260,11 +261,15 @@ impl<T> Request<T> {
         method: http::Method,
         body: T,
     ) -> http::Result<Request<T>> {
-        let mut req = http::request::Builder::new()
-            .method(method)
-            .uri(uri)
-            .body(body)?;
-        *req.headers_mut() = header_map(headers)?;
+        let mut builder = http::request::Builder::new().method(method).uri(uri);
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
+        }
+        let req = builder.body(body)?;
         Ok(Self { inner: req })
     }
 }
@@ -392,7 +397,7 @@ pub(crate) struct Response<T> {
 #[cfg(test)]
 pub(crate) fn from_response_to_stream(
     http: http::response::Response<graphql::Response>,
-) -> http::Response<futures::stream::BoxStream<'static, graphql::Response>> {
+) -> http::Response<graphql::ResponseStream> {
     use futures::future::ready;
     use futures::stream::once;
     use futures::StreamExt;

@@ -1,5 +1,6 @@
 //! Calls out to nodejs query planner
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,14 +10,16 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use tower::BoxError;
+use serde_json_bytes::json;
 use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
+use super::TYPENAME;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -52,7 +55,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.server.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.preview_defer_support),
                         }),
                     },
                 )
@@ -151,7 +154,7 @@ impl BridgeQueryPlanner {
 impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     type Response = QueryPlannerResponse;
 
-    type Error = BoxError;
+    type Error = QueryPlannerError;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -169,11 +172,45 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => Ok(QueryPlannerResponse::new(
-                    query_planner_content,
-                    req.context,
-                )),
-                Err(e) => Err(tower::BoxError::from(e)),
+                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
+                    .content(query_planner_content)
+                    .context(req.context)
+                    .build()),
+                Err(e) => {
+                    match &e {
+                        QueryPlannerError::PlanningErrors(pe) => {
+                            if let Err(inner_e) = req
+                                .context
+                                .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                            {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        }
+                        QueryPlannerError::SpecError(e) => {
+                            let error_key = match e {
+                                SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+                                _ => "## GraphQLValidationFailure\n",
+                            };
+                            if let Err(inner_e) = req.context.insert(
+                                USAGE_REPORTING,
+                                UsageReporting {
+                                    stats_report_key: error_key.to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                },
+                            ) {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    inner_e
+                                );
+                            }
+                        }
+                        _ => (),
+                    }
+                    Err(e)
+                }
             }
         };
 
@@ -187,7 +224,18 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(key.0).await;
+            // If we have only one operation containing a single root field `__typename`
+            if selections.contains_only_typename() {
+                return Ok(QueryPlannerContent::Introspection {
+                    response: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
+                            .build(),
+                    ),
+                });
+            } else {
+                return self.introspection(key.0).await;
+            }
         }
 
         self.plan(key.0, key.1, selections).await

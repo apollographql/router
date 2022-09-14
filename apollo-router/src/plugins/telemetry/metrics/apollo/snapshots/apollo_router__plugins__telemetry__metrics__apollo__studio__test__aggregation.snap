@@ -5,6 +5,7 @@ expression: aggregated_metrics
 {
   "traces_per_query": {
     "report_key_1": {
+      "traces": [],
       "stats_with_context": [
         [
           {

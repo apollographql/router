@@ -16,8 +16,8 @@ const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
 #[derive(GraphQLQuery)]
 #[graphql(
-    query_path = "query.graphql",
-    schema_path = "uplink.graphql",
+    query_path = "src/uplink/query.graphql",
+    schema_path = "src/uplink/uplink.graphql",
     request_derives = "Debug",
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
@@ -26,11 +26,14 @@ const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 pub(crate) struct SupergraphSdl;
 
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     Reqwest(reqwest::Error),
     EmptyResponse,
     UpLink {
+        // The lint ignores uses in the `Debug` impl, but this is where these fields are useful.
+        #[allow(dead_code)]
         code: FetchErrorCode,
+        #[allow(dead_code)]
         message: String,
     },
 }
@@ -42,13 +45,12 @@ impl From<reqwest::Error> for Error {
 }
 
 #[derive(Clone, Debug)]
-pub struct Schema {
-    pub id: String,
-    pub schema: String,
+pub(crate) struct Schema {
+    pub(crate) schema: String,
 }
 
 /// regularly download a schema from Uplink
-pub fn stream_supergraph(
+pub(crate) fn stream_supergraph(
     api_key: String,
     graph_ref: String,
     urls: Option<Vec<Url>>,
@@ -76,7 +78,6 @@ pub fn stream_supergraph(
                         composition_id = Some(schema_config.id.clone());
                         if sender
                             .send(Ok(Schema {
-                                id: schema_config.id,
                                 schema: schema_config.supergraph_sdl,
                             }))
                             .await
@@ -123,7 +124,7 @@ pub fn stream_supergraph(
     ReceiverStream::new(receiver)
 }
 
-pub async fn fetch_supergraph(
+pub(crate) async fn fetch_supergraph(
     api_key: String,
     graph_ref: String,
     composition_id: Option<String>,

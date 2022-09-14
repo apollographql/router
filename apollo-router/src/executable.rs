@@ -62,6 +62,10 @@ pub(crate) struct Opt {
     )]
     config_path: Option<PathBuf>,
 
+    /// Enable development mode.
+    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", hide(true))]
+    dev: bool,
+
     /// Schema location relative to the project directory.
     #[clap(
         short,
@@ -159,15 +163,21 @@ impl Executable {
     /// Build an executable that will parse commandline options and set up logging,
     /// then start an HTTP server.
     ///
-    /// You may optionally specify when the server should gracefully shut down.
+    /// You may optionally specify when the server should gracefully shut down, the schema source and the configuration source.
     /// The default is on CTRL+C on the terminal (or a `SIGINT` signal).
     ///
     /// ```no_run
     /// use apollo_router::{Executable, ShutdownSource};
     /// # #[tokio::main]
     /// # async fn main() -> anyhow::Result<()> {
+    /// # use futures::StreamExt;
+    /// # let schemas = futures::stream::empty().boxed();
+    /// # let configs = futures::stream::empty().boxed();
+    /// use apollo_router::{ConfigurationSource, SchemaSource};
     /// Executable::builder()
     ///   .shutdown(ShutdownSource::None)
+    ///   .schema(SchemaSource::Stream(schemas))
+    ///   .config(ConfigurationSource::Stream(configs))
     ///   .start()
     ///   .await
     /// # }
@@ -175,7 +185,11 @@ impl Executable {
     /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
     ///
     #[builder(entry = "builder", exit = "start", visibility = "pub")]
-    async fn start(shutdown: Option<ShutdownSource>) -> Result<()> {
+    async fn start(
+        shutdown: Option<ShutdownSource>,
+        schema: Option<SchemaSource>,
+        config: Option<ConfigurationSource>,
+    ) -> Result<()> {
         let opt = Opt::parse();
 
         if opt.version {
@@ -213,39 +227,65 @@ impl Executable {
         // The dispatcher we created is passed explicitely here to make sure we display the logs
         // in the initialization pahse and in the state machine code, before a global subscriber
         // is set using the configuration file
-        Self::inner_start(shutdown, opt, dispatcher.clone())
+        Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
             .with_subscriber(dispatcher)
             .await
     }
 
     async fn inner_start(
         shutdown: Option<ShutdownSource>,
-        opt: Opt,
+        schema: Option<SchemaSource>,
+        config: Option<ConfigurationSource>,
+        mut opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+        // Enable hot reload when dev mode is enabled
+        opt.hot_reload = opt.hot_reload || opt.dev;
 
-        let configuration = opt
-            .config_path
-            .as_ref()
-            .map(|path| {
-                let path = if path.is_relative() {
-                    current_directory.join(path)
-                } else {
-                    path.to_path_buf()
-                };
+        let configuration = match (config, opt.config_path.as_ref()) {
+            (Some(_), Some(_)) => {
+                return Err(anyhow!(
+                    "--config and APOLLO_ROUTER_CONFIG_PATH cannot be used when a custom configuration source is in use"
+                ));
+            }
+            (Some(config), None) => config,
+            _ => opt
+                .config_path
+                .as_ref()
+                .map(|path| {
+                    let path = if path.is_relative() {
+                        current_directory.join(path)
+                    } else {
+                        path.to_path_buf()
+                    };
 
-                ConfigurationSource::File {
-                    path,
-                    watch: opt.hot_reload,
-                    delay: None,
-                }
-            })
-            .unwrap_or_else(|| Configuration::builder().build().into());
+                    ConfigurationSource::File {
+                        path,
+                        watch: opt.hot_reload,
+                        delay: None,
+                        dev: opt.dev,
+                    }
+                })
+                .unwrap_or_else(|| Configuration::builder().dev(opt.dev).build().into()),
+        };
 
-        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
-        let schema = match (opt.supergraph_path, opt.apollo_key) {
-            (Some(supergraph_path), _) => {
+        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
+        let apollo_telemetry_msg = if is_telemetry_disabled {
+            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        } else {
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
+        };
+
+        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)\n{}", std::env!("CARGO_PKG_VERSION"), apollo_telemetry_msg);
+        let schema = match (schema, opt.supergraph_path, opt.apollo_key) {
+            (Some(_), Some(_), _) => {
+                return Err(anyhow!(
+                    "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
+                ))
+            }
+            (Some(source), None, _) => source,
+            (_, Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
                 setup_panic_handler(dispatcher.clone());
 
@@ -260,7 +300,7 @@ impl Executable {
                     delay: None,
                 }
             }
-            (None, Some(apollo_key)) => {
+            (_, None, Some(apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
 
                 let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
@@ -313,9 +353,9 @@ impl Executable {
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router with the supergraph schema:
+  2. Run the Apollo Router in development mode with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --dev --supergraph starstuff.graphql
 
     "#
                 ));

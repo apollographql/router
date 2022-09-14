@@ -4,7 +4,7 @@ assertion_line: 726
 expression: second
 ---
 {
-  "hasNext": true,
+  "hasNext": false,
   "incremental": [
     {
       "label": "author name",

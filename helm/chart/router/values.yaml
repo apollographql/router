@@ -7,7 +7,7 @@ replicaCount: 1
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
 router:
   configuration:
-    server:
+    graphql:
       listen: 0.0.0.0:80
   args:
   - --hot-reload

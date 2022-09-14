@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/yaml.rs
-assertion_line: 214
 expression: "format!(\"{:#?}\", root)"
 ---
 Mapping(

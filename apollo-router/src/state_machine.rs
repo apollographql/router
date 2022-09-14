@@ -72,9 +72,11 @@ where
     http_server_factory: S,
     router_configurator: FA,
 
-    // The reason we have listen_address and listen_address_guard is that on startup we want ensure that we update the listen address before users can read the value.
-    pub(crate) listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
+    // The reason we have extra_listen_adresses and extra_listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
+    pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    pub(crate) extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
+    extra_listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
+    graphql_listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -84,13 +86,17 @@ where
     FA::SupergraphServiceFactory: SupergraphServiceFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
-        let ready = Arc::new(RwLock::new(None));
-        let ready_guard = ready.clone().try_write_owned().expect("owned lock");
+        let graphql_ready = Arc::new(RwLock::new(None));
+        let graphql_ready_guard = graphql_ready.clone().try_write_owned().expect("owned lock");
+        let extra_ready = Arc::new(RwLock::new(Vec::new()));
+        let extra_ready_guard = extra_ready.clone().try_write_owned().expect("owned lock");
         Self {
             http_server_factory,
             router_configurator: router_factory,
-            listen_address: ready,
-            listen_address_guard: Some(ready_guard),
+            graphql_listen_address: graphql_ready,
+            graphql_listen_address_guard: Some(graphql_ready_guard),
+            extra_listen_adresses: extra_ready,
+            extra_listen_addresses_guard: Some(extra_ready_guard),
         }
     }
 
@@ -231,7 +237,7 @@ where
             state = new_state;
 
             // If we're running then let those waiting proceed.
-            self.maybe_update_listen_address(&mut state).await;
+            self.maybe_update_listen_addresses(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -240,8 +246,10 @@ where
         }
         tracing::debug!("stopped");
 
-        // If the listen_address_guard has not been taken, take it so that anything waiting on listen_address will proceed.
-        self.listen_address_guard.take();
+        // If the listen_address_guard has not been taken,
+        // take it so that anything waiting on listen_address will proceed.
+        self.extra_listen_addresses_guard.take();
+        self.graphql_listen_address_guard.take();
 
         match state {
             Stopped => Ok(()),
@@ -252,23 +260,29 @@ where
         }
     }
 
-    async fn maybe_update_listen_address(
+    async fn maybe_update_listen_addresses(
         &mut self,
         state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
     ) {
-        let listen_address = if let Running { server_handle, .. } = &state {
-            let listen_address = server_handle.listen_address().clone();
-            Some(listen_address)
-        } else {
-            None
-        };
-
-        if let Some(listen_address) = listen_address {
-            if let Some(mut listen_address_guard) = self.listen_address_guard.take() {
-                *listen_address_guard = Some(listen_address);
+        let (graphql_listen_address, extra_listen_addresses) =
+            if let Running { server_handle, .. } = &state {
+                let listen_addresses = server_handle.listen_addresses().to_vec();
+                let graphql_listen_address = server_handle.graphql_listen_address().clone();
+                (graphql_listen_address, listen_addresses)
             } else {
-                *self.listen_address.write().await = Some(listen_address);
-            }
+                return;
+            };
+
+        if let Some(mut listen_address_guard) = self.graphql_listen_address_guard.take() {
+            *listen_address_guard = graphql_listen_address;
+        } else {
+            *self.graphql_listen_address.write().await = graphql_listen_address;
+        }
+
+        if let Some(mut extra_listen_addresses_guard) = self.extra_listen_addresses_guard.take() {
+            *extra_listen_addresses_guard = extra_listen_addresses;
+        } else {
+            *self.extra_listen_adresses.write().await = extra_listen_addresses;
         }
     }
 
@@ -306,15 +320,17 @@ where
                     tracing::error!("cannot create the router: {}", err);
                     Errored(ApolloRouterError::ServiceCreationError(err))
                 })?;
-            let plugin_handlers = router_factory.custom_endpoints();
+
+            let web_endpoints = router_factory.web_endpoints();
 
             let server_handle = self
                 .http_server_factory
                 .create(
                     router_factory.clone(),
                     configuration.clone(),
-                    None,
-                    plugin_handlers,
+                    Default::default(),
+                    Default::default(),
+                    web_endpoints,
                 )
                 .await
                 .map_err(|err| {
@@ -360,14 +376,14 @@ where
             .await
         {
             Ok(new_router_service) => {
-                let plugin_handlers = new_router_service.custom_endpoints();
+                let web_endpoints = new_router_service.web_endpoints();
 
                 let server_handle = server_handle
                     .restart(
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
-                        plugin_handlers,
+                        web_endpoints,
                     )
                     .await
                     .map_err(|err| {
@@ -413,7 +429,6 @@ impl<T> ResultExt<T> for Result<T, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
@@ -423,9 +438,9 @@ mod tests {
 
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
-    use futures::stream::BoxStream;
     use mockall::mock;
     use mockall::Sequence;
+    use multimap::MultiMap;
     use test_log::test;
     use tower::BoxError;
     use tower::Service;
@@ -434,7 +449,7 @@ mod tests {
     use crate::graphql;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
-    use crate::plugin::Handler;
+    use crate::router_factory::Endpoint;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;
@@ -530,8 +545,8 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateConfiguration(
                         Configuration::builder()
-                            .server(
-                                crate::configuration::Server::builder()
+                            .supergraph(
+                                crate::configuration::Supergraph::builder()
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
@@ -604,7 +619,7 @@ mod tests {
             .returning(|_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                router.expect_custom_endpoints().returning(HashMap::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory
@@ -657,7 +672,7 @@ mod tests {
         impl SupergraphServiceFactory for MyRouterFactory {
             type SupergraphService = MockMyRouter;
             type Future = <Self::SupergraphService as Service<http::Request<graphql::Request>>>::Future;
-            fn custom_endpoints(&self) -> std::collections::HashMap<String, crate::plugin::Handler>;
+            fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
         impl  NewService<http::Request<graphql::Request>> for MyRouterFactory {
             type Service = MockMyRouter;
@@ -683,7 +698,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<http::Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = http::Response<BoxStream<'static, graphql::Response>>;
+        type Response = http::Response<graphql::ResponseStream>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -700,7 +715,7 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
+                main_listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
         }
     }
 
@@ -712,13 +727,14 @@ mod tests {
             &self,
             _service_factory: RF,
             configuration: Arc<Configuration>,
-            listener: Option<Listener>,
-            _plugin_handlers: HashMap<String, Handler>,
+            main_listener: Option<Listener>,
+            _extra_listeners: Vec<(ListenAddr, Listener)>,
+            _web_endpoints: MultiMap<ListenAddr, Endpoint>,
         ) -> Self::Future
         where
             RF: SupergraphServiceFactory,
         {
-            let res = self.create_server(configuration, listener);
+            let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })
         }
     }
@@ -748,7 +764,7 @@ mod tests {
             .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |configuration: Arc<Configuration>, listener: Option<Listener>| {
+                move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -756,19 +772,21 @@ mod tests {
                         .push(shutdown_receiver);
 
                     let server = async move {
-                        Ok(if let Some(l) = listener {
-                            l
-                        } else {
-                            Listener::Tcp(
+                        let main_listener = match main_listener.take() {
+                            Some(l) => l,
+                            None => Listener::Tcp(
                                 tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
-                            )
-                        })
+                            ),
+                        };
+
+                        Ok((main_listener, vec![]))
                     };
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
-                        configuration.server.listen.clone(),
+                        Some(configuration.supergraph.listen.clone()),
+                        vec![],
                     ))
                 },
             );
@@ -784,7 +802,7 @@ mod tests {
             .returning(move |_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
-                router.expect_custom_endpoints().returning(HashMap::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory

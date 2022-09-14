@@ -4,14 +4,14 @@ mod yaml;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::env;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
 use derivative::Derivative;
 use displaydoc::Display;
-use envmnt::ExpandOptions;
-use envmnt::ExpansionType;
 use http::request::Parts;
 use http::HeaderValue;
 use itertools::Itertools;
@@ -27,6 +27,7 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -34,6 +35,34 @@ use tower_http::cors::CorsLayer;
 use tower_http::cors::{self};
 
 use crate::plugin::plugins;
+
+enum Expansion {
+    Regular,
+
+    // APOLLO_ROUTER_CONFIG_ENV_PREFIX is undocumented and unsupported currently. If there is demand from the community then it can be promoted to a top level feature.
+    Prefixed(String),
+}
+
+impl Expansion {
+    fn context_fn(&self) -> impl Fn(&str) -> Result<Option<String>, ConfigurationError> + '_ {
+        move |key: &str| {
+            if let Some(key) = key.strip_prefix("env.") {
+                return match self {
+                    Expansion::Regular => env::var(key),
+                    Expansion::Prefixed(prefix) => env::var(format!("{}_{}", prefix, key)),
+                }
+                .map(Some)
+                .map_err(|cause| ConfigurationError::CannotExpandVariable {
+                    key: key.to_string(),
+                    cause,
+                });
+            }
+            Err(ConfigurationError::UnknownExpansionMode {
+                key: key.to_string(),
+            })
+        }
+    }
+}
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -44,6 +73,13 @@ pub(crate) enum ConfigurationError {
     CannotReadSecretFromFile(std::io::Error),
     /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
+    /// could not expand variable: {key}, {cause}
+    CannotExpandVariable {
+        key: String,
+        cause: std::env::VarError,
+    },
+    /// could not expand variable: {key}. Variables must be prefixed with `env.`.
+    UnknownExpansionMode { key: String },
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
@@ -68,6 +104,15 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    #[serde(default)]
+    #[serde(rename = "health-check")]
+    pub(crate) health_check: HealthCheck,
+
+    #[serde(default)]
+    pub(crate) sandbox: Sandbox,
+
+    #[serde(default)]
+    pub(crate) supergraph: Supergraph,
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -80,13 +125,23 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    // Dev mode
+    #[serde(skip)]
+    dev: Option<bool>,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 const TELEMETRY_KEY: &str = "telemetry";
 
-fn default_listen() -> ListenAddr {
+fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
+
+// This isn't dead code! we use it in buildstructor's fake_new
+#[allow(dead_code)]
+fn test_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
 #[buildstructor::buildstructor]
@@ -94,12 +149,19 @@ impl Configuration {
     #[builder]
     pub(crate) fn new(
         server: Option<Server>,
+        supergraph: Option<Supergraph>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
+            supergraph: supergraph.unwrap_or_default(),
+            health_check: health_check.unwrap_or_default(),
+            sandbox: sandbox.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -107,7 +169,31 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
+    }
+
+    /// This should be executed after normal configuration processing
+    pub(crate) fn enable_dev_mode(&mut self) {
+        if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
+            tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
+        } else {
+            tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
+        }
+
+        if self.plugins.plugins.is_none() {
+            self.plugins.plugins = Some(Map::new());
+        }
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.expose_query_plan".to_string(),
+            Value::Bool(true),
+        );
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.include_subgraph_errors".to_string(),
+            json!({"all": true}),
+        );
+        self.supergraph.introspection = true;
+        self.sandbox.enabled = true;
     }
 
     #[cfg(test)]
@@ -153,6 +239,37 @@ impl Configuration {
             Ok(())
         } else {
             Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Configuration {
+    #[builder]
+    pub(crate) fn fake_new(
+        server: Option<Server>,
+        supergraph: Option<Supergraph>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        cors: Option<Cors>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
+    ) -> Self {
+        Self {
+            server: server.unwrap_or_default(),
+            supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            cors: cors.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+            dev,
         }
     }
 }
@@ -246,37 +363,203 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Server {
+pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_listen")]
+    #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
-
-    /// introspection queries
-    /// enabled by default
-    #[serde(default = "default_introspection")]
-    pub(crate) introspection: bool,
-
-    /// display landing page
-    /// enabled by default
-    #[serde(default = "default_landing_page")]
-    pub(crate) landing_page: bool,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
     #[serde(default = "default_graphql_path")]
-    pub(crate) graphql_path: String,
+    pub(crate) path: String,
 
-    /// healthCheck path
-    /// default: "/.well-known/apollo/server-health"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) health_check_path: String,
+    /// Enable introspection
+    /// Default: false
+    #[serde(default = "default_graphql_introspection")]
+    pub(crate) introspection: bool,
 
-    /// Preview @defer directive support
-    /// default: true
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
+}
 
+fn default_defer_support() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+        }
+    }
+}
+
+impl Default for Supergraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Sandbox {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_graphql_path")]
+    pub(crate) path: String,
+
+    /// Enable sandbox
+    /// Default: false
+    #[serde(default = "default_sandbox_enabled")]
+    pub(crate) enabled: bool,
+}
+
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
+        }
+    }
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HealthCheck {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:9494
+    #[serde(default = "default_health_check_listen")]
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    #[serde(default = "default_health_check_path")]
+    pub(crate) path: String,
+
+    #[serde(default = "default_health_check")]
+    pub(crate) enabled: bool,
+}
+
+fn default_health_check_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:9494").unwrap().into()
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
+}
+
+fn default_health_check() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl HealthCheck {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_health_check_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+            enabled: enabled.unwrap_or_else(default_health_check),
+        }
+    }
+
+    // Used in tests
+    #[allow(dead_code)]
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_health_check_path),
+            enabled: enabled.unwrap_or_else(default_health_check),
+        }
+    }
+}
+
+impl Default for HealthCheck {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the http server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Server {
     /// Experimental limitation of query depth
     /// default: 4096
     #[serde(default = "default_parser_recursion_limit")]
@@ -287,22 +570,8 @@ pub(crate) struct Server {
 impl Server {
     #[builder]
     #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        introspection: Option<bool>,
-        landing_page: Option<bool>,
-        graphql_path: Option<String>,
-        health_check_path: Option<String>,
-        defer_support: Option<bool>,
-        parser_recursion_limit: Option<usize>,
-    ) -> Self {
+    pub(crate) fn new(parser_recursion_limit: Option<usize>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_listen),
-            introspection: introspection.unwrap_or_else(default_introspection),
-            landing_page: landing_page.unwrap_or_else(default_landing_page),
-            graphql_path: graphql_path.unwrap_or_else(default_graphql_path),
-            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
-            preview_defer_support: defer_support.unwrap_or_else(default_defer_support),
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }
@@ -310,7 +579,7 @@ impl Server {
 }
 
 /// Listening address.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ListenAddr {
     /// Socket address.
@@ -318,6 +587,17 @@ pub enum ListenAddr {
     /// Unix socket.
     #[cfg(unix)]
     UnixSocket(std::path::PathBuf),
+}
+
+impl ListenAddr {
+    pub(crate) fn ip_and_port(&self) -> Option<(IpAddr, u16)> {
+        #[cfg_attr(not(unix), allow(irrefutable_let_patterns))]
+        if let Self::SocketAddr(addr) = self {
+            Some((addr.ip(), addr.port()))
+        } else {
+            None
+        }
+    }
 }
 
 impl From<SocketAddr> for ListenAddr {
@@ -425,24 +705,16 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
-fn default_introspection() -> bool {
-    true
-}
-
-fn default_landing_page() -> bool {
-    true
-}
-
 fn default_graphql_path() -> String {
     String::from("/")
 }
 
-fn default_health_check_path() -> String {
-    String::from("/.well-known/apollo/server-health")
+fn default_graphql_introspection() -> bool {
+    false
 }
 
-fn default_defer_support() -> bool {
-    true
+fn default_sandbox_enabled() -> bool {
+    false
 }
 
 fn default_parser_recursion_limit() -> usize {
@@ -622,13 +894,26 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 /// The validation sequence is:
 /// 1. Parse the config into yaml
 /// 2. Create the json schema
+/// 3. Expand env variables
 /// 3. Validate the yaml against the json schema.
-/// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
-/// 5. Convert the json paths from the error messages into nice error snippets.
+/// 4. Convert the json paths from the error messages into nice error snippets. Makes sure to use the values from the original source document to prevent leaks of secrets etc.
 ///
 /// There may still be serde validation issues later.
 ///
 pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
+    // APOLLO_ROUTER_CONFIG_ENV_PREFIX is undocumented and unsupported currently. If there is demand from the community then it can be promoted to a top level feature.
+    let expansion = if let Ok(prefix) = env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+        Expansion::Prefixed(prefix)
+    } else {
+        Expansion::Regular
+    };
+    validate_configuration_internal(raw_yaml, expansion)
+}
+
+fn validate_configuration_internal(
+    raw_yaml: &str,
+    expansion: Expansion,
+) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
         "plugins:".to_string()
     } else {
@@ -641,7 +926,8 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
             error: e.to_string(),
         }
     })?;
-    let expanded_yaml = expand_env_variables(yaml);
+
+    let expanded_yaml = expand_env_variables(yaml, expansion)?;
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",
@@ -807,32 +1093,32 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     }
 
     // Custom validations
-    if !config.server.graphql_path.starts_with('/') {
+    if !config.supergraph.path.starts_with('/') {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.graphql_path,
-                config.server.graphql_path
+                config.supergraph.path,
+                config.supergraph.path
             ),
         });
     }
-    if config.server.graphql_path.ends_with('*') && !config.server.graphql_path.ends_with("/*") {
+    if config.supergraph.path.ends_with('*') && !config.supergraph.path.ends_with("/*") {
         return Err(ConfigurationError::InvalidConfiguration {
             message: "invalid 'server.graphql_path' configuration",
             error: format!(
                 "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.graphql_path
+                config.supergraph.path
             ),
         });
     }
-    if config.server.graphql_path.contains("/*/") {
+    if config.supergraph.path.contains("/*/") {
         return Err(
                 ConfigurationError::InvalidConfiguration {
                     message: "invalid 'server.graphql_path' configuration",
                     error: format!(
                         "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.graphql_path
+                        config.supergraph.path
                     ),
                 },
             );
@@ -841,36 +1127,42 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     Ok(config)
 }
 
-fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+fn expand_env_variables(
+    configuration: &serde_json::Value,
+    expansion: Expansion,
+) -> Result<serde_json::Value, ConfigurationError> {
     let mut configuration = configuration.clone();
-    visit(&mut configuration);
-    configuration
+    visit(&mut configuration, &expansion)?;
+    Ok(configuration)
 }
 
-fn visit(value: &mut Value) {
+fn visit(value: &mut Value, expansion: &Expansion) -> Result<(), ConfigurationError> {
     let mut expanded: Option<String> = None;
     match value {
         Value::String(value) => {
-            let new_value = envmnt::expand(
-                value,
-                Some(
-                    ExpandOptions::new()
-                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
-                ),
-            );
-
+            let new_value = shellexpand::env_with_context(value, expansion.context_fn())
+                .map_err(|e| e.cause)?;
             if &new_value != value {
-                expanded = Some(new_value);
+                expanded = Some(new_value.to_string());
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(visit),
-        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        Value::Array(a) => {
+            for v in a {
+                visit(v, expansion)?
+            }
+        }
+        Value::Object(o) => {
+            for v in o.values_mut() {
+                visit(v, expansion)?
+            }
+        }
         _ => {}
     }
     // The expansion may have resulted in a primitive, reparse and replace
     if let Some(expanded) = expanded {
         *value = coerce(&expanded)
     }
+    Ok(())
 }
 
 fn coerce(expanded: &str) -> Value {
@@ -1025,8 +1317,8 @@ mod tests {
     fn bad_graphql_path_configuration_without_slash() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: test
+supergraph:
+  path: test
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1037,8 +1329,8 @@ server:
     fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /*/test
+supergraph:
+  path: /*/test
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1049,8 +1341,8 @@ server:
     fn unknown_fields() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /
+supergraph:
+  path: /
 subgraphs:
   account: true
   "#,
@@ -1084,8 +1376,8 @@ unknown:
     fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
         let error = validate_configuration(
             r#"
-server:
-  graphql_path: /test*
+supergraph:
+  path: /test*
   "#,
         )
         .expect_err("should have resulted in an error");
@@ -1112,7 +1404,7 @@ telemetry:
     fn line_precise_config_errors_with_errors_after_first_field() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1128,7 +1420,7 @@ server:
     fn line_precise_config_errors_bad_type() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: true
@@ -1142,7 +1434,7 @@ server:
     fn line_precise_config_errors_with_inline_sequence() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1158,7 +1450,7 @@ cors:
     fn line_precise_config_errors_with_sequence() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
@@ -1225,6 +1517,11 @@ cors:
 
     #[test]
     fn validate_project_config_files() {
+        std::env::set_var("JAEGER_USERNAME", "username");
+        std::env::set_var("JAEGER_PASSWORD", "pass");
+        std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
+        std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
+
         #[cfg(not(unix))]
         let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
         #[cfg(unix)]
@@ -1285,8 +1582,8 @@ cors:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
-  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+supergraph:
+  introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         )
         .expect_err("Must have an error because we expect a boolean");
@@ -1298,12 +1595,12 @@ server:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
 cors:
-  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+  allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1312,18 +1609,18 @@ cors:
 
     #[test]
     fn line_precise_config_errors_with_sequence_env_expansion() {
-        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
 
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
 cors:
   allow_headers:
     - Content-Type
-    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+    - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1334,15 +1631,52 @@ cors:
     fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
-  another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
+  another_one: foo
         "#,
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_failure_missing_variable() {
+        let error = validate_configuration(
+            r#"
+supergraph:
+  introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
+        "#,
+        )
+        .expect_err("must have an error because the env variable is unknown");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_failure_unknown_mode() {
+        let error = validate_configuration(
+            r#"
+supergraph:
+  introspection: ${unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
+        "#,
+        )
+        .expect_err("must have an error because the mode is unknown");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_prefixing() {
+        std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
+        validate_configuration_internal(
+            r#"
+supergraph:
+  introspection: ${env.NEEDS_PREFIX}
+        "#,
+            Expansion::Prefixed("TEST_CONFIG".to_string()),
+        )
+        .expect("must have expanded successfully");
     }
 }

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
+assertion_line: 122
 expression: get_spans()
 ---
 {
@@ -30,16 +31,32 @@ expression: get_spans()
             ""
           ],
           [
-            "client_name",
+            "client.name",
             ""
           ],
           [
-            "client_version",
+            "client.version",
             ""
           ],
           [
             "otel.kind",
             "internal"
+          ],
+          [
+            "apollo_private.field_level_instrumentation_ratio",
+            0.0
+          ],
+          [
+            "apollo_private.graphql.variables",
+            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+          ],
+          [
+            "apollo_private.http.request_headers",
+            "{\"content-type\":[\"\"]}"
+          ],
+          [
+            "apollo_private.operation_signature",
+            "# -\n{topProducts{name name}}"
           ]
         ],
         "metadata": {
@@ -51,9 +68,13 @@ expression: get_spans()
             "names": [
               "graphql.document",
               "graphql.operation.name",
-              "client_name",
-              "client_version",
-              "otel.kind"
+              "client.name",
+              "client.version",
+              "otel.kind",
+              "apollo_private.field_level_instrumentation_ratio",
+              "apollo_private.operation_signature",
+              "apollo_private.graphql.variables",
+              "apollo_private.http.request_headers"
             ]
           }
         }
@@ -131,6 +152,10 @@ expression: get_spans()
               [
                 "otel.kind",
                 "internal"
+              ],
+              [
+                "ftv1.do_not_sample_reason",
+                ""
               ]
             ],
             "metadata": {
@@ -142,7 +167,8 @@ expression: get_spans()
                 "names": [
                   "graphql.document",
                   "graphql.operation.name",
-                  "otel.kind"
+                  "otel.kind",
+                  "ftv1.do_not_sample_reason"
                 ]
               }
             }
@@ -155,6 +181,14 @@ expression: get_spans()
                   [
                     "otel.kind",
                     "internal"
+                  ],
+                  [
+                    "service.name",
+                    "products"
+                  ],
+                  [
+                    "apollo_private.sent_time_offset",
+                    0
                   ]
                 ],
                 "metadata": {
@@ -164,7 +198,9 @@ expression: get_spans()
                   "module_path": "apollo_router::query_planner",
                   "fields": {
                     "names": [
-                      "otel.kind"
+                      "otel.kind",
+                      "service.name",
+                      "apollo_private.sent_time_offset"
                     ]
                   }
                 }
@@ -217,7 +253,8 @@ expression: get_spans()
                           "name",
                           "graphql.document",
                           "graphql.operation.name",
-                          "otel.kind"
+                          "otel.kind",
+                          "apollo_private.ftv1"
                         ]
                       }
                     }
