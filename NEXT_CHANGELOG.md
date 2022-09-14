@@ -76,7 +76,7 @@ While you could previously only customize the path for these endpoints, you can 
 In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
 Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
 
-This previous configuration: 
+This previous configuration:
 ```yaml
 server:
   listen: 127.0.0.1:4000
@@ -94,7 +94,7 @@ telemetry:
 Now becomes:
 ```yaml
 # landing_page configuration
-sandbox: 
+sandbox:
   listen: 127.0.0.1:4000
   path: /
   enabled: false # default
@@ -144,7 +144,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
   `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
 * Failed expansions result in an error.
-  
+
   Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
@@ -240,12 +240,12 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
 
-For example: 
+For example:
 
 `APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
 
 Would cause:
-`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
 
