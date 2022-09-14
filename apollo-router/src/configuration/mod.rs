@@ -12,6 +12,8 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use askama::Template;
+use bytes::Bytes;
 use derivative::Derivative;
 use displaydoc::Display;
 use http::request::Parts;
@@ -153,6 +155,9 @@ pub struct Configuration {
     pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
+    pub(crate) homepage: Homepage,
+
+    #[serde(default)]
     pub(crate) supergraph: Supergraph,
     /// Cross origin request headers.
     #[serde(default)]
@@ -192,6 +197,7 @@ impl Configuration {
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -201,6 +207,7 @@ impl Configuration {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
+            homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -233,6 +240,7 @@ impl Configuration {
         );
         self.supergraph.introspection = true;
         self.sandbox.enabled = true;
+        self.homepage.enabled = false;
     }
 
     #[cfg(test)]
@@ -290,6 +298,7 @@ impl Configuration {
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
@@ -299,6 +308,7 @@ impl Configuration {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -397,7 +407,7 @@ impl JsonSchema for UserPlugins {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the supergraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Supergraph {
@@ -422,6 +432,12 @@ pub(crate) struct Supergraph {
 
 fn default_defer_support() -> bool {
     true
+}
+
+impl Supergraph {
+    pub(crate) fn endpoint_url(&self) -> String {
+        format!("{}{}", self.listen, self.path)
+    }
 }
 
 #[buildstructor::buildstructor]
@@ -467,7 +483,7 @@ impl Default for Supergraph {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
@@ -476,15 +492,17 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// The HTTP path on which GraphQL requests will be served.
+    /// The HTTP path on which the sandbox page will be served.
     /// default: "/"
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    /// Enable sandbox
-    /// Default: false
-    #[serde(default = "default_sandbox_enabled")]
+    #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
+}
+
+fn default_sandbox() -> bool {
+    false
 }
 
 #[buildstructor::buildstructor]
@@ -498,7 +516,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
+            enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
 }
@@ -515,7 +533,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
+            enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
 }
@@ -523,6 +541,71 @@ impl Sandbox {
 impl Default for Sandbox {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "sandbox_index.html")]
+struct SandboxTemplate<'a> {
+    supergraph_endpoint_url: &'a str,
+}
+
+impl Sandbox {
+    pub(crate) fn display_page(supergraph_endpoint_url: &str) -> Bytes {
+        let template = SandboxTemplate {
+            supergraph_endpoint_url,
+        };
+        template.render().unwrap().into()
+    }
+}
+
+/// Configuration options pertaining to the home page.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Homepage {
+    #[serde(default = "default_homepage")]
+    pub(crate) enabled: bool,
+}
+
+fn default_homepage() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_homepage),
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_homepage),
+        }
+    }
+}
+
+impl Default for Homepage {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "homepage_index.html")]
+struct HomepageTemplate {}
+
+impl Homepage {
+    pub(crate) fn display_page() -> Bytes {
+        let template = HomepageTemplate {};
+        template.render().unwrap().into()
     }
 }
 
@@ -680,10 +763,6 @@ fn default_graphql_path() -> String {
 }
 
 fn default_graphql_introspection() -> bool {
-    false
-}
-
-fn default_sandbox_enabled() -> bool {
     false
 }
 

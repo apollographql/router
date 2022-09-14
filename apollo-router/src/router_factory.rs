@@ -26,7 +26,7 @@ use crate::Schema;
 
 #[derive(Clone)]
 pub struct Endpoint {
-    path: String,
+    pub(crate) path: String,
     // Plugins need to be Send + Sync
     // BoxCloneService isn't enough
     handler: Handler,
