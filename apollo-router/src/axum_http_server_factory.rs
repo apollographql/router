@@ -1271,22 +1271,21 @@ mod tests {
                 Arc::new(
                     Configuration::builder()
                         .sandbox(
-                            crate::configuration::Sandbox::builder()
+                            crate::configuration::Sandbox::fake_builder()
                                 .enabled(true)
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
                         .supergraph(
-                            crate::configuration::Supergraph::builder()
+                            crate::configuration::Supergraph::fake_builder()
                                 .introspection(true)
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
-                        .health_check(
-                            crate::configuration::HealthCheck::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                        .homepage(
+                            crate::configuration::Homepage::fake_builder()
+                                .enabled(false)
                                 .build(),
                         )
+                        .health_check(crate::configuration::HealthCheck::fake_builder().build())
                         .build(),
                 ),
                 None,
@@ -2472,6 +2471,7 @@ Content-Type: application/json\r
                     .path("/sandbox")
                     .build(),
             )
+            .supergraph(crate::configuration::Supergraph::fake_builder().build())
             .build();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
