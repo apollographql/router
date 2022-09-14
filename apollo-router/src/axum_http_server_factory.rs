@@ -2895,6 +2895,7 @@ Content-Type: application/json\r
             .sandbox(
                 Sandbox::fake_builder()
                     .listen(SocketAddr::from_str("0.0.0.0:4010").unwrap())
+                    .enabled(true)
                     .build(),
             )
             .build();
@@ -2919,7 +2920,6 @@ Content-Type: application/json\r
             .sandbox(
                 crate::configuration::Sandbox::fake_builder()
                     .listen(SocketAddr::from_str("127.0.0.1:4000").unwrap())
-                    .enabled(false)
                     .build(),
             )
             .build();
