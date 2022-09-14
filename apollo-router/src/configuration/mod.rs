@@ -571,7 +571,6 @@ impl Homepage {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
-        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -589,7 +588,6 @@ impl Homepage {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
-        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
