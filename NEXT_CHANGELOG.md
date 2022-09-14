@@ -30,7 +30,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🐛 Fixes
 ## 🛠 Maintenance
 
-### Update apollo-router-scaffold to use published router crate [PR #1782](https://github.com/apollographql/router/pull/1782)
+### Update apollo-router-scaffold to use the published router crate [PR #1782](https://github.com/apollographql/router/pull/1782)
 
 Now that apollo-router version "1.0.0-rc.0" is released on [crates.io](https://crates.io/crates/apollo-router), we can update scaffold to it relies on the published crate instead of the git tag.
 
