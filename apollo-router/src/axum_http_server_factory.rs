@@ -117,22 +117,21 @@ where
             &configuration.sandbox.path,
         )
     {
+        let sandbox = Arc::new(configuration.sandbox.clone());
         endpoints.insert(
-            configuration.sandbox.listen.clone(),
+            sandbox.listen.clone(),
             Endpoint::new(
-                configuration.sandbox.path.clone(),
-                service_fn(|_req: transport::Request| async move {
-                    Ok::<_, BoxError>(
-                        http::Response::builder()
-                            .header(CONTENT_TYPE, "text/html")
-                            .body(
-                                Bytes::from_static(include_bytes!(
-                                    "../resources/sandbox_index.html"
-                                ))
-                                .into(),
-                            )
-                            .unwrap(),
-                    )
+                sandbox.path.clone(),
+                service_fn(move |_req: transport::Request| {
+                    let sandbox = Arc::clone(&sandbox);
+                    async move {
+                        Ok::<_, BoxError>(
+                            http::Response::builder()
+                                .header(CONTENT_TYPE, "text/html")
+                                .body(sandbox.display_page().into())
+                                .unwrap(),
+                        )
+                    }
                 })
                 .boxed(),
             ),
@@ -146,22 +145,21 @@ where
             &configuration.homepage.path,
         )
     {
+        let homepage = Arc::new(configuration.homepage.clone());
         endpoints.insert(
-            configuration.homepage.listen.clone(),
+            homepage.listen.clone(),
             Endpoint::new(
-                configuration.homepage.path.clone(),
-                service_fn(|_req: transport::Request| async move {
-                    Ok::<_, BoxError>(
-                        http::Response::builder()
-                            .header(CONTENT_TYPE, "text/html")
-                            .body(
-                                Bytes::from_static(include_bytes!(
-                                    "../resources/homepage_index.html"
-                                ))
-                                .into(),
-                            )
-                            .unwrap(),
-                    )
+                homepage.path.clone(),
+                service_fn(move |_req: transport::Request| {
+                    let homepage = Arc::clone(&homepage);
+                    async move {
+                        Ok::<_, BoxError>(
+                            http::Response::builder()
+                                .header(CONTENT_TYPE, "text/html")
+                                .body(homepage.display_page().into())
+                                .unwrap(),
+                        )
+                    }
                 })
                 .boxed(),
             ),
@@ -726,9 +724,15 @@ where
             &configuration.sandbox.listen,
             &configuration.sandbox.path,
         ) {
+        let sandbox = Arc::new(configuration.sandbox.clone());
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_sandbox(host, service.new_service().boxed(), http_request)
+                handle_get_with_static(
+                    Arc::clone(&sandbox).display_page(),
+                    host,
+                    service.new_service().boxed(),
+                    http_request,
+                )
             }
         })
     } else if configuration.homepage.enabled
@@ -738,9 +742,15 @@ where
             &configuration.homepage.path,
         )
     {
+        let homepage = Arc::new(configuration.homepage.clone());
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_homepage(host, service.new_service().boxed(), http_request)
+                handle_get_with_static(
+                    Arc::clone(&homepage).display_page(),
+                    host,
+                    service.new_service().boxed(),
+                    http_request,
+                )
             }
         })
     } else {
@@ -771,7 +781,8 @@ where
     )
 }
 
-async fn handle_get_with_homepage(
+async fn handle_get_with_static(
+    static_page: Bytes,
     Host(host): Host,
     service: BoxService<
         http::Request<graphql::Request>,
@@ -781,36 +792,7 @@ async fn handle_get_with_homepage(
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if prefers_html(http_request.headers()) {
-        return display_home_page().into_response();
-    }
-
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
-            .await
-            .into_response();
-    }
-
-    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
-}
-
-async fn handle_get_with_sandbox(
-    Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
-    http_request: Request<Body>,
-) -> impl IntoResponse {
-    if prefers_html(http_request.headers()) {
-        return display_sandbox_page().into_response();
+        return Html(static_page).into_response();
     }
 
     if let Some(request) = http_request
@@ -881,16 +863,6 @@ async fn handle_post(
     run_graphql_request(service, http_request)
         .await
         .into_response()
-}
-
-fn display_sandbox_page() -> Html<Bytes> {
-    let html = Bytes::from_static(include_bytes!("../resources/sandbox_index.html"));
-    Html(html)
-}
-
-fn display_home_page() -> Html<Bytes> {
-    let html = Bytes::from_static(include_bytes!("../resources/homepage_index.html"));
-    Html(html)
 }
 
 // Process the headers to make sure that `VARY` is set correctly
@@ -2481,7 +2453,7 @@ Content-Type: application/json\r
         assert_eq!(sandbox_response.status(), StatusCode::OK);
         assert_eq!(
             sandbox_response.text().await.unwrap(),
-            include_str!("../resources/sandbox_index.html")
+            include_str!("../templates/sandbox_index.html")
         );
 
         let homepage_response = client
@@ -2496,7 +2468,7 @@ Content-Type: application/json\r
         assert_eq!(homepage_response.status(), StatusCode::OK);
         assert_eq!(
             homepage_response.text().await.unwrap(),
-            include_str!("../resources/homepage_index.html")
+            include_str!("../templates/homepage_index.html")
         );
 
         server.shutdown().await

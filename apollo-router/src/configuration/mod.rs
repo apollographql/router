@@ -9,6 +9,8 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use askama::Template;
+use bytes::Bytes;
 use derivative::Derivative;
 use displaydoc::Display;
 use envmnt::ExpandOptions;
@@ -19,6 +21,7 @@ use itertools::Itertools;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use regex::Regex;
+use reqwest::Url;
 use schemars::gen::SchemaGenerator;
 use schemars::gen::SchemaSettings;
 use schemars::schema::ObjectValidation;
@@ -386,8 +389,27 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
+    /// The url of the endpoint serving supergraph queries.
+    /// Use this setting to point the Sandbox to a reachable URL
+    /// default: "http://127.0.0.1:4000/"
+    #[serde(default = "default_supergraph_endpoint_url")]
+    pub(crate) supergraph_endpoint_url: Url,
+
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
+}
+
+fn default_supergraph_endpoint_url() -> Url {
+    format!("{}{}", default_graphql_listen(), default_graphql_path())
+        .parse()
+        .unwrap()
+}
+
+#[cfg(test)]
+fn test_supergraph_endpoint_url() -> Url {
+    format!("http://127.0.0.1:0{}", default_graphql_path())
+        .parse()
+        .unwrap()
 }
 
 fn default_sandbox() -> bool {
@@ -401,11 +423,14 @@ impl Sandbox {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
+        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_sandbox),
+            supergraph_endpoint_url: supergraph_endpoint_url
+                .unwrap_or_else(default_supergraph_endpoint_url),
         }
     }
 }
@@ -418,11 +443,14 @@ impl Sandbox {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
+        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_sandbox),
+            supergraph_endpoint_url: supergraph_endpoint_url
+                .unwrap_or_else(test_supergraph_endpoint_url),
         }
     }
 }
@@ -430,6 +458,21 @@ impl Sandbox {
 impl Default for Sandbox {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "sandbox_index.html")]
+struct SandboxTemplate {
+    supergraph_endpoint_url: String,
+}
+
+impl Sandbox {
+    pub(crate) fn display_page(&self) -> Bytes {
+        let template = SandboxTemplate {
+            supergraph_endpoint_url: self.supergraph_endpoint_url.to_string(),
+        };
+        template.render().unwrap().into()
     }
 }
 
@@ -447,6 +490,12 @@ pub(crate) struct Homepage {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
+    /// The url of the endpoint serving supergraph queries.
+    /// Use this setting to point the Homepage to a reachable URL
+    /// default: "http://127.0.0.1:4000/"
+    #[serde(default = "default_supergraph_endpoint_url")]
+    pub(crate) supergraph_endpoint_url: Url,
+
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -462,11 +511,14 @@ impl Homepage {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
+        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
+            supergraph_endpoint_url: supergraph_endpoint_url
+                .unwrap_or_else(default_supergraph_endpoint_url),
         }
     }
 }
@@ -479,11 +531,14 @@ impl Homepage {
         listen: Option<ListenAddr>,
         path: Option<String>,
         enabled: Option<bool>,
+        supergraph_endpoint_url: Option<Url>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
+            supergraph_endpoint_url: supergraph_endpoint_url
+                .unwrap_or_else(test_supergraph_endpoint_url),
         }
     }
 }
@@ -491,6 +546,21 @@ impl Homepage {
 impl Default for Homepage {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "homepage_index.html")]
+struct HomepageTemplate {
+    supergraph_endpoint_url: String,
+}
+
+impl Homepage {
+    pub(crate) fn display_page(&self) -> Bytes {
+        let template = HomepageTemplate {
+            supergraph_endpoint_url: self.supergraph_endpoint_url.to_string(),
+        };
+        template.render().unwrap().into()
     }
 }
 
