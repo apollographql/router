@@ -400,6 +400,23 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "include_subgraph_errors": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "default": false,
+          "type": "boolean"
+        },
+        "subgraphs": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "type": "object",
       "additionalProperties": {
@@ -413,23 +430,6 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
-        },
-        "experimental.include_subgraph_errors": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "default": false,
-              "type": "boolean"
-            },
-            "subgraphs": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1489,61 +1489,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1551,32 +1501,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {
@@ -1747,61 +1672,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1809,32 +1684,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {

@@ -166,7 +166,7 @@ async fn create_plugins(
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
     let mandatory_plugins = vec![
-        "experimental.include_subgraph_errors",
+        "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
     ];
@@ -265,7 +265,13 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(?plugin_details, "list of plugins");
+    tracing::info!(
+        "enabled plugins: {:?}",
+        plugin_details
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&&String>>()
+    );
 
     if !errors.is_empty() {
         for error in &errors {

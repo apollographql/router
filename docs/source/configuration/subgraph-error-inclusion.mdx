@@ -2,8 +2,6 @@
 title: Subgraph error inclusion
 ---
 
-> ⚠️ Apollo Router support for subgraph error inclusion is currently experimental.
-
 By default, the Apollo Router redacts the details of subgraph errors in its responses to clients. The router instead returns a default error with the following message:
 
 ```
@@ -17,11 +15,10 @@ This redaction prevents potential leaks of sensitive information to the client. 
 To configure subgraph error inclusion, add the `include_subgraph_errors` plugin to your [YAML config file](./overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-plugins:
-  experimental.include_subgraph_errors:
-    all: true # Propagate errors from all subraphs
-    subgraphs:
-      products: false # Do not propagate errors from the products subgraph
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
+  subgraphs:
+    products: false # Do not propagate errors from the products subgraph
 ```
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, subgraph errors are included from all subgraphs _except_ the `products` subgraph.

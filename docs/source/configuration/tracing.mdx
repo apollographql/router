@@ -145,15 +145,9 @@ telemetry:
       # Optional Grpc configuration
       grpc:
         domain_name: "my.domain"
-        key:
-          file: ""
-          # env: ""
-        ca:
-          file: ""
-          # env: ""
-        cert:
-          file: ""
-          # env: ""
+        key: ""
+        ca: ""
+        cert: ""
         metadata:
           foo: bar
 
@@ -164,9 +158,9 @@ telemetry:
 
       # Optional timeout in humantime form
       timeout: 2s
-
 ```
 
+Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
 
 ## Using Zipkin
 
