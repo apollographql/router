@@ -2489,6 +2489,8 @@ Content-Type: application/json\r
         assert_eq!(
             sandbox_response.text().await.unwrap(),
             include_str!("../templates/sandbox_index.html")
+                .replace("{{ supergraph_endpoint_url }}", "http://127.0.0.1:0/")
+                .trim_end_matches('\n')
         );
 
         let homepage_response = client
@@ -2503,7 +2505,7 @@ Content-Type: application/json\r
         assert_eq!(homepage_response.status(), StatusCode::OK);
         assert_eq!(
             homepage_response.text().await.unwrap(),
-            include_str!("../templates/homepage_index.html")
+            include_str!("../templates/homepage_index.html").trim_end_matches('\n')
         );
 
         server.shutdown().await
