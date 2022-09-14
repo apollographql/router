@@ -2792,7 +2792,7 @@ Content-Type: application/json\r
         let service = TestHarness::builder()
             .configuration_json(json!({
                 "plugins": {
-                    "experimental.include_subgraph_errors": {
+                    "apollo.include_subgraph_errors": {
                         "all": true
                     }
                 }

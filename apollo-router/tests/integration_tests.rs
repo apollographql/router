@@ -540,7 +540,7 @@ async fn defer_path_with_disabled_config() {
             "preview_defer_support": false,
         },
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -572,7 +572,7 @@ async fn defer_path_with_disabled_config() {
 async fn defer_path() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -607,7 +607,7 @@ async fn defer_path() {
 async fn defer_path_in_array() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -651,7 +651,7 @@ async fn defer_path_in_array() {
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }

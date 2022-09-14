@@ -68,7 +68,7 @@ humantime-serde = "1.1.1"
 hyper = { version = "0.14.20", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
 indexmap = { version = "1.9.1", features = ["serde-1"] }
-itertools = "0.10.3"
+itertools = "0.10.4"
 jsonschema = { version = "0.16.0", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.132"
