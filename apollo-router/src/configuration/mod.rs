@@ -556,12 +556,6 @@ pub(crate) struct Homepage {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    /// The url of the endpoint serving supergraph queries.
-    /// Use this setting to point the Homepage to a reachable URL
-    /// default: "http://127.0.0.1:4000/"
-    #[serde(default = "default_supergraph_endpoint_url")]
-    pub(crate) supergraph_endpoint_url: Url,
-
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -583,8 +577,6 @@ impl Homepage {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
-            supergraph_endpoint_url: supergraph_endpoint_url
-                .unwrap_or_else(default_supergraph_endpoint_url),
         }
     }
 }
@@ -603,8 +595,6 @@ impl Homepage {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_homepage),
-            supergraph_endpoint_url: supergraph_endpoint_url
-                .unwrap_or_else(test_supergraph_endpoint_url),
         }
     }
 }
