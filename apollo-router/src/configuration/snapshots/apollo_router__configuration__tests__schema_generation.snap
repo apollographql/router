@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 1204
 expression: "&schema"
 ---
 {
@@ -445,6 +446,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Enable sandbox Default: false",
           "default": false,
           "type": "boolean"
         },
@@ -492,13 +494,14 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "introspection": true,
+        "introspection": false,
         "preview_defer_support": true
       },
       "type": "object",
       "properties": {
         "introspection": {
-          "default": true,
+          "description": "Enable introspection Default: false",
+          "default": false,
           "type": "boolean"
         },
         "listen": {

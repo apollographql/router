@@ -27,6 +27,7 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -124,6 +125,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    // Dev mode
+    #[serde(skip)]
+    dev: Option<bool>,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
@@ -150,6 +155,7 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
@@ -163,7 +169,36 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
+    }
+
+    /// This should be executed after normal configuration processing
+    pub(crate) fn enable_dev_mode(&mut self) {
+        if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
+            tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
+        } else {
+            tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
+        }
+
+        if self.plugins.plugins.is_none() {
+            self.plugins.plugins = Some(Map::new());
+        }
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.expose_query_plan".to_string(),
+            Value::Bool(true),
+        );
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.include_subgraph_errors".to_string(),
+            json!({"all": true}),
+        );
+        self.supergraph.introspection = true;
+        self.sandbox.enabled = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn boxed(self) -> Box<Self> {
+        Box::new(self)
     }
 
     pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
@@ -220,6 +255,7 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
@@ -233,11 +269,8 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
-    }
-
-    pub(crate) fn boxed(self) -> Box<Self> {
-        Box::new(self)
     }
 }
 
@@ -341,15 +374,13 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    #[serde(default = "default_introspection")]
+    /// Enable introspection
+    /// Default: false
+    #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
-}
-
-fn default_introspection() -> bool {
-    true
 }
 
 fn default_defer_support() -> bool {
@@ -368,7 +399,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -387,7 +418,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -413,12 +444,10 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    #[serde(default = "default_sandbox")]
+    /// Enable sandbox
+    /// Default: false
+    #[serde(default = "default_sandbox_enabled")]
     pub(crate) enabled: bool,
-}
-
-fn default_sandbox() -> bool {
-    false
 }
 
 #[buildstructor::buildstructor]
@@ -432,7 +461,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox),
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
         }
     }
 }
@@ -449,7 +478,7 @@ impl Sandbox {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            enabled: enabled.unwrap_or_else(default_sandbox),
+            enabled: enabled.unwrap_or_else(default_sandbox_enabled),
         }
     }
 }
@@ -678,6 +707,14 @@ fn default_cors_methods() -> Vec<String> {
 
 fn default_graphql_path() -> String {
     String::from("/")
+}
+
+fn default_graphql_introspection() -> bool {
+    false
+}
+
+fn default_sandbox_enabled() -> bool {
+    false
 }
 
 fn default_parser_recursion_limit() -> usize {
