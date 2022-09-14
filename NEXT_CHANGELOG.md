@@ -74,28 +74,30 @@ supergraph:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1748
 
-### Configuration: Update metrics and healthcheck web endpoints, and make them configurable ([#1500](https://github.com/apollographql/router/issues/1500))
+### Configuration overhaul ([#1500](https://github.com/apollographql/router/issues/1500))
 
-The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for health check and prometheus have changed.
+The web endpoints exposed by the router listen to 127.0.0.1 by default, and the ports and paths for Sandbox and Prometheus have changed.
 
-Here's the list of the endpoints exposed by the router:
+Here's a list of the endpoints exposed by the router:
 
 - GraphQL: http://127.0.0.1:4000/ (unchanged)
-- The GraphQL sandbox: http://127.0.0.1:4000/ (unchanged)
+- Apollo Sandbox: http://127.0.0.1:4000/ (unchanged)
 - Prometheus metrics: http://127.0.0.1:9090/metrics (used to be http://127.0.0.1:4000/plugins/apollo.telemetry/prometheus)
-- Healthcheck: http://127.0.0.1:9494/health (used to be http://127.0.0.1:4000/.well-known/apollo/server-health)
 
-While you could previously only customize the path for these endpoints, you can now customize the full IP address, PORT and PATH.
+As another section (below) in the CHANGELOG notes, we have *removed* the health check and instead recommend users to configure their health checks (in, e.g, Kubernetes, Docker, etc.) to use a simple GraphQL query: `/?query={__typename}`.  This has the added benefit of actually testing GraphQL!
+
+While you could previously only customize the _path_ for these endpoints, you can now customize the full IP address, PORT and PATH.
 
 In order to enable this new feature, various `server` attributes such as `listen`, `graphql_path` and `landing_page` moved to more relevant sections.
 Likewise, `introspection` and `preview_defer_support` have moved from the `server` section to the `supergraph` section:
 
-This previous configuration: 
+This previous configuration:
+
 ```yaml
 server:
   listen: 127.0.0.1:4000
   graphql_path: /graphql
-  health_check_path: /health
+  health_check_path: /health # Health check has been deprecated.  See below.
   introspection: false
   preview_defer_support: true
   landing_page: true
@@ -106,9 +108,10 @@ telemetry:
 ```
 
 Now becomes:
+
 ```yaml
 # landing_page configuration
-sandbox: 
+sandbox:
   listen: 127.0.0.1:4000
   path: /
   enabled: false # default
@@ -118,12 +121,9 @@ supergraph:
   path: /
   introspection: false
   preview_defer_support: true
-# health_check_path configuration
-health-check:
-  listen: 127.0.0.1:9494
-  path: /health
-  enabled: true # default
-# prometheus scraper configuration
+# The health check has been removed.  See the section below in the CHANGELOG
+# for more information on how to configure health checks going forward.
+# Prometheus scraper configuration
 telemetry:
   metrics:
     prometheus:
@@ -133,6 +133,24 @@ telemetry:
 ```
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1718
+
+### Dedicated health check endpoint removed with new recommendation to use `/query={__typename}` query ([Issue #1765](https://github.com/apollographql/router/issues/1765))
+
+We have *removed* the dedicated health check endpoint and now recommend users to configure their health checks (in, e.g, Kubernetes, Docker) to use a simple GraphQL query instead.
+
+Use the following query with a `content-type: application/json` header as a health check instead of `/.well-known/apollo/server-health`:
+
+```
+/?query={__typename}
+```
+
+The [Kubernetes documentation and related Helm charts](https://www.apollographql.com/docs/router/containerization/kubernetes) have been updated to reflect this change.
+
+Using this query has the added benefit of *actually testing GraphQL*.  If this query returns with an HTTP 200 OK, it is just as reliable (and even more meaningful) than the previous `/.well-known/apollo/server-health` endpoint.  It's important to include the `content-type: application/json` header to satisfy the Router's secure requirements that offer CSRF protections.
+
+In the future, we will likely reintroduce a dedicated health check "liveliness" endpoint along with a meaningful "readiness" health check at the same time.  In the meantime, the query above is technically more durable than the health check we offered previously.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
 
 ### `apollo-spaceport` and `uplink` are now part of `apollo-router` ([Issue #491](https://github.com/apollographql/router/issues/491))
 
@@ -159,7 +177,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
   `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
 * Failed expansions result in an error.
-  
+
   Previously expansions that failed due to missing environment variables were silently skipped. Now they result in a configuration error. Add a default if optional expansion is needed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
@@ -286,12 +304,12 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This feature is undocumented and unsupported and may change at any time.
 
-For example: 
+For example:
 
 `APOLLO_ROUTER_CONFIG_ENV_PREFIX=MY_PREFIX`
 
 Would cause:
-`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
+`${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
 
