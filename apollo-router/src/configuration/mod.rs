@@ -202,6 +202,7 @@ impl Configuration {
         );
         self.supergraph.introspection = true;
         self.sandbox.enabled = true;
+        self.homepage.enabled = false;
     }
 
     #[cfg(test)]
