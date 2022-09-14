@@ -1,6 +1,5 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use indexmap::map::Entry;
@@ -18,7 +17,6 @@ use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
-use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
 
@@ -132,9 +130,9 @@ fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::sc
 #[serde(deny_unknown_fields)]
 pub struct TlsConfig {
     domain_name: Option<String>,
-    ca: Option<Secret>,
-    cert: Option<Secret>,
-    key: Option<Secret>,
+    ca: Option<String>,
+    cert: Option<String>,
+    key: Option<String>,
 }
 
 impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
@@ -144,35 +142,12 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
         ClientTlsConfig::new()
             .with(&config.domain_name, |b, d| b.domain_name(d))
             .try_with(&config.ca, |b, c| {
-                Ok(b.ca_certificate(tonic::transport::Certificate::from_pem(c.read()?)))
+                Ok(b.ca_certificate(tonic::transport::Certificate::from_pem(c)))
             })?
             .try_with(
                 &config.cert.clone().zip(config.key.clone()),
-                |b, (cert, key)| {
-                    Ok(b.identity(tonic::transport::Identity::from_pem(
-                        cert.read()?,
-                        key.read()?,
-                    )))
-                },
+                |b, (cert, key)| Ok(b.identity(tonic::transport::Identity::from_pem(cert, key))),
             )
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Secret {
-    Env(String),
-    File(PathBuf),
-}
-
-impl Secret {
-    pub(crate) fn read(&self) -> Result<String, ConfigurationError> {
-        match self {
-            Secret::Env(s) => std::env::var(s).map_err(ConfigurationError::CannotReadSecretFromEnv),
-            Secret::File(path) => {
-                std::fs::read_to_string(path).map_err(ConfigurationError::CannotReadSecretFromFile)
-            }
-        }
     }
 }
 

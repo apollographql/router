@@ -121,7 +121,8 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Environment variable expansion enhancements ([#1759](https://github.com/apollographql/router/issues/1759))
 
-* Environment expansions must be prefixed with `env.`. This will allow us to add other expansion types in future.
+* Environment expansions must be prefixed with `env.`.
+* File expansions must be prefixed with `file.`.
 * Change defaulting token from `:` to `:-`. For example:
 
   `${env.USER_NAME:Nandor}` => `${env.USER_NAME:-Nandor}`
@@ -138,6 +139,37 @@ OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the
 * `client_version` => `client.version`
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
+
+### Otel configuration updated to use expansion ([#1772](https://github.com/apollographql/router/issues/1772))
+
+File and env access in configuration now use the generic expansion mechanism introduced in [#1759](https://github.com/apollographql/router/issues/1759).
+
+```yaml
+      grpc:
+        key: 
+          file: "foo.txt"
+        ca:
+          file: "bar.txt"
+        cert:
+          file: "baz.txt"
+```
+
+Becomes:
+```yaml
+      grpc:
+        key: "${file.foo.txt}"
+        ca: "${file.bar.txt}"
+        cert: "${file.baz.txt}"
+```
+or
+```yaml
+      grpc:
+        key: "${env.FOO}"
+        ca: "${env.BAR}"
+        cert: "${env.BAZ}"
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1774
 
 ## 🚀 Features
 
@@ -220,7 +252,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Environment variable expansion prefixing ([#1759](https://github.com/apollographql/router/issues/1759))
 
-The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This may be useful for security. This feature is undocumented and unsupported and may change at any time.
+The environment variable: `APOLLO_ROUTER_CONFIG_ENV_PREFIX` can be used to prefix environment variable lookups during configuration expansion. This feature is undocumented and unsupported and may change at any time.
 
 For example: 
 
@@ -230,6 +262,18 @@ Would cause:
 `${env.FOO}` to be mapped to `${env.MY_PREFIX_FOO}` when expansion is performed. 
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1763
+
+### Environment variable expansion mode configuration ([#1772](https://github.com/apollographql/router/issues/1772))
+
+The environment variable: `APOLLO_ROUTER_CONFIG_SUPPORTED_MODES` can be used restrict which modes can be used for environment expansion. This feature is undocumented and unsupported and may change at any time.
+
+For example:
+
+`APOLLO_ROUTER_CONFIG_SUPPORTED_MODES=env,file` env and file expansion
+`APOLLO_ROUTER_CONFIG_SUPPORTED_MODES=env` - only env expansion allowed
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1774
+
 
 ## 🐛 Fixes
 
