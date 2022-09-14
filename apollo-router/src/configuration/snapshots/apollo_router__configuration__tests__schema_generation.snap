@@ -365,23 +365,6 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
-        },
-        "experimental.include_subgraph_errors": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "default": false,
-              "type": "boolean"
-            },
-            "subgraphs": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false

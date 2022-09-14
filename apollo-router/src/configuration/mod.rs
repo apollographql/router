@@ -183,7 +183,7 @@ impl Configuration {
             Value::Bool(true),
         );
         self.plugins.plugins.as_mut().unwrap().insert(
-            "experimental.include_subgraph_errors".to_string(),
+            "apollo.include_subgraph_errors".to_string(),
             json!({"all": true}),
         );
         self.supergraph.introspection = true;
