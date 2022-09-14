@@ -131,14 +131,17 @@ where
     }
 
     endpoints.insert(
-        configuration.health_check.listen.clone(),
+        configuration.supergraph.listen.clone(),
         Endpoint::new(
-            configuration.health_check.path.clone(),
+            "/.well-known/apollo/server-health".to_string(),
             service_fn(|_req: transport::Request| async move {
                 Ok::<_, BoxError>(
                     http::Response::builder()
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
+                        .status(StatusCode::NOT_FOUND)
+                        .body(
+                            Bytes::from_static(b"The health check is no longer at this endpoint")
+                                .into(),
+                        )
                         .unwrap(),
                 )
             })
@@ -1030,7 +1033,6 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
-    use crate::configuration::HealthCheck;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::json_ext::Path;
@@ -1147,11 +1149,6 @@ mod tests {
                         .supergraph(
                             crate::configuration::Supergraph::builder()
                                 .introspection(true)
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .build(),
-                        )
-                        .health_check(
-                            crate::configuration::HealthCheck::builder()
                                 .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
@@ -2153,36 +2150,16 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
-    async fn test_health_check() {
+    async fn test_health_check_returns_four_oh_four() {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!(
-            "{}/health",
+            "{}/.well-known/apollo/server-health",
             server.graphql_listen_address().as_ref().unwrap()
         );
 
         let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_custom_health_check() {
-        let conf = Configuration::fake_builder()
-            .health_check(
-                HealthCheck::fake_builder()
-                    .path("/custom-health".to_string())
-                    .build(),
-            )
-            .build();
-        let expectations = MockSupergraphService::new();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
-        let url = format!(
-            "{}/custom-health",
-            server.graphql_listen_address().as_ref().unwrap()
-        );
-
-        let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test(tokio::test)]

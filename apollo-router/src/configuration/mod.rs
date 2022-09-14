@@ -150,10 +150,6 @@ pub struct Configuration {
     pub(crate) server: Server,
 
     #[serde(default)]
-    #[serde(rename = "health-check")]
-    pub(crate) health_check: HealthCheck,
-
-    #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
@@ -195,7 +191,6 @@ impl Configuration {
     pub(crate) fn new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
-        health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
@@ -205,7 +200,6 @@ impl Configuration {
         Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
-            health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
@@ -294,7 +288,6 @@ impl Configuration {
     pub(crate) fn fake_new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
-        health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
@@ -304,7 +297,6 @@ impl Configuration {
         Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
@@ -528,73 +520,6 @@ impl Sandbox {
 }
 
 impl Default for Sandbox {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
-/// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct HealthCheck {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:9494
-    #[serde(default = "default_health_check_listen")]
-    pub(crate) listen: ListenAddr,
-
-    /// The HTTP path on which GraphQL requests will be served.
-    /// default: "/"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) path: String,
-
-    #[serde(default = "default_health_check")]
-    pub(crate) enabled: bool,
-}
-
-fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:9494").unwrap().into()
-}
-
-fn default_health_check_path() -> String {
-    "/health".to_string()
-}
-
-fn default_health_check() -> bool {
-    true
-}
-
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
-        Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            path: path.unwrap_or_else(default_health_check_path),
-            enabled: enabled.unwrap_or_else(default_health_check),
-        }
-    }
-
-    // Used in tests
-    #[allow(dead_code)]
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            path: path.unwrap_or_else(default_health_check_path),
-            enabled: enabled.unwrap_or_else(default_health_check),
-        }
-    }
-}
-
-impl Default for HealthCheck {
     fn default() -> Self {
         Self::builder().build()
     }
