@@ -138,7 +138,10 @@ where
                 Ok::<_, BoxError>(
                     http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
-                        .body(Bytes::from_static(b"The health check is no longer at this endpoint").into())
+                        .body(
+                            Bytes::from_static(b"The health check is no longer at this endpoint")
+                                .into(),
+                        )
                         .unwrap(),
                 )
             })
