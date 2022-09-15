@@ -201,10 +201,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
-
-            // Dev mode
-            #[serde(skip)]
-            dev: Option<bool>,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -216,7 +212,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
-            .and_dev(ad_hoc.dev)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
