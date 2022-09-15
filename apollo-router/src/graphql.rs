@@ -1,6 +1,4 @@
-//! Namespace for the GraphQL [`Request`], [`Response`], and [`Error`] types.
-
-#![allow(missing_docs)] // FIXME
+//! Types related to GraphQL requests, responses, etc.
 
 use std::fmt;
 use std::pin::Pin;
@@ -38,7 +36,10 @@ pub use crate::response::Response;
 /// even if that stream happens to only contain one item.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
 
-/// Any GraphQL error.
+/// A [GraphQL error](https://spec.graphql.org/October2021/#sec-Errors)
+/// as may be found in the `errors` field of a GraphQL [`Response`].
+///
+/// Converted to (or from) JSON with serde.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -46,21 +47,51 @@ pub struct Error {
     /// The error message.
     pub message: String,
 
-    /// The locations of the error from the originating request.
+    /// The locations of the error in the GraphQL document of the originating request.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub locations: Vec<Location>,
 
-    /// The path of the error.
+    /// If this is a field error, the JSON path to that field in [`Response::data`]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Path>,
 
-    /// The optional graphql extensions.
+    /// The optional GraphQL extensions for this error.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
 }
 
 #[buildstructor::buildstructor]
 impl Error {
+    /// Returns a builder that builds a GraphQL [`Error`] from its components.
+    ///
+    /// Builder methods:
+    ///
+    /// * `.message(impl Into<`[`String`]`>)`
+    ///   Required.
+    ///   Sets [`Error::message`].
+    ///
+    /// * `.locations(impl Into<`[`Vec`]`<`[`Location`]`>>)`
+    ///   Optional.
+    ///   Sets the entire `Vec` of [`Error::locations`], which defaults to the empty.
+    ///
+    /// * `.location(impl Into<`[`Location`]`>)`
+    ///   Optional, may be called multiple times.
+    ///   Adds one item at the end of [`Error::locations`].
+    ///
+    /// * `.path(impl Into<`[`Path`]`>)`
+    ///   Optional.
+    ///   Sets [`Error::path`].
+    ///
+    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`], [`Value`]`>>)`
+    ///   Optional.
+    ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
+    ///
+    /// * `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)`
+    ///   Optional, may be called multiple times.
+    ///   Adds one item to the [`Error::extensions`] map.
+    ///
+    /// * `.build()`
+    ///   Finishes the builder and returns a GraphQL [`Error`].
     #[builder(visibility = "pub")]
     fn new(
         message: String,
@@ -123,6 +154,7 @@ impl Error {
     }
 }
 
+/// Displays (only) the error message.
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.message.fmt(f)
