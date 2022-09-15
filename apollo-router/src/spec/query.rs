@@ -1001,6 +1001,103 @@ mod tests {
         };
     }
 
+    #[derive(Default)]
+    struct FormatTest {
+        schema: Option<&'static str>,
+        query: Option<&'static str>,
+        operation: Option<&'static str>,
+        variables: Option<serde_json_bytes::Value>,
+        response: Option<serde_json_bytes::Value>,
+        expected: Option<serde_json_bytes::Value>,
+        expected_errors: Option<serde_json_bytes::Value>,
+        federation_version: Option<FederationVersion>,
+    }
+
+    enum FederationVersion {
+        Fed1,
+        Fed2,
+    }
+
+    impl FormatTest {
+        fn builder() -> Self {
+            Self::default()
+        }
+
+        fn schema(mut self, schema: &'static str) -> Self {
+            self.schema = Some(schema);
+            self
+        }
+
+        fn query(mut self, query: &'static str) -> Self {
+            self.query = Some(query);
+            self
+        }
+
+        fn operation(mut self, operation: &'static str) -> Self {
+            self.operation = Some(operation);
+            self
+        }
+
+        fn response(mut self, v: serde_json_bytes::Value) -> Self {
+            self.response = Some(v);
+            self
+        }
+
+        fn expected(mut self, v: serde_json_bytes::Value) -> Self {
+            self.expected = Some(v);
+            self
+        }
+
+        fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
+            self.expected_errors = Some(v);
+            self
+        }
+
+        fn version(mut self, version: FederationVersion) -> Self {
+            self.federation_version = Some(version);
+            self
+        }
+
+        #[track_caller]
+        fn test(self) {
+            let schema = self.schema.expect("missing schema");
+            let query = self.query.expect("missing query");
+            let response = self.response.expect("missing response");
+
+            let schema = match self.federation_version {
+                Some(FederationVersion::Fed1) | None => with_supergraph_boilerplate(schema),
+                Some(FederationVersion::Fed2) => with_supergraph_boilerplate_fed2(schema),
+            };
+
+            let schema =
+                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+
+            let api_schema = schema.api_schema();
+            let query =
+                Query::parse(query, &schema, &Default::default()).expect("could not parse query");
+            let mut response = Response::builder().data(response.clone()).build();
+
+            query.format_response(
+                &mut response,
+                self.operation,
+                self.variables
+                    .unwrap_or_else(|| Value::Object(Object::default()))
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                api_schema,
+            );
+
+            if let Some(e) = self.expected {
+                assert_eq_and_ordered!((&response).data.as_ref().unwrap(), &e);
+            }
+
+            if let Some(e) = self.expected_errors {
+                assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+            }
+        }
+    }
+
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
             assert_format_response!(
@@ -1224,21 +1321,20 @@ mod tests {
           }
           union Test = Stuff | Thing";
         let query = "{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }";
-        assert_format_response!(
-            schema,
-            query,
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {
                 {"get": {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}}
-            },
-            None,
-            json! {{
+            })
+            .expected(json! {{
                 "get": {
                     "stuff": {
                         "bar": "2",
                     },
                 }
-            }},
-        );
+            }})
+            .test();
 
         assert_format_response!(
             schema,
