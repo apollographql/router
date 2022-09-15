@@ -5,13 +5,10 @@ telemetry:
     otlp:
       endpoint: default
       grpc:
-        ca:
-          env: ""
-        cert:
-          env: ""
+        ca: ""
+        cert: ""
         domain_name: ""
-        key:
-          env: ""
+        key: ""
         metadata:
           foo: bar
       http:

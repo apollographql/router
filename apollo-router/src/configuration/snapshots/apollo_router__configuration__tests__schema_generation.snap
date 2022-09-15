@@ -351,11 +351,9 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "health-check": {
-      "description": "Configuration options pertaining to the http server component.",
+    "homepage": {
+      "description": "Configuration options pertaining to the home page.",
       "default": {
-        "listen": "127.0.0.1:9494",
-        "path": "/health",
         "enabled": true
       },
       "type": "object",
@@ -363,25 +361,23 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "include_subgraph_errors": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "default": false,
+          "type": "boolean"
         },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9494",
-          "default": "127.0.0.1:9494",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/health",
-          "type": "string"
+        "subgraphs": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
         }
       },
       "additionalProperties": false
@@ -399,23 +395,6 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
-        },
-        "experimental.include_subgraph_errors": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "default": false,
-              "type": "boolean"
-            },
-            "subgraphs": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -436,7 +415,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "sandbox": {
-      "description": "Configuration options pertaining to the http server component.",
+      "description": "Configuration options pertaining to the sandbox page.",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
@@ -463,7 +442,7 @@ expression: "&schema"
           ]
         },
         "path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "description": "The HTTP path on which the sandbox page will be served. default: \"/\"",
           "default": "/",
           "type": "string"
         }
@@ -488,17 +467,18 @@ expression: "&schema"
       "additionalProperties": false
     },
     "supergraph": {
-      "description": "Configuration options pertaining to the http server component.",
+      "description": "Configuration options pertaining to the supergraph server component.",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
-        "introspection": true,
+        "introspection": false,
         "preview_defer_support": true
       },
       "type": "object",
       "properties": {
         "introspection": {
-          "default": true,
+          "description": "Enable introspection Default: false",
+          "default": false,
           "type": "boolean"
         },
         "listen": {
@@ -1474,61 +1454,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1536,32 +1466,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {
@@ -1732,61 +1637,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1794,32 +1649,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {

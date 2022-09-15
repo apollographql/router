@@ -4,15 +4,18 @@ mod yaml;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::env;
+use std::env::VarError;
 use std::fmt;
+use std::fs;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use askama::Template;
+use bytes::Bytes;
 use derivative::Derivative;
 use displaydoc::Display;
-use envmnt::ExpandOptions;
-use envmnt::ExpansionType;
 use http::request::Parts;
 use http::HeaderValue;
 use itertools::Itertools;
@@ -28,6 +31,7 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -36,15 +40,90 @@ use tower_http::cors::{self};
 
 use crate::plugin::plugins;
 
+#[derive(buildstructor::Builder)]
+struct Expansion {
+    prefix: Option<String>,
+    supported_modes: Vec<String>,
+}
+
+impl Expansion {
+    fn default() -> Result<Self, ConfigurationError> {
+        // APOLLO_ROUTER_CONFIG_SUPPORTED_MODES and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unspported and may change in future.
+        // If you need this functionality then raise an issue and we can look to promoting this to official support.
+        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+            Ok(v) => Some(v),
+            Err(VarError::NotPresent) => None,
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
+        };
+        let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
+            Ok(v) => v,
+            Err(VarError::NotPresent) => "env,file".to_string(),
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
+        };
+        let supported_modes = supported_expansion_modes
+            .split(',')
+            .map(|mode| mode.trim().to_string())
+            .collect::<Vec<String>>();
+        Ok(Expansion {
+            prefix,
+            supported_modes,
+        })
+    }
+}
+
+impl Expansion {
+    fn context_fn(&self) -> impl Fn(&str) -> Result<Option<String>, ConfigurationError> + '_ {
+        move |key: &str| {
+            if !self
+                .supported_modes
+                .iter()
+                .any(|prefix| key.starts_with(prefix.as_str()))
+            {
+                return Err(ConfigurationError::UnknownExpansionMode {
+                    key: key.to_string(),
+                    supported_modes: self.supported_modes.join("|"),
+                });
+            }
+
+            if let Some(key) = key.strip_prefix("env.") {
+                return match self.prefix.as_ref() {
+                    None => env::var(key),
+                    Some(prefix) => env::var(format!("{}_{}", prefix, key)),
+                }
+                .map(Some)
+                .map_err(|cause| ConfigurationError::CannotExpandVariable {
+                    key: key.to_string(),
+                    cause: format!("{}", cause),
+                });
+            }
+            if let Some(key) = key.strip_prefix("file.") {
+                if !std::path::Path::new(key).exists() {
+                    return Ok(None);
+                }
+
+                return fs::read_to_string(key).map(Some).map_err(|cause| {
+                    ConfigurationError::CannotExpandVariable {
+                        key: key.to_string(),
+                        cause: format!("{}", cause),
+                    }
+                });
+            }
+            Err(ConfigurationError::InvalidExpansionModeConfig)
+        }
+    }
+}
+
 /// Configuration error.
 #[derive(Debug, Error, Display)]
-#[allow(missing_docs)] // FIXME
 #[non_exhaustive]
 pub(crate) enum ConfigurationError {
-    /// could not read secret from file: {0}
-    CannotReadSecretFromFile(std::io::Error),
-    /// could not read secret from environment variable: {0}
-    CannotReadSecretFromEnv(std::env::VarError),
+    /// could not expand variable: {key}, {cause}
+    CannotExpandVariable { key: String, cause: String },
+    /// could not expand variable: {key}. Variables must be prefixed with one of '{supported_modes}' followed by '.' e.g. 'env.'
+    UnknownExpansionMode {
+        key: String,
+        supported_modes: String,
+    },
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
@@ -56,6 +135,9 @@ pub(crate) enum ConfigurationError {
     },
     /// could not deserialize configuration: {0}
     DeserializeConfigError(serde_json::Error),
+
+    /// APOLLO_ROUTER_CONFIG_SUPPORTED_MODES must be of the format env,file,... Possible modes are 'env' and 'file'.
+    InvalidExpansionModeConfig,
 }
 
 /// The configuration for the router.
@@ -70,11 +152,10 @@ pub struct Configuration {
     pub(crate) server: Server,
 
     #[serde(default)]
-    #[serde(rename = "health-check")]
-    pub(crate) health_check: HealthCheck,
+    pub(crate) sandbox: Sandbox,
 
     #[serde(default)]
-    pub(crate) sandbox: Sandbox,
+    pub(crate) homepage: Homepage,
 
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
@@ -90,6 +171,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    // Dev mode
+    #[serde(skip)]
+    dev: Option<bool>,
 }
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
@@ -111,17 +196,18 @@ impl Configuration {
     pub(crate) fn new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
-        health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
-            health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
+            homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -129,7 +215,36 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
+    }
+
+    /// This should be executed after normal configuration processing
+    pub(crate) fn enable_dev_mode(&mut self) {
+        if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
+            tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
+        } else {
+            tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
+        }
+
+        if self.plugins.plugins.is_none() {
+            self.plugins.plugins = Some(Map::new());
+        }
+        self.plugins.plugins.as_mut().unwrap().insert(
+            "experimental.expose_query_plan".to_string(),
+            Value::Bool(true),
+        );
+        self.apollo_plugins
+            .plugins
+            .insert("include_subgraph_errors".to_string(), json!({"all": true}));
+        self.supergraph.introspection = true;
+        self.sandbox.enabled = true;
+        self.homepage.enabled = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn boxed(self) -> Box<Self> {
+        Box::new(self)
     }
 
     pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
@@ -181,17 +296,18 @@ impl Configuration {
     pub(crate) fn fake_new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
-        health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Self {
         Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -199,11 +315,8 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            dev,
         }
-    }
-
-    pub(crate) fn boxed(self) -> Box<Self> {
-        Box::new(self)
     }
 }
 
@@ -293,7 +406,7 @@ impl JsonSchema for UserPlugins {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the supergraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Supergraph {
@@ -307,19 +420,23 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
-    #[serde(default = "default_introspection")]
+    /// Enable introspection
+    /// Default: false
+    #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
 }
 
-fn default_introspection() -> bool {
+fn default_defer_support() -> bool {
     true
 }
 
-fn default_defer_support() -> bool {
-    true
+impl Supergraph {
+    pub(crate) fn endpoint_url(&self) -> String {
+        format!("{}{}", self.listen, self.path)
+    }
 }
 
 #[buildstructor::buildstructor]
@@ -334,7 +451,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -353,7 +470,7 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_introspection),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
     }
@@ -365,7 +482,7 @@ impl Default for Supergraph {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+/// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
@@ -374,7 +491,7 @@ pub(crate) struct Sandbox {
     #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// The HTTP path on which GraphQL requests will be served.
+    /// The HTTP path on which the sandbox page will be served.
     /// default: "/"
     #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
@@ -426,70 +543,68 @@ impl Default for Sandbox {
     }
 }
 
-/// Configuration options pertaining to the http server component.
+#[derive(Template)]
+#[template(path = "sandbox_index.html")]
+struct SandboxTemplate<'a> {
+    supergraph_endpoint_url: &'a str,
+}
+
+impl Sandbox {
+    pub(crate) fn display_page(supergraph_endpoint_url: &str) -> Bytes {
+        let template = SandboxTemplate {
+            supergraph_endpoint_url,
+        };
+        template.render().unwrap().into()
+    }
+}
+
+/// Configuration options pertaining to the home page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct HealthCheck {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:9494
-    #[serde(default = "default_health_check_listen")]
-    pub(crate) listen: ListenAddr,
-
-    /// The HTTP path on which GraphQL requests will be served.
-    /// default: "/"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) path: String,
-
-    #[serde(default = "default_health_check")]
+pub(crate) struct Homepage {
+    #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
 
-fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:9494").unwrap().into()
-}
-
-fn default_health_check_path() -> String {
-    "/health".to_string()
-}
-
-fn default_health_check() -> bool {
+fn default_homepage() -> bool {
     true
 }
 
 #[buildstructor::buildstructor]
-impl HealthCheck {
+impl Homepage {
     #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            path: path.unwrap_or_else(default_health_check_path),
-            enabled: enabled.unwrap_or_else(default_health_check),
-        }
-    }
-
-    // Used in tests
-    #[allow(dead_code)]
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            path: path.unwrap_or_else(default_health_check_path),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_homepage),
         }
     }
 }
 
-impl Default for HealthCheck {
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_homepage),
+        }
+    }
+}
+
+impl Default for Homepage {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "homepage_index.html")]
+struct HomepageTemplate {}
+
+impl Homepage {
+    pub(crate) fn display_page() -> Bytes {
+        let template = HomepageTemplate {};
+        template.render().unwrap().into()
     }
 }
 
@@ -644,6 +759,10 @@ fn default_cors_methods() -> Vec<String> {
 
 fn default_graphql_path() -> String {
     String::from("/")
+}
+
+fn default_graphql_introspection() -> bool {
+    false
 }
 
 fn default_parser_recursion_limit() -> usize {
@@ -823,13 +942,20 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 /// The validation sequence is:
 /// 1. Parse the config into yaml
 /// 2. Create the json schema
+/// 3. Expand env variables
 /// 3. Validate the yaml against the json schema.
-/// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
-/// 5. Convert the json paths from the error messages into nice error snippets.
+/// 4. Convert the json paths from the error messages into nice error snippets. Makes sure to use the values from the original source document to prevent leaks of secrets etc.
 ///
 /// There may still be serde validation issues later.
 ///
 pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
+    validate_configuration_internal(raw_yaml, Expansion::default()?)
+}
+
+fn validate_configuration_internal(
+    raw_yaml: &str,
+    expansion: Expansion,
+) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
         "plugins:".to_string()
     } else {
@@ -842,7 +968,8 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
             error: e.to_string(),
         }
     })?;
-    let expanded_yaml = expand_env_variables(yaml);
+
+    let expanded_yaml = expand_env_variables(yaml, expansion)?;
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",
@@ -1042,36 +1169,42 @@ pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Co
     Ok(config)
 }
 
-fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+fn expand_env_variables(
+    configuration: &serde_json::Value,
+    expansion: Expansion,
+) -> Result<serde_json::Value, ConfigurationError> {
     let mut configuration = configuration.clone();
-    visit(&mut configuration);
-    configuration
+    visit(&mut configuration, &expansion)?;
+    Ok(configuration)
 }
 
-fn visit(value: &mut Value) {
+fn visit(value: &mut Value, expansion: &Expansion) -> Result<(), ConfigurationError> {
     let mut expanded: Option<String> = None;
     match value {
         Value::String(value) => {
-            let new_value = envmnt::expand(
-                value,
-                Some(
-                    ExpandOptions::new()
-                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
-                ),
-            );
-
+            let new_value = shellexpand::env_with_context(value, expansion.context_fn())
+                .map_err(|e| e.cause)?;
             if &new_value != value {
-                expanded = Some(new_value);
+                expanded = Some(new_value.to_string());
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(visit),
-        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        Value::Array(a) => {
+            for v in a {
+                visit(v, expansion)?
+            }
+        }
+        Value::Object(o) => {
+            for v in o.values_mut() {
+                visit(v, expansion)?
+            }
+        }
         _ => {}
     }
     // The expansion may have resulted in a primitive, reparse and replace
     if let Some(expanded) = expanded {
         *value = coerce(&expanded)
     }
+    Ok(())
 }
 
 fn coerce(expanded: &str) -> Value {
@@ -1087,6 +1220,7 @@ fn coerce(expanded: &str) -> Value {
 mod tests {
     use std::collections::HashMap;
     use std::fs;
+    use std::path::PathBuf;
 
     use http::Uri;
     #[cfg(unix)]
@@ -1426,6 +1560,11 @@ cors:
 
     #[test]
     fn validate_project_config_files() {
+        std::env::set_var("JAEGER_USERNAME", "username");
+        std::env::set_var("JAEGER_PASSWORD", "pass");
+        std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
+        std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
+
         #[cfg(not(unix))]
         let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
         #[cfg(unix)]
@@ -1487,7 +1626,7 @@ cors:
         let error = validate_configuration(
             r#"
 supergraph:
-  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+  introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         )
         .expect_err("Must have an error because we expect a boolean");
@@ -1499,12 +1638,12 @@ supergraph:
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
         let error = validate_configuration(
             r#"
-server:
+supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
 cors:
-  allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
+  allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1513,7 +1652,7 @@ cors:
 
     #[test]
     fn line_precise_config_errors_with_sequence_env_expansion() {
-        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+        std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
 
         let error = validate_configuration(
             r#"
@@ -1524,7 +1663,7 @@ supergraph:
 cors:
   allow_headers:
     - Content-Type
-    - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
+    - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
         )
         .expect_err("should have resulted in an error");
@@ -1539,11 +1678,77 @@ supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
-  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
-  another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
+  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
+  another_one: foo
         "#,
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_failure_missing_variable() {
+        let error = validate_configuration(
+            r#"
+supergraph:
+  introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
+        "#,
+        )
+        .expect_err("must have an error because the env variable is unknown");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_failure_unknown_mode() {
+        let error = validate_configuration_internal(
+            r#"
+supergraph:
+  introspection: ${unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
+        "#,
+            Expansion::builder()
+                .prefix("TEST_CONFIG")
+                .supported_mode("env")
+                .build(),
+        )
+        .expect_err("must have an error because the mode is unknown");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn expansion_prefixing() {
+        std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
+        validate_configuration_internal(
+            r#"
+supergraph:
+  introspection: ${env.NEEDS_PREFIX}
+        "#,
+            Expansion::builder()
+                .prefix("TEST_CONFIG")
+                .supported_mode("env")
+                .build(),
+        )
+        .expect("must have expanded successfully");
+    }
+
+    #[test]
+    fn expansion_from_file() {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("src");
+        path.push("configuration");
+        path.push("testdata");
+        path.push("true.txt");
+        let config = validate_configuration_internal(
+            &format!(
+                r#"
+supergraph:
+  introspection: ${{file.{}}}
+        "#,
+                path.to_string_lossy()
+            ),
+            Expansion::builder().supported_mode("file").build(),
+        )
+        .expect("must have expanded successfully");
+
+        assert!(config.supergraph.introspection);
     }
 }

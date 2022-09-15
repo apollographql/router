@@ -262,28 +262,64 @@ Path parameters and wildcards are supported. For example:
 
 ### Introspection
 
-By default, the router answers to some introspection queries. You can override this behavior to disable the introspection like so:
+By default, the router does _not_ resolve introspection queries. You can enable introspection like so:
 
 ```yaml title="router.yaml"
 #
 # supergraph: Configuration of the Supergraph server
 #
 supergraph:
-  introspection: false
+  introspection: true
 ```
 
 ### Landing page
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page by changing the defaults:
+By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
 
 ```yaml title="router.yaml"
-#
-# router: Configuration of the GraphQL server
-#
+homepage:
+  enabled: false
+```
+
+### Sandbox
+
+You can enable the sandbox by editing your configuration file. Make sure introspection is enabled as well:
+
+```yaml title="router.yaml"
 sandbox:
   listen: 127.0.0.1:4000
-  path: /
+  path: /sandbox
   enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
+```
+
+The sandbox default path is `/`, which will conflict with the homepage if both are enabled.
+You can work around this by either disabling the homepage...:
+
+```yaml title="router.yaml"
+homepage:
+  enabled: false
+sandbox:
+  listen: 127.0.0.1:4000
+  path: /sandbox
+  enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
+```
+
+...or changing the sandbox port or path:
+
+```yaml title="router.yaml"
+sandbox:
+  listen: 127.0.0.1:4010
+  path: /sandbox
+  enabled: true
+# make sure you enable introspection as well!
+supergraph:
+  introspection: true
 ```
 
 ### Subgraph routing URLs
@@ -316,7 +352,6 @@ See [Tracing in the Apollo Router](./tracing/).
 ### Automatic persisted queries (APQ)
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
-
 The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
@@ -332,22 +367,26 @@ plugins:
     var2: 1
 ```
 
-### Environment variable expansion
+### Variable expansion
 
-You can reference environment variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+You can reference variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+
+Only environment variable expansion is currently supported, and variables must be prefixed with `env.`
 
 Unix-style expansion is used. For example:
 
-- `${ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
-- `${ENV_VAR_NAME:some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
+- `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${file.a.txt}` expands to the content of `a.txt`.
+- `${file.a.txt:-some_default}` expands to the content of `a.txt`, or falls back to the value `some_default` if the file does not exist.
 
-Environment variable expansions are valid only for YAML _values_, not keys:
+Variable expansions are valid only for YAML _values_, not keys:
 
 ```yaml {4,8} title="router.yaml"
 supergraph:
-  listen: "${MY_LISTEN_ADDRESS}"
+  listen: "${env.MY_LISTEN_ADDRESS}"
 example:
-  password: "${MY_PASSWORD}"
+  password: "${env.MY_PASSWORD}"
 ```
 
 ### Reusing configuration

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 715
 expression: second
 ---
 {

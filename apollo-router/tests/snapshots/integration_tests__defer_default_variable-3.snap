@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 729
 expression: first
 ---
 {
@@ -10,5 +9,5 @@ expression: first
       "name": "Ada Lovelace"
     }
   },
-  "hasNext": true
+  "hasNext": false
 }
