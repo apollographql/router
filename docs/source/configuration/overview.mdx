@@ -397,11 +397,13 @@ You can reuse parts of your configuration file in multiple places using standard
 headers:
   subgraphs:
     products:
-      - insert: &insert_custom_header
-          name: "custom-header"
-          value: "something"
+      request:
+        - insert: &insert_custom_header
+            name: "custom-header"
+            value: "something"
     reviews:
-      - insert: *insert_custom_header
+      request:
+        - insert: *insert_custom_header
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
