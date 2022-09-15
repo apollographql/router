@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Update apollo-router-scaffold to use the published router crate [#1785](https://github.com/apollographql/router/issues/1785)
+### Bind the Sandbox on the same endpoint as the Supergraph [#1785](https://github.com/apollographql/router/issues/1785)
 
 We have rolled back an addition that we released in yesteday’s `v1.0.0-rc.0` which allowed Sandbox to be on a custom listener address.
 In retrospect, we believe it was premature to make this change without considering the broader impact of this change which touches on CORS and some developer experiences bits.
