@@ -62,14 +62,14 @@ impl Plugin for HttpPlugin {
                 async move {
                     // Call into our out of process processor with a body of our body
 
-                    let my_request = request.originating_request.body().clone();
+                    let my_request = request.supergraph_request.body().clone();
                     let my_context = request.context.clone();
                     let modified_output =
                         utility::call_with_request(&proto_url, my_request, my_context, my_sdl)
                             .await
                             .map_err(|e: BoxError| e.to_string())?;
                     // tracing::info!("modified output: {:?}", modified_output);
-                    *request.originating_request.body_mut() = modified_output.body;
+                    *request.supergraph_request.body_mut() = modified_output.body;
                     request.context = modified_output.context;
 
                     // Figure out a way to allow our external processor to interact with
@@ -77,9 +77,9 @@ impl Plugin for HttpPlugin {
                     // to be changed (version, etc...)
                     // None of these things can be serialized just now.
                     /*
-                    let hdrs = serde_json::to_string(&request.originating_request.headers())?;
+                    let hdrs = serde_json::to_string(&request.supergraph_request.headers())?;
                     let extensions =
-                        serde_json::to_string(&request.originating_request.extensions())?;
+                        serde_json::to_string(&request.supergraph_request.extensions())?;
                     */
                     Ok(ControlFlow::Continue(request))
                 }
