@@ -380,6 +380,36 @@ impl Configuration {
                 error: "sandbox needs introspection to be enabled".to_string(),
             });
         }
+        if !self.supergraph.path.starts_with('/') {
+            return Err(ConfigurationError::InvalidConfiguration {
+            message: "invalid 'server.graphql_path' configuration",
+            error: format!(
+                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                self.supergraph.path,
+                self.supergraph.path
+            ),
+        });
+        }
+        if self.supergraph.path.ends_with('*') && !self.supergraph.path.ends_with("/*") {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, you can only set a wildcard after a '/'",
+                    self.supergraph.path
+                ),
+            });
+        }
+        if self.supergraph.path.contains("/*/") {
+            return Err(
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid 'server.graphql_path' configuration",
+                    error: format!(
+                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                        self.supergraph.path
+                    ),
+                },
+            );
+        }
         Ok(self)
     }
 }
@@ -1162,38 +1192,6 @@ fn validate_yaml_configuration(
         });
     }
 
-    // Custom validations
-    if !config.supergraph.path.starts_with('/') {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.supergraph.path,
-                config.supergraph.path
-            ),
-        });
-    }
-    if config.supergraph.path.ends_with('*') && !config.supergraph.path.ends_with("/*") {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.supergraph.path
-            ),
-        });
-    }
-    if config.supergraph.path.contains("/*/") {
-        return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.supergraph.path
-                    ),
-                },
-            );
-    }
-
     Ok(config)
 }
 
@@ -1386,27 +1384,20 @@ mod tests {
 
     #[test]
     fn bad_graphql_path_configuration_without_slash() {
-        let error = validate_yaml_configuration(
-            r#"
-supergraph:
-  path: test
-  "#,
-            Expansion::default().unwrap(),
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("test").build())
+            .build()
+            .unwrap_err();
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
     }
 
     #[test]
     fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
-        let error = validate_yaml_configuration(
-            r#"
-supergraph:
-  path: /*/test
-  "#,
-            Expansion::default().unwrap(),
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("/*/test").build())
+            .build()
+            .unwrap_err();
+
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
@@ -1450,14 +1441,11 @@ unknown:
 
     #[test]
     fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
-        let error = validate_yaml_configuration(
-            r#"
-supergraph:
-  path: /test*
-  "#,
-            Expansion::default().unwrap(),
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("/test*").build())
+            .build()
+            .unwrap_err();
+
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
     }
 
