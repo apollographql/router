@@ -27,7 +27,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Respect supergraph path for kubernetes deployment probes [PR #1795](https://github.com/apollographql/router/pull/1795)
+### Change header propagation configuration [PR #1795](https://github.com/apollographql/router/pull/1795)
 
 Adds `request` subsection into header propagation configuration to prepare for #1284 coming post 1.0
 
