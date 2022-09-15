@@ -42,13 +42,16 @@ sandbox:
 -  listen: 127.0.0.1:4000
 -  path: /
   enabled: true
+# make sure homepage is disabled!
+homepage:
+  enabled: false
 # do not forget to enable introspection,
 # otherwise the sandbox won't work!
 supergraph:
   introspection: true
 ```
 
-Note this means you can either enable the Landing page, or the sandbox.
+Note this means you can either enable the Homepage, or the Sandbox, but not both.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1796
 
