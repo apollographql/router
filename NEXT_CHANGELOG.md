@@ -35,14 +35,20 @@ We would like more time to make sure we provide you with the best experience bef
 
 Sandbox will continue to be on the same listener address as the GraphQL listener.
 
-If you have updated your configuration for `v1.0.0-rc.0` here's the configuration change:
+If you have updated your configuration for `v1.0.0-rc.0` and enabled the sandbox here is a diff of what has changed:
 
 ```diff
 sandbox:
 -  listen: 127.0.0.1:4000
 -  path: /
   enabled: true
+# do not forget to enable introspection,
+# otherwise the sandbox won't work!
+supergraph:
+  introspection: true
 ```
+
+Note this means you can either enable the Landing page, or the sandbox.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1796
 
