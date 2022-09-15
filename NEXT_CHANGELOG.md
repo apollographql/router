@@ -46,3 +46,16 @@ Now that apollo-router version "1.0.0-rc.0" is released on [crates.io](https://c
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1782
 
 ## 📚 Documentation
+
+### Add rustdoc documentation to varius modules ([Issue #799](https://github.com/apollographql/router/issues/799))
+
+Adds documentation for:
+
+apollo-router/src/layers/instrument.rs
+apollo-router/src/layers/map_first_graphql_response.rs
+apollo-router/src/layers/map_future_with_request_data.rs
+apollo-router/src/layers/sync_checkpoint.rs
+apollo-router/src/plugin/serde.rs
+apollo-router/src/tracer.rs
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1792
