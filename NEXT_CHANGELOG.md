@@ -26,6 +26,36 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Bind the Sandbox on the same endpoint as the Supergraph [#1785](https://github.com/apollographql/router/issues/1785)
+
+We have rolled back an addition that we released in yesteday’s `v1.0.0-rc.0` which allowed Sandbox to be on a custom listener address.
+In retrospect, we believe it was premature to make this change without considering the broader impact of this change which touches on CORS and some developer experiences bits.
+We would like more time to make sure we provide you with the best experience before we attempt to make the change again.
+
+Sandbox will continue to be on the same listener address as the GraphQL listener.
+
+If you have updated your configuration for `v1.0.0-rc.0` and enabled the sandbox here is a diff of what has changed:
+
+```diff
+sandbox:
+-  listen: 127.0.0.1:4000
+-  path: /
+  enabled: true
+# make sure homepage is disabled!
+homepage:
+  enabled: false
+# do not forget to enable introspection,
+# otherwise the sandbox won't work!
+supergraph:
+  introspection: true
+```
+
+Note this means you can either enable the Homepage, or the Sandbox, but not both.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1796
+
+
 ## 🚀 Features
 ## 🐛 Fixes
 

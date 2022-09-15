@@ -53,7 +53,7 @@
         ></div>
         <script src="https://embeddable-sandbox.cdn.apollographql.com/_latest/embeddable-sandbox.umd.production.min.js"></script>
         <script>
-        var initialEndpoint = "{{ supergraph_endpoint_url }}";
+        var initialEndpoint = window.location.href;
         new window.EmbeddedSandbox({
             target: '#embeddableSandbox',
             initialEndpoint,
