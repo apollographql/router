@@ -21,7 +21,7 @@ use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::*;
 
-const TYPENAME: &str = "__typename";
+pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
 #[derive(Debug, Derivative, Default)]
@@ -31,7 +31,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    operations: Vec<Operation>,
+    pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
 }
@@ -794,6 +794,10 @@ impl Query {
         }
     }
 
+    pub(crate) fn contains_only_typename(&self) -> bool {
+        self.operations.len() == 1 && self.operations[0].is_only_typename()
+    }
+
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
@@ -881,15 +885,19 @@ impl Operation {
         })
     }
 
-    fn is_introspection(&self) -> bool {
-        // If the only field is `__typename` it's considered as an introspection query
-        if self.selection_set.len() == 1
+    /// A query or mutation containing only `__typename` at the root level
+    fn is_only_typename(&self) -> bool {
+        self.selection_set.len() == 1
             && self
                 .selection_set
                 .get(0)
                 .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
                 .unwrap_or_default()
-        {
+    }
+
+    fn is_introspection(&self) -> bool {
+        // If the only field is `__typename` it's considered as an introspection query
+        if self.is_only_typename() {
             return true;
         }
         self.selection_set.iter().all(|sel| match sel {
@@ -901,6 +909,10 @@ impl Operation {
             }
             _ => false,
         })
+    }
+
+    pub(crate) fn kind(&self) -> &OperationKind {
+        &self.kind
     }
 }
 
@@ -1843,6 +1855,26 @@ mod tests {
                 "get": {
                     "array": ["hello","world"],
                 },
+            }},
+        );
+    }
+
+    #[test]
+    fn solve_query_with_single_typename() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }
+
+            ",
+            "{ __typename }",
+            json! {{}},
+            None,
+            json! {{
+                "__typename": "Query"
             }},
         );
     }

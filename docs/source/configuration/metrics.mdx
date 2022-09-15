@@ -19,8 +19,9 @@ telemetry:
     prometheus:
       # By setting this endpoint you enable the prometheus exporter
       # All our endpoints exposed by plugins are namespaced by the name of the plugin
-      # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/prometheus`
       enabled: true
+      listen: 127.0.0.1:9090
+      path: /metrics
 ```
 
 Assuming you're running locally:
@@ -63,21 +64,17 @@ telemetry:
       # Optional Grpc configuration
       grpc:
         domain_name: "my.domain"
-        key:
-          file: ""
-          # env: ""
-        ca:
-          file: ""
-          # env: ""
-        cert:
-          file: ""
-          # env: ""
+        key: ""
+        ca: ""
+        cert: ""
         metadata:
           foo: bar
 
       # Optional timeout in humatime form
       timeout: 2s
 ```
+
+Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
 
 ## Adding custom attributes/labels
 

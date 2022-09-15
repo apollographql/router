@@ -2,9 +2,6 @@
 // This entire file is license key functionality
 use std::time::Duration;
 
-use apollo_spaceport::ReportHeader;
-use apollo_spaceport::Reporter;
-use apollo_spaceport::ReporterError;
 use async_trait::async_trait;
 use deadpool::managed;
 use deadpool::managed::Pool;
@@ -17,6 +14,9 @@ use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use crate::spaceport::ReportHeader;
+use crate::spaceport::Reporter;
+use crate::spaceport::ReporterError;
 // use crate::plugins::telemetry::apollo::ReportBuilder;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
@@ -71,7 +71,7 @@ impl ApolloExporter {
         // * If the exporter is dropped the remaining records are flushed.
         let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
 
-        let header = apollo_spaceport::ReportHeader {
+        let header = crate::spaceport::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,
             agent_version: format!(
@@ -142,7 +142,7 @@ impl ApolloExporter {
             Ok(mut reporter) => {
                 let report = report.into_report(header.clone());
                 match reporter
-                    .submit(apollo_spaceport::ReporterRequest {
+                    .submit(crate::spaceport::ReporterRequest {
                         apollo_key: apollo_key.to_string(),
                         report: Some(report),
                     })

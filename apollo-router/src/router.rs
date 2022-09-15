@@ -1,6 +1,7 @@
 #![allow(missing_docs)] // FIXME
 
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -107,6 +108,12 @@ pub enum ApolloRouterError {
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// tried to bind {0} and {1} on port {2}
+    DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
+
+    /// tried to register two endpoints on `{0}:{1}{2}`
+    SameRouteUsedTwice(IpAddr, u16, String),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
@@ -206,7 +213,7 @@ impl SchemaSource {
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
+                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
@@ -257,6 +264,9 @@ pub enum ConfigurationSource {
 
         /// When watching, the delay to wait before applying the new configuration.
         delay: Option<Duration>,
+
+        /// `true` if dev mode is enabled
+        dev: bool,
     },
 }
 
@@ -276,7 +286,12 @@ impl ConfigurationSource {
             ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
-            ConfigurationSource::File { path, watch, delay } => {
+            ConfigurationSource::File {
+                path,
+                watch,
+                delay,
+                dev,
+            } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -286,7 +301,7 @@ impl ConfigurationSource {
                     stream::empty().boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => {
+                        Ok(mut configuration) => {
                             if watch {
                                 crate::files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
@@ -300,9 +315,17 @@ impl ConfigurationSource {
                                             },
                                         )
                                     })
-                                    .map(|x| UpdateConfiguration(Box::new(x)))
+                                    .map(move |mut x| {
+                                        if dev {
+                                            x.enable_dev_mode();
+                                        }
+                                        UpdateConfiguration(Box::new(x))
+                                    })
                                     .boxed()
                             } else {
+                                if dev {
+                                    configuration.enable_dev_mode();
+                                }
                                 stream::once(future::ready(UpdateConfiguration(Box::new(
                                     configuration,
                                 ))))
@@ -603,7 +626,9 @@ fn generate_event_stream(
 mod tests {
     use std::env::temp_dir;
 
+    use serde_json::json;
     use serde_json::to_string_pretty;
+    use serde_json::Value;
     use test_log::test;
 
     use super::*;
@@ -667,6 +692,7 @@ mod tests {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
+            dev: false,
         }
         .into_stream()
         .boxed();
@@ -690,6 +716,57 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn config_by_file_dev_mode() {
+        let (path, mut file) = create_temp_file();
+        let contents = include_str!("testdata/supergraph_config.yaml");
+        write_and_flush(&mut file, contents).await;
+        let mut stream = ConfigurationSource::File {
+            path,
+            watch: true,
+            delay: Some(Duration::from_millis(10)),
+            dev: true,
+        }
+        .into_stream()
+        .boxed();
+
+        let cfg = match stream.next().await.unwrap() {
+            UpdateConfiguration(configuration) => configuration,
+            _ => panic!("the event from the stream must be UpdateConfiguration"),
+        };
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
+        assert!(cfg.plugins().iter().any(
+            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
+        ));
+        assert!(cfg
+            .plugins()
+            .iter()
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
+                && val == &json!({"all": true})));
+
+        // Modify the file and try again
+        write_and_flush(&mut file, contents).await;
+        let cfg = match stream.next().await.unwrap() {
+            UpdateConfiguration(configuration) => configuration,
+            _ => panic!("the event from the stream must be UpdateConfiguration"),
+        };
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
+        assert!(cfg.plugins().iter().any(
+            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
+        ));
+        assert!(cfg
+            .plugins()
+            .iter()
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
+                && val == &json!({"all": true})));
+
+        // This time write garbage, there should not be an update.
+        write_and_flush(&mut file, ":garbage").await;
+        assert!(stream.into_future().now_or_never().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_invalid() {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
@@ -697,6 +774,7 @@ mod tests {
             path,
             watch: true,
             delay: None,
+            dev: false,
         }
         .into_stream();
 
@@ -710,6 +788,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
+            dev: false,
         }
         .into_stream();
 
@@ -727,6 +806,7 @@ mod tests {
             path,
             watch: false,
             delay: None,
+            dev: false,
         }
         .into_stream();
         assert!(matches!(
