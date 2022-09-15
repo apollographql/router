@@ -1010,12 +1010,18 @@ mod tests {
         response: Option<serde_json_bytes::Value>,
         expected: Option<serde_json_bytes::Value>,
         expected_errors: Option<serde_json_bytes::Value>,
-        federation_version: Option<FederationVersion>,
+        federation_version: FederationVersion,
     }
 
     enum FederationVersion {
         Fed1,
         Fed2,
+    }
+
+    impl Default for FederationVersion {
+        fn default() -> Self {
+            FederationVersion::Fed1
+        }
     }
 
     impl FormatTest {
@@ -1043,6 +1049,11 @@ mod tests {
             self
         }
 
+        fn variables(mut self, v: serde_json_bytes::Value) -> Self {
+            self.variables = Some(v);
+            self
+        }
+
         fn expected(mut self, v: serde_json_bytes::Value) -> Self {
             self.expected = Some(v);
             self
@@ -1053,8 +1064,8 @@ mod tests {
             self
         }
 
-        fn version(mut self, version: FederationVersion) -> Self {
-            self.federation_version = Some(version);
+        fn fed2(mut self) -> Self {
+            self.federation_version = FederationVersion::Fed2;
             self
         }
 
@@ -1065,8 +1076,8 @@ mod tests {
             let response = self.response.expect("missing response");
 
             let schema = match self.federation_version {
-                Some(FederationVersion::Fed1) | None => with_supergraph_boilerplate(schema),
-                Some(FederationVersion::Fed2) => with_supergraph_boilerplate_fed2(schema),
+                FederationVersion::Fed1 => with_supergraph_boilerplate(schema),
+                FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema),
             };
 
             let schema =
@@ -1098,60 +1109,6 @@ mod tests {
         }
     }
 
-    macro_rules! assert_format_response {
-        ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
-            assert_format_response!(
-                $schema,
-                $query,
-                $response,
-                $operation,
-                Value::Object(Object::default()),
-                $expected
-            );
-        }};
-
-        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate($schema);
-            let schema =
-                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-            let api_schema = schema.api_schema();
-            let query =
-                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
-            let mut response = Response::builder().data($response.clone()).build();
-
-            query.format_response(
-                &mut response,
-                $operation,
-                $variables.as_object().unwrap().clone(),
-                api_schema,
-            );
-
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
-        }};
-
-        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr, $expected_errors:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate($schema);
-            let schema =
-                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-            let api_schema = schema.api_schema();
-            let query =
-                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
-            let mut response = Response::builder().data($response.clone()).build();
-
-            query.format_response(
-                &mut response,
-                $operation,
-                $variables.as_object().unwrap().clone(),
-                api_schema,
-            );
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
-            assert_eq_and_ordered!(
-                serde_json_bytes::to_value(&response.errors).unwrap(),
-                $expected_errors
-            );
-        }};
-    }
-
     fn with_supergraph_boilerplate(content: &str) -> String {
         format!(
             "{}\n{}",
@@ -1173,37 +1130,6 @@ mod tests {
         "#,
             content
         )
-    }
-
-    macro_rules! assert_format_response_fed2 {
-        ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
-            assert_format_response_fed2!(
-                $schema,
-                $query,
-                $response,
-                $operation,
-                Value::Object(Object::default()),
-                $expected
-            );
-        }};
-
-        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema = with_supergraph_boilerplate_fed2($schema);
-            let schema =
-                Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-            let api_schema = schema.api_schema();
-            let query =
-                Query::parse($query, &schema, &Default::default()).expect("could not parse query");
-            let mut response = Response::builder().data($response.clone()).build();
-
-            query.format_response(
-                &mut response,
-                $operation,
-                $variables.as_object().unwrap().clone(),
-                api_schema,
-            );
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
-        }};
     }
 
     fn with_supergraph_boilerplate_fed2(content: &str) -> String {
@@ -1249,27 +1175,31 @@ mod tests {
 
     #[test]
     fn reformat_response_data_field() {
-        assert_format_response!(
-            "type Query {
-                foo: String
-                stuff: Bar
-                array: [Bar]
-                baz: String
-            }
-            type Bar {
-                bar: String
-                baz: String
-            }",
-            "query Test {
-                foo
-                stuff{bar __typename }
-                array{bar}
-                baz
-                alias:baz
-                alias_obj:stuff{bar}
-                alias_array:array{bar}
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+            foo: String
+            stuff: Bar
+            array: [Bar]
+            baz: String
+        }
+        type Bar {
+            bar: String
+            baz: String
+        }",
+            )
+            .query(
+                "query Test {
+            foo
+            stuff{bar __typename }
+            array{bar}
+            baz
+            alias:baz
+            alias_obj:stuff{bar}
+            alias_array:array{bar}
+        }",
+            )
+            .response(json! {{
                 "foo": "1",
                 "stuff": {"bar": "2", "__typename": "Bar"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
@@ -1278,9 +1208,8 @@ mod tests {
                 "alias_obj": {"bar": "8"},
                 "alias_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
                 "other": "13",
-            }},
-            Some("Test"),
-            json! {{
+            }})
+            .expected(json! {{
                 "foo": "1",
                 "stuff": {
                     "bar": "2",
@@ -1299,8 +1228,8 @@ mod tests {
                     {"bar": "9"},
                     {"bar": "11"},
                 ],
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -1321,6 +1250,7 @@ mod tests {
           }
           union Test = Stuff | Thing";
         let query = "{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }";
+
         FormatTest::builder()
             .schema(schema)
             .query(query)
@@ -1336,19 +1266,18 @@ mod tests {
             }})
             .test();
 
-        assert_format_response!(
-            schema,
-            query,
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {
                 {"get": {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}}
-            },
-            None,
-            json! {{
+            })
+            .expected(json! {{
                 "get": {
                     "id": "1",
                 }
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -1372,19 +1301,18 @@ mod tests {
         // when using a fragment on an operation exported by a subgraph,
         // we might not get a __typename field, we should instead be able
         // to know the type in advance
-        assert_format_response!(
-            schema,
-            "{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }",
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query("{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
+            .response(json! {
                 {"getStuff": { "stuff": {"bar": "2"}}}
-            },
-            None,
-            json! {{
-                "getStuff": {
+            })
+            .expected(json! {{
+                 "getStuff": {
                     "stuff": {"bar": "2"},
                 }
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -1407,212 +1335,213 @@ mod tests {
         let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar} fragment baz on Baz {baz}";
 
         // should only select fields from Foo
-        assert_format_response!(
-            schema,
-            query,
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {
                 {"thing": {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}}
-            },
-            None,
-            json! {
+            })
+            .expected(json! {
                 {"thing": {"foo": "1"}}
-            },
-        );
+            })
+            .test();
+
         // should only select fields from Bar
-        assert_format_response!(
-            schema,
-            query,
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {
                 {"thing": {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}}
-            },
-            None,
-            json! {
+            })
+            .expected(json! {
                 {"thing": {"bar": "2"} }
-            },
-        );
+            })
+            .test();
+
         // should only select fields from Baz
-        assert_format_response!(
-            schema,
-            query,
-            json! {
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {
                 {"thing": {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}}
-            },
-            None,
-            json! {
+            })
+            .expected(json! {
                 {"thing": {"baz": "3"} }
-            },
-        );
+            })
+            .test();
     }
 
     #[test]
     fn reformat_response_data_best_effort() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                foo: String
-                stuff: Baz
-                array: [Element]
-                other: Bar
-            }
+        FormatTest::builder()
+            .schema(
+                "type Query {
+            get: Thing
+        }
+        type Thing {
+            foo: String
+            stuff: Baz
+            array: [Element]
+            other: Bar
+        }
 
-            type Baz {
-                bar: String
-                baz: String
-            }
+        type Baz {
+            bar: String
+            baz: String
+        }
 
-            type Bar {
-                bar: String
-            }
+        type Bar {
+            bar: String
+        }
 
-            union Element = Baz | Bar
-            ",
-            "{get {foo stuff{bar baz} array{... on Baz { bar baz } } other{bar}}}",
-            json! {{
-                "get": {
-                    "foo": "1",
-                    "stuff": {"baz": "2"},
-                    "array": [
-                        {"baz": "3"},
-                        "4",
-                        {"bar": "5"},
-                    ],
-                    "other": "6",
-                },
-                "should_be_removed": {
-                    "aaa": 2
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "foo": "1",
-                    "stuff": {
-                        "bar": null,
-                        "baz": "2",
+        union Element = Baz | Bar
+        ",
+            )
+            .query("{get {foo stuff{bar baz} array{... on Baz { bar baz } } other{bar}}}")
+            .response(json! {
+                {
+                    "get": {
+                        "foo": "1",
+                        "stuff": {"baz": "2"},
+                        "array": [
+                            {"baz": "3"},
+                            "4",
+                            {"bar": "5"},
+                        ],
+                        "other": "6",
                     },
-                    "array": [
-                        {},
-                        null,
-                        {},
-                    ],
-                    "other": null,
-                },
-            }},
-        );
+                    "should_be_removed": {
+                        "aaa": 2
+                    },
+                }
+            })
+            .expected(json! {
+                {
+                    "get": {
+                        "foo": "1",
+                        "stuff": {
+                            "bar": null,
+                            "baz": "2",
+                        },
+                        "array": [
+                            {},
+                            null,
+                            {},
+                        ],
+                        "other": null,
+                    },
+                }
+            })
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_scalar_simple() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Int]
-            }
-
-            ",
-            "{get {array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Int]
+                }",
+            )
+            .query("{get {array}}")
+            .response(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_scalar_alias() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Int]
-            }
-
-            ",
-            "{get {stuff: array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Int]
+                }",
+            )
+            .query("{get {stuff: array}}")
+            .response(json! {{
                 "get": {
                     "stuff": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "stuff": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_scalar_duplicate_alias() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
                 array: [Int]
-            }
-
-            ",
-            "{get {array stuff:array}}",
-            json! {{
+            }",
+            )
+            .query("{get {array stuff:array}}")
+            .response(json! {{
                 "get": {
                     "array": [1,2,3,4],
                     "stuff": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [1,2,3,4],
                     "stuff": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_scalar_duplicate_key() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Int]
-            }
-
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Int]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_type_simple() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
@@ -1623,83 +1552,87 @@ mod tests {
                 stuff: String
             }
             ",
-            "{get {array{stuff}}}",
-            json! {{
+            )
+            .query("{get {array{stuff}}}")
+            .response(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_type_alias() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Element]
-            }
-
-            type Element {
-                stuff: String
-            }
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Element]
+                }
+    
+                type Element {
+                    stuff: String
+                }
+                
             ",
-            "{get { aliased: array {stuff}}}",
-            json! {{
+            )
+            .query("{get { aliased: array {stuff}}}")
+            .response(json! {{
                 "get": {
                     "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_type_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Element]
-            }
-
-            type Element {
-                stuff: String
-            }
-            ",
-            "{get {array{stuff} array{stuff}}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Element]
+                }
+    
+                type Element {
+                    stuff: String
+                }
+                ",
+            )
+            .query("{get {array{stuff} array{stuff}}}")
+            .response(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_type_duplicate_alias() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
@@ -1708,59 +1641,59 @@ mod tests {
             
             type Element {
                 stuff: String
-            }
-            ",
-            "{get {array{stuff} aliased: array{stuff}}}",
-            json! {{
+            }",
+            )
+            .query("{get {array{stuff} aliased: array{stuff}}}")
+            .response(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                     "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                     "aliased": [{"stuff": "FOO"}, {"stuff": "BAR"}],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_enum_simple() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Element]
-            }
-
-            enum Element {
-                FOO
-                BAR
-            }
-            ",
-            "{get {array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Element]
+                }
+    
+                enum Element {
+                    FOO
+                    BAR
+                }",
+            )
+            .query("{get {array}}")
+            .response(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_enum_alias() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
@@ -1770,57 +1703,57 @@ mod tests {
             enum Element {
                 FOO
                 BAR
-            }
-            ",
-            "{get {stuff: array}}",
-            json! {{
+            }",
+            )
+            .query("{get {stuff: array}}")
+            .response(json! {{
                 "get": {
                     "stuff": ["FOO", "BAR"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "stuff": ["FOO", "BAR"],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_enum_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Element]
-            }
-
-            enum Element {
-                FOO
-                BAR
-            }
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Element]
+                }
+    
+                enum Element {
+                    FOO
+                    BAR
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_enum_duplicate_alias() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
@@ -1830,203 +1763,196 @@ mod tests {
             enum Element {
                 FOO
                 BAR
-            }
-            ",
-            "{get {array stuff: array}}",
-            json! {{
+            }",
+            )
+            .query("{get {array stuff: array}}")
+            .response(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                     "stuff": ["FOO", "BAR"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": ["FOO", "BAR"],
                     "stuff": ["FOO", "BAR"],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     // If this test fails, this means you got greedy about allocations,
     // beware of aliases!
     fn reformat_response_array_of_int_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Int]
-            }
-
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Int]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_float_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Float]
-            }
-
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Float]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
-                    "array": [1.2,3.4],
+                    "array": [1,2,3,4],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
-                    "array": [1.2,3.4],
+                    "array": [1,2,3,4],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_bool_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [Boolean]
-            }
-
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [Boolean]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
                     "array": [true,false],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": [true,false],
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_string_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [String]
-            }
-
-            ",
-            "{get {array array}}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [String]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
                 "get": {
                     "array": ["hello","world"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "array": ["hello","world"],
                 },
-            }},
-        );
-    }
-
-    #[test]
-    fn solve_query_with_single_typename() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [String]
-            }
-
-            ",
-            "{ __typename }",
-            json! {{}},
-            None,
-            json! {{
-                "__typename": "Query"
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_array_of_id_duplicate() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                array: [ID]
-            }
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [ID]
+                }",
+            )
+            .query("{get {array array}}")
+            .response(json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }})
+            .expected(json! {{
+                "get": {
+                    "array": ["hello","world"],
+                },
+            }})
+            .test();
+    }
 
-            ",
-            "{get {array array}}",
-            json! {{
-                "get": {
-                    "array": ["hello","world"],
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "array": ["hello","world"],
-                },
-            }},
-        );
+    #[test]
+    fn solve_query_with_single_typename() {
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    array: [String]
+                }",
+            )
+            .query("{ __typename }")
+            .response(json! {{}})
+            .expected(json! {{
+                "__typename": "Query"
+            }})
+            .test();
     }
 
     #[test]
     fn reformat_response_query_with_root_typename() {
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                foo: String
-            }
-            ",
-            "{get {foo __typename} __typename}",
-            json! {{
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
+                }
+                type Thing {
+                    foo: String
+                }",
+            )
+            .query("{get {foo __typename} __typename}")
+            .response(json! {{
                 "get": {
                     "foo": "1",
                     "__typename": "Thing"
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "foo": "1",
                     "__typename": "Thing"
                 },
                 "__typename": "Query",
-            }},
-        );
+            }})
+            .test();
     }
 
     macro_rules! run_validation {
@@ -2279,28 +2205,28 @@ mod tests {
             getInt: Int
             getNonNullString: String!
         }";
-        assert_format_response!(
-            schema,
-            "query MyOperation { getInt }",
-            json! {{
+
+        FormatTest::builder()
+            .schema(schema)
+            .query("query MyOperation { getInt }")
+            .response(json! {{
                 "getInt": "not_an_int",
                 "other": "2",
-            }},
-            Some("MyOperation"),
-            json! {{
+            }})
+            .operation("MyOperation")
+            .expected(json! {{
                 "getInt": null,
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query { getNonNullString }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { getNonNullString }")
+            .response(json! {{
                 "getNonNullString": 1,
-            }},
-            None,
-            Value::Null,
-        );
+            }})
+            .expected(Value::Null)
+            .test();
     }
 
     #[test]
@@ -2316,134 +2242,126 @@ mod tests {
         let query = "query  { me { id name } }";
 
         // name expected a string, got an int
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "name": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // non null id expected a string, got an int
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": 1,
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non null id got a null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": null,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non null id was absent
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": { },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non null id was absent
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // a non null field not present in the query should not be an error
-        assert_format_response!(
-            schema,
-            "query  { me { name } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query  { me { name } }")
+            .response(json! {{
                 "me": {
                     "name": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // if a field appears multiple times, selection should be deduplicated
-        assert_format_response!(
-            schema,
-            "query  { me { id id } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query  { me { id id } }")
+            .response(json! {{
                 "me": {
                     "id": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // duplicate id field
-        assert_format_response!(
-            schema,
-            "query  { me { id ...on User { id } } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query  { me { id ...on User { id } } }")
+            .response(json! {{
                 "me": {
                     "__typename": "User",
                     "id": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -2461,163 +2379,153 @@ mod tests {
 
         // l1: nullable list of nullable elements
         // any error should stop at the list elements
-        assert_format_response!(
-            schema,
-            "query { list { l1 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l1 } }")
+            .response(json! {{
                 "list": {
                     "l1": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l1": ["abc", null, null, null, "def"],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // l1 expected a list, got a string
-        assert_format_response!(
-            schema,
-            "query { list { l1 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l1 } }")
+            .response(json! {{
                 "list": {
                     "l1": "abc",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l1": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // l2: nullable list of non nullable elements
         // any element error should nullify the entire list
-        assert_format_response!(
-            schema,
-            "query { list { l2 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l2 } }")
+            .response(json! {{
                 "list": {
                     "l2": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{}},
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l2": null,
                 },
-            }},
-            json! {[
+            }})
+            .expected_errors(json! {[
                 {
                     "message": "Cannot return null for non-nullable array element of type String at index 1",
                     "path": ["list", "l2", 1]
                 }
-            ]},
-        );
+            ]},)
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query { list { l2 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l2 } }")
+            .response(json! {{
                 "list": {
                     "l2": ["abc", "def"],
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l2": ["abc", "def"],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // l3: nullable list of nullable elements
         // any element error should stop at the list elements
-        assert_format_response!(
-            schema,
-            "query { list { l3 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l3 } }")
+            .response(json! {{
                 "list": {
                     "l3": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l3": ["abc", null, null, null, "def"],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // non null l3 expected a list, got an int, parrent element should be null
-        assert_format_response!(
-            schema,
-            "query { list { l3 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l3 } }")
+            .response(json! {{
                 "list": {
                     "l3": 1,
                 },
-            }},
-            None,
-            json! {{
-                "list":null,
-            }},
-        );
+            }})
+            .expected(json! {{
+                "list": null,
+            }})
+            .test();
 
         // l4: non nullable list of non nullable elements
         // any element error should nullify the entire list,
         // which will nullify the parent element
-        assert_format_response!(
-            schema,
-            "query { list { l4 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l4 } }")
+            .response(json! {{
                 "list": {
                     "l4": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": null,
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query { list { l4 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l4 } }")
+            .response(json! {{
                 "list": {
                     "l4": ["abc", "def"],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": {
                     "l4": ["abc", "def"],
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query { list { l4 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { list { l4 } }")
+            .response(json! {{
                 "list": {
                     "l4": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "list": null,
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -2643,376 +2551,366 @@ mod tests {
         // nullable parent and child elements
         // child errors should stop at the child's level
         let query_review1_text1 = "query  { me { id reviews1 { text1 } } }";
-        assert_format_response!(
-            schema,
-            query_review1_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ {
                         "text1": null,
-                     } ],
+                    } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 was null
-        assert_format_response!(
-            schema,
-            query_review1_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { "text1": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 expected a string, got an int, so text1 is nullified
-        assert_format_response!(
-            schema,
-            query_review1_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { "text1": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // text2 is non null so errors should nullify reviews1 element
         let query_review1_text2 = "query  { me { id reviews1 { text2 } } }";
         // text2 was absent, reviews1 element should be nullified
-        assert_format_response!(
-            schema,
-            query_review1_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { } ],
                 },
-            }},
-            None,
-            json! {{}},
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ null ],
                 },
-            }},
-            json! {[
+            }})
+            .expected_errors(json! {[
                 {
                     "message": "Cannot return null for non-nullable field Named type Review.text2",
                     "path": ["me", "reviews1", 0]
                 }
-            ]},
-        );
+            ]})
+            .test();
 
         // text2 was null, reviews1 element should be nullified
-        assert_format_response!(
-            schema,
-            query_review1_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { "text2": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ null ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // text2 expected a string, got an int, text2 is nullified, reviews1 element should be nullified
-        assert_format_response!(
-            schema,
-            query_review1_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review1_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews1": [ { "text2": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews1": [ null ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // reviews2: [Review!]
         // reviews2 elements are non null, so any error there should nullify the entire list
         let query_review2_text1 = "query  { me { id reviews2 { text1 } } }";
         // nullable text1 was absent
-        assert_format_response!(
-            schema,
-            query_review2_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews2": [ { } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": [ {
                         "text1": null,
                     } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 was null
-        assert_format_response!(
-            schema,
-            query_review2_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews2": [ { "text1": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 expected a string, got an int
-        assert_format_response!(
-            schema,
-            query_review2_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews2": [ { "text1": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // text2 is non null
         let query_review2_text2 = "query  { me { id reviews2 { text2 } } }";
         // text2 was absent, so the reviews2 element is nullified, so reviews2 is nullified
-        assert_format_response!(
-            schema,
-            query_review2_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
-                    "name": 1,
-                    "reviews2": [ { } ],
+                        "name": 1,
+                        "reviews2": [ { } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": null,
                 },
-            }},
-        );
+            }})
+            .test();
+
         // text2 was null, so the reviews2 element is nullified, so reviews2 is nullified
-        assert_format_response!(
-            schema,
-            query_review2_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews2": [ { "text2": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": null,
                 },
-            }},
-        );
+            }})
+            .test();
+
         // text2 expected a string, got an int, so the reviews2 element is nullified, so reviews2 is nullified
-        assert_format_response!(
-            schema,
-            query_review2_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review2_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews2": [ { "text2": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews2": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         //reviews3: [Review!]!
         // reviews3 is non null, and its elements are non null
         let query_review3_text1 = "query  { me { id reviews3 { text1 } } }";
+
         // nullable text1 was absent
-        assert_format_response!(
-            schema,
-            query_review3_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
-                    "name": 1,
-                    "reviews3": [ { } ],
+                        "name": 1,
+                        "reviews3": [ { } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews3": [ {
                         "text1": null,
                     } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 was null
-        assert_format_response!(
-            schema,
-            query_review3_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews3": [ { "text1": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews3": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable text1 expected a string, got an int
-        assert_format_response!(
-            schema,
-            query_review3_text1,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text1)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews3": [ { "text1": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "reviews3": [ { "text1": null } ],
                 },
-            }},
-        );
+            }})
+            .test();
 
-        // reviews3 is non null, and its elements are non null, text2 is  on null
+        // reviews3 is non null, and its elements are non null, text2 is non null
         let query_review3_text2 = "query  { me { id reviews3 { text2 } } }";
+
         // text2 was absent, nulls should propagate up to the operation
-        assert_format_response!(
-            schema,
-            query_review3_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews3": [ { } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+
+            }})
+            .test();
+
         // text2 was null, nulls should propagate up to the operation
-        assert_format_response!(
-            schema,
-            query_review3_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews3": [ { "text2": null } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+
+            }})
+            .test();
+
         // text2 expected a string, got an int, nulls should propagate up to the operation
-        assert_format_response!(
-            schema,
-            query_review3_text2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_review3_text2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "name": 1,
                     "reviews3": [ { "text2": 1 } ],
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+
+            }})
+            .test();
     }
 
     #[test]
@@ -3028,147 +2926,139 @@ mod tests {
         let query = "query  { me { id identifiant:id } }";
 
         // both aliases got valid values
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "identifiant": "b",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "identifiant": "b",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // non null identifiant expected a string, got an int, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "identifiant": 1,
                 },
-            }},
-            None,
-            json! {{
-                "me": null,
-            }},
-        );
+            }})
+            .expected(json! {{
+               "me": null,
+            }})
+            .test();
 
         // non null identifiant was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "identifiant": null,
                 },
-            }},
-            None,
-            json! {{
-                "me": null,
-            }},
-        );
+            }})
+            .expected(json! {{
+               "me": null,
+            }})
+            .test();
 
         // non null identifiant was absent, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                 },
-            }},
-            None,
-            json! {{
-                "me": null,
-            }},
-        );
+            }})
+            .expected(json! {{
+               "me": null,
+            }})
+            .test();
 
         let query2 = "query  { me { name name2:name } }";
 
         // both aliases got valid values
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name": "a",
                     "name2": "b",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                     "name2": "b",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name2 expected a string, got an int, name2 should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name": "a",
                     "name2": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                     "name2": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name2 was null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name": "a",
                     "name2": null,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                     "name2": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name2 was absent
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                     "name2": null,
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3189,121 +3079,115 @@ mod tests {
         let query = "query  { me { id a } }";
 
         // scalar a is present, no further validation
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "a": "hello",
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "a": "hello",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                },
+            }})
+            .test();
 
-        // scalar a is present, no further validation
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "a": {
-                        "field": 1234,
-                    },
-                }
-            }},
-            None,
-            json! {{
+        // scalar a is present, no further validation=
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "a": {
                         "field": 1234,
                     },
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "a": {
+                        "field": 1234,
+                    },
+                },
+            }})
+            .test();
 
         let query2 = "query  { me { id b } }";
 
         // non null scalar b is present, no further validation
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "b": "hello",
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": "hello",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                },
+            }})
+            .test();
 
         // non null scalar b is present, no further validation
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "b": {
-                        "field": 1234,
-                    },
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": {
                         "field": 1234,
                     },
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "b": {
+                        "field": 1234,
+                    },
+                },
+            }})
+            .test();
 
         // non null scalar b was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": null,
-                }
-            }},
-            None,
-            json! {{
+                },
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non null scalar b was absent, the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "id": "a",
-                }
-            }},
-            None,
-            json! {{
+                },
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3327,113 +3211,108 @@ mod tests {
         let query_a = "query  { me { id a } }";
 
         // enum a got a correct value
-        assert_format_response!(
-            schema,
-            query_a,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "a": "X",
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_a)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "a": "X",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "a": "X",
+                },
+            }})
+            .test();
 
         // nullable enum a expected "X", "Y" or "Z", got another string, a should be null
-        assert_format_response!(
-            schema,
-            query_a,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_a)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "a": "hello",
-                }
-            }},
-            None,
-            json! {{
+                },
+            }})
+            .expected(json! {{
                 "me": {
                     "id": "a",
                     "a": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable enum a was null
-        assert_format_response!(
-            schema,
-            query_a,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "a": null,
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_a)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "a": null,
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                },
+            }})
+            .test();
 
         let query_b = "query  { me { id b } }";
 
         // non nullable enum b got a correct value
-        assert_format_response!(
-            schema,
-            query_b,
-            json! {{
-                "me": {
-                    "id": "a",
-                    "b": "X",
-                }
-            }},
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_b)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": "X",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "me": {
+                    "id": "a",
+                    "b": "X",
+                },
+            }})
+            .test();
+
         // non nullable enum b expected "X", "Y" or "Z", got another string, b and the operation should be null
-        assert_format_response!(
-            schema,
-            query_b,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_b)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": "hello",
-                }
-            }},
-            None,
-            json! {{
+                },
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non nullable enum b was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query_b,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query_b)
+            .response(json! {{
                 "me": {
                     "id": "a",
                     "b": null,
-                }
-            }},
-            None,
-            json! {{
+                },
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3461,150 +3340,141 @@ mod tests {
         let query = "query  { me { name } }";
 
         // nullable name field got a correct value
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name field was absent
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": { },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name field was null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name": null,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         // nullable name field expected a string, got an int
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name": null,
                 },
-            }},
-        );
+            }})
+            .test();
 
         let query2 = "query  { me { name2 } }";
 
         // non nullable name2 field got a correct value
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name2": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name2": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 field was absent, the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": { },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 field was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name2": null,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 field expected a string, got an int, name2 and the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
                 "me": {
                     "name2": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // we should be able to handle duplicate fields even across fragments and interfaces
-        assert_format_response!(
-            schema,
-            "query  { me { ... on User { name2 } name2 } }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query("query { me { ... on User { name2 } name2 } }")
+            .response(json! {{
                 "me": {
                     "__typename": "User",
                     "name2": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name2": "a",
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3641,64 +3511,60 @@ mod tests {
         let query = "query  { me { name2 } }";
 
         // non nullable name2 got a correct value
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name2": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": {
                     "name2": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name2": null,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 was absent, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": { },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 expected a string, got an int, the operation should be null
-        assert_format_response!(
-            schema,
-            query,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
                 "me": {
                     "name2": 1,
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "me": null,
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3714,132 +3580,128 @@ mod tests {
 
         // fragments can appear on top level queries
         let query = "{ ...frag } fragment frag on Query { __typename get { name } }";
+
         // nullable name got a correct value
-        assert_format_response!(
-            schema,
-            query,
-            json! {
-                { "get": {"name": "a", "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
+                "get": {
+                    "name": "a",
+                    "other": "b"
+                }
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name": "a",
                 }
-            }},
-        );
+            }})
+            .test();
 
         // nullable name was null
-        assert_format_response!(
-            schema,
-            query,
-            json! {
-                { "get": {"name": null, "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query)
+            .response(json! {{
+                "get": {"name": null, "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name": null,
                 }
-            }},
-        );
+            }})
+            .test();
 
         let query2 = "{ ...frag2 } fragment frag2 on Query { __typename get { name2 } }";
         // non nullable name2 got a correct value
-        assert_format_response!(
-            schema,
-            query2,
-            json! {
-                { "get": {"name2": "a", "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
+                "get": {"name2": "a", "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name2": "a",
                 }
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query2,
-            json! {
-                { "get": {"name2": null, "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query2)
+            .response(json! {{
+                "get": {"name2": null, "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": null
-            }},
-        );
+            }})
+            .test();
 
         let query3 = "{ ... on Query { __typename get { name } } }";
         // nullable name got a correct value
-        assert_format_response!(
-            schema,
-            query3,
-            json! {
-                { "get": {"name": "a", "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query3)
+            .response(json! {{
+                "get": {"name": "a", "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name": "a",
                 }
-            }},
-        );
+            }})
+            .test();
 
         // nullable name was null
-        assert_format_response!(
-            schema,
-            query3,
-            json! {
-                { "get": {"name": null, "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query3)
+            .response(json! {{
+                "get": {"name": null, "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name": null,
                 }
-            }},
-        );
+            }})
+            .test();
 
         let query4 = "{ ... on Query { __typename get { name2 } } }";
         // non nullable name2 got a correct value
-        assert_format_response!(
-            schema,
-            query4,
-            json! {
-                { "get": {"name2": "a", "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query4)
+            .response(json! {{
+                "get": {"name2": "a", "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": {
                     "name2": "a",
                 }
-            }},
-        );
+            }})
+            .test();
 
         // non nullable name2 was null, the operation should be null
-        assert_format_response!(
-            schema,
-            query4,
-            json! {
-                { "get": {"name2": null, "other": "b"} }
-            },
-            None,
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(query4)
+            .response(json! {{
+                "get": {"name2": null, "other": "b"}
+            }})
+            .expected(json! {{
                 "__typename": null,
                 "get": null,
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -3860,9 +3722,10 @@ mod tests {
         }";
 
         // duplicate operation name
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                 }
@@ -3870,25 +3733,26 @@ mod tests {
                     name
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // merge nested selection
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     review {
@@ -3905,7 +3769,8 @@ mod tests {
                     name
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "review": {
@@ -3914,9 +3779,8 @@ mod tests {
                         "body": "hello",
                     }
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "review": {
@@ -3925,8 +3789,8 @@ mod tests {
                     },
                     "name": null,
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -4244,20 +4108,22 @@ mod tests {
         }";
 
         // duplicate operation name
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    name @skip(if: true)
-                }
-                get @skip(if: false) {
-                    id 
-                    review {
-                        id
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                        name @skip(if: true)
                     }
-                }
-            }",
-            json! {{
+                    get @skip(if: false) {
+                        id 
+                        review {
+                            id
+                        }
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
@@ -4265,44 +4131,45 @@ mod tests {
                         "id": "b",
                     }
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "review": {
                         "id": "b",
                     }
                 },
-            }},
-        );
+            }})
+            .test();
 
         // skipped non null
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id @skip(if: true)
                     name
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // inline fragment
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ... on Product @skip(if: true) {
@@ -4310,51 +4177,51 @@ mod tests {
                     }
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
-
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    id
-                    ... on Product @skip(if: false) {
-                        name
-                    }
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+            get {
+                id
+                ... on Product @skip(if: false) {
+                    name
                 }
-            }",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "name": "Chair",
-
-                },
-            }},
-            None,
-            json! {{
+            }
+        }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }})
+            .test();
 
         // directive on fragment spread
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ...test @skip(if: false)
@@ -4364,56 +4231,57 @@ mod tests {
             fragment test on Product {
                 nom: name
                 name @skip(if: true)
-            }
-            ",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                    "name": "Chair",
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                },
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    id
-                    ...test @skip(if: true)
-                }
-            }
-
-            fragment test on Product {
-                nom: name
-                name @skip(if: true)
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                        id
+                        ...test @skip(if: true)
+                    }
+                }
+    
+                fragment test on Product {
+                    nom: name
+                    name @skip(if: true)
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // directive on fragment
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ...test
@@ -4423,154 +4291,189 @@ mod tests {
             fragment test on Product @skip(if: false) {
                 nom: name
                 name @skip(if: true)
-            }
-            ",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                    "name": "Chair",
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                },
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    id
-                    ...test
-                }
-            }
-
-            fragment test on Product @skip(if: true) {
-                nom: name
-                name @skip(if: true)
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                        id
+                        ...test
+                    }
+                }
+    
+                fragment test on Product @skip(if: true) {
+                    nom: name
+                    name @skip(if: true)
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // variables
         // duplicate operation name
-        assert_format_response!(
-            schema,
-            "query Example($shouldSkip: Boolean) {
-                get {
-                    id
-                    name @skip(if: $shouldSkip)
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldSkip: Boolean) {
+                    get {
+                        id
+                        name @skip(if: $shouldSkip)
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldSkip": true
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query Example($shouldSkip: Boolean) {
-                get {
-                    id
-                    name @skip(if: $shouldSkip)
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldSkip: Boolean) {
+                    get {
+                        id
+                        name @skip(if: $shouldSkip)
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldSkip": false
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // default variable value
-        assert_format_response!(
-            schema,
-            "query Example($shouldSkip: Boolean = true) {
-                get {
-                    id
-                    name @skip(if: $shouldSkip)
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldSkip: Boolean) {
+                    get {
+                        id
+                        name @skip(if: $shouldSkip)
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{ }},
-            json! {{
-                "get": {
-                    "id": "a",
-                },
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "query Example($shouldSkip: Boolean = true) {
-                get {
-                    id
-                    name @skip(if: $shouldSkip)
-                }
-            }",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "name": "Chair",
-                },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldSkip": false
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldSkip: Boolean = true) {
+                    get {
+                        id
+                        name @skip(if: $shouldSkip)
+                    }
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }})
+            .operation("Example")
+            .variables(json! {{
+                "shouldSkip": false
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldSkip: Boolean = true) {
+                    get {
+                        id
+                        name @skip(if: $shouldSkip)
+                    }
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }})
+            .operation("Example")
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                },
+            }})
+            .test();
     }
 
     #[test]
@@ -4594,169 +4497,169 @@ mod tests {
             name: String
         }";
 
-        assert_format_response!(
-            schema,
-            "
-            fragment ProductBase on Product {
-              __typename
-              id
-              name
-            }
-            query  {
-                get {
-                  ...ProductBase
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "fragment ProductBase on Product {
+                __typename
+                id
+                name
+              }
+              query  {
+                  get {
+                    ...ProductBase
+                  }
+              }",
+            )
+            .response(json! {{
                 "get": {
                     "__typename": "Beer",
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "__typename": "Beer",
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "
-            fragment ProductBase on Product {
-              id
-              name
-            }
-            query  {
-                get {
-                  ...ProductBase
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "fragment ProductBase on Product {
+                id
+                name
+              }
+              query  {
+                  get {
+                    ...ProductBase
+                  }
+              }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                        "name": "Asahi",
+                },
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                      ... on Product {
+                        __typename
+                        id
+                        name
+                      }
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
+                    "__typename": "Beer",
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "
-            query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                   ... on Product {
-                    __typename
                     id
                     name
                   }
                 }
-            }",
-            json! {{
-                "get": {
-                    "__typename": "Beer",
-                    "id": "a",
-                    "name": "Asahi",
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "__typename": "Beer",
-                    "id": "a",
-                    "name": "Asahi",
-                },
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "
-            query  {
-                get {
-                  ... on Product {
-                    id
-                    name
-                  }
-                }
-            }",
-            json! {{
+            }}",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Asahi",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // Make sure we do not return data for type that doesn't implement interface
-        assert_format_response!(
-            schema,
-            "
-            fragment ProductBase on Product {
-              __typename
-              id
-              name
-            }
-            query  {
-                get {
-                  ...ProductBase
-                }
-            }",
-            json! {{
-                "get": {
-                    "__typename": "Vodka",
-                    "id": "a",
-                    "name": "Crystal",
-                },
-            }},
-            None,
-            json! {{
-                "get": {}
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "
-            query  {
-                get {
-                  ... on Product {
-                    __typename
-                    id
-                    name
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "fragment ProductBase on Product {
+                __typename
+                id
+                name
+              }
+              query  {
+                  get {
+                    ...ProductBase
                   }
-                }
-            }",
-            json! {{
+              }",
+            )
+            .response(json! {{
                 "get": {
                     "__typename": "Vodka",
                     "id": "a",
                     "name": "Crystal",
                 },
-            }},
-            None,
-            json! {{
-                "get": {}
-            }},
-        );
+            }})
+            .expected(json! {{
+                "get": { }
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                      ... on Product {
+                        __typename
+                        id
+                        name
+                      }
+                    }
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }})
+            .expected(json! {{
+                "get": { }
+            }})
+            .test();
     }
 
     #[test]
@@ -4777,9 +4680,10 @@ mod tests {
         }";
 
         // duplicate operation name
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     name @include(if: false)
                 }
@@ -4790,7 +4694,8 @@ mod tests {
                     }
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
@@ -4798,44 +4703,45 @@ mod tests {
                         "id": "b",
                     }
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "review": {
                         "id": "b",
                     }
                 },
-            }},
-        );
+            }})
+            .test();
 
         // skipped non null
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id @include(if: false)
                     name
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // inline fragment
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ... on Product @include(if: false) {
@@ -4843,24 +4749,24 @@ mod tests {
                     }
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
-
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ... on Product @include(if: true) {
@@ -4868,26 +4774,26 @@ mod tests {
                     }
                 }
             }",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "name": "Chair",
-
-                },
-            }},
-            None,
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }})
+            .test();
 
         // directive on fragment spread
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ...test @include(if: true)
@@ -4897,86 +4803,87 @@ mod tests {
             fragment test on Product {
                 nom: name
                 name @skip(if: true)
-            }
-            ",
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                    "name": "Chair",
-                },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "id": "a",
-                    "nom": "Chaise",
-                },
-            }},
-        );
-
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    id
-                    ...test @include(if: false)
-                }
-            }
-
-            fragment test on Product {
-                nom: name
-                name @include(if: false)
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                        id
+                        ...test @include(if: false)
+                    }
+                }
+    
+                fragment test on Product {
+                    nom: name
+                    name @include(if: false)
+                }",
+            )
+            .response(json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // directive on fragment
-        assert_format_response!(
-            schema,
-            "query  {
-                get {
-                    id
-                    ...test
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get {
+                        id
+                        ...test
+                    }
                 }
-            }
-
-            fragment test on Product @include(if: true) {
-                nom: name
-                name @include(if: false)
-            }
-            ",
-            json! {{
+    
+                fragment test on Product @include(if: true) {
+                    nom: name
+                    name @include(if: false)
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     id
                     ...test
@@ -4987,123 +4894,131 @@ mod tests {
                 nom: name
                 name @include(if: false)
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "nom": "Chaise",
                     "name": "Chair",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // variables
         // duplicate operation name
-        assert_format_response!(
-            schema,
-            "query Example($shouldInclude: Boolean) {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldInclude: Boolean) {
                 get {
                     id
                     name @include(if: $shouldInclude)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldInclude": false
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query Example($shouldInclude: Boolean) {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldInclude: Boolean) {
                 get {
                     id
                     name @include(if: $shouldInclude)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldInclude": true
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
 
         // default variable value
-        assert_format_response!(
-            schema,
-            "query Example($shouldInclude: Boolean = false) {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldInclude: Boolean = false) {
                 get {
                     id
                     name @include(if: $shouldInclude)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{ }},
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{ }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query Example($shouldInclude: Boolean = false) {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query Example($shouldInclude: Boolean = false) {
                 get {
                     id
                     name @include(if: $shouldInclude)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-            Some("Example"),
-            json! {{
+            }})
+            .operation("Example")
+            .variables(json! {{
                 "shouldInclude": true
-            }},
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "id": "a",
                     "name": "Chair",
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5120,32 +5035,32 @@ mod tests {
         // combine skip and include
         // both of them must accept the field
         // ref: https://spec.graphql.org/October2021/#note-f3059
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     a:name @skip(if:true) @include(if: true)
                     b:name @skip(if:true) @include(if: false)
                     c:name @skip(if:false) @include(if: true)
                     d:name @skip(if:false) @include(if: false)
                 }
-
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "a": "a",
                     "b": "b",
                     "c": "c",
                     "d": "d",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "c": "c",
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5163,9 +5078,10 @@ mod tests {
         // combine skip and include
         // both of them must accept the field
         // ref: https://spec.graphql.org/October2021/#note-f3059
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     a:name @skip(if:false)
                 }
@@ -5173,22 +5089,23 @@ mod tests {
                     a:name @skip(if:true)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "a": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "a": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     a:name @skip(if:true)
                 }
@@ -5196,44 +5113,45 @@ mod tests {
                     a:name @skip(if:false)
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "get": {
                     "a": "a",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "a": "a",
                 },
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            schema,
-            "query  {
-                get @skip(if: false) @include(if: false) {
-                    a:name
-                    bar
-                }
-                get @skip(if: false) {
-                    a:name
-                    a:name
-                }
-            }",
-            json! {{
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
+                    get @skip(if: false) @include(if: false) {
+                        a:name
+                        bar
+                    }
+                    get @skip(if: false) {
+                        a:name
+                        a:name
+                    }
+                }",
+            )
+            .response(json! {{
                 "get": {
                     "a": "a",
                     "bar": "foo",
                 },
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "get": {
                     "a": "a",
                 },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5251,9 +5169,10 @@ mod tests {
         union ProductResult = Product | ProductError
         ";
 
-        assert_format_response!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .query(
+                "query  {
                 get {
                     __typename
                     ... on Product {
@@ -5264,20 +5183,20 @@ mod tests {
                     }
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
+                "get": {
+                    "__typename": "Product",
+                        "symbol": "1"
+                },
+            }})
+            .expected(json! {{
                 "get": {
                     "__typename": "Product",
                     "symbol": "1"
                 },
-            }},
-            None,
-            json! {{
-                "get": {
-                    "__typename": "Product",
-                    "symbol": "1"
-                },
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5322,37 +5241,40 @@ mod tests {
         }
         ";
 
-        assert_format_response_fed2!(
-            schema,
-            "query  {
-                test_interface {
-                    __typename
-                    foo
-                }
-
-                test_interface2: test_interface {
-                    __typename
-                    foo
-                }
-
-                test_union {
-                    ...on B {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "query  {
+                    test_interface {
                         __typename
-                        common
+                        foo
                     }
-                }
-
-                test_union2: test_union {
-                    ...on B {
+    
+                    test_interface2: test_interface {
                         __typename
-                        common
+                        foo
                     }
-                }
-
-                test_enum
-                test_enum2: test_enum
-            }",
-            json! {{
+    
+                    test_union {
+                        ...on B {
+                            __typename
+                            common
+                        }
+                    }
+    
+                    test_union2: test_union {
+                        ...on B {
+                            __typename
+                            common
+                        }
+                    }
+    
+                    test_enum
+                    test_enum2: test_enum
+                }",
+            )
+            .response(json! {{
                 "test_interface": {
                     "__typename": "Object",
                     "foo": "bar",
@@ -5379,9 +5301,8 @@ mod tests {
 
                 "test_enum": "X",
                 "test_enum2": "Z"
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "test_interface": null,
                 "test_interface2": {
                     "__typename": "Object2",
@@ -5394,8 +5315,8 @@ mod tests {
                 },
                 "test_enum": null,
                 "test_enum2": "Z"
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5503,9 +5424,11 @@ mod tests {
         }
         ";
 
-        assert_format_response_fed2!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "query  {
                 test_interface {
                     __typename
                     foo
@@ -5520,26 +5443,28 @@ mod tests {
             fragment FragmentB on MyTypeB {
                 somethingElse
             }",
-            json! {{
+            )
+            .response(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                     "something": "something"
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                     "something": "something"
                 }
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response_fed2!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "query  {
                 test_interface {
                     __typename
                     ...FragmentI
@@ -5548,26 +5473,27 @@ mod tests {
 
             fragment FragmentI on Interface {
                 foo
-            }
-            ",
-            json! {{
+            }",
+            )
+            .response(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar"
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar"
                 }
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response_fed2!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "query  {
                 test_interface {
                     __typename
                     foo
@@ -5579,26 +5505,28 @@ mod tests {
                     }
                 }
             }",
-            json! {{
+            )
+            .response(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                     "something": "something"
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                     "something": "something"
                 }
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response_fed2!(
-            schema,
-            "query  {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "query  {
                 test_interface {
                     __typename
                     foo
@@ -5613,21 +5541,21 @@ mod tests {
             fragment FragmentB on MyTypeB {
                 somethingElse
             }",
-            json! {{
+            )
+            .response(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                     "something": "something"
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "test_interface": {
                     "__typename": "MyTypeA",
                     "foo": "bar",
                 }
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5713,9 +5641,11 @@ mod tests {
             city: String
         }";
 
-        assert_format_response_fed2!(
-            schema,
-            "{
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                "{
                 settings {
                   location {
                     ...SettingsLocation
@@ -5734,24 +5664,24 @@ mod tests {
                    }
                  }
               }",
-            json! {{
+            )
+            .response(json! {{
                 "settings": {
                     "location": {
                         "__typename": "AccountLocation",
                         "id": "1234"
                     }
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "settings": {
                     "location": {
                         "id": "1234",
                         "address": null
                     }
                 }
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
@@ -5780,23 +5710,26 @@ mod tests {
             total: Int!
         }";
 
-        assert_format_response_fed2!(
-            schema,
-            r#"query {
-                mtb: inStore(key: "mountainbikes") {
-                    ...CartFragmentTest
-                }
-            }
-
-            fragment CartFragmentTest on CartQueryInterface {
-                carts {
-                    results {
-                        id
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                r#"query {
+                    mtb: inStore(key: "mountainbikes") {
+                        ...CartFragmentTest
                     }
-                    total
                 }
-            }"#,
-            json! {{
+    
+                fragment CartFragmentTest on CartQueryInterface {
+                    carts {
+                        results {
+                            id
+                        }
+                        total
+                    }
+                }"#,
+            )
+            .response(json! {{
                 "mtb": {
                     "carts": {
                         "results": [{"id": "id"}],
@@ -5804,22 +5737,23 @@ mod tests {
                     },
                     "cart": null
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "mtb": {
                     "carts": {
                         "results": [{"id": "id"}],
                         "total": 1234
                     },
                 }
-            }},
-        );
+            }})
+            .test();
 
         // With inline fragment
-        assert_format_response_fed2!(
-            schema,
-            r#"query {
+        FormatTest::builder()
+            .schema(schema)
+            .fed2()
+            .query(
+                r#"query {
                 mtb: inStore(key: "mountainbikes") {
                     ... on CartQueryInterface {
                         carts {
@@ -5831,7 +5765,8 @@ mod tests {
                     }
                 }
             }"#,
-            json! {{
+            )
+            .response(json! {{
                 "mtb": {
                     "carts": {
                         "results": [{"id": "id"}],
@@ -5839,104 +5774,111 @@ mod tests {
                     },
                     "cart": null
                 }
-            }},
-            None,
-            json! {{
+            }})
+            .expected(json! {{
                 "mtb": {
                     "carts": {
                         "results": [{"id": "id"}],
                         "total": 1234
                     },
                 }
-            }},
-        );
+            }})
+            .test();
     }
 
     #[test]
     fn query_operation_nullification() {
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing
             }
             type Thing {
                 name: String
             }
             ",
-            "{
-                get {
-                    name
+            )
+            .query(
+                "{
+                    get {
+                        name
+                    }
+                }",
+            )
+            .response(json! {{ }})
+            .expected(json! {{
+                "get": null,
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                    get: Thing
                 }
+                type Thing {
+                    name: String
+                }",
+            )
+            .query(
+                "query {
+                    ...F
+                 }
+                 
+                 fragment F on Query {
+                     get {
+                         name
+                     }
+                 }",
+            )
+            .response(json! {{ }})
+            .expected(json! {{
+                "get": null,
+            }})
+            .test();
+
+        FormatTest::builder()
+            .schema(
+                "type Query {
+                get: Thing
+            }
+            type Thing {
+                name: String
             }",
-            json! {{}},
-            None,
-            json! {{
-                "get": null,
-            }},
-        );
-
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                name: String
-            }
-            ",
-            "query {
-               ...F
-            }
-            
-            fragment F on Query {
-                get {
-                    name
+            )
+            .query(
+                "query {
+                ... on Query {
+                 get {
+                     name
+                 }
                 }
-            }
-            ",
-            json! {{}},
-            None,
-            json! {{
+             }",
+            )
+            .response(json! {{ }})
+            .expected(json! {{
                 "get": null,
-            }},
-        );
+            }})
+            .test();
 
-        assert_format_response!(
-            "type Query {
-                get: Thing
-            }
-            type Thing {
-                name: String
-            }
-            ",
-            "query {
-               ... on Query {
-                get {
-                    name
-                }
-               }
-            }",
-            json! {{}},
-            None,
-            json! {{
-                "get": null,
-            }},
-        );
-
-        assert_format_response!(
-            "type Query {
+        FormatTest::builder()
+            .schema(
+                "type Query {
                 get: Thing!
             }
             type Thing {
                 name: String
-            }
-            ",
-            "{
+            }",
+            )
+            .query(
+                "{
                 get {
                     name
                 }
             }",
-            json! {{}},
-            None,
-            Value::Null,
-        );
+            )
+            .response(json! {{ }})
+            .expected(Value::Null)
+            .test();
     }
 }
