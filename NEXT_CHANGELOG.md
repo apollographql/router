@@ -28,5 +28,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Respect supergraph path for kubernetes deployment probes (#1787)
+
+For cases where you configured the `supergraph.path` for the router when using the helm chart, the liveness 
+and readiness probes continued to use the default path of `/` and so the start failed.
+
+By @damienpontifex in #1788
+
+
 ## 🛠 Maintenance
 ## 📚 Documentation
