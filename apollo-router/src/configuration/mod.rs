@@ -116,7 +116,7 @@ impl Expansion {
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[non_exhaustive]
-pub(crate) enum ConfigurationError {
+pub enum ConfigurationError {
     /// could not expand variable: {key}, {cause}
     CannotExpandVariable { key: String, cause: String },
     /// could not expand variable: {key}. Variables must be prefixed with one of '{supported_modes}' followed by '.' e.g. 'env.'
@@ -144,7 +144,7 @@ pub(crate) enum ConfigurationError {
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema, Default)]
+#[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
@@ -177,6 +177,46 @@ pub struct Configuration {
     dev: Option<bool>,
 }
 
+impl<'de> serde::Deserialize<'de> for Configuration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // This intermediate structure will allow us to deserialize a Configuration
+        // yet still exercise the Configuration validation function
+        #[derive(Deserialize, Default)]
+        struct AdHocConfiguration {
+            #[serde(default)]
+            server: Server,
+            #[serde(default)]
+            sandbox: Sandbox,
+            #[serde(default)]
+            homepage: Homepage,
+            #[serde(default)]
+            supergraph: Supergraph,
+            #[serde(default)]
+            cors: Cors,
+            #[serde(default)]
+            plugins: UserPlugins,
+            #[serde(default)]
+            #[serde(flatten)]
+            apollo_plugins: ApolloPlugins,
+        }
+        let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
+
+        Configuration::builder()
+            .server(ad_hoc.server)
+            .sandbox(ad_hoc.sandbox)
+            .homepage(ad_hoc.homepage)
+            .supergraph(ad_hoc.supergraph)
+            .cors(ad_hoc.cors)
+            .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
+            .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .build()
+            .map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 const TELEMETRY_KEY: &str = "telemetry";
 
@@ -202,8 +242,8 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ConfigurationError> {
+        let conf = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
@@ -216,7 +256,9 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             dev,
-        }
+        };
+
+        conf.validate()
     }
 
     /// This should be executed after normal configuration processing
@@ -302,8 +344,8 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ConfigurationError> {
+        let configuration = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
@@ -316,16 +358,54 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             dev,
+        };
+
+        configuration.validate()
+    }
+}
+
+impl Configuration {
+    fn validate(self) -> Result<Self, ConfigurationError> {
+        if !self.supergraph.path.starts_with('/') {
+            return Err(ConfigurationError::InvalidConfiguration {
+            message: "invalid 'server.graphql_path' configuration",
+            error: format!(
+                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                self.supergraph.path,
+                self.supergraph.path
+            ),
+        });
         }
+        if self.supergraph.path.ends_with('*') && !self.supergraph.path.ends_with("/*") {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, you can only set a wildcard after a '/'",
+                    self.supergraph.path
+                ),
+            });
+        }
+        if self.supergraph.path.contains("/*/") {
+            return Err(
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid 'server.graphql_path' configuration",
+                    error: format!(
+                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                        self.supergraph.path
+                    ),
+                },
+            );
+        }
+        Ok(self)
     }
 }
 
 /// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
-    type Err = serde_yaml::Error;
+    type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_yaml::from_str(s)
+        validate_yaml_configuration(s, Expansion::default()?)?.validate()
     }
 }
 
@@ -948,11 +1028,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 ///
 /// There may still be serde validation issues later.
 ///
-pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
-    validate_configuration_internal(raw_yaml, Expansion::default()?)
-}
-
-fn validate_configuration_internal(
+fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
 ) -> Result<Configuration, ConfigurationError> {
@@ -1132,38 +1208,6 @@ fn validate_configuration_internal(
                 unknown_fields.iter().join(", ")
             ),
         });
-    }
-
-    // Custom validations
-    if !config.supergraph.path.starts_with('/') {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.supergraph.path,
-                config.supergraph.path
-            ),
-        });
-    }
-    if config.supergraph.path.ends_with('*') && !config.supergraph.path.ends_with("/*") {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.supergraph.path
-            ),
-        });
-    }
-    if config.supergraph.path.contains("/*/") {
-        return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.supergraph.path
-                    ),
-                },
-            );
     }
 
     Ok(config)
@@ -1358,37 +1402,33 @@ mod tests {
 
     #[test]
     fn bad_graphql_path_configuration_without_slash() {
-        let error = validate_configuration(
-            r#"
-supergraph:
-  path: test
-  "#,
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("test").build())
+            .build()
+            .unwrap_err();
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
     }
 
     #[test]
     fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
-        let error = validate_configuration(
-            r#"
-supergraph:
-  path: /*/test
-  "#,
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("/*/test").build())
+            .build()
+            .unwrap_err();
+
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
     #[test]
     fn unknown_fields() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   path: /
 subgraphs:
   account: true
   "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
@@ -1396,11 +1436,12 @@ subgraphs:
 
     #[test]
     fn unknown_fields_at_root() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 unknown:
   foo: true
   "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"));
@@ -1408,28 +1449,27 @@ unknown:
 
     #[test]
     fn empty_config() {
-        validate_configuration(
+        validate_yaml_configuration(
             r#"
   "#,
+            Expansion::default().unwrap(),
         )
         .expect("should have been ok with an empty config");
     }
 
     #[test]
     fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
-        let error = validate_configuration(
-            r#"
-supergraph:
-  path: /test*
-  "#,
-        )
-        .expect_err("should have resulted in an error");
+        let error = Configuration::fake_builder()
+            .supergraph(Supergraph::fake_builder().path("/test*").build())
+            .build()
+            .unwrap_err();
+
         assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
     }
 
     #[test]
     fn line_precise_config_errors() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 plugins:
   non_existant:
@@ -1438,6 +1478,7 @@ plugins:
 telemetry:
   another_non_existant: 3
   "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1445,7 +1486,7 @@ telemetry:
 
     #[test]
     fn line_precise_config_errors_with_errors_after_first_field() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1454,6 +1495,7 @@ supergraph:
   bad: "donotwork"
   another_one: true
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1461,13 +1503,14 @@ supergraph:
 
     #[test]
     fn line_precise_config_errors_bad_type() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: true
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1475,7 +1518,7 @@ supergraph:
 
     #[test]
     fn line_precise_config_errors_with_inline_sequence() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1484,6 +1527,7 @@ supergraph:
 cors:
   allow_headers: [ Content-Type, 5 ]
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1491,7 +1535,7 @@ cors:
 
     #[test]
     fn line_precise_config_errors_with_sequence() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1502,6 +1546,7 @@ cors:
     - Content-Type
     - 5
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1509,12 +1554,13 @@ cors:
 
     #[test]
     fn it_does_not_allow_invalid_cors_headers() {
-        let cfg = validate_configuration(
+        let cfg = validate_yaml_configuration(
             r#"
 cors:
   allow_credentials: true
   allow_headers: [ "*" ]
         "#,
+            Expansion::default().unwrap(),
         )
         .expect("should not have resulted in an error");
         let error = cfg
@@ -1526,12 +1572,13 @@ cors:
 
     #[test]
     fn it_does_not_allow_invalid_cors_methods() {
-        let cfg = validate_configuration(
+        let cfg = validate_yaml_configuration(
             r#"
 cors:
   allow_credentials: true
   methods: [ GET, "*" ]
         "#,
+            Expansion::default().unwrap(),
         )
         .expect("should not have resulted in an error");
         let error = cfg
@@ -1543,12 +1590,13 @@ cors:
 
     #[test]
     fn it_does_not_allow_invalid_cors_origins() {
-        let cfg = validate_configuration(
+        let cfg = validate_yaml_configuration(
             r#"
 cors:
   allow_credentials: true
   allow_any_origin: true
         "#,
+            Expansion::default().unwrap(),
         )
         .expect("should not have resulted in an error");
         let error = cfg
@@ -1608,7 +1656,9 @@ cors:
                 };
 
                 for yaml in yamls {
-                    if let Err(e) = validate_configuration(&yaml) {
+                    if let Err(e) =
+                        validate_yaml_configuration(&yaml, Expansion::default().unwrap())
+                    {
                         panic!(
                             "{} configuration error: \n{}",
                             entry.path().to_string_lossy(),
@@ -1623,11 +1673,12 @@ cors:
     #[test]
     fn it_does_not_leak_env_variable_values() {
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("Must have an error because we expect a boolean");
         insta::assert_snapshot!(error.to_string());
@@ -1636,7 +1687,7 @@ supergraph:
     #[test]
     fn line_precise_config_errors_with_inline_sequence_env_expansion() {
         std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1645,6 +1696,7 @@ supergraph:
 cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1654,7 +1706,7 @@ cors:
     fn line_precise_config_errors_with_sequence_env_expansion() {
         std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
 
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1665,6 +1717,7 @@ cors:
     - Content-Type
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1672,7 +1725,7 @@ cors:
 
     #[test]
     fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   # The socket address and port to listen on
@@ -1681,6 +1734,7 @@ supergraph:
   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
   another_one: foo
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("should have resulted in an error");
         insta::assert_snapshot!(error.to_string());
@@ -1688,11 +1742,12 @@ supergraph:
 
     #[test]
     fn expansion_failure_missing_variable() {
-        let error = validate_configuration(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
+            Expansion::default().unwrap(),
         )
         .expect_err("must have an error because the env variable is unknown");
         insta::assert_snapshot!(error.to_string());
@@ -1700,7 +1755,7 @@ supergraph:
 
     #[test]
     fn expansion_failure_unknown_mode() {
-        let error = validate_configuration_internal(
+        let error = validate_yaml_configuration(
             r#"
 supergraph:
   introspection: ${unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
@@ -1717,7 +1772,7 @@ supergraph:
     #[test]
     fn expansion_prefixing() {
         std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
-        validate_configuration_internal(
+        validate_yaml_configuration(
             r#"
 supergraph:
   introspection: ${env.NEEDS_PREFIX}
@@ -1737,7 +1792,7 @@ supergraph:
         path.push("configuration");
         path.push("testdata");
         path.push("true.txt");
-        let config = validate_configuration_internal(
+        let config = validate_yaml_configuration(
             &format!(
                 r#"
 supergraph:

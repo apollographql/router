@@ -1227,7 +1227,7 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
+                    Configuration::fake_builder()
                         .sandbox(
                             crate::configuration::Sandbox::fake_builder()
                                 .enabled(true)
@@ -1243,7 +1243,8 @@ mod tests {
                                 .enabled(false)
                                 .build(),
                         )
-                        .build(),
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1332,7 +1333,8 @@ mod tests {
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
-                        .build(),
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1351,7 +1353,8 @@ mod tests {
         let conf = Configuration::fake_builder()
             .sandbox(Sandbox::fake_builder().enabled(true).build())
             .homepage(Homepage::fake_builder().enabled(false).build())
-            .build();
+            .build()
+            .unwrap();
 
         let (server, client) =
             init_with_config(expectations, conf.clone(), MultiMap::new()).await?;
@@ -1391,7 +1394,8 @@ mod tests {
                     .enabled(true)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let (server, client) =
             init_with_config(expectations, conf.clone(), Default::default()).await?;
@@ -1430,7 +1434,8 @@ mod tests {
                     .enabled(true)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let (server, client) =
             init_with_config(expectations, conf.clone(), Default::default()).await?;
@@ -1731,7 +1736,8 @@ mod tests {
                     .path(String::from("/graphql"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/graphql",
@@ -1797,7 +1803,8 @@ mod tests {
                     .path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/prefix/graphql",
@@ -1863,7 +1870,8 @@ mod tests {
                     .path(String::from("/graphql/*"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         for url in &[
             format!(
@@ -2090,7 +2098,8 @@ mod tests {
                     .path(String::from("/graphql/*"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         let response = client
@@ -2296,7 +2305,8 @@ Content-Type: application/json\r
                     .enabled(false)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
@@ -2322,7 +2332,8 @@ Content-Type: application/json\r
                     .enabled(false)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
@@ -2366,7 +2377,7 @@ Content-Type: application/json\r
             Endpoint::new("/an-other-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::fake_builder().build();
+        let conf = Configuration::fake_builder().build().unwrap();
         let (server, client) = init_with_config(expectations, conf, web_endpoints).await?;
 
         for path in &["/a-custom-path", "/an-other-custom-path"] {
@@ -2413,7 +2424,8 @@ Content-Type: application/json\r
                     .build(),
             )
             .supergraph(crate::configuration::Supergraph::fake_builder().build())
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
 
@@ -2465,7 +2477,8 @@ Content-Type: application/json\r
                     .enabled(true)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let error = init_with_config(MockSupergraphService::new(), conf, MultiMap::new())
             .await
@@ -2499,7 +2512,7 @@ Content-Type: application/json\r
             Endpoint::new("/a-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::fake_builder().build();
+        let conf = Configuration::fake_builder().build().unwrap();
         let error = init_with_config(MockSupergraphService::new(), conf, web_endpoints)
             .await
             .unwrap_err();
@@ -2597,7 +2610,8 @@ Content-Type: application/json\r
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         let conf = Configuration::fake_builder()
             .cors(Cors::builder().allow_any_origin(true).build())
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2619,7 +2633,8 @@ Content-Type: application/json\r
                     .origins(vec![valid_origin.to_string()])
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2645,7 +2660,8 @@ Content-Type: application/json\r
                     .match_origins(vec![apollo_subdomains.to_string()])
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2875,7 +2891,7 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
-        let configuration = Configuration::fake_builder().build();
+        let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
             .await
@@ -2895,7 +2911,8 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("0.0.0.0:4010").unwrap())
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let error = init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
             .await
@@ -2914,7 +2931,8 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let endpoint = service_fn(|_req: transport::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
@@ -2949,7 +2967,8 @@ Content-Type: application/json\r
                         .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                         .build(),
                 )
-                .build(),
+                .build()
+                .unwrap(),
         );
         let endpoint = service_fn(|_req: transport::Request| async move {
             Ok::<_, BoxError>(
