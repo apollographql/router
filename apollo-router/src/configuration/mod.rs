@@ -366,6 +366,20 @@ impl Configuration {
 
 impl Configuration {
     fn validate(self) -> Result<Self, ConfigurationError> {
+        // Sandbox and Homepage cannot be both enabled
+        if self.sandbox.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable sandbox".to_string(),
+            });
+        }
+        // Sandbox needs Introspection to be enabled
+        if self.sandbox.enabled && !self.supergraph.introspection {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox requires introspection",
+                error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
         Ok(self)
     }
 }
@@ -483,12 +497,6 @@ fn default_defer_support() -> bool {
     true
 }
 
-impl Supergraph {
-    pub(crate) fn endpoint_url(&self) -> String {
-        format!("{}{}", self.listen, self.path)
-    }
-}
-
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
@@ -536,16 +544,6 @@ impl Default for Supergraph {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_graphql_listen")]
-    pub(crate) listen: ListenAddr,
-
-    /// The HTTP path on which the sandbox page will be served.
-    /// default: "/"
-    #[serde(default = "default_graphql_path")]
-    pub(crate) path: String,
-
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
@@ -557,14 +555,8 @@ fn default_sandbox() -> bool {
 #[buildstructor::buildstructor]
 impl Sandbox {
     #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_graphql_listen),
-            path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
@@ -574,14 +566,8 @@ impl Sandbox {
 #[buildstructor::buildstructor]
 impl Sandbox {
     #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        enabled: Option<bool>,
-    ) -> Self {
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(test_listen),
-            path: path.unwrap_or_else(default_graphql_path),
             enabled: enabled.unwrap_or_else(default_sandbox),
         }
     }
@@ -595,15 +581,11 @@ impl Default for Sandbox {
 
 #[derive(Template)]
 #[template(path = "sandbox_index.html")]
-struct SandboxTemplate<'a> {
-    supergraph_endpoint_url: &'a str,
-}
+struct SandboxTemplate {}
 
 impl Sandbox {
-    pub(crate) fn display_page(supergraph_endpoint_url: &str) -> Bytes {
-        let template = SandboxTemplate {
-            supergraph_endpoint_url,
-        };
+    pub(crate) fn display_page() -> Bytes {
+        let template = SandboxTemplate {};
         template.render().unwrap().into()
     }
 }
