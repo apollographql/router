@@ -68,7 +68,7 @@ pub struct TestHarness<'a> {
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
 impl<'a> TestHarness<'a> {
-    #![allow(missing_docs)] // FIXME
+    /// Creates a new builder.
     pub fn builder() -> Self {
         Self {
             schema: None,
@@ -167,7 +167,6 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    /// Builds the GraphQL service
     async fn build_common(self) -> Result<(Arc<Configuration>, RouterCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
@@ -203,6 +202,7 @@ impl<'a> TestHarness<'a> {
         Ok((config, router_creator))
     }
 
+    /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
         Ok(tower::service_fn(move |request| {
