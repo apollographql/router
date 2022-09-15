@@ -1,8 +1,6 @@
-//! Extension of map_future layer. Allows mapping of the future using some information obtained from the request.
+//! Extension of map_future layer. Allows mapping of the future using information obtained from the request.
 //!
 //! See [`Layer`] and [`Service`] for more details.
-
-#![allow(missing_docs)] // FIXME
 
 use std::future::Future;
 use std::task::Context;
@@ -11,6 +9,7 @@ use std::task::Poll;
 use tower::Layer;
 use tower::Service;
 
+/// [`Layer`] for mapping futures with request data. See [`ServiceBuilderExt::map_future_with_request_data()`](crate::layers::ServiceBuilderExt::map_future_with_request_data()).
 #[derive(Clone)]
 pub struct MapFutureWithRequestDataLayer<RF, MF> {
     req_fn: RF,
@@ -18,6 +17,7 @@ pub struct MapFutureWithRequestDataLayer<RF, MF> {
 }
 
 impl<RF, MF> MapFutureWithRequestDataLayer<RF, MF> {
+    /// Create a new instance.
     pub fn new(req_fn: RF, map_fn: MF) -> Self {
         Self { req_fn, map_fn }
     }
@@ -35,6 +35,7 @@ where
     }
 }
 
+/// [`Service`] for mapping futures with request data. See [`ServiceBuilderExt::map_future_with_request_data()`](crate::layers::ServiceBuilderExt::map_future_with_request_data()).
 pub struct MapFutureWithRequestDataService<S, RF, MF> {
     inner: S,
     req_fn: RF,
@@ -42,6 +43,7 @@ pub struct MapFutureWithRequestDataService<S, RF, MF> {
 }
 
 impl<S, RF, MF> MapFutureWithRequestDataService<S, RF, MF> {
+    /// Create a new instance.
     pub fn new(inner: S, req_fn: RF, map_fn: MF) -> MapFutureWithRequestDataService<S, RF, MF>
     where
         RF: Clone,
