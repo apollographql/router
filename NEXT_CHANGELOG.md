@@ -45,4 +45,10 @@ Now that apollo-router version "1.0.0-rc.0" is released on [crates.io](https://c
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1782
 
+### Refactor Configuration validation [#1791](https://github.com/apollographql/router/issues/1791)
+
+Instantiating `Configuration`s is now fallible, because it will run consistency checks on top of the already run structure checks.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1794
+
 ## 📚 Documentation
