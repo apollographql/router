@@ -249,24 +249,26 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
-            _ => opt
-                .config_path
-                .as_ref()
-                .map(|path| {
-                    let path = if path.is_relative() {
-                        current_directory.join(path)
-                    } else {
-                        path.to_path_buf()
-                    };
+            _ => match opt.config_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
 
-                    ConfigurationSource::File {
-                        path,
-                        watch: opt.hot_reload,
-                        delay: None,
-                        dev: opt.dev,
-                    }
-                })
-                .unwrap_or_else(|| Configuration::builder().dev(opt.dev).build().into()),
+                ConfigurationSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                    dev: opt.dev,
+                }
+            }) {
+                Some(configuration) => configuration,
+                None => Configuration::builder()
+                    .dev(opt.dev)
+                    .build()
+                    .map(std::convert::Into::into)?,
+            },
         };
 
         let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
