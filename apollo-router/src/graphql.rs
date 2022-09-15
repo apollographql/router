@@ -82,7 +82,7 @@ impl Error {
     ///   Optional.
     ///   Sets [`Error::path`].
     ///
-    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`], [`Value`]`>>)`
+    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`]`, `[`Value`]`>>)`
     ///   Optional.
     ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
     ///
