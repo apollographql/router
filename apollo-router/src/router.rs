@@ -689,6 +689,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
     async fn config_by_file_dev_mode() {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
@@ -725,6 +726,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
     async fn config_dev_mode_without_file() {
         std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
         let mut stream = ConfigurationSource::from(Configuration::builder().build().unwrap())
