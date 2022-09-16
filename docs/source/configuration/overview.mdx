@@ -283,43 +283,17 @@ homepage:
 
 ### Sandbox
 
-You can enable the sandbox by editing your configuration file. Make sure introspection is enabled as well:
+You can enable the sandbox by editing your configuration file. Make sure introspection is enabled as well, and that homepage is disabled:
 
 ```yaml title="router.yaml"
 sandbox:
-  listen: 127.0.0.1:4000
-  path: /sandbox
   enabled: true
-# make sure you enable introspection as well!
+# make sure you enable introspection
 supergraph:
   introspection: true
-```
-
-The sandbox default path is `/`, which will conflict with the homepage if both are enabled.
-You can work around this by either disabling the homepage...:
-
-```yaml title="router.yaml"
+# make sure homepage is disabled
 homepage:
   enabled: false
-sandbox:
-  listen: 127.0.0.1:4000
-  path: /sandbox
-  enabled: true
-# make sure you enable introspection as well!
-supergraph:
-  introspection: true
-```
-
-...or changing the sandbox port or path:
-
-```yaml title="router.yaml"
-sandbox:
-  listen: 127.0.0.1:4010
-  path: /sandbox
-  enabled: true
-# make sure you enable introspection as well!
-supergraph:
-  introspection: true
 ```
 
 ### Subgraph routing URLs

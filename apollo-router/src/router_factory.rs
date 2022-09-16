@@ -390,7 +390,7 @@ mod test {
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
-        let config = Configuration::builder().build();
+        let config = Configuration::builder().build().unwrap();
         let service = create_service(config).await;
         assert!(service.is_ok())
     }
