@@ -46,6 +46,7 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
+        can_be_deferred: bool,
         variables: Object,
         schema: &Schema,
     ) {
@@ -59,39 +60,41 @@ impl Query {
                     .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
                 None => self.operations.get(0),
             };
-            if let Some(subselection) = &response.subselection {
-                // Get subselection from hashmap
-                match self.subselections.get(&(
-                    //FIXME: we should not have optional paths at all in the subselections map
-                    response.path.clone().or_else(|| Some(Path::default())),
-                    subselection.clone(),
-                )) {
-                    Some(subselection_query) => {
-                        let mut output = Object::default();
-                        let operation = &subselection_query.operations[0];
-                        let mut parameters = FormatParameters {
-                            variables: &variables,
-                            schema,
-                            errors: Vec::new(),
-                        };
-                        response.data = Some(
-                            match self.apply_root_selection_set(
-                                operation,
-                                &mut parameters,
-                                &mut input,
-                                &mut output,
-                                &mut Path::default(),
-                            ) {
-                                Ok(()) => output.into(),
-                                Err(InvalidValue) => Value::Null,
-                            },
-                        );
+            if can_be_deferred {
+                if let Some(subselection) = &response.subselection {
+                    // Get subselection from hashmap
+                    match self.subselections.get(&(
+                        //FIXME: we should not have optional paths at all in the subselections map
+                        response.path.clone().or_else(|| Some(Path::default())),
+                        subselection.clone(),
+                    )) {
+                        Some(subselection_query) => {
+                            let mut output = Object::default();
+                            let operation = &subselection_query.operations[0];
+                            let mut parameters = FormatParameters {
+                                variables: &variables,
+                                schema,
+                                errors: Vec::new(),
+                            };
+                            response.data = Some(
+                                match self.apply_root_selection_set(
+                                    operation,
+                                    &mut parameters,
+                                    &mut input,
+                                    &mut output,
+                                    &mut Path::default(),
+                                ) {
+                                    Ok(()) => output.into(),
+                                    Err(InvalidValue) => Value::Null,
+                                },
+                            );
 
-                        response.errors.extend(parameters.errors.into_iter());
+                            response.errors.extend(parameters.errors.into_iter());
 
-                        return;
+                            return;
+                        }
+                        None => failfast_debug!("can't find subselection for {:?}", subselection),
                     }
-                    None => failfast_debug!("can't find subselection for {:?}", subselection),
                 }
             } else if let Some(operation) = operation {
                 let mut output = Object::default();

@@ -314,6 +314,7 @@ fn process_execution_response(
                 query.format_response(
                     &mut response,
                     operation_name.as_deref(),
+                    can_be_deferred,
                     variables.clone(),
                     schema.api_schema(),
                 )
