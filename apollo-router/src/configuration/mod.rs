@@ -252,8 +252,7 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
         };
-        println!("HERE");
-        if dbg!(std::env::var(APOLLO_ROUTER_DEV_ENV)).ok().as_deref() == Some("true") {
+        if std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true") {
             println!("DEV MODE!!!");
             conf.enable_dev_mode();
         }
