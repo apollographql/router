@@ -95,6 +95,10 @@ impl Query {
                         }
                         None => failfast_debug!("can't find subselection for {:?}", subselection),
                     }
+                // the primary query was empty, we return an empty object
+                } else {
+                    response.data = Some(Value::Object(Object::default()));
+                    return;
                 }
             } else if let Some(operation) = operation {
                 let mut output = Object::default();

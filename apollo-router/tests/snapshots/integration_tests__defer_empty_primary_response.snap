@@ -3,6 +3,6 @@ source: apollo-router/tests/integration_tests.rs
 expression: first
 ---
 {
-  "data": null,
+  "data": {},
   "hasNext": true
 }
