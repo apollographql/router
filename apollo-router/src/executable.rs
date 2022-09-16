@@ -278,7 +278,7 @@ impl Executable {
             "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
         };
 
-        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)\n{}", std::env!("CARGO_PKG_VERSION"), apollo_telemetry_msg);
+        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
         let schema = match (schema, opt.supergraph_path, opt.apollo_key) {
             (Some(_), Some(_), _) => {
                 return Err(anyhow!(
@@ -288,6 +288,8 @@ impl Executable {
             (Some(source), None, _) => source,
             (_, Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+
                 setup_panic_handler(dispatcher.clone());
 
                 let supergraph_path = if supergraph_path.is_relative() {
@@ -303,6 +305,7 @@ impl Executable {
             }
             (_, None, Some(apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
 
                 let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
                 if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
