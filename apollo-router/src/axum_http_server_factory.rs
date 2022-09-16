@@ -317,23 +317,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
             // if we received a TCP listener, reuse it, otherwise create a new one
             let main_listener = match all_routers.main.0.clone() {
                 ListenAddr::SocketAddr(addr) => {
-                    match main_listener
-                        .take()
-                        .map(|listener| {
-                            listener
-                                .local_addr()
-                                .ok()
-                                .map(|l| {
-                                    if l == ListenAddr::SocketAddr(addr) {
-                                        Some(listener)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .flatten()
+                    match main_listener.take().and_then(|listener| {
+                        listener.local_addr().ok().and_then(|l| {
+                            if l == ListenAddr::SocketAddr(addr) {
+                                Some(listener)
+                            } else {
+                                None
+                            }
                         })
-                        .flatten()
-                    {
+                    }) {
                         Some(listener) => listener,
                         None => Listener::Tcp(
                             TcpListener::bind(addr)
@@ -344,23 +336,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 }
                 #[cfg(unix)]
                 ListenAddr::UnixSocket(path) => {
-                    match main_listener
-                        .take()
-                        .map(|listener| {
-                            listener
-                                .local_addr()
-                                .ok()
-                                .map(|l| {
-                                    if l == ListenAddr::UnixSocket(path.clone()) {
-                                        Some(listener)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .flatten()
+                    match main_listener.take().and_then(|listener| {
+                        listener.local_addr().ok().and_then(|l| {
+                            if l == ListenAddr::UnixSocket(path.clone()) {
+                                Some(listener)
+                            } else {
+                                None
+                            }
                         })
-                        .flatten()
-                    {
+                    }) {
                         Some(listener) => listener,
                         None => Listener::Unix(
                             UnixListener::bind(path)
