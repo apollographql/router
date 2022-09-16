@@ -57,6 +57,13 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 
 ## 🚀 Features
+
+### Automatically check "Return Query Plans from Router" checkbox in Sandbox ([Issue #](https://github.com/apollographql/router/issues/1803))
+
+When loading Sandbox, we now automatically configure it to toggle the "Request query plans from Router" checkbox to the enabled position which requests query plans from the Apollo Router when executing operations.  These query plans are displayed in the Sandbox interface and can be seen by selecting "Query Plan Preview" from the drop-down above the panel on the right side of the interface.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1804
+
 ## 🐛 Fixes
 
 ### Respect supergraph path for kubernetes deployment probes (#1787)
