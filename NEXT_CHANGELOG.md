@@ -103,6 +103,12 @@ This _also_ fixes _default value_ validations for non-`@defer`'d queries.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1640
 
+### Correctly hot-reload when changing the `supergraph`'s `listen` socket ([Issue #1814](https://github.com/apollographql/router/issues/1814))
+
+If you change the `supergraph`'s `listen` socket while in `--hot-reload` mode, the Router will now correctly pickup the change and bind to the new socket.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1815
+
 ## 🛠 Maintenance
 
 ### Update `apollo-router-scaffold` to use the published `apollo-router` crate [PR #1782](https://github.com/apollographql/router/pull/1782)
