@@ -111,6 +111,23 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🛠 Maintenance
 
+### Improve error message when querying non existent field [Issue #1816](https://github.com/apollographql/router/issues/1816)
+
+When querying a non-existent field you will get a better error message:
+
+```patch
+{
+  "errors": [
+    {
+-       "message": "invalid type error, expected another type than 'Named type Computer'"
++       "message": "Cannot query field \"xxx\" on type \"Computer\""
+    }
+  ]
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1817
+
 ### Update `apollo-router-scaffold` to use the published `apollo-router` crate [PR #1782](https://github.com/apollographql/router/pull/1782)
 
 Now that `apollo-router` is released on [crates.io](https://crates.io/crates/apollo-router), we have updated the project scaffold to rely on the published crate instead of Git tags.

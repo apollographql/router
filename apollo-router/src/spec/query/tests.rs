@@ -1649,7 +1649,7 @@ fn filter_nested_object_errors() {
         }})
         .expected_errors(json! {[
             {
-                "message": "Cannot return null for non-nullable field Named type Review.text2",
+                "message": "Cannot return null for non-nullable field Review.text2",
                 "path": ["me", "reviews1", 0]
             }
         ]})
