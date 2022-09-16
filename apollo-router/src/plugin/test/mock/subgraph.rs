@@ -61,7 +61,10 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::new_from_response(http_response, req.context)
         } else {
             let error = crate::error::Error::builder()
-                .message("couldn't find mock for query".to_string())
+                .message(format!(
+                    "couldn't find mock for query {}",
+                    serde_json::to_string(&req.subgraph_request.body()).unwrap()
+                ))
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();
             SubgraphResponse::fake_builder()
