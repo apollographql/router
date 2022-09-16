@@ -1022,6 +1022,8 @@ fn variable_validation() {
     // https://spec.graphql.org/June2018/#sec-Int
     assert_validation!(schema, "query($foo:Int){x}", json!({}));
     assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int=1){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int!=1){x}", json!({}));
     // When expected as an input type, only integer input values are accepted.
     assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
     assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
@@ -1078,6 +1080,9 @@ fn variable_validation() {
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": 0}));
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": "no"}));
+
+    assert_validation!(schema, "query($foo:Boolean=true){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean!=true){x}", json!({}));
 
     // https://spec.graphql.org/June2018/#sec-ID
     assert_validation!(schema, "query($foo:ID){x}", json!({}));

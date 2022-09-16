@@ -27,6 +27,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::execution::QueryPlan;
 use super::new_service::NewService;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
@@ -51,7 +52,6 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::spec::Query;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -201,7 +201,8 @@ where
             *response.response.status_mut() = StatusCode::BAD_REQUEST;
             Ok(response)
         }
-        Some(QueryPlannerContent::Plan { query, plan }) => {
+
+        Some(QueryPlannerContent::Plan { plan }) => {
             let can_be_deferred = plan.root.contains_defer();
 
             if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
@@ -212,7 +213,7 @@ where
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
-            } else if let Some(err) = query.validate_variables(body, &schema).err() {
+            } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
@@ -223,7 +224,7 @@ where
                     .oneshot(
                         ExecutionRequest::builder()
                             .supergraph_request(req.supergraph_request)
-                            .query_plan(plan)
+                            .query_plan(plan.clone())
                             .context(context)
                             .build(),
                     )
@@ -231,7 +232,7 @@ where
 
                 process_execution_response(
                     execution_response,
-                    query,
+                    plan,
                     operation_name,
                     variables,
                     schema,
@@ -298,7 +299,7 @@ fn accepts_multipart(headers: &HeaderMap) -> bool {
 
 fn process_execution_response(
     execution_response: ExecutionResponse,
-    query: Arc<Query>,
+    plan: Arc<QueryPlan>,
     operation_name: Option<String>,
     variables: Map<ByteString, Value>,
     schema: Arc<Schema>,
@@ -311,7 +312,7 @@ fn process_execution_response(
     let stream = response_stream
         .map(move |mut response: Response| {
             tracing::debug_span!("format_response").in_scope(|| {
-                query.format_response(
+                plan.query.format_response(
                     &mut response,
                     operation_name.as_deref(),
                     can_be_deferred,
