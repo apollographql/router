@@ -649,12 +649,21 @@ impl PlanNode {
                     errors = Vec::new();
 
                     let v: &Value = parameters
-                    .supergraph_request
-                    .body()
-                    .variables
-                    .get(condition.as_str()).or_else(|| parameters.query.default_variable_value(parameters
-                        .supergraph_request.body().operation_name.as_deref(),condition.as_str()))
-                    .expect("defer expects a `Boolean!` so the variable should be non null too and present or with a default value");
+                        .supergraph_request
+                        .body()
+                        .variables
+                        .get(condition.as_str())
+                        .or_else(|| {
+                            parameters.query.default_variable_value(
+                                parameters
+                                    .supergraph_request
+                                    .body()
+                                    .operation_name
+                                    .as_deref(),
+                                condition.as_str(),
+                            )
+                        })
+                        .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 
                     if let &Value::Bool(true) = v {
                         //FIXME: should we show an error if the if_node was not present?
