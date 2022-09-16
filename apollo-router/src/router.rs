@@ -36,7 +36,6 @@ use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::axum_http_server_factory::ListenAddrAndRouter;
 use crate::configuration::Configuration;
-use crate::configuration::ConfigurationError;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
@@ -697,7 +696,7 @@ mod tests {
         assert!(std::env::var(APOLLO_ROUTER_DEV_ENV).is_ok());
         let mut stream = ConfigurationSource::File {
             path,
-            watch: true,
+            watch: false,
             delay: Some(Duration::from_millis(10)),
         }
         .into_stream()
@@ -706,7 +705,9 @@ mod tests {
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,
-            _ => panic!("the event from the stream must be UpdateConfiguration"),
+            other => {
+                panic!("the event from the stream must be UpdateConfiguration but it's {other:?}")
+            }
         };
         assert!(cfg.supergraph.introspection);
         assert!(!cfg.homepage.enabled);
@@ -720,29 +721,6 @@ mod tests {
             .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
         cfg.validate().unwrap();
-
-        // Modify the file and try again
-        write_and_flush(&mut file, contents).await;
-        let cfg = match stream.next().await.unwrap() {
-            UpdateConfiguration(configuration) => configuration,
-            _ => panic!("the event from the stream must be UpdateConfiguration"),
-        };
-        assert!(cfg.supergraph.introspection);
-        assert!(!cfg.homepage.enabled);
-        assert!(cfg.sandbox.enabled);
-        assert!(cfg.plugins().iter().any(
-            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
-        ));
-        assert!(cfg
-            .plugins()
-            .iter()
-            .any(|(name, val)| name == "apollo.include_subgraph_errors"
-                && val == &json!({"all": true})));
-        cfg.validate().unwrap();
-
-        // This time write garbage, there should not be an update.
-        write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
