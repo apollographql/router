@@ -690,12 +690,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_dev_mode_without_file() {
-        std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
         let mut stream =
             ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
                 .into_stream()
                 .boxed();
-        std::env::remove_var(APOLLO_ROUTER_DEV_ENV);
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,
