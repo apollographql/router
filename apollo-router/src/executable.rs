@@ -62,6 +62,10 @@ pub(crate) struct Opt {
     )]
     config_path: Option<PathBuf>,
 
+    /// Enable development mode.
+    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", hide(true))]
+    dev: bool,
+
     /// Schema location relative to the project directory.
     #[clap(
         short,
@@ -206,7 +210,11 @@ impl Executable {
         );
 
         let dispatcher = if atty::is(atty::Stream::Stdout) {
-            Dispatch::new(builder.finish())
+            Dispatch::new(
+                builder
+                    .with_target(!opt.log_level.eq_ignore_ascii_case("info"))
+                    .finish(),
+            )
         } else {
             Dispatch::new(builder.json().finish())
         };
@@ -227,10 +235,12 @@ impl Executable {
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
-        opt: Opt,
+        mut opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+        // Enable hot reload when dev mode is enabled
+        opt.hot_reload = opt.hot_reload || opt.dev;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -239,23 +249,33 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
-            _ => opt
-                .config_path
-                .as_ref()
-                .map(|path| {
-                    let path = if path.is_relative() {
-                        current_directory.join(path)
-                    } else {
-                        path.to_path_buf()
-                    };
+            _ => match opt.config_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
 
-                    ConfigurationSource::File {
-                        path,
-                        watch: opt.hot_reload,
-                        delay: None,
-                    }
-                })
-                .unwrap_or_else(|| Configuration::builder().build().into()),
+                ConfigurationSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                    dev: opt.dev,
+                }
+            }) {
+                Some(configuration) => configuration,
+                None => Configuration::builder()
+                    .dev(opt.dev)
+                    .build()
+                    .map(std::convert::Into::into)?,
+            },
+        };
+
+        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
+        let apollo_telemetry_msg = if is_telemetry_disabled {
+            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        } else {
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
@@ -268,6 +288,8 @@ impl Executable {
             (Some(source), None, _) => source,
             (_, Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+
                 setup_panic_handler(dispatcher.clone());
 
                 let supergraph_path = if supergraph_path.is_relative() {
@@ -283,6 +305,7 @@ impl Executable {
             }
             (_, None, Some(apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
 
                 let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
                 if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
@@ -334,9 +357,9 @@ impl Executable {
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router with the supergraph schema:
+  2. Run the Apollo Router in development mode with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --dev --supergraph starstuff.graphql
 
     "#
                 ));

@@ -56,6 +56,7 @@ pub struct QueryPlan {
     pub(crate) root: PlanNode,
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
+    pub(crate) query: Arc<Query>,
     options: QueryPlanOptions,
 }
 
@@ -75,6 +76,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         }
     }
@@ -303,6 +305,7 @@ impl QueryPlan {
                     schema,
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
+                    query: &self.query,
                     options: &self.options,
                 },
                 &root,
@@ -330,6 +333,7 @@ pub(crate) struct ExecutionParameters<'a, SF> {
     schema: &'a Schema,
     supergraph_request: &'a Arc<http::Request<Request>>,
     deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
+    query: &'a Arc<Query>,
     options: &'a QueryPlanOptions,
 }
 
@@ -492,10 +496,10 @@ impl PlanNode {
                         let sf = parameters.service_factory.clone();
                         let ctx = parameters.context.clone();
                         let opt = parameters.options.clone();
+                        let query = parameters.query.clone();
                         let mut primary_receiver = primary_sender.subscribe();
                         let mut value = parent_value.clone();
                         let fut = async move {
-                            let mut has_next = true;
                             let mut errors = Vec::new();
 
                             if is_depends_empty {
@@ -527,6 +531,7 @@ impl PlanNode {
                                             schema: &sc,
                                             supergraph_request: &orig,
                                             deferred_fetches: &deferred_fetches,
+                                            query: &query,
                                             options: &opt,
                                         },
                                         &Path::default(),
@@ -540,7 +545,6 @@ impl PlanNode {
                                 if !is_depends_empty {
                                     let primary_value =
                                         primary_receiver.recv().await.unwrap_or_default();
-                                    has_next = false;
                                     v.deep_merge(primary_value);
                                 }
 
@@ -548,7 +552,6 @@ impl PlanNode {
                                     .send(
                                         Response::builder()
                                             .data(v)
-                                            .has_next(has_next)
                                             .errors(err)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection.or(node_subselection))
@@ -563,16 +566,16 @@ impl PlanNode {
                                         e
                                     );
                                 };
+                                tx.disconnect();
                             } else {
                                 let primary_value =
                                     primary_receiver.recv().await.unwrap_or_default();
-                                has_next = false;
                                 value.deep_merge(primary_value);
+
                                 if let Err(e) = tx
                                     .send(
                                         Response::builder()
                                             .data(value)
-                                            .has_next(has_next)
                                             .errors(errors)
                                             .and_path(Some(deferred_path.clone()))
                                             .and_subselection(subselection)
@@ -587,6 +590,7 @@ impl PlanNode {
                                         e
                                     );
                                 }
+                                tx.disconnect();
                             };
                         };
 
@@ -613,6 +617,7 @@ impl PlanNode {
                                     supergraph_request: parameters.supergraph_request,
                                     deferred_fetches: &deferred_fetches,
                                     options: parameters.options,
+                                    query: parameters.query,
                                 },
                                 current_dir,
                                 &value,
@@ -643,12 +648,15 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    if let Some(&Value::Bool(true)) = parameters
-                        .supergraph_request
-                        .body()
-                        .variables
-                        .get(condition.as_str())
-                    {
+                    let v: &Value = parameters
+                    .supergraph_request
+                    .body()
+                    .variables
+                    .get(condition.as_str()).or_else(|| parameters.query.default_variable_value(parameters
+                        .supergraph_request.body().operation_name.as_deref(),condition.as_str()))
+                    .expect("defer expects a `Boolean!` so the variable should be non null too and present or with a default value");
+
+                    if let &Value::Bool(true) = v {
                         //FIXME: should we show an error if the if_node was not present?
                         if let Some(node) = if_clause {
                             let span = tracing::info_span!("condition_if");
@@ -1274,6 +1282,7 @@ mod tests {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
             formatted_query_plan: Default::default(),
             options: QueryPlanOptions::default(),
+            query: Arc::new(Query::default()),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -1327,6 +1336,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1381,6 +1391,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1494,6 +1505,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 
@@ -1569,7 +1581,7 @@ mod tests {
             serde_json::to_value(&response).unwrap(),
             // the primary response appears there because the deferred response gets data from it
             // unneeded parts are removed in response formatting
-            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}}, "hasNext": false, "path":["t"]}}
+            serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
         );
     }
 
@@ -1644,6 +1656,7 @@ mod tests {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
+            query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         };
 

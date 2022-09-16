@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/configuration/mod.rs
+expression: error.to_string()
+---
+could not expand variable: unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT. Variables must be prefixed with one of 'env' followed by '.' e.g. 'env.'
