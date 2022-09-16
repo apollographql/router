@@ -2833,20 +2833,6 @@ Content-Type: application/json\r
                 .build()
                 .unwrap(),
         );
-        let endpoint = service_fn(|_req: transport::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
-                    .body("this is a test".to_string().into())
-                    .unwrap(),
-            )
-        })
-        .boxed();
-
-        let mut web_endpoints = MultiMap::new();
-        web_endpoints.insert(
-            SocketAddr::from_str("127.0.0.1:5000").unwrap().into(),
-            Endpoint::new("/".to_string(), endpoint),
-        );
 
         let server_factory = AxumHttpServerFactory::new();
         let (service, _) = tower_test::mock::spawn();
@@ -2861,20 +2847,62 @@ Content-Type: application/json\r
                 Arc::clone(&configuration),
                 None,
                 vec![],
-                web_endpoints.clone(),
+                MultiMap::new(),
             )
             .await
             .expect("Failed to create server factory");
+
+        let client = reqwest::Client::builder().build().unwrap();
+
+        // Regular studio redirect
+        let response = client
+            .get("http://localhost:4010/")
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+
+        // change the listenaddrs
+        let configuration = Arc::new(
+            Configuration::fake_builder()
+                .supergraph(
+                    Supergraph::fake_builder()
+                        .listen(SocketAddr::from_str("127.0.0.1:4020").unwrap())
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        );
 
         server
             .restart(
                 &server_factory,
                 supergraph_service_factory,
                 Arc::clone(&configuration),
-                web_endpoints,
+                MultiMap::new(),
             )
             .await
             .unwrap();
+
+        // Regular studio redirect
+        let response = client
+            .get("http://localhost:4020/")
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
     }
 
     /// A counter of how many GraphQL responses have been sent by an Apollo Router
