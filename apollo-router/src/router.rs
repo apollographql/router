@@ -689,49 +689,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial_test::serial]
-    async fn config_by_file_dev_mode() {
-        let (path, mut file) = create_temp_file();
-        let contents = include_str!("testdata/supergraph_config.yaml");
-        write_and_flush(&mut file, contents).await;
-        std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
-        assert!(std::env::var(APOLLO_ROUTER_DEV_ENV).is_ok());
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: false,
-            delay: Some(Duration::from_millis(10)),
-        }
-        .into_stream()
-        .boxed();
-        std::env::remove_var(APOLLO_ROUTER_DEV_ENV);
-
-        let cfg = match stream.next().await.unwrap() {
-            UpdateConfiguration(configuration) => configuration,
-            other => {
-                panic!("the event from the stream must be UpdateConfiguration but it's {other:?}")
-            }
-        };
-        assert!(cfg.supergraph.introspection);
-        assert!(!cfg.homepage.enabled);
-        assert!(cfg.sandbox.enabled);
-        assert!(cfg.plugins().iter().any(
-            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
-        ));
-        assert!(cfg
-            .plugins()
-            .iter()
-            .any(|(name, val)| name == "apollo.include_subgraph_errors"
-                && val == &json!({"all": true})));
-        cfg.validate().unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial_test::serial]
     async fn config_dev_mode_without_file() {
         std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
-        let mut stream = ConfigurationSource::from(Configuration::builder().build().unwrap())
-            .into_stream()
-            .boxed();
+        let mut stream =
+            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
+                .into_stream()
+                .boxed();
         std::env::remove_var(APOLLO_ROUTER_DEV_ENV);
 
         let cfg = match stream.next().await.unwrap() {

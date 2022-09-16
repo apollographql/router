@@ -238,6 +238,7 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
             server: server.unwrap_or_default(),
@@ -252,7 +253,9 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
         };
-        if std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true") {
+        if dev.unwrap_or_default()
+            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
+        {
             conf.enable_dev_mode();
         }
 
@@ -341,8 +344,9 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
+        dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
-        let configuration = Self {
+        let mut configuration = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
@@ -355,6 +359,11 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
         };
+        if dev.unwrap_or_default()
+            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
+        {
+            configuration.enable_dev_mode();
+        }
 
         configuration.validate()
     }
