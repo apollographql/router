@@ -121,7 +121,7 @@ When querying a non existent field you will get a better error.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1817
 
-### Update apollo-router-scaffold to use the published router crate [PR #1782](https://github.com/apollographql/router/pull/1782)
+### Update `apollo-router-scaffold` to use the published `apollo-router` crate [PR #1782](https://github.com/apollographql/router/pull/1782)
 
 Now that apollo-router version "1.0.0-rc.0" is released on [crates.io](https://crates.io/crates/apollo-router), we can update scaffold to it relies on the published crate instead of the git tag.
 
