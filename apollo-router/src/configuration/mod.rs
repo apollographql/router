@@ -174,7 +174,7 @@ pub struct Configuration {
 
     // Dev mode
     #[serde(skip)]
-    dev: Option<bool>,
+    pub(crate) dev: Option<bool>,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {

@@ -279,12 +279,20 @@ impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ConfigurationSource::Static(instance) => {
+            ConfigurationSource::Static(mut instance) => {
+                if instance.dev.unwrap_or_default() {
+                    instance.enable_dev_mode();
+                }
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
-            ConfigurationSource::Stream(stream) => {
-                stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
-            }
+            ConfigurationSource::Stream(stream) => stream
+                .map(|mut x| {
+                    if x.dev.unwrap_or_default() {
+                        x.enable_dev_mode();
+                    }
+                    UpdateConfiguration(Box::new(x))
+                })
+                .boxed(),
             ConfigurationSource::File {
                 path,
                 watch,
@@ -731,6 +739,7 @@ mod tests {
             _ => panic!("the event from the stream must be UpdateConfiguration"),
         };
         assert!(cfg.supergraph.introspection);
+        assert!(!cfg.homepage.enabled);
         assert!(cfg.sandbox.enabled);
         assert!(cfg.plugins().iter().any(
             |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
@@ -748,6 +757,7 @@ mod tests {
             _ => panic!("the event from the stream must be UpdateConfiguration"),
         };
         assert!(cfg.supergraph.introspection);
+        assert!(!cfg.homepage.enabled);
         assert!(cfg.sandbox.enabled);
         assert!(cfg.plugins().iter().any(
             |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
@@ -761,6 +771,30 @@ mod tests {
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
         assert!(stream.into_future().now_or_never().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_dev_mode_without_file() {
+        let mut stream =
+            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
+                .into_stream()
+                .boxed();
+
+        let cfg = match stream.next().await.unwrap() {
+            UpdateConfiguration(configuration) => configuration,
+            _ => panic!("the event from the stream must be UpdateConfiguration"),
+        };
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
+        assert!(!cfg.homepage.enabled);
+        assert!(cfg.plugins().iter().any(
+            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
+        ));
+        assert!(cfg
+            .plugins()
+            .iter()
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
+                && val == &json!({"all": true})));
     }
 
     #[tokio::test(flavor = "multi_thread")]
