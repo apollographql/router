@@ -613,7 +613,7 @@ mod tests {
     @join__owner(graph: USER)
     @join__type(graph: ORGA, key: "id")
     @join__type(graph: USER, key: "id"){
-        id: ID
+        id: ID!
         name: String
         activeOrganization: Organization
     }

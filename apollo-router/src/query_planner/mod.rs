@@ -972,7 +972,7 @@ pub(crate) mod fetch {
             {
                 Some(variables) => variables,
                 None => {
-                    return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
+                    return Ok((Value::Object(Object::default()), Vec::new()));
                 }
             };
 
