@@ -38,6 +38,7 @@ use thiserror::Error;
 use tower_http::cors::CorsLayer;
 use tower_http::cors::{self};
 
+use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
 
 #[derive(buildstructor::Builder)]
@@ -171,10 +172,6 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
-
-    // Dev mode
-    #[serde(skip)]
-    pub(crate) dev: Option<bool>,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -243,7 +240,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
-        let conf = Self {
+        let mut conf = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
@@ -255,8 +252,12 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
-            dev,
         };
+        if dev.unwrap_or_default()
+            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
+        {
+            conf.enable_dev_mode();
+        }
 
         conf.validate()
     }
@@ -341,7 +342,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
-        let configuration = Self {
+        let mut configuration = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
@@ -353,8 +354,12 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
-            dev,
         };
+        if dev.unwrap_or_default()
+            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
+        {
+            configuration.enable_dev_mode();
+        }
 
         configuration.validate()
     }
