@@ -1,0 +1,13 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: first
+---
+{
+  "data": {
+    "me": {
+      "id": "1",
+      "name": "Ada Lovelace"
+    }
+  },
+  "hasNext": false
+}

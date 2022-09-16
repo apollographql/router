@@ -272,9 +272,9 @@ mod tests {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),
                     },
+                    query: Arc::new(Query::default()),
                 };
                 let qp_content = QueryPlannerContent::Plan {
-                    query: Arc::new(Query::default()),
                     plan: Arc::new(query_plan),
                 };
 

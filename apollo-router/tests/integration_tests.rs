@@ -684,6 +684,57 @@ async fn defer_query_without_accept() {
     insta::assert_json_snapshot!(first);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_default_variable() {
+    let config = serde_json::json!({
+        "include_subgraph_errors": {
+            "all": true
+        }
+    });
+
+    let query = r#"query X($if: Boolean! = true){
+        me {
+            id
+            ...@defer(label: "name", if: $if) {
+                name
+            }
+        }
+    }"#;
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config.clone()).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .variable("if", false)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await;
+    assert!(second.is_none());
+}
+
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")

@@ -6,7 +6,6 @@ use static_assertions::assert_impl_all;
 
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::spec::Query;
 use crate::Context;
 
 assert_impl_all!(Request: Send);
@@ -45,13 +44,8 @@ pub(crate) struct Response {
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone)]
 pub(crate) enum QueryPlannerContent {
-    Plan {
-        query: Arc<Query>,
-        plan: Arc<QueryPlan>,
-    },
-    Introspection {
-        response: Box<graphql::Response>,
-    },
+    Plan { plan: Arc<QueryPlan> },
+    Introspection { response: Box<graphql::Response> },
     IntrospectionDisabled,
 }
 

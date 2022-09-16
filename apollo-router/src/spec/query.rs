@@ -51,14 +51,7 @@ impl Query {
     ) {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
-            let operation = match operation_name {
-                Some(name) => self
-                    .operations
-                    .iter()
-                    // we should have an error if the only operation is anonymous but the query specifies a name
-                    .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
-                None => self.operations.get(0),
-            };
+            let operation = self.operation(operation_name);
             if let Some(subselection) = &response.subselection {
                 // Get subselection from hashmap
                 match self.subselections.get(&(
@@ -776,8 +769,12 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, (ty, _))| {
-                let value = request.variables.get(*name).unwrap_or(&Value::Null);
+            .filter_map(|(name, (ty, default_value))| {
+                let value = request
+                    .variables
+                    .get(*name)
+                    .or(default_value.as_ref())
+                    .unwrap_or(&Value::Null);
                 ty.validate_input_value(value, schema).err().map(|_| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
@@ -800,6 +797,29 @@ impl Query {
 
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
+    }
+
+    pub(crate) fn default_variable_value(
+        &self,
+        operation_name: Option<&str>,
+        variable_name: &str,
+    ) -> Option<&Value> {
+        self.operation(operation_name).and_then(|op| {
+            op.variables
+                .get(variable_name)
+                .and_then(|(_, value)| value.as_ref())
+        })
+    }
+
+    fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+        match operation_name {
+            Some(name) => self
+                .operations
+                .iter()
+                // we should have an error if the only operation is anonymous but the query specifies a name
+                .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
+            None => self.operations.get(0),
+        }
     }
 }
 
