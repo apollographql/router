@@ -3,7 +3,7 @@ title: Apollo Router support for @defer
 description: Improve performance by delivering entity fields incrementally
 ---
 
-> This feature is currently in **preview**, available in Apollo Router v1.0 and later.
+> This feature is currently in **preview**, available in Apollo Router v1.0 and later. [Learn about launch stages.](/resources/product-launch-stages)
 
 Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
 
@@ -51,7 +51,27 @@ The Apollo Router supports deferring data for any of the following fields in you
 - Fields of [entity types](#entity-fields)
 - Root fields of the [`Query` type](#fields-of-query)
 
-In most supergraphs, this represents a large percentage of all fields in the schema. [See an example of a non-deferrable field.](#non-deferrable-fields)
+If a query defers one of the above fields, it can _also_ defer any _subfields_ of that field:
+
+```graphql
+query DeferExample {
+  users {
+    id
+  }
+
+  # highlight-start
+  ... @defer {
+    products {
+      name
+    }
+  }
+  # highlight-end
+}
+```
+
+In the example query above, `products` is a root field of the `Query` type, so it can be deferred. The `name` subfield can _also_ be deferred, because it appears within a deferrable field in the fragment.
+
+In supergraphs that use entities, a large percentage of all fields in your schema can be deferred. [See an example of a non-deferrable field.](#non-deferrable-fields)
 
 ### Entity fields
 
@@ -96,7 +116,7 @@ query GetUser($userId: ID!) {
 }
 ```
 
-As this query shows, if you defer an entity field (such as `User.name`), you can also defer _subfields_ of that field (such as `Name.firstName` and `Name.lastName`).
+Remember that this query can _also_ successfully defer `firstName` and `lastName` because they're _subfields_ of a deferrable field in the fragment.
 
 ### Fields of `Query`
 
@@ -117,7 +137,7 @@ query PartiallyDeferredQuery {
 }
 ```
 
-In this case, the router initially responds with the result of `Query.products`, and it later completes the response with the result of `Query.users`.
+In this example, the router immediately begins resolving both `Query.products` _and_ `Query.users` (along with their subfields). However, the router responds with data for the `Query.products` part as soon as it's ready, instead of waiting for the `Query.users` part to finish. It later completes its response with data for `Query.users`.
 
 > It is invalid to use `@defer` with root fields of the `Mutation` type.
 
