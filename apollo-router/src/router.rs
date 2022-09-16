@@ -604,7 +604,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::executable::APOLLO_ROUTER_DEV_ENV;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
     use crate::graphql;
