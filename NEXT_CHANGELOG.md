@@ -27,6 +27,20 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Change header propagation configuration [PR #1795](https://github.com/apollographql/router/pull/1795)
+
+Adds `request` subsection into header propagation configuration to prepare for #1284 coming post 1.0
+
+```patch
+headers:
+    all:
++     request:
+          - remove:
+              named: "test"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1795
+
 ### Bind the Sandbox on the same endpoint as the Supergraph [#1785](https://github.com/apollographql/router/issues/1785)
 
 We have rolled back an addition that we released in yesteday’s `v1.0.0-rc.0` which allowed Sandbox to be on a custom listener address.
