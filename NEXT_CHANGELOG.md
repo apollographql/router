@@ -113,7 +113,7 @@ When querying a non existent field you will get a better error.
   "errors": [
     {
 -       "message": "invalid type error, expected another type than 'Named type Computer'"
-+       "message": "cannot query field 'xxx' on type 'Computer'"
++       "message": "Cannot query field \"xxx\" on type \"Computer\""
     }
   ]
 }
