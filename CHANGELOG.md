@@ -92,7 +92,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🛠 Maintenance
 
-### Improve error message when querying non existent field [Issue #1816](https://github.com/apollographql/router/issues/1816)
+### Improve error message when querying non existent field ([Issue #1816](https://github.com/apollographql/router/issues/1816))
 
 When querying a non-existent field you will get a better error message:
 
@@ -121,7 +121,7 @@ Instantiating `Configuration`s is now fallible, because it will run consistency 
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1794
 
-### Refactor response-formatting tests [#1798](https://github.com/apollographql/router/issues/1798)
+### Refactor response-formatting tests ([Issue #1798](https://github.com/apollographql/router/issues/1798))
 
 Rewrite the response-formatting tests to use a builder pattern instead of macros and move the tests to a separate file.
 
