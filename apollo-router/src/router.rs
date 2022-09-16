@@ -36,6 +36,7 @@ use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::axum_http_server_factory::ListenAddrAndRouter;
 use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
@@ -263,9 +264,6 @@ pub enum ConfigurationSource {
 
         /// When watching, the delay to wait before applying the new configuration.
         delay: Option<Duration>,
-
-        /// `true` if dev mode is enabled
-        dev: bool,
     },
 }
 
@@ -279,26 +277,13 @@ impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ConfigurationSource::Static(mut instance) => {
-                if instance.dev.unwrap_or_default() {
-                    instance.enable_dev_mode();
-                }
+            ConfigurationSource::Static(instance) => {
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
-            ConfigurationSource::Stream(stream) => stream
-                .map(|mut x| {
-                    if x.dev.unwrap_or_default() {
-                        x.enable_dev_mode();
-                    }
-                    UpdateConfiguration(Box::new(x))
-                })
-                .boxed(),
-            ConfigurationSource::File {
-                path,
-                watch,
-                delay,
-                dev,
-            } => {
+            ConfigurationSource::Stream(stream) => {
+                stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
+            }
+            ConfigurationSource::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -306,39 +291,22 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
+                } else if watch {
+                    crate::files::watch(path.to_owned(), delay)
+                        .map(move |_| match ConfigurationSource::read_config(&path) {
+                            Ok(config) => UpdateConfiguration(Box::new(config)),
+                            Err(err) => {
+                                tracing::error!("{}", err);
+                                NoMoreConfiguration
+                            }
+                        })
+                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(mut configuration) => {
-                            if watch {
-                                crate::files::watch(path.to_owned(), delay)
-                                    .filter_map(move |_| {
-                                        future::ready(
-                                            match ConfigurationSource::read_config(&path) {
-                                                Ok(config) => Some(config),
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
-                                                }
-                                            },
-                                        )
-                                    })
-                                    .map(move |mut x| {
-                                        if dev {
-                                            x.enable_dev_mode();
-                                        }
-                                        UpdateConfiguration(Box::new(x))
-                                    })
-                                    .boxed()
-                            } else {
-                                if dev {
-                                    configuration.enable_dev_mode();
-                                }
-                                stream::once(future::ready(UpdateConfiguration(Box::new(
-                                    configuration,
-                                ))))
-                                .boxed()
-                            }
-                        }
+                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
+                            Box::new(configuration),
+                        )))
+                        .boxed(),
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
@@ -637,6 +605,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::executable::APOLLO_ROUTER_DEV_ENV;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
     use crate::graphql;
@@ -697,7 +666,6 @@ mod tests {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
-            dev: false,
         }
         .into_stream()
         .boxed();
@@ -725,14 +693,16 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
         write_and_flush(&mut file, contents).await;
+        std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
+        assert!(std::env::var(APOLLO_ROUTER_DEV_ENV).is_ok());
         let mut stream = ConfigurationSource::File {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
-            dev: true,
         }
         .into_stream()
         .boxed();
+        std::env::remove_var(APOLLO_ROUTER_DEV_ENV);
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,
@@ -777,10 +747,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_dev_mode_without_file() {
-        let mut stream =
-            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
-                .into_stream()
-                .boxed();
+        std::env::set_var(APOLLO_ROUTER_DEV_ENV, "true");
+        let mut stream = ConfigurationSource::from(Configuration::builder().build().unwrap())
+            .into_stream()
+            .boxed();
+        std::env::remove_var(APOLLO_ROUTER_DEV_ENV);
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,
@@ -808,7 +779,6 @@ mod tests {
             path,
             watch: true,
             delay: None,
-            dev: false,
         }
         .into_stream();
 
@@ -822,7 +792,6 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
-            dev: false,
         }
         .into_stream();
 
@@ -840,7 +809,6 @@ mod tests {
             path,
             watch: false,
             delay: None,
-            dev: false,
         }
         .into_stream();
         assert!(matches!(

@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use clap::AppSettings;
+use clap::ArgAction;
 use clap::CommandFactory;
 use clap::Parser;
 use directories::ProjectDirs;
@@ -31,6 +32,7 @@ use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 
 /// Options for the router
 #[derive(Parser, Debug)]
@@ -50,7 +52,12 @@ pub(crate) struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
+    #[clap(
+        alias = "hr",
+        long = "hot-reload",
+        env = "APOLLO_ROUTER_HOT_RELOAD",
+        action(ArgAction::SetTrue)
+    )]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
@@ -63,7 +70,12 @@ pub(crate) struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", hide(true))]
+    #[clap(
+        env = APOLLO_ROUTER_DEV_ENV,
+        long = "dev",
+        hide(true),
+        action(ArgAction::SetTrue)
+    )]
     dev: bool,
 
     /// Schema location relative to the project directory.
@@ -76,7 +88,7 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long)]
+    #[clap(long, action(ArgAction::SetTrue))]
     schema: bool,
 
     /// Your Apollo key.
@@ -260,12 +272,10 @@ impl Executable {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
-                    dev: opt.dev,
                 }
             }) {
                 Some(configuration) => configuration,
                 None => Configuration::builder()
-                    .dev(opt.dev)
                     .build()
                     .map(std::convert::Into::into)?,
             },
@@ -418,6 +428,8 @@ fn copy_args_to_env() {
                 env::set_var(env, value);
             } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
                 env::set_var(env, value);
+            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id()) {
+                env::set_var(env, value.to_string());
             }
         }
     });

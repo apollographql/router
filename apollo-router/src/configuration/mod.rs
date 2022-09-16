@@ -38,6 +38,7 @@ use thiserror::Error;
 use tower_http::cors::CorsLayer;
 use tower_http::cors::{self};
 
+use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
 
 #[derive(buildstructor::Builder)]
@@ -171,10 +172,6 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
-
-    // Dev mode
-    #[serde(skip)]
-    pub(crate) dev: Option<bool>,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -241,9 +238,8 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-        dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
-        let conf = Self {
+        let mut conf = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
@@ -255,8 +251,12 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
-            dev,
         };
+        println!("HERE");
+        if dbg!(std::env::var(APOLLO_ROUTER_DEV_ENV)).ok().as_deref() == Some("true") {
+            println!("DEV MODE!!!");
+            conf.enable_dev_mode();
+        }
 
         conf.validate()
     }
@@ -343,7 +343,6 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-        dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             server: server.unwrap_or_default(),
@@ -357,7 +356,6 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
-            dev,
         };
 
         configuration.validate()
