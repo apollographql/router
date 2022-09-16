@@ -253,7 +253,6 @@ impl Configuration {
             },
         };
         if std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true") {
-            println!("DEV MODE!!!");
             conf.enable_dev_mode();
         }
 
