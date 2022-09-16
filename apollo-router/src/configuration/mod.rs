@@ -174,7 +174,7 @@ pub struct Configuration {
 
     // Dev mode
     #[serde(skip)]
-    dev: Option<bool>,
+    pub(crate) dev: Option<bool>,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -263,11 +263,7 @@ impl Configuration {
 
     /// This should be executed after normal configuration processing
     pub(crate) fn enable_dev_mode(&mut self) {
-        if std::env::var("APOLLO_ROVER").ok().as_deref() == Some("true") {
-            tracing::info!("Development mode has been enabled. This mode of operation is only meant for development!");
-        } else {
-            tracing::warn!("Development mode has been enabled and has not been started by `rover dev`. This mode of operation is only meant for development!");
-        }
+        tracing::info!("Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)");
 
         if self.plugins.plugins.is_none() {
             self.plugins.plugins = Some(Map::new());
@@ -365,7 +361,7 @@ impl Configuration {
 }
 
 impl Configuration {
-    fn validate(self) -> Result<Self, ConfigurationError> {
+    pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {

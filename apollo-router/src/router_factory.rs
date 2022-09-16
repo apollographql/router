@@ -265,8 +265,8 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(
-        "enabled plugins: {:?}",
+    tracing::debug!(
+        "plugins list: {:?}",
         plugin_details
             .iter()
             .map(|(name, _)| name)
