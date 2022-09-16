@@ -107,6 +107,15 @@ After CI builds the release binaries, a new release will appear on the
     with a small changelog at the top to get folks who installed the old
     release candidate up to speed.
 
+### Publish the release to Crates.io
+
+0. **To perform these steps, you'll need access credentials which allow you publishing to Crates.io.**
+1. Make sure you are on the Git tag you have published and pushed in the previous step by running `git checkout v#.#.#` (release) or `git checkout v#.#.#-rc.#` (release candidate).  (You are probably still on this commit)
+2. Change into the `apollo-router/` directory at the root of the repository.
+3. Make sure that the `README.md` in this directory is up to date with any necessary or relevant changes.  It will be published as the crates README on Crates.io.
+4. Run `cargo publish --dry-run` if you'd like to smoke test things
+5. Do the real publish with `cargo publish`.
+
 Troubleshooting a release
 -------------------------
 

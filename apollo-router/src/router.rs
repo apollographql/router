@@ -35,7 +35,6 @@ use self::Event::UpdateSchema;
 use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::axum_http_server_factory::ListenAddrAndRouter;
-use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
@@ -111,6 +110,9 @@ pub enum ApolloRouterError {
 
     /// tried to bind {0} and {1} on port {2}
     DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
+
+    /// tried to register two endpoints on `{0}:{1}{2}`
+    SameRouteUsedTwice(IpAddr, u16, String),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
@@ -343,9 +345,7 @@ impl ConfigurationSource {
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
         let config = fs::read_to_string(path)?;
-        let config = validate_configuration(&config)?;
-
-        Ok(config)
+        config.parse().map_err(ReadConfigError::Validation)
     }
 }
 

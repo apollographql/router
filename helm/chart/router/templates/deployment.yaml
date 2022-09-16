@@ -92,14 +92,14 @@ spec:
               httpHeaders:
                 - name: Content-Type
                   value: application/json
-              path: "/?query={__typename}"
+              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
               port: {{ .Values.containerPorts.http }}
           readinessProbe:
             httpGet:
               httpHeaders:
                 - name: Content-Type
                   value: application/json
-              path: "/?query={__typename}"
+              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
               port: {{ .Values.containerPorts.http }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
