@@ -88,6 +88,12 @@ Instantiating `Configuration`s is now fallible, because it will run consistency 
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1794
 
+### Refactor formatting tests [#1798](https://github.com/apollographql/router/issues/1798)
+
+Rewrite the response formatting tests to use a builder instead of macros, and move the tests to a separate file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1798
+
 ## 📚 Documentation
 
 ### Add rustdoc documentation to varius modules ([Issue #799](https://github.com/apollographql/router/issues/799))

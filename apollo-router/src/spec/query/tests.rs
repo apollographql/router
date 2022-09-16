@@ -101,7 +101,7 @@ impl FormatTest {
         let api_schema = schema.api_schema();
         let query =
             Query::parse(query, &schema, &Default::default()).expect("could not parse query");
-        let mut response = Response::builder().data(response.clone()).build();
+        let mut response = Response::builder().data(response).build();
 
         query.format_response(
             &mut response,
@@ -115,7 +115,7 @@ impl FormatTest {
         );
 
         if let Some(e) = self.expected {
-            assert_eq_and_ordered!((&response).data.as_ref().unwrap(), &e);
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &e);
         }
 
         if let Some(e) = self.expected_errors {
