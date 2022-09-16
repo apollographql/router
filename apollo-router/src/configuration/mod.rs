@@ -365,7 +365,7 @@ impl Configuration {
 }
 
 impl Configuration {
-    fn validate(self) -> Result<Self, ConfigurationError> {
+    pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {

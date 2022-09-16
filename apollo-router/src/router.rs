@@ -749,6 +749,7 @@ mod tests {
             .iter()
             .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
+        cfg.validate().unwrap();
 
         // Modify the file and try again
         write_and_flush(&mut file, contents).await;
@@ -767,6 +768,7 @@ mod tests {
             .iter()
             .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
+        cfg.validate().unwrap();
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
@@ -795,6 +797,7 @@ mod tests {
             .iter()
             .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
+        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
