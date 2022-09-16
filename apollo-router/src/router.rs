@@ -684,7 +684,8 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
+        let event = stream.into_future().now_or_never();
+        assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
     }
 
     #[tokio::test(flavor = "multi_thread")]
