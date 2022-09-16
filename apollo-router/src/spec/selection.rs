@@ -97,23 +97,25 @@ impl Selection {
                 } else if field_name == "__type" {
                     FieldType::Introspection("__Type".to_string())
                 } else {
-                    current_type
+                    let name = current_type
                         .inner_type_name()
-                        .and_then(|name| {
-                            //looking into object types
+                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+
+                    //looking into object types
+                    schema
+                        .object_types
+                        .get(name)
+                        .and_then(|ty| ty.field(&field_name))
+                        // otherwise, it might be an interface
+                        .or_else(|| {
                             schema
-                                .object_types
+                                .interfaces
                                 .get(name)
                                 .and_then(|ty| ty.field(&field_name))
-                                // otherwise, it might be an interface
-                                .or_else(|| {
-                                    schema
-                                        .interfaces
-                                        .get(name)
-                                        .and_then(|ty| ty.field(&field_name))
-                                })
                         })
-                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?
+                        .ok_or_else(|| {
+                            SpecError::InvalidField(field_name.clone(), current_type.to_string())
+                        })?
                         .clone()
                 };
 
