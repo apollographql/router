@@ -1,11 +1,15 @@
 //! Implements the Execution phase of the request lifecycle.
 
+use std::future::ready;
 use std::sync::Arc;
 use std::task::Poll;
 
-use futures::future::ready;
+use futures::channel::mpsc::Receiver;
+use futures::channel::mpsc::SendError;
+use futures::channel::mpsc::Sender;
 use futures::future::BoxFuture;
 use futures::stream::once;
+use futures::SinkExt;
 use futures::StreamExt;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -17,6 +21,7 @@ use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLay
 use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
+use crate::graphql::Response;
 use crate::services::execution;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -66,9 +71,11 @@ where
                 )
                 .await;
 
-            let rest = receiver;
-
-            let stream = once(ready(first.0)).chain(rest).boxed();
+            let stream = if req.query_plan.root.contains_defer() {
+                filter_stream(first.0, receiver).boxed()
+            } else {
+                once(ready(first.0)).chain(receiver).boxed()
+            };
 
             Ok(ExecutionResponse::new_from_response(
                 http::Response::new(stream as _),
@@ -78,6 +85,66 @@ where
         }
         .in_current_span();
         Box::pin(fut)
+    }
+}
+
+// modifies the response stream to set `has_next` to `false` on the last response
+fn filter_stream(first: Response, mut stream: Receiver<Response>) -> Receiver<Response> {
+    let (mut sender, receiver) = futures::channel::mpsc::channel(10);
+
+    tokio::task::spawn(async move {
+        let mut seen_last_message = consume_responses(first, &mut stream, &mut sender).await?;
+
+        while let Some(current_response) = stream.next().await {
+            seen_last_message =
+                consume_responses(current_response, &mut stream, &mut sender).await?;
+        }
+
+        // the response stream disconnected early so we could not add `has_next = false` to the
+        // last message, so we add an empty one
+        if !seen_last_message {
+            sender
+                .send(Response::builder().has_next(false).build())
+                .await?;
+        }
+        Ok::<_, SendError>(())
+    });
+
+    receiver
+}
+
+// returns Ok(true) when we saw the last message
+async fn consume_responses(
+    mut current_response: Response,
+    stream: &mut Receiver<Response>,
+    sender: &mut Sender<Response>,
+) -> Result<bool, SendError> {
+    loop {
+        match stream.try_next() {
+            // no messages available, but the channel is not closed
+            // this means more deferred responses can come
+            Err(_) => {
+                sender.send(current_response).await?;
+
+                return Ok(false);
+            }
+
+            // there might be other deferred responses after this one,
+            // so we should call `try_next` again
+            Ok(Some(response)) => {
+                sender.send(current_response).await?;
+                current_response = response;
+            }
+            // the channel is closed
+            // there will be no other deferred responses after that,
+            // so we set `has_next` to `false`
+            Ok(None) => {
+                current_response.has_next = Some(false);
+
+                sender.send(current_response).await?;
+                return Ok(true);
+            }
+        }
     }
 }
 

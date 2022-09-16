@@ -1,4 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -44,16 +46,19 @@ use multimap::MultiMap;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
-use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
+use tower::service_fn;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
+use tower_http::compression::DefaultPredicate;
+use tower_http::compression::Predicate;
 use tower_http::trace::MakeSpan;
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
@@ -61,7 +66,9 @@ use tracing::Level;
 use tracing::Span;
 
 use crate::configuration::Configuration;
+use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
+use crate::configuration::Sandbox;
 use crate::graphql;
 use crate::http_ext;
 use crate::http_server_factory::HttpServerFactory;
@@ -73,11 +80,11 @@ use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::transport;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-/// Redirects to studio for GET requests.
 #[derive(Debug)]
 pub(crate) struct AxumHttpServerFactory;
 
@@ -99,12 +106,41 @@ pub(crate) struct ListenersAndRouters {
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
-    endpoints: MultiMap<ListenAddr, Endpoint>,
+    mut endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
 {
-    let mut main_endpoint = main_endpoint(service_factory, configuration)?;
+    ensure_listenaddrs_consistency(configuration, &endpoints)?;
+
+    endpoints.insert(
+        configuration.supergraph.listen.clone(),
+        Endpoint::new(
+            "/.well-known/apollo/server-health".to_string(),
+            service_fn(|_req: transport::Request| async move {
+                Ok::<_, BoxError>(
+                    http::Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(
+                            Bytes::from_static(b"The health check is no longer at this endpoint")
+                                .into(),
+                        )
+                        .unwrap(),
+                )
+            })
+            .boxed(),
+        ),
+    );
+
+    ensure_endpoints_consistency(configuration, &endpoints)?;
+
+    let mut main_endpoint = main_endpoint(
+        service_factory,
+        configuration,
+        endpoints
+            .remove(&configuration.supergraph.listen)
+            .unwrap_or_default(),
+    )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
     // put any extra endpoint that uses the main ListenAddr into the main router
@@ -120,9 +156,89 @@ where
     })
 }
 
+/// Binding different listen addresses to the same port will "relax" the requirements, which
+/// could result in a security issue:
+/// If endpoint A is exposed to 127.0.0.1:4000/foo and endpoint B is exposed to 0.0.0.0:4000/bar
+/// 0.0.0.0:4000/foo would be accessible.
+///
+/// `ensure_listenaddrs_consistency` makes sure listen addresses that bind to the same port
+/// have the same IP:
+/// 127.0.0.1:4000 and 127.0.0.1:4000 will not trigger an error
+/// 127.0.0.1:4000 and 0.0.0.0:4001 will not trigger an error
+///
+/// 127.0.0.1:4000 and 0.0.0.0:4000 will trigger an error
+fn ensure_listenaddrs_consistency(
+    configuration: &Configuration,
+    endpoints: &MultiMap<ListenAddr, Endpoint>,
+) -> Result<(), ApolloRouterError> {
+    let mut all_ports = HashMap::new();
+    if let Some((main_ip, main_port)) = configuration.supergraph.listen.ip_and_port() {
+        all_ports.insert(main_port, main_ip);
+    }
+
+    for addr in endpoints.keys() {
+        if let Some((ip, port)) = addr.ip_and_port() {
+            if let Some(previous_ip) = all_ports.insert(port, ip) {
+                if ip != previous_ip {
+                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                        previous_ip,
+                        ip,
+                        port,
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Merging `axum::Router`s that use the same path panics (yes it doesn't raise an error, it panics.)
+///
+/// In order to not crash the router if paths clash using hot reload, we make sure the configuration is consistent,
+/// and raise an error instead.
+fn ensure_endpoints_consistency(
+    configuration: &Configuration,
+    endpoints: &MultiMap<ListenAddr, Endpoint>,
+) -> Result<(), ApolloRouterError> {
+    // check the main endpoint
+    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
+        if supergraph_listen_endpoint
+            .iter()
+            .any(|e| e.path == configuration.supergraph.path)
+        {
+            if let Some((ip, port)) = configuration.supergraph.listen.ip_and_port() {
+                return Err(ApolloRouterError::SameRouteUsedTwice(
+                    ip,
+                    port,
+                    configuration.supergraph.path.clone(),
+                ));
+            }
+        }
+    }
+
+    // check the extra endpoints
+    let mut listen_addrs_and_paths = HashSet::new();
+    for (listen, endpoints) in endpoints.iter_all() {
+        for endpoint in endpoints {
+            if let Some((ip, port)) = listen.ip_and_port() {
+                if !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone())) {
+                    return Err(ApolloRouterError::SameRouteUsedTwice(
+                        ip,
+                        port,
+                        endpoint.path.clone(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
+    endpoints_on_main_listener: Vec<Endpoint>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -130,42 +246,8 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let graphql_path = if configuration.server.graphql_path.ends_with("/*") {
-        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        format!("{}router_extra_path", configuration.server.graphql_path)
-    } else {
-        configuration.server.graphql_path.clone()
-    };
-    let route = Router::<hyper::Body>::new()
-        .route(
-            &graphql_path,
-            get({
-                let display_landing_page = configuration.server.landing_page;
-                move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                    handle_get(
-                        host,
-                        service.new_service().boxed(),
-                        http_request,
-                        display_landing_page,
-                    )
-                }
-            })
-            .post({
-                move |host: Host,
-                      uri: OriginalUri,
-                      request: Json<graphql::Request>,
-                      Extension(service): Extension<RF>,
-                      header_map: HeaderMap| {
-                    handle_post(
-                        host,
-                        uri,
-                        request,
-                        service.new_service().boxed(),
-                        header_map,
-                    )
-                }
-            }),
-        )
+
+    let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
             TraceLayer::new_for_http()
@@ -186,12 +268,19 @@ where
                     }
                 }),
         )
-        .route(&configuration.server.health_check_path, get(health_check))
         .layer(Extension(service_factory))
         .layer(cors)
-        .layer(CompressionLayer::new()); // To compress response body
+        // Compress the response body, except for multipart responses such as with `@defer`.
+        // This is a work-around for https://github.com/apollographql/router/issues/1572
+        .layer(CompressionLayer::new().compress_when(
+            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
+        ));
 
-    let listener = configuration.server.listen.clone();
+    let route = endpoints_on_main_listener
+        .into_iter()
+        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+
+    let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
 }
 
@@ -223,9 +312,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
         Box::pin(async move {
             let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
 
-            // TODO [igni]: I believe configuring the router
-            // To listen to port 0 would lead it to change ports on every restart Oo
-
             // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
@@ -255,7 +341,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
                 actual_main_listen_address,
-                configuration.server.graphql_path
+                configuration.supergraph.path
             );
 
             // serve extra routers
@@ -323,14 +409,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
 async fn get_extra_listeners(
     previous_listeners: Vec<(ListenAddr, Listener)>,
-    extra_routers: MultiMap<ListenAddr, Router>,
+    mut extra_routers: MultiMap<ListenAddr, Router>,
 ) -> Result<Vec<((ListenAddr, Listener), axum::Router)>, ApolloRouterError> {
     let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
         Vec::with_capacity(extra_routers.len());
 
     // reuse previous extra listen addrs
     for (listen_addr, listener) in previous_listeners.into_iter() {
-        if let Some(routers) = extra_routers.get_vec(&listen_addr) {
+        if let Some(routers) = extra_routers.remove(&listen_addr) {
             listeners_and_routers.push((
                 (listen_addr, listener),
                 routers
@@ -544,6 +630,96 @@ struct CustomRejection {
     msg: String,
 }
 
+fn main_router<RF>(configuration: &Configuration) -> axum::Router
+where
+    RF: SupergraphServiceFactory,
+{
+    let mut graphql_configuration = configuration.supergraph.clone();
+    if graphql_configuration.path.ends_with("/*") {
+        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+        graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
+    }
+
+    let get_handler = if configuration.sandbox.enabled {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get_with_static(
+                    Sandbox::display_page(),
+                    host,
+                    service.new_service().boxed(),
+                    http_request,
+                )
+            }
+        })
+    } else if configuration.homepage.enabled {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get_with_static(
+                    Homepage::display_page(),
+                    host,
+                    service.new_service().boxed(),
+                    http_request,
+                )
+            }
+        })
+    } else {
+        get({
+            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get(host, service.new_service().boxed(), http_request)
+            }
+        })
+    };
+
+    Router::<hyper::Body>::new().route(
+        &graphql_configuration.path,
+        get_handler.post({
+            move |host: Host,
+                  uri: OriginalUri,
+                  request: Json<graphql::Request>,
+                  Extension(service): Extension<RF>,
+                  header_map: HeaderMap| {
+                handle_post(
+                    host,
+                    uri,
+                    request,
+                    service.new_service().boxed(),
+                    header_map,
+                )
+            }
+        }),
+    )
+}
+
+async fn handle_get_with_static(
+    static_page: Bytes,
+    Host(host): Host,
+    service: BoxService<
+        http::Request<graphql::Request>,
+        http::Response<graphql::ResponseStream>,
+        BoxError,
+    >,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    if prefers_html(http_request.headers()) {
+        return Html(static_page).into_response();
+    }
+
+    if let Some(request) = http_request
+        .uri()
+        .query()
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    {
+        let mut http_request = http_request.map(|_| request);
+        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+            .expect("the URL is already valid because it comes from axum; qed");
+        return run_graphql_request(service, http_request)
+            .await
+            .into_response();
+    }
+
+    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
+}
+
 async fn handle_get(
     Host(host): Host,
     service: BoxService<
@@ -552,12 +728,7 @@ async fn handle_get(
         BoxError,
     >,
     http_request: Request<Body>,
-    display_landing_page: bool,
 ) -> impl IntoResponse {
-    if prefers_html(http_request.headers()) && display_landing_page {
-        return display_home_page().into_response();
-    }
-
     if let Some(request) = http_request
         .uri()
         .query()
@@ -596,15 +767,6 @@ async fn handle_post(
     run_graphql_request(service, http_request)
         .await
         .into_response()
-}
-
-fn display_home_page() -> Html<Bytes> {
-    let html = Bytes::from_static(include_bytes!("../resources/index.html"));
-    Html(html)
-}
-
-async fn health_check() -> impl IntoResponse {
-    Json(json!({ "status": "pass" }))
 }
 
 // Process the headers to make sure that `VARY` is set correctly
@@ -865,6 +1027,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
 
     use async_compression::tokio::write::GzipEncoder;
     use http::header::ACCEPT_ENCODING;
@@ -884,14 +1048,21 @@ mod tests {
     use reqwest::StatusCode;
     use serde_json::json;
     use test_log::test;
+    use tokio::io::BufReader;
     use tower::service_fn;
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::Homepage;
+    use crate::configuration::Sandbox;
+    use crate::configuration::Supergraph;
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
     use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+    use crate::test_harness::http_client;
+    use crate::test_harness::http_client::MaybeMultipart;
+    use crate::TestHarness;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -989,13 +1160,24 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    Configuration::fake_builder()
+                        .sandbox(
+                            crate::configuration::Sandbox::fake_builder()
+                                .enabled(true)
                                 .build(),
                         )
-                        .build(),
+                        .supergraph(
+                            crate::configuration::Supergraph::fake_builder()
+                                .introspection(true)
+                                .build(),
+                        )
+                        .homepage(
+                            crate::configuration::Homepage::fake_builder()
+                                .enabled(false)
+                                .build(),
+                        )
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1018,7 +1200,7 @@ mod tests {
         mut mock: MockSupergraphService,
         conf: Configuration,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-    ) -> (HttpServerHandle, Client) {
+    ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
         let server_factory = AxumHttpServerFactory::new();
         let (service, mut handle) = tower_test::mock::spawn();
 
@@ -1042,8 +1224,7 @@ mod tests {
                 vec![],
                 web_endpoints,
             )
-            .await
-            .expect("Failed to create server factory");
+            .await?;
         let mut default_headers = HeaderMap::new();
         default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -1052,7 +1233,7 @@ mod tests {
             .redirect(Policy::none())
             .build()
             .unwrap();
-        (server, client)
+        Ok((server, client))
     }
 
     #[cfg(unix)]
@@ -1079,13 +1260,14 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
+                    Configuration::fake_builder()
+                        .supergraph(
+                            crate::configuration::Supergraph::fake_builder()
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
-                        .build(),
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1098,14 +1280,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_home_page() -> Result<(), ApolloRouterError> {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
+    async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let (server, client) = init(expectations).await;
+
+        let conf = Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
+            .supergraph(Supergraph::fake_builder().introspection(true).build())
+            .build()
+            .unwrap();
+
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1123,12 +1308,47 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
+        assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
+        let expectations = MockSupergraphService::new();
+
+        let conf = Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
+            .supergraph(
+                Supergraph::fake_builder()
+                    .introspection(true)
+                    .path("/custom")
+                    .build(),
+            )
+            .build()
+            .unwrap();
+
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+
+        // Regular studio redirect
+        let response = client
+            .get(&format!(
+                "{}/custom",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+        assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
+
         Ok(())
     }
 
@@ -1285,11 +1505,6 @@ mod tests {
 
     #[tokio::test]
     async fn response() -> Result<(), ApolloRouterError> {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -1346,11 +1561,6 @@ mod tests {
         );
 
         server.shutdown().await?;
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
         Ok(())
     }
 
@@ -1409,20 +1619,15 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
+        let conf = Configuration::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .path(String::from("/graphql"))
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql"))
-                    .build(),
-            )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/graphql",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1481,20 +1686,15 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
+        let conf = Configuration::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/:my_prefix/graphql"))
-                    .build(),
-            )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/prefix/graphql",
             server.graphql_listen_address().as_ref().unwrap()
@@ -1553,20 +1753,15 @@ mod tests {
                         .unwrap(),
                 ))
             });
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
+        let conf = Configuration::fake_builder()
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .path(String::from("/graphql/*"))
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql/*"))
-                    .build(),
-            )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         for url in &[
             format!(
                 "{}/graphql/test",
@@ -1785,21 +1980,24 @@ mod tests {
     #[tokio::test]
     async fn cors_preflight() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(Cors::builder().build())
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .graphql_path(String::from("/graphql/*"))
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .path(String::from("/graphql/*"))
                     .build(),
             )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         let response = client
             .request(
                 Method::OPTIONS,
-                &format!("{}/", server.graphql_listen_address().as_ref().unwrap()),
+                &format!(
+                    "{}/graphql/",
+                    server.graphql_listen_address().as_ref().unwrap()
+                ),
             )
             .header(ACCEPT, "text/html")
             .header(ORIGIN, "https://studio.apollographql.com")
@@ -1893,7 +2091,6 @@ mod tests {
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
         use tokio::io::AsyncBufReadExt;
-        use tokio::io::BufReader;
         use tokio::io::Interest;
         use tokio::net::UnixStream;
 
@@ -1954,12 +2151,7 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
-    async fn test_health_check() {
-        // TODO re-enable after the release
-        // test_span::init();
-        // let root_span = info_span!("root");
-        // {
-        // let _guard = root_span.enter();
+    async fn test_health_check_returns_four_oh_four() {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!(
@@ -1968,33 +2160,7 @@ Content-Type: application/json\r
         );
 
         let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        // }
-        // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-        //     &root_span.id().unwrap(),
-        //     &test_span::Filter::new(Level::INFO)
-        // ));
-    }
-
-    #[tokio::test]
-    async fn test_custom_health_check() {
-        let conf = Configuration::builder()
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .health_check_path("/health")
-                    .build(),
-            )
-            .build();
-        let expectations = MockSupergraphService::new();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
-        let url = format!(
-            "{}/health",
-            server.graphql_listen_address().as_ref().unwrap()
-        );
-
-        let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test(tokio::test)]
@@ -2019,22 +2185,18 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_doesnt_display_disabled_home_page() -> Result<(), ApolloRouterError> {
+    async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
+        let conf = Configuration::fake_builder()
+            // sandbox is disabled by default, but homepage will take over if we dont disable it
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
+                    .enabled(false)
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .landing_page(false)
-                    .build(),
-            )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await;
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
                 "{}/",
@@ -2046,6 +2208,38 @@ Content-Type: application/json\r
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
+        let expectations = MockSupergraphService::new();
+        let conf = Configuration::fake_builder()
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
+                    .enabled(false)
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+        let response = client
+            .get(&format!(
+                "{}/",
+                server.graphql_listen_address().as_ref().unwrap()
+            ))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{:?}",
+            response.text().await
+        );
 
         server.shutdown().await
     }
@@ -2072,19 +2266,8 @@ Content-Type: application/json\r
             Endpoint::new("/an-other-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::builder()
-            .cors(
-                Cors::builder()
-                    .origins(vec!["http://studio".to_string()])
-                    .build(),
-            )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .build();
-        let (server, client) = init_with_config(expectations, conf, web_endpoints).await;
+        let conf = Configuration::fake_builder().build().unwrap();
+        let (server, client) = init_with_config(expectations, conf, web_endpoints).await?;
 
         for path in &["/a-custom-path", "/an-other-custom-path"] {
             let response = client
@@ -2116,6 +2299,80 @@ Content-Type: application/json\r
             assert_eq!(response.text().await.unwrap(), format!("POST + {}", path));
         }
         server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
+        let error = Configuration::fake_builder()
+            .homepage(crate::configuration::Homepage::fake_builder().build())
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .enabled(true)
+                    .build(),
+            )
+            .build()
+            .unwrap_err();
+
+        assert_eq!(
+            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+            error.to_string()
+        )
+    }
+
+    #[test(tokio::test)]
+    async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
+        let error = Configuration::fake_builder()
+            .homepage(crate::configuration::Homepage::fake_builder().build())
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .introspection(false)
+                    .build(),
+            )
+            .build()
+            .unwrap_err();
+
+        assert_eq!(
+            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+            error.to_string()
+        )
+    }
+
+    #[test(tokio::test)]
+    async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
+        let endpoint = service_fn(|req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(format!("{} + {}", req.method(), req.uri().path()).into())
+                    .unwrap(),
+            )
+        })
+        .boxed_clone();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        );
+        web_endpoints.insert(
+            ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+            Endpoint::new("/a-custom-path".to_string(), endpoint.boxed()),
+        );
+
+        let conf = Configuration::fake_builder().build().unwrap();
+        let error = init_with_config(MockSupergraphService::new(), conf, web_endpoints)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:0/a-custom-path`",
+            error.to_string()
+        )
     }
 
     #[test(tokio::test)]
@@ -2203,16 +2460,12 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(Cors::builder().allow_any_origin(true).build())
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response =
@@ -2226,20 +2479,16 @@ Content-Type: application/json\r
     async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         let valid_origin = "https://thisoriginisallowed.com";
 
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(
                 Cors::builder()
                     .origins(vec![valid_origin.to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
@@ -2256,21 +2505,17 @@ Content-Type: application/json\r
     async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         let apollo_subdomains = "https://([a-z0-9]+[.])*apollographql[.]com";
 
-        let conf = Configuration::builder()
+        let conf = Configuration::fake_builder()
             .cors(
                 Cors::builder()
                     .origins(vec!["https://anexactmatchorigin.com".to_string()])
                     .match_origins(vec![apollo_subdomains.to_string()])
                     .build(),
             )
-            .server(
-                crate::configuration::Server::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                    .build(),
-            )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await;
+            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
         // regex tests
@@ -2494,5 +2739,309 @@ Content-Type: application/json\r
         for value in vary {
             assert!(value == "one" || value == "two");
         }
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_same_listenaddrs_are_accepted() {
+        let configuration = Configuration::fake_builder().build().unwrap();
+
+        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
+        let configuration = Configuration::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
+                    .build(),
+            )
+            .sandbox(Sandbox::fake_builder().build())
+            .build()
+            .unwrap();
+
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            SocketAddr::from_str("0.0.0.0:4010").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let error = init_with_config(MockSupergraphService::new(), configuration, web_endpoints)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
+            error.to_string()
+        )
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
+        let configuration = Configuration::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut mm = MultiMap::new();
+        mm.insert(
+            SocketAddr::from_str("127.0.0.1:4010").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let error = init_with_config(MockSupergraphService::new(), configuration, mm)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:4010/`",
+            error.to_string()
+        )
+    }
+
+    #[tokio::test]
+    async fn it_supports_server_restart() {
+        let configuration = Arc::new(
+            Configuration::fake_builder()
+                .supergraph(
+                    Supergraph::fake_builder()
+                        .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        );
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            SocketAddr::from_str("127.0.0.1:5000").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let server_factory = AxumHttpServerFactory::new();
+        let (service, _) = tower_test::mock::spawn();
+
+        let supergraph_service_factory = TestSupergraphServiceFactory {
+            inner: service.into_inner(),
+        };
+
+        let server = server_factory
+            .create(
+                supergraph_service_factory.clone(),
+                Arc::clone(&configuration),
+                None,
+                vec![],
+                web_endpoints.clone(),
+            )
+            .await
+            .expect("Failed to create server factory");
+
+        server
+            .restart(
+                &server_factory,
+                supergraph_service_factory,
+                Arc::clone(&configuration),
+                web_endpoints,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A counter of how many GraphQL responses have been sent by an Apollo Router
+    ///
+    /// When `@defer` is used, it should increment multiple times for a single HTTP request.
+    #[derive(Clone, Default)]
+    struct GraphQLResponseCounter(Arc<AtomicU32>);
+
+    impl GraphQLResponseCounter {
+        fn increment(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn get(&self) -> u32 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn http_service() -> impl Service<
+        http::Request<serde_json::Value>,
+        Response = http::Response<MaybeMultipart<serde_json::Value>>,
+        Error = BoxError,
+    > {
+        let counter = GraphQLResponseCounter::default();
+        let service = TestHarness::builder()
+            .configuration_json(json!({
+                "plugins": {
+                    "apollo.include_subgraph_errors": {
+                        "all": true
+                    }
+                }
+            }))
+            .unwrap()
+            .supergraph_hook(move |service| {
+                let counter = counter.clone();
+                service
+                    .map_response(move |mut response| {
+                        response.response.extensions_mut().insert(counter.clone());
+                        response.map_stream(move |graphql_response| {
+                            counter.increment();
+                            graphql_response
+                        })
+                    })
+                    .boxed()
+            })
+            .build_http_service()
+            .await
+            .unwrap()
+            .map_err(Into::into);
+        let service = http_client::response_decompression(service);
+        let service = http_client::defer_spec_20220824_multipart(service);
+        http_client::json(service)
+    }
+
+    /// Creates an Apollo Router as an HTTP-level Tower service and makes one request.
+    async fn make_request(
+        request_body: serde_json::Value,
+    ) -> http::Response<MaybeMultipart<serde_json::Value>> {
+        let request = http::Request::builder()
+            .method(http::Method::POST)
+            .header("host", "127.0.0.1")
+            .body(request_body)
+            .unwrap();
+        http_service().await.oneshot(request).await.unwrap()
+    }
+
+    fn assert_compressed<B>(response: &http::Response<B>, expected: bool) {
+        assert_eq!(
+            response
+                .extensions()
+                .get::<http_client::ResponseBodyWasCompressed>()
+                .unwrap()
+                .0,
+            expected
+        )
+    }
+
+    #[tokio::test]
+    async fn test_compressed_response() {
+        let response = make_request(json!({
+            "query": "
+                query TopProducts($first: Int) { 
+                    topProducts(first: $first) { 
+                        upc 
+                        name 
+                        reviews { 
+                            id 
+                            product { name } 
+                            author { id name } 
+                        } 
+                    } 
+                }
+            ",
+            "variables": {"first": 2_u32},
+        }))
+        .await;
+        assert_compressed(&response, true);
+        let status = response.status().as_u16();
+        let graphql_response = response.into_body().expect_not_multipart();
+        assert_eq!(graphql_response["errors"], json!(null));
+        assert_eq!(status, 200);
+    }
+
+    #[tokio::test]
+    async fn test_defer_is_not_buffered() {
+        let mut response = make_request(json!({
+            "query": "
+                query TopProducts($first: Int) { 
+                    topProducts(first: $first) { 
+                        upc 
+                        name 
+                        reviews { 
+                            id 
+                            product { name } 
+                            ... @defer { author { id name } }
+                        } 
+                    } 
+                }
+            ",
+            "variables": {"first": 2_u32},
+        }))
+        .await;
+        assert_compressed(&response, false);
+        let status = response.status().as_u16();
+        assert_eq!(status, 200);
+        let counter: GraphQLResponseCounter = response.extensions_mut().remove().unwrap();
+        let parts = response.into_body().expect_multipart();
+
+        let (parts, counts): (Vec<_>, Vec<_>) =
+            parts.map(|part| (part, counter.get())).unzip().await;
+        let parts = serde_json::Value::Array(parts);
+        assert_eq!(
+            parts,
+            json!([
+                {
+                    "data": {
+                        "topProducts": [
+                            {"upc": "1", "name": "Table", "reviews": null},
+                            {"upc": "2", "name": "Couch", "reviews": null}
+                        ]
+                    },
+                    "errors": [
+                        {
+                            "message": "invalid content: Missing key `_entities`!",
+                            "path": ["topProducts", "@"],
+                            "extensions": {
+                                "type": "ExecutionInvalidContent",
+                                "reason": "Missing key `_entities`!"
+                            }
+                        }],
+                    "hasNext": true,
+                },
+                {"hasNext": false}
+            ]),
+            "{}",
+            serde_json::to_string(&parts).unwrap()
+        );
+
+        // Non-regression test for https://github.com/apollographql/router/issues/1572
+        //
+        // With unpatched async-compression 0.3.14 as used by tower-http 0.3.4,
+        // `counts` is `[2, 2]` since both parts have to be generated on the server side
+        // before the first one reaches the client.
+        //
+        // Conversly, observing the value `1` after receiving the first part
+        // means the didn’t wait for all parts to be in the compression buffer
+        // before sending any.
+        assert_eq!(counts, [1, 2]);
     }
 }

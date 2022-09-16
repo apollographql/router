@@ -8,6 +8,7 @@ use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use prost::Message;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::error::TrySendError;
@@ -20,17 +21,17 @@ use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 
-use crate::agent::reporter_server::Reporter;
-use crate::agent::reporter_server::ReporterServer;
-use crate::agent::ReporterRequest;
-use crate::agent::ReporterResponse;
-use crate::report::Report;
+use crate::spaceport::agent::reporter_server::Reporter;
+use crate::spaceport::agent::reporter_server::ReporterServer;
+use crate::spaceport::agent::ReporterRequest;
+use crate::spaceport::agent::ReporterResponse;
+use crate::spaceport::report::Report;
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
-pub struct ReportSpaceport {
+pub(crate) struct ReportSpaceport {
     shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     listener: Option<TcpListener>,
     addr: SocketAddr,
@@ -45,7 +46,7 @@ impl ReportSpaceport {
     ///
     /// The spaceport will attempt to make the transfer 5 times before failing. If
     /// the spaceport fails, the data is discarded.
-    pub async fn new(
+    pub(crate) async fn new(
         addr: SocketAddr,
         shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     ) -> Result<Self, std::io::Error> {
@@ -76,12 +77,12 @@ impl ReportSpaceport {
         })
     }
 
-    pub fn address(&self) -> &SocketAddr {
+    pub(crate) fn address(&self) -> &SocketAddr {
         &self.addr
     }
 
     /// Start serving requests.
-    pub async fn serve(mut self) -> Result<(), Error> {
+    pub(crate) async fn serve(mut self) -> Result<(), Error> {
         let shutdown_signal = self
             .shutdown_signal
             .take()
@@ -127,7 +128,7 @@ impl ReportSpaceport {
             .body(compressed_content)
             .header("X-Api-Key", key)
             .header("Content-Encoding", "gzip")
-            .header("Content-Type", "application/protobuf")
+            .header(CONTENT_TYPE, "application/protobuf")
             .header("Accept", "application/json")
             .header(
                 "User-Agent",

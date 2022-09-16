@@ -498,7 +498,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -519,7 +519,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateSchema(example_schema()),
                     Shutdown
@@ -541,16 +541,17 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     UpdateConfiguration(
                         Configuration::builder()
-                            .server(
-                                crate::configuration::Server::builder()
+                            .supergraph(
+                                crate::configuration::Supergraph::builder()
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
                             .build()
+                            .unwrap()
                             .boxed()
                     ),
                     Shutdown
@@ -572,7 +573,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -598,7 +599,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                 ],
             )
@@ -635,7 +636,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     UpdateSchema(example_schema()),
                     Shutdown
@@ -785,7 +786,7 @@ mod tests {
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
-                        Some(configuration.server.listen.clone()),
+                        Some(configuration.supergraph.listen.clone()),
                         vec![],
                     ))
                 },

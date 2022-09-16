@@ -352,7 +352,7 @@ mod tests {
     async fn emulate_subgraph_bad_request(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header("Content-Type", "application/json")
+                .header(CONTENT_TYPE, "application/json")
                 .status(StatusCode::BAD_REQUEST)
                 .body(
                     serde_json::to_string(&Response {
@@ -376,7 +376,7 @@ mod tests {
     async fn emulate_subgraph_bad_response_format(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header("Content-Type", "text/html")
+                .header(CONTENT_TYPE, "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
                 .unwrap())
@@ -424,7 +424,7 @@ mod tests {
             let compressed_body = encoder.into_inner();
 
             Ok(http::Response::builder()
-                .header("Content-Type", "application/json")
+                .header(CONTENT_TYPE, "application/json")
                 .header(CONTENT_ENCODING, "gzip")
                 .status(StatusCode::OK)
                 .body(compressed_body.into())

@@ -1,5 +1,7 @@
 #![allow(missing_docs)] // FIXME
 
+use std::sync::Arc;
+
 use futures::stream::BoxStream;
 use http::header::HeaderName;
 use http::header::CONNECTION;
@@ -16,7 +18,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use lazy_static::lazy_static;
 use static_assertions::assert_impl_all;
-use std::sync::Arc;
 use tower::BoxError;
 
 use crate::graphql;

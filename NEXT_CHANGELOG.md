@@ -26,69 +26,99 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
-OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
 
-* `client_name` => `client.name`
-* `client_version` => `client.version`
+### Change header propagation configuration [PR #1795](https://github.com/apollographql/router/pull/1795)
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
+Adds `request` subsection into header propagation configuration to prepare for #1284 coming post 1.0
+
+```patch
+headers:
+    all:
++     request:
+          - remove:
+              named: "test"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1795
+
+### Bind the Sandbox on the same endpoint as the Supergraph [#1785](https://github.com/apollographql/router/issues/1785)
+
+We have rolled back an addition that we released in yesteday’s `v1.0.0-rc.0` which allowed Sandbox to be on a custom listener address.
+In retrospect, we believe it was premature to make this change without considering the broader impact of this change which touches on CORS and some developer experiences bits.
+We would like more time to make sure we provide you with the best experience before we attempt to make the change again.
+
+Sandbox will continue to be on the same listener address as the GraphQL listener.
+
+If you have updated your configuration for `v1.0.0-rc.0` and enabled the sandbox here is a diff of what has changed:
+
+```diff
+sandbox:
+-  listen: 127.0.0.1:4000
+-  path: /
+  enabled: true
+# make sure homepage is disabled!
+homepage:
+  enabled: false
+# do not forget to enable introspection,
+# otherwise the sandbox won't work!
+supergraph:
+  introspection: true
+```
+
+Note this means you can either enable the Homepage, or the Sandbox, but not both.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1796
+
 
 ## 🚀 Features
 
-### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
+### Automatically check "Return Query Plans from Router" checkbox in Sandbox ([Issue #](https://github.com/apollographql/router/issues/1803))
 
-There is a new global constant `apollo_sdl` which can be use to read the
-supergraph SDL as a string.
+When loading Sandbox, we now automatically configure it to toggle the "Request query plans from Router" checkbox to the enabled position which requests query plans from the Apollo Router when executing operations.  These query plans are displayed in the Sandbox interface and can be seen by selecting "Query Plan Preview" from the drop-down above the panel on the right side of the interface.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
-
-### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
-
-Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
-
-```yaml
-telemetry:
-    apollo:
-        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
-        # This is expensive and should be left at a low value.
-        # This cannot be higher than tracing->trace_config->sampler
-        field_level_instrumentation_sampler: 0.01 # (default)
-        
-        # Include HTTP request and response headers in traces sent to Apollo Studio
-        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all headers except referer
-            - referer
-
-        # Send variable values in Apollo in traces sent to Apollo Studio
-        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all variable values except for variable named first
-            - first
-    tracing:
-        trace_config:
-            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
-```
-
-By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
-
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1804
 
 ## 🐛 Fixes
 
-### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
+### Respect supergraph path for kubernetes deployment probes (#1787)
 
-You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
+For cases where you configured the `supergraph.path` for the router when using the helm chart, the liveness 
+and readiness probes continued to use the default path of `/` and so the start failed.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1736
+By @damienpontifex in #1788
+
 
 ## 🛠 Maintenance
 
-### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
+### Update apollo-router-scaffold to use the published router crate [PR #1782](https://github.com/apollographql/router/pull/1782)
 
-We changed `QueryPlannerResponse` to:
+Now that apollo-router version "1.0.0-rc.0" is released on [crates.io](https://crates.io/crates/apollo-router), we can update scaffold to it relies on the published crate instead of the git tag.
 
-+ Add a `Vec<apollo_router::graphql::Error>`
-+ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1782
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+### Refactor Configuration validation [#1791](https://github.com/apollographql/router/issues/1791)
+
+Instantiating `Configuration`s is now fallible, because it will run consistency checks on top of the already run structure checks.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1794
+
+### Refactor formatting tests [#1798](https://github.com/apollographql/router/issues/1798)
+
+Rewrite the response formatting tests to use a builder instead of macros, and move the tests to a separate file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1798
 
 ## 📚 Documentation
+
+### Add rustdoc documentation to varius modules ([Issue #799](https://github.com/apollographql/router/issues/799))
+
+Adds documentation for:
+
+apollo-router/src/layers/instrument.rs
+apollo-router/src/layers/map_first_graphql_response.rs
+apollo-router/src/layers/map_future_with_request_data.rs
+apollo-router/src/layers/sync_checkpoint.rs
+apollo-router/src/plugin/serde.rs
+apollo-router/src/tracer.rs
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1792

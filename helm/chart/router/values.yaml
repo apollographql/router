@@ -7,7 +7,7 @@ replicaCount: 1
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
 router:
   configuration:
-    server:
+    supergraph:
       listen: 0.0.0.0:80
   args:
   - --hot-reload

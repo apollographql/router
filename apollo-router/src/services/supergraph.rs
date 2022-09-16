@@ -272,7 +272,7 @@ impl Response {
         self.response.body_mut().next().await
     }
 
-    pub(crate) fn map<F>(self, f: F) -> Response
+    pub fn map<F>(self, f: F) -> Response
     where
         F: FnOnce(graphql::ResponseStream) -> graphql::ResponseStream,
     {

@@ -14,6 +14,7 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
 use insta::internals::Content;
@@ -220,7 +221,7 @@ async fn queries_should_work_with_compression() {
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
         .method(Method::POST)
-        .header("content-type", "application/json")
+        .header(CONTENT_TYPE, "application/json")
         .header("accept-encoding", "gzip")
         .build()
         .expect("expecting valid request");
@@ -535,11 +536,11 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
-        "server": {
+        "supergraph": {
             "preview_defer_support": false,
         },
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -571,7 +572,7 @@ async fn defer_path_with_disabled_config() {
 async fn defer_path() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -606,7 +607,7 @@ async fn defer_path() {
 async fn defer_path_in_array() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -637,16 +638,20 @@ async fn defer_path_in_array() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+    assert_eq!(first.has_next, Some(true));
 
     let second = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(second);
+    assert_eq!(second.has_next, Some(false));
+
+    assert_eq!(stream.next_response().await, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -725,7 +730,6 @@ async fn query_rust_with_config(
 async fn setup_router_and_registry(
     config: serde_json::Value,
 ) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
-    let config = serde_json::from_value(config).unwrap();
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
