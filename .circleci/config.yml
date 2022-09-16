@@ -31,7 +31,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: gary.{{ checksum "rust-toolchain.toml" }}
+    default: v8.{{ checksum "rust-toolchain.toml" }}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -39,16 +39,9 @@ parameters:
 # code.  Also, most of our secrets are not necessary for _most_ of our jobs, so this enables
 # forks of the project to run their own tests on their own CircleCI deployments with no
 # additional configuration.
-# Note:
-# Disable incremental compilation. CI builds often are closer to from-scratch
-# builds, as changes are typically much bigger than from a local edit-compile
-# cycle. For from-scratch builds, incremental adds an
-# extra dependency-tracking overhead. It also significantly increases the
-# amount of IO and the size of ./target, which make caching less effective.
 common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: true
   RUST_BACKTRACE: full
-  CARGO_INCREMENTAL: 0
 
 commands:
   linux_install_baseline:
