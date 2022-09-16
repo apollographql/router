@@ -174,7 +174,7 @@ pub struct Configuration {
 
     // Dev mode
     #[serde(skip)]
-    dev: Option<bool>,
+    pub(crate) dev: Option<bool>,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -365,7 +365,7 @@ impl Configuration {
 }
 
 impl Configuration {
-    fn validate(self) -> Result<Self, ConfigurationError> {
+    pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
