@@ -115,7 +115,7 @@ Now that `apollo-router` is released on [crates.io](https://crates.io/crates/apo
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1782
 
-### Refactor `Configuration` validation [Issue #1791](https://github.com/apollographql/router/issues/1791)
+### Refactor `Configuration` validation ([Issue #1791](https://github.com/apollographql/router/issues/1791))
 
 Instantiating `Configuration`s is now fallible, because it will run consistency checks on top of the already run structure checks.
 
