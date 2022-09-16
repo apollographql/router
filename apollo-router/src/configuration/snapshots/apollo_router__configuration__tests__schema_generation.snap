@@ -118,234 +118,255 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
-          "type": "array",
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": [
-                  "insert"
-                ],
-                "properties": {
-                  "insert": {
+          "type": "object",
+          "required": [
+            "request"
+          ],
+          "properties": {
+            "request": {
+              "description": "Propagate/Insert/Remove headers from request",
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "required": [
-                      "name",
-                      "value"
+                      "insert"
                     ],
                     "properties": {
-                      "name": {
-                        "type": "string"
-                      },
-                      "value": {
-                        "type": "string"
+                      "insert": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "remove"
+                    ],
+                    "properties": {
+                      "remove": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "named": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "propagate"
+                    ],
+                    "properties": {
+                      "propagate": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "named": {
+                                "type": "string"
+                              },
+                              "rename": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
                   }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "remove"
-                ],
-                "properties": {
-                  "remove": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "named": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "propagate"
-                ],
-                "properties": {
-                  "propagate": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "default": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "named": {
-                            "type": "string"
-                          },
-                          "rename": {
-                            "type": "string",
-                            "nullable": true
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
+                ]
               }
-            ]
-          }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         },
         "subgraphs": {
           "type": "object",
           "additionalProperties": {
-            "type": "array",
-            "items": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "required": [
-                    "insert"
-                  ],
-                  "properties": {
-                    "insert": {
+            "type": "object",
+            "required": [
+              "request"
+            ],
+            "properties": {
+              "request": {
+                "description": "Propagate/Insert/Remove headers from request",
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
                       "type": "object",
                       "required": [
-                        "name",
-                        "value"
+                        "insert"
                       ],
                       "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "value": {
-                          "type": "string"
+                        "insert": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "remove"
+                      ],
+                      "properties": {
+                        "remove": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "named": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "propagate"
+                      ],
+                      "properties": {
+                        "propagate": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "named": {
+                                  "type": "string"
+                                },
+                                "rename": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
                         }
                       },
                       "additionalProperties": false
                     }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "remove"
-                  ],
-                  "properties": {
-                    "remove": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "named": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "propagate"
-                  ],
-                  "properties": {
-                    "propagate": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "default": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "named": {
-                              "type": "string"
-                            },
-                            "rename": {
-                              "type": "string",
-                              "nullable": true
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
+                  ]
                 }
-              ]
-            }
+              }
+            },
+            "additionalProperties": false
           }
         }
       },
@@ -417,8 +438,6 @@ expression: "&schema"
     "sandbox": {
       "description": "Configuration options pertaining to the sandbox page.",
       "default": {
-        "listen": "127.0.0.1:4000",
-        "path": "/",
         "enabled": false
       },
       "type": "object",
@@ -426,25 +445,6 @@ expression: "&schema"
         "enabled": {
           "default": false,
           "type": "boolean"
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "path": {
-          "description": "The HTTP path on which the sandbox page will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
         }
       },
       "additionalProperties": false

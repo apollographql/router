@@ -39,6 +39,15 @@ register_plugin!("apollo", "headers", Headers);
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct HeadersLocation {
+    /// Propagate/Insert/Remove headers from request
+    request: Vec<Operation>,
+    // Propagate/Insert/Remove headers from response
+    // response: Option<Operation>
+}
+
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
     Insert(Insert),
     Remove(Remove),
@@ -94,9 +103,9 @@ enum Propagate {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     #[serde(default)]
-    all: Vec<Operation>,
+    all: Option<HeadersLocation>,
     #[serde(default)]
-    subgraphs: HashMap<String, Vec<Operation>>,
+    subgraphs: HashMap<String, HeadersLocation>,
 }
 
 struct Headers {
@@ -121,9 +130,16 @@ impl Plugin for Headers {
         })
     }
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let mut operations = self.config.all.clone();
-        if let Some(subgraph_operations) = self.config.subgraphs.get(name) {
-            operations.append(&mut subgraph_operations.clone())
+        let mut operations: Vec<Operation> = self
+            .config
+            .all
+            .as_ref()
+            .map(|a| a.request.clone())
+            .unwrap_or_default();
+        if let Some(mut subgraph_operations) =
+            self.config.subgraphs.get(name).map(|s| s.request.clone())
+        {
+            operations.append(&mut subgraph_operations);
         }
 
         ServiceBuilder::new()
@@ -268,9 +284,10 @@ mod test {
             r#"
         subgraphs:
           products:
-            - insert:
-                name: "test"
-                value: "test"
+            request:
+                - insert:
+                    name: "test"
+                    value: "test"
         "#,
         )
         .unwrap();
@@ -281,6 +298,7 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
+            request:
             - insert:
                 name: "test"
                 value: "test"
@@ -294,8 +312,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                named: "test"
+            request:
+                - remove:
+                    named: "test"
         "#,
         )
         .unwrap();
@@ -303,8 +322,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                matching: "d.*"
+            request:
+                - remove:
+                    matching: "d.*"
         "#,
         )
         .unwrap();
@@ -312,8 +332,9 @@ mod test {
         assert!(serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                matching: "d.*["
+            request:
+                - remove:
+                    matching: "d.*["
         "#,
         )
         .is_err());
@@ -324,8 +345,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
+            request:
+                - propagate:
+                    named: "test"
         "#,
         )
         .unwrap();
@@ -333,9 +355,10 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
-                rename: "bif"
+            request:
+                - propagate:
+                    named: "test"
+                    rename: "bif"
         "#,
         )
         .unwrap();
@@ -343,10 +366,11 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
-                rename: "bif"
-                default: "bof"
+            request:
+                - propagate:
+                    named: "test"
+                    rename: "bif"
+                    default: "bof"
         "#,
         )
         .unwrap();
@@ -354,8 +378,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                matching: "d.*"
+            request:
+                - propagate:
+                    matching: "d.*"
         "#,
         )
         .unwrap();

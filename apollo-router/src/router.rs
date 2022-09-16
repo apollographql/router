@@ -35,7 +35,6 @@ use self::Event::UpdateSchema;
 use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::axum_http_server_factory::ListenAddrAndRouter;
-use crate::configuration::validate_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
@@ -346,9 +345,7 @@ impl ConfigurationSource {
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
         let config = fs::read_to_string(path)?;
-        let config = validate_configuration(&config)?;
-
-        Ok(config)
+        config.parse().map_err(ReadConfigError::Validation)
     }
 }
 

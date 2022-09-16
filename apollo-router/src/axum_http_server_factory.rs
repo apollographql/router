@@ -1,5 +1,4 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::pin::Pin;
@@ -113,33 +112,6 @@ where
     RF: SupergraphServiceFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-    if configuration.sandbox.enabled
-        && !on_supergraph_endpoint(
-            configuration,
-            &configuration.sandbox.listen,
-            &configuration.sandbox.path,
-        )
-    {
-        let supergraph_endpoint_url: Cow<'_, str> = configuration.supergraph.endpoint_url().into();
-        endpoints.insert(
-            configuration.sandbox.listen.clone(),
-            Endpoint::new(
-                configuration.sandbox.path.clone(),
-                service_fn(move |_req: transport::Request| {
-                    let supergraph_endpoint_url = supergraph_endpoint_url.clone();
-                    async move {
-                        Ok::<_, BoxError>(
-                            http::Response::builder()
-                                .header(CONTENT_TYPE, "text/html")
-                                .body(Sandbox::display_page(&*supergraph_endpoint_url).into())
-                                .unwrap(),
-                        )
-                    }
-                })
-                .boxed(),
-            ),
-        );
-    }
 
     endpoints.insert(
         configuration.supergraph.listen.clone(),
@@ -204,18 +176,6 @@ fn ensure_listenaddrs_consistency(
         all_ports.insert(main_port, main_ip);
     }
 
-    if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
-        if let Some(previous_ip) = all_ports.insert(port, ip) {
-            if ip != previous_ip {
-                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                    previous_ip,
-                    ip,
-                    port,
-                ));
-            }
-        }
-    }
-
     for addr in endpoints.keys() {
         if let Some((ip, port)) = addr.ip_and_port() {
             if let Some(previous_ip) = all_ports.insert(port, ip) {
@@ -241,22 +201,6 @@ fn ensure_endpoints_consistency(
     configuration: &Configuration,
     endpoints: &MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(), ApolloRouterError> {
-    // This mistake is easy to make, so we'll check for this first:
-    // check that sandbox and homepage aren't both enabled on the supergraph endpoint
-    if configuration.homepage.enabled
-        && configuration.sandbox.enabled
-        && configuration.supergraph.listen == configuration.sandbox.listen
-        && configuration.supergraph.path == configuration.sandbox.path
-    {
-        if let Some((ip, port)) = configuration.sandbox.listen.ip_and_port() {
-            return Err(ApolloRouterError::SameRouteUsedTwice(
-                ip,
-                port,
-                configuration.sandbox.path.clone(),
-            ));
-        }
-    }
-
     // check the main endpoint
     if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
         if supergraph_listen_endpoint
@@ -696,17 +640,11 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    let get_handler = if configuration.sandbox.enabled
-        && on_supergraph_endpoint(
-            configuration,
-            &configuration.sandbox.listen,
-            &configuration.sandbox.path,
-        ) {
-        let supergraph_endpoint_url: Cow<'_, str> = configuration.supergraph.endpoint_url().into();
+    let get_handler = if configuration.sandbox.enabled {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
-                    Sandbox::display_page(&*supergraph_endpoint_url),
+                    Sandbox::display_page(),
                     host,
                     service.new_service().boxed(),
                     http_request,
@@ -805,11 +743,6 @@ async fn handle_get(
     }
 
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
-}
-
-// Returns true if the provided url and path targets the supergraph endpoint
-fn on_supergraph_endpoint(configuration: &Configuration, listen: &ListenAddr, path: &str) -> bool {
-    listen == &configuration.supergraph.listen && path == configuration.supergraph.path
 }
 
 async fn handle_post(
@@ -1227,7 +1160,7 @@ mod tests {
                     inner: service.into_inner(),
                 },
                 Arc::new(
-                    Configuration::builder()
+                    Configuration::fake_builder()
                         .sandbox(
                             crate::configuration::Sandbox::fake_builder()
                                 .enabled(true)
@@ -1243,7 +1176,8 @@ mod tests {
                                 .enabled(false)
                                 .build(),
                         )
-                        .build(),
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1332,7 +1266,8 @@ mod tests {
                                 .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .build(),
                         )
-                        .build(),
+                        .build()
+                        .unwrap(),
                 ),
                 None,
                 vec![],
@@ -1345,16 +1280,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_display_sandbox_page_on_same_endpoint() -> Result<(), ApolloRouterError> {
+    async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
             .sandbox(Sandbox::fake_builder().enabled(true).build())
             .homepage(Homepage::fake_builder().enabled(false).build())
-            .build();
+            .supergraph(Supergraph::fake_builder().introspection(true).build())
+            .build()
+            .unwrap();
 
-        let (server, client) =
-            init_with_config(expectations, conf.clone(), MultiMap::new()).await?;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         // Regular studio redirect
         let response = client
@@ -1372,34 +1308,33 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(
-            response.bytes().await.unwrap(),
-            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
-        );
+        assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn it_display_sandbox_page_on_different_path() -> Result<(), ApolloRouterError> {
+    async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
         let expectations = MockSupergraphService::new();
 
         let conf = Configuration::fake_builder()
-            .sandbox(
-                Sandbox::fake_builder()
-                    .path("/a-custom-path")
-                    .enabled(true)
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
+            .supergraph(
+                Supergraph::fake_builder()
+                    .introspection(true)
+                    .path("/custom")
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
 
-        let (server, client) =
-            init_with_config(expectations, conf.clone(), Default::default()).await?;
+        let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         // Regular studio redirect
         let response = client
             .get(&format!(
-                "{}/a-custom-path",
+                "{}/custom",
                 server.graphql_listen_address().as_ref().unwrap()
             ))
             .header(ACCEPT, "text/html")
@@ -1412,49 +1347,8 @@ mod tests {
             "{}",
             response.text().await.unwrap()
         );
-        assert_eq!(
-            response.bytes().await.unwrap(),
-            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
-        );
-        Ok(())
-    }
+        assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
 
-    #[tokio::test]
-    async fn it_display_sandbox_page_on_different_endpoint() -> Result<(), ApolloRouterError> {
-        let expectations = MockSupergraphService::new();
-
-        let conf = Configuration::fake_builder()
-            .sandbox(
-                Sandbox::fake_builder()
-                    .path("/a-custom-path")
-                    .enabled(true)
-                    .build(),
-            )
-            .build();
-
-        let (server, client) =
-            init_with_config(expectations, conf.clone(), Default::default()).await?;
-
-        // Regular studio redirect
-        let response = client
-            .get(&format!(
-                "{}/a-custom-path",
-                server.graphql_listen_address().as_ref().unwrap()
-            ))
-            .header(ACCEPT, "text/html")
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "{}",
-            response.text().await.unwrap()
-        );
-        assert_eq!(
-            response.bytes().await.unwrap(),
-            Sandbox::display_page(conf.supergraph.endpoint_url().as_str())
-        );
         Ok(())
     }
 
@@ -1731,7 +1625,8 @@ mod tests {
                     .path(String::from("/graphql"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/graphql",
@@ -1797,7 +1692,8 @@ mod tests {
                     .path(String::from("/:my_prefix/graphql"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let url = format!(
             "{}/prefix/graphql",
@@ -1863,7 +1759,8 @@ mod tests {
                     .path(String::from("/graphql/*"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         for url in &[
             format!(
@@ -2090,7 +1987,8 @@ mod tests {
                     .path(String::from("/graphql/*"))
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
 
         let response = client
@@ -2296,7 +2194,8 @@ Content-Type: application/json\r
                     .enabled(false)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
@@ -2322,7 +2221,8 @@ Content-Type: application/json\r
                     .enabled(false)
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
         let response = client
             .get(&format!(
@@ -2366,7 +2266,7 @@ Content-Type: application/json\r
             Endpoint::new("/an-other-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::fake_builder().build();
+        let conf = Configuration::fake_builder().build().unwrap();
         let (server, client) = init_with_config(expectations, conf, web_endpoints).await?;
 
         for path in &["/a-custom-path", "/an-other-custom-path"] {
@@ -2402,77 +2302,42 @@ Content-Type: application/json\r
     }
 
     #[test(tokio::test)]
-    async fn it_displays_homepage_and_sandbox_in_separate_endpoints(
-    ) -> Result<(), ApolloRouterError> {
-        let conf = Configuration::fake_builder()
-            .homepage(crate::configuration::Homepage::fake_builder().build())
-            .sandbox(
-                crate::configuration::Sandbox::fake_builder()
-                    .enabled(true)
-                    .path("/sandbox")
-                    .build(),
-            )
-            .supergraph(crate::configuration::Supergraph::fake_builder().build())
-            .build();
-        let (server, client) =
-            init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
-
-        let sandbox_response = client
-            .get(&format!(
-                "{}/sandbox",
-                server.graphql_listen_address().as_ref().unwrap(),
-            ))
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(sandbox_response.status(), StatusCode::OK);
-        assert_eq!(
-            sandbox_response.text().await.unwrap(),
-            include_str!("../templates/sandbox_index.html")
-                .replace("{{ supergraph_endpoint_url }}", "http://127.0.0.1:0/")
-                .trim_end_matches('\n')
-                .trim_end()
-        );
-
-        let homepage_response = client
-            .get(&format!(
-                "{}/",
-                server.graphql_listen_address().as_ref().unwrap(),
-            ))
-            .header(ACCEPT, "text/html")
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(homepage_response.status(), StatusCode::OK);
-        assert_eq!(
-            homepage_response.text().await.unwrap(),
-            include_str!("../templates/homepage_index.html")
-                .trim_end_matches('\n')
-                .trim_end()
-        );
-
-        server.shutdown().await
-    }
-
-    #[test(tokio::test)]
-    async fn it_refuses_to_start_if_homepage_and_sandbox_are_on_the_same_endpoint() {
-        let conf = Configuration::fake_builder()
+    async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
+        let error = Configuration::fake_builder()
             .homepage(crate::configuration::Homepage::fake_builder().build())
             .sandbox(
                 crate::configuration::Sandbox::fake_builder()
                     .enabled(true)
                     .build(),
             )
-            .build();
-
-        let error = init_with_config(MockSupergraphService::new(), conf, MultiMap::new())
-            .await
+            .build()
             .unwrap_err();
 
         assert_eq!(
-            "tried to register two endpoints on `127.0.0.1:0/`",
+            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+            error.to_string()
+        )
+    }
+
+    #[test(tokio::test)]
+    async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
+        let error = Configuration::fake_builder()
+            .homepage(crate::configuration::Homepage::fake_builder().build())
+            .sandbox(
+                crate::configuration::Sandbox::fake_builder()
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(
+                crate::configuration::Supergraph::fake_builder()
+                    .introspection(false)
+                    .build(),
+            )
+            .build()
+            .unwrap_err();
+
+        assert_eq!(
+            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
             error.to_string()
         )
     }
@@ -2499,7 +2364,7 @@ Content-Type: application/json\r
             Endpoint::new("/a-custom-path".to_string(), endpoint.boxed()),
         );
 
-        let conf = Configuration::fake_builder().build();
+        let conf = Configuration::fake_builder().build().unwrap();
         let error = init_with_config(MockSupergraphService::new(), conf, web_endpoints)
             .await
             .unwrap_err();
@@ -2597,7 +2462,8 @@ Content-Type: application/json\r
     async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         let conf = Configuration::fake_builder()
             .cors(Cors::builder().allow_any_origin(true).build())
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2619,7 +2485,8 @@ Content-Type: application/json\r
                     .origins(vec![valid_origin.to_string()])
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2645,7 +2512,8 @@ Content-Type: application/json\r
                     .match_origins(vec![apollo_subdomains.to_string()])
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let (server, client) =
             init_with_config(MockSupergraphService::new(), conf, MultiMap::new()).await?;
         let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -2875,7 +2743,7 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
-        let configuration = Configuration::fake_builder().build();
+        let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
             .await
@@ -2890,14 +2758,26 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
-            .sandbox(
-                Sandbox::fake_builder()
-                    .listen(SocketAddr::from_str("0.0.0.0:4010").unwrap())
-                    .build(),
-            )
-            .build();
+            .sandbox(Sandbox::fake_builder().build())
+            .build()
+            .unwrap();
 
-        let error = init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            SocketAddr::from_str("0.0.0.0:4010").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let error = init_with_config(MockSupergraphService::new(), configuration, web_endpoints)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2914,7 +2794,8 @@ Content-Type: application/json\r
                     .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                     .build(),
             )
-            .build();
+            .build()
+            .unwrap();
         let endpoint = service_fn(|_req: transport::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
@@ -2949,7 +2830,8 @@ Content-Type: application/json\r
                         .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
                         .build(),
                 )
-                .build(),
+                .build()
+                .unwrap(),
         );
         let endpoint = service_fn(|_req: transport::Request| async move {
             Ok::<_, BoxError>(

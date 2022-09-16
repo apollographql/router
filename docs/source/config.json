@@ -15,7 +15,7 @@
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Traffic shaping": "/configuration/traffic-shaping",
-      "Subgraph error inclusion (experimental)": "/configuration/subgraph-error-inclusion"
+      "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
     },
     "Monitoring & Metrics": {
       "Health check": "/configuration/health-checks",

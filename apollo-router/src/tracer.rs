@@ -1,7 +1,6 @@
 //! Trace Ids for the router.
 
 #![warn(unreachable_pub)]
-#![warn(missing_docs)]
 use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
