@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
+#[cfg(not(feature = "console"))]
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
@@ -46,6 +47,7 @@ use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+#[cfg(not(feature = "console"))]
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use url::Url;
@@ -56,6 +58,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+#[cfg(not(feature = "console"))]
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -351,7 +354,7 @@ impl Telemetry {
     /// This method can be used instead of `Plugin::new` to override the subscriber
     async fn new_common<S>(
         mut config: <Self as Plugin>::Config,
-        subscriber: Option<S>,
+        #[cfg_attr(feature = "console", allow(unused_variables))] subscriber: Option<S>,
     ) -> Result<Self, BoxError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
@@ -396,6 +399,7 @@ impl Telemetry {
 
         // the global tracer and subscriber initialization step must be performed only once
         TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
+            #[cfg(not(feature = "console"))]
             use anyhow::Context;
             let tracer_provider = Self::create_tracer_provider(&config)?;
 
@@ -410,11 +414,6 @@ impl Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
             global::set_text_map_propagator(Self::create_propagator(&config));
 
-            let log_level = GLOBAL_ENV_FILTER
-                .get()
-                .map(|s| s.as_str())
-                .unwrap_or("info");
-
             #[cfg(feature = "console")]
             {
                 use tracing_subscriber::util::SubscriberInitExt;
@@ -428,6 +427,11 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
+                let log_level = GLOBAL_ENV_FILTER
+                    .get()
+                    .map(|s| s.as_str())
+                    .unwrap_or("info");
+
                 let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
                     EnvFilter::try_new(log_level).context("could not parse log configuration")?,
                 );
