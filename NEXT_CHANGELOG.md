@@ -28,5 +28,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fixed rhai forced config templating  ([Issue #1826](https://github.com/apollographql/router/issues/1826))
+
+Fixed rhai config templating using incorrect conditional for generating and overwriting pre-existing rhai configs using volume mounts. Increases flexibility for configuration. 
+
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1827
+
+
+
 ## 🛠 Maintenance
 ## 📚 Documentation
