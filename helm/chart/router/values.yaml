@@ -34,18 +34,12 @@ managedFederation:
 #   - name: APOLLO_ROUTER_LOG
 #     value: debug
 #
-extraEnvVars:
-  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
-    value: /etc/apollo/supergraph.graphqls
-  - name: APOLLO_ROUTER_LOG
-    value: debug
+extraEnvVars: []
 extraEnvVarsCM: ''
 extraEnvVarsSecret: ''
 
 extraVolumes: []
-extraVolumeMounts:
-  - name: config-volume
-    mountPath: /etc/apollo
+extraVolumeMounts: []
 
 image:
   repository: ghcr.io/apollographql/router
