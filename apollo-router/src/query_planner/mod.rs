@@ -85,7 +85,7 @@ impl QueryPlan {
 
 impl QueryPlan {
     pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
-        self.root.is_deferred(operation, &variables, &self.query)
+        self.root.is_deferred(operation, variables, &self.query)
     }
 }
 
