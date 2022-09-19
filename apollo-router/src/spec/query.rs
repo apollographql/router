@@ -806,6 +806,17 @@ impl Query {
         self.operations.iter().any(Operation::is_introspection)
     }
 
+    pub(crate) fn variable_value<'a>(
+        &'a self,
+        operation_name: Option<&str>,
+        variable_name: &str,
+        variables: &'a Object,
+    ) -> Option<&'a Value> {
+        variables
+            .get(variable_name)
+            .or_else(|| self.default_variable_value(operation_name, variable_name))
+    }
+
     pub(crate) fn default_variable_value(
         &self,
         operation_name: Option<&str>,

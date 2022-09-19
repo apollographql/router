@@ -22,6 +22,7 @@ pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -160,28 +161,44 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn contains_defer(&self) -> bool {
+    pub(crate) fn is_deferred(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+        query: &Query,
+    ) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_defer()),
-            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_defer()),
-            Self::Flatten(node) => node.node.contains_defer(),
+            Self::Sequence { nodes } => nodes
+                .iter()
+                .any(|n| n.is_deferred(operation, variables, query)),
+            Self::Parallel { nodes } => nodes
+                .iter()
+                .any(|n| n.is_deferred(operation, variables, query)),
+            Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
             Self::Condition {
                 if_clause,
                 else_clause,
-                ..
+                condition,
             } => {
-                // right now ConditionNode is only used with defer, but it might be used
-                // in the future to implement @skip and @include execution
-                if let Some(node) = if_clause {
-                    if node.contains_defer() {
-                        return true;
+                if query
+                    .variable_value(operation, condition.as_str(), variables)
+                    .map(|v| *v == Value::Bool(true))
+                    .unwrap_or(true)
+                {
+                    // right now ConditionNode is only used with defer, but it might be used
+                    // in the future to implement @skip and @include execution
+                    if let Some(node) = if_clause {
+                        if node.is_deferred(operation, variables, query) {
+                            return true;
+                        }
                     }
-                }
-                if let Some(node) = else_clause {
-                    if node.contains_defer() {
-                        return true;
+                } else {
+                    if let Some(node) = else_clause {
+                        if node.is_deferred(operation, variables, query) {
+                            return true;
+                        }
                     }
                 }
                 false
@@ -193,9 +210,6 @@ impl PlanNode {
         &self,
         schema: &Schema,
     ) -> HashMap<(Option<Path>, String), Query> {
-        if !self.contains_defer() {
-            return HashMap::new();
-        }
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -632,13 +646,13 @@ impl PlanNode {
                         let _guard = span.enter();
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
-                        subselection = primary_subselection.clone().into();
+                        subselection = primary_subselection.clone();
 
                         let _ = primary_sender.send(value.clone());
                     } else {
                         let _guard = span.enter();
 
-                        subselection = primary_subselection.clone().into();
+                        subselection = primary_subselection.clone();
 
                         let _ = primary_sender.send(value.clone());
                     }

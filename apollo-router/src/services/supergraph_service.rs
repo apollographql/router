@@ -203,7 +203,11 @@ where
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
-            let can_be_deferred = plan.root.contains_defer();
+            let operation_name = body.operation_name.clone();
+
+            let can_be_deferred =
+                plan.root
+                    .is_deferred(operation_name.as_deref(), &variables, &plan.query);
 
             if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
@@ -218,8 +222,6 @@ where
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let operation_name = body.operation_name.clone();
-
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()

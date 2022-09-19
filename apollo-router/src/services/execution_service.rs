@@ -60,6 +60,15 @@ where
             let ctx = context.clone();
             let (sender, receiver) = futures::channel::mpsc::channel(10);
 
+            let operation_name = &req.supergraph_request.body().operation_name;
+            let variables = &req.supergraph_request.body().variables;
+
+            let is_deferred = req.query_plan.root.is_deferred(
+                operation_name.as_deref(),
+                variables,
+                &req.query_plan.query,
+            );
+
             let first = req
                 .query_plan
                 .execute(
@@ -71,7 +80,7 @@ where
                 )
                 .await;
 
-            let stream = if req.query_plan.root.contains_defer() {
+            let stream = if is_deferred {
                 filter_stream(first, receiver).boxed()
             } else {
                 once(ready(first)).chain(receiver).boxed()
