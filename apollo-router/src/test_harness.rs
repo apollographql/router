@@ -292,7 +292,16 @@ where
     }
 }
 
-pub(crate) struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
+/// a list of subgraphs with pregenerated responses
+#[derive(Default)]
+pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
+
+impl MockedSubgraphs {
+    /// adds a mocked subgraph to the list
+    pub fn insert(&mut self, name: &'static str, subgraph: MockSubgraph) {
+        self.0.insert(name, subgraph);
+    }
+}
 
 #[async_trait::async_trait]
 impl Plugin for MockedSubgraphs {
