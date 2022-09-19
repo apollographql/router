@@ -29,4 +29,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
+
+Add more gates (for `console` feature) to not have warnings when using `--all-features`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+
 ## 📚 Documentation
