@@ -670,21 +670,17 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    let v: &Value = parameters
-                        .supergraph_request
-                        .body()
-                        .variables
-                        .get(condition.as_str())
-                        .or_else(|| {
-                            parameters.query.default_variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
-                                condition.as_str(),
-                            )
-                        })
+                    let v = parameters
+                        .query
+                        .variable_value(
+                            parameters
+                                .supergraph_request
+                                .body()
+                                .operation_name
+                                .as_deref(),
+                            condition.as_str(),
+                            &parameters.supergraph_request.body().variables,
+                        )
                         .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 
                     if let &Value::Bool(true) = v {
