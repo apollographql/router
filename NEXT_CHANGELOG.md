@@ -28,5 +28,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Support query plans with empty primary subselections ([Issue #1778](https://github.com/apollographql/router/issues/1778))
+
+When a query with `@defer` would result in an empty primary response, the router was returning
+an error in interpreting the query plan. It is now using the query plan properly, and detects
+more precisely queries containing `@defer`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1778
+
 ## 🛠 Maintenance
 ## 📚 Documentation
