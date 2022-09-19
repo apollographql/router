@@ -110,6 +110,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
+            dbg!(&body);
             let compressed_body = compress(body, &parts.headers)
                 .instrument(tracing::debug_span!("body_compression"))
                 .await
@@ -207,7 +208,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     })
                 })?;
 
-            let resp = http::Response::from_parts(parts, graphql);
+            let resp = dbg!(http::Response::from_parts(parts, graphql));
 
             Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
