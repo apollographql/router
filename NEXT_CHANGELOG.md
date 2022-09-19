@@ -29,6 +29,27 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Do not fill in a skeleton object when canceling a subgraph request ([Issue #1819](https://github.com/apollographql/router/issues/1819))
+
+in a query spanning multiple subgraphs like this:
+
+query {
+  currentUser {
+    activeOrganization {
+      id
+      creatorUser {
+        name
+      }
+    }
+  }
+}
+if the user subgraph returns {"currentUser": { "activeOrganization": null }}, then the request to the organization subgraph
+is cancelled, and no data should be generated, but the query planner was wrongly creating an object at the target path.
+
+This PR also improves the usage of mocked subgraphs with `TestHarness`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1819
+
 ### Support query plans with empty primary subselections ([Issue #1778](https://github.com/apollographql/router/issues/1778))
 
 When a query with `@defer` would result in an empty primary response, the router was returning
@@ -38,4 +59,11 @@ more precisely queries containing `@defer`.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1778
 
 ## 🛠 Maintenance
+
+### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
+
+Add more gates (for `console` feature) to not have warnings when using `--all-features`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+
 ## 📚 Documentation
