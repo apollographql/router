@@ -649,12 +649,21 @@ impl PlanNode {
                     errors = Vec::new();
 
                     let v: &Value = parameters
-                    .supergraph_request
-                    .body()
-                    .variables
-                    .get(condition.as_str()).or_else(|| parameters.query.default_variable_value(parameters
-                        .supergraph_request.body().operation_name.as_deref(),condition.as_str()))
-                    .expect("defer expects a `Boolean!` so the variable should be non null too and present or with a default value");
+                        .supergraph_request
+                        .body()
+                        .variables
+                        .get(condition.as_str())
+                        .or_else(|| {
+                            parameters.query.default_variable_value(
+                                parameters
+                                    .supergraph_request
+                                    .body()
+                                    .operation_name
+                                    .as_deref(),
+                                condition.as_str(),
+                            )
+                        })
+                        .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 
                     if let &Value::Bool(true) = v {
                         //FIXME: should we show an error if the if_node was not present?
@@ -1231,9 +1240,11 @@ mod tests {
     use std::sync::Arc;
 
     use http::Method;
+    use serde_json_bytes::json;
 
     use super::*;
     use crate::json_ext::PathElement;
+    use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSubgraphFactory;
     use crate::query_planner::fetch::FetchNode;
     use crate::services::subgraph_service::MakeSubgraphService;
@@ -1583,6 +1594,136 @@ mod tests {
             // unneeded parts are removed in response formatting
             serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
         );
+    }
+
+    #[tokio::test]
+    async fn defer_if_condition() {
+        let query = r#"
+        query Me($shouldDefer: Boolean) {
+            me {
+              id
+              ... @defer(if: $shouldDefer) {
+                name
+                username
+              }
+            }
+          }"#;
+
+        let schema = include_str!("testdata/defer_clause.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
+
+        let root: PlanNode =
+            serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
+
+        let query_plan = QueryPlan {
+            root,
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
+            query: Arc::new(
+                Query::parse(
+                    query,
+                    &schema,
+                    &Configuration::fake_builder().build().unwrap(),
+                )
+                .unwrap(),
+            ),
+            options: QueryPlanOptions::default(),
+            formatted_query_plan: None,
+        };
+
+        let mocked_accounts = MockSubgraph::builder()
+        // defer if true
+        .with_json(
+            serde_json::json! {{"query":"query Me__accounts__0{me{__typename id}}", "operationName":"Me__accounts__0"}},
+            serde_json::json! {{"data": {"me": {"__typename": "User", "id": "1"}}}},
+        )
+        .with_json(
+            serde_json::json! {{"query":"query Me__accounts__1($representations:[_Any!]!){_entities(representations:$representations){...on User{name username}}}", "operationName":"Me__accounts__1", "variables":{"representations":[{"__typename":"User","id":"1"}]}}},
+            serde_json::json! {{"data": {"_entities": [{"name": "Ada Lovelace", "username": "@ada"}]}}},
+        )
+        // defer if false
+        .with_json(serde_json::json! {{"query": "query Me__accounts__2{me{id name username}}", "operationName":"Me__accounts__2"}},
+        serde_json::json! {{"data": {"me": {"id": "1", "name": "Ada Lovelace", "username": "@ada"}}}},
+    )
+        .build();
+
+        let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+
+        let service_factory = Arc::new(MockSubgraphFactory {
+            subgraphs: HashMap::from([(
+                "accounts".into(),
+                Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
+            )]),
+            plugins: Default::default(),
+        });
+
+        let defer_primary_response = query_plan
+            .execute(
+                &Context::new(),
+                &service_factory,
+                &Arc::new(
+                    http::Request::builder()
+                        .body(
+                            request::Request::fake_builder()
+                                .variables(
+                                    json!({ "shouldDefer": true }).as_object().unwrap().clone(),
+                                )
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                &schema,
+                sender,
+            )
+            .await;
+
+        // shouldDefer: true
+        insta::assert_json_snapshot!(defer_primary_response);
+        let deferred_response = receiver.next().await.unwrap();
+        insta::assert_json_snapshot!(deferred_response);
+        assert!(receiver.next().await.is_none());
+
+        // shouldDefer: not provided, should default to true
+        let (default_sender, mut default_receiver) = futures::channel::mpsc::channel(10);
+        let default_primary_response = query_plan
+            .execute(
+                &Context::new(),
+                &service_factory,
+                &Default::default(),
+                &schema,
+                default_sender,
+            )
+            .await;
+
+        assert_eq!(defer_primary_response, default_primary_response);
+        assert_eq!(deferred_response, default_receiver.next().await.unwrap());
+        assert!(default_receiver.next().await.is_none());
+
+        // shouldDefer: false, only 1 response
+        let (sender, mut no_defer_receiver) = futures::channel::mpsc::channel(10);
+        let defer_disabled = query_plan
+            .execute(
+                &Context::new(),
+                &service_factory,
+                &Arc::new(
+                    http::Request::builder()
+                        .body(
+                            request::Request::fake_builder()
+                                .variables(
+                                    json!({ "shouldDefer": false }).as_object().unwrap().clone(),
+                                )
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                &schema,
+                sender,
+            )
+            .await;
+        insta::assert_json_snapshot!(defer_disabled);
+        assert!(no_defer_receiver.next().await.is_none());
     }
 
     #[tokio::test]

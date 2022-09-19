@@ -50,6 +50,15 @@ This PR also improves the usage of mocked subgraphs with `TestHarness`.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1819
 
+
+### Defer: default defer condition to true ([Issue #1820](https://github.com/apollographql/router/issues/1820))
+
+According to the defer specification, defer conditions are mandatory and default to true.
+We fixed a bug where the default value wasn't initialized properly.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1832
+
+
 ## 🛠 Maintenance
 
 ### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
