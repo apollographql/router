@@ -28,6 +28,28 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Do not fill in a skeleton object when canceling a subgraph request ([Issue #1819](https://github.com/apollographql/router/issues/1819))
+
+in a query spanning multiple subgraphs like this:
+
+query {
+  currentUser {
+    activeOrganization {
+      id
+      creatorUser {
+        name
+      }
+    }
+  }
+}
+if the user subgraph returns {"currentUser": { "activeOrganization": null }}, then the request to the organization subgraph
+is cancelled, and no data should be generated, but the query planner was wrongly creating an object at the target path.
+
+This PR also improves the usage of mocked subgraphs with `TestHarness`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1819
+
 ## 🛠 Maintenance
 
 ### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
