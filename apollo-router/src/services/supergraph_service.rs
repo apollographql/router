@@ -573,12 +573,11 @@ impl RouterCreator {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        plugin::test::MockSubgraph, services::supergraph, test_harness::MockedSubgraphs,
-        TestHarness,
-    };
-
     use super::*;
+    use crate::plugin::test::MockSubgraph;
+    use crate::services::supergraph;
+    use crate::test_harness::MockedSubgraphs;
+    use crate::TestHarness;
 
     #[tokio::test]
     async fn nullability_formatting() {
