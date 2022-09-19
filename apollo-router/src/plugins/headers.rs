@@ -261,61 +261,59 @@ where
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
         for operation in &self.operations {
             match operation {
-                Operation::Insert(insert_config) => {
-                    match insert_config {
-                        Insert::Static(static_insert) => {
-                            req.subgraph_request
-                                .headers_mut()
-                                .insert(&static_insert.name, static_insert.value.clone());
-                        }
-                        Insert::FromContext(insert_from_context) => {
-                            if let Some(val) = req
-                                .context
-                                .get::<_, String>(&insert_from_context.from_context)
-                                .ok()
-                                .flatten()
-                            {
-                                match HeaderValue::from_str(&val) {
-                                    Ok(header_value) => {
-                                        req.subgraph_request
-                                            .headers_mut()
-                                            .insert(&insert_from_context.name, header_value);
-                                    }
-                                    Err(err) => {
-                                        tracing::error!("cannot convert from the context into a header value: {:?}", err);
-                                    }
+                Operation::Insert(insert_config) => match insert_config {
+                    Insert::Static(static_insert) => {
+                        req.subgraph_request
+                            .headers_mut()
+                            .insert(&static_insert.name, static_insert.value.clone());
+                    }
+                    Insert::FromContext(insert_from_context) => {
+                        if let Some(val) = req
+                            .context
+                            .get::<_, String>(&insert_from_context.from_context)
+                            .ok()
+                            .flatten()
+                        {
+                            match HeaderValue::from_str(&val) {
+                                Ok(header_value) => {
+                                    req.subgraph_request
+                                        .headers_mut()
+                                        .insert(&insert_from_context.name, header_value);
                                 }
-                            }
-                        }
-                        Insert::FromBody(from_body) => {
-                            let output = from_body
-                                .path
-                                .execute(req.supergraph_request.body())
-                                .unwrap();
-                            if let Some(val) = output {
-                                let header_value = if let Value::String(val_str) = val {
-                                    val_str
-                                } else {
-                                    val.to_string()
-                                };
-                                match HeaderValue::from_str(&header_value) {
-                                    Ok(header_value) => {
-                                        req.subgraph_request
-                                            .headers_mut()
-                                            .insert(&from_body.name, header_value);
-                                    }
-                                    Err(err) => {
-                                        tracing::error!("cannot convert from the body into a header value: {:?}", err);
-                                    }
+                                Err(err) => {
+                                    tracing::error!("cannot convert from the context into a header value for header name '{}': {:?}", insert_from_context.name, err);
                                 }
-                            } else if let Some(default_val) = &from_body.default {
-                                req.subgraph_request
-                                    .headers_mut()
-                                    .insert(&from_body.name, default_val.clone());
                             }
                         }
                     }
-                }
+                    Insert::FromBody(from_body) => {
+                        let output = from_body
+                            .path
+                            .execute(req.supergraph_request.body())
+                            .unwrap();
+                        if let Some(val) = output {
+                            let header_value = if let Value::String(val_str) = val {
+                                val_str
+                            } else {
+                                val.to_string()
+                            };
+                            match HeaderValue::from_str(&header_value) {
+                                Ok(header_value) => {
+                                    req.subgraph_request
+                                        .headers_mut()
+                                        .insert(&from_body.name, header_value);
+                                }
+                                Err(err) => {
+                                    tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                                }
+                            }
+                        } else if let Some(default_val) = &from_body.default {
+                            req.subgraph_request
+                                .headers_mut()
+                                .insert(&from_body.name, default_val.clone());
+                        }
+                    }
+                },
                 Operation::Remove(Remove::Named(name)) => {
                     req.subgraph_request.headers_mut().remove(name);
                 }
