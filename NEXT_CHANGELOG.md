@@ -33,7 +33,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 Fixed extraVolumeMounts not be being read into the deployment template correctly.
 
-By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/XXXX
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1831
 
 ### Do not fill in a skeleton object when canceling a subgraph request ([Issue #1819](https://github.com/apollographql/router/issues/1819))
 
