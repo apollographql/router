@@ -31,6 +31,10 @@ use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 
@@ -157,6 +161,9 @@ impl fmt::Display for ProjectDir {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")

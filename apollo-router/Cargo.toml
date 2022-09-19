@@ -14,6 +14,8 @@ name = "router"
 path = "src/main.rs"
 
 [features]
+# if you are doing heap profiling
+dhat-heap = []
 # Prevents the query execution to continue if any error occurs while fetching
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
@@ -54,6 +56,7 @@ derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
     "display",
 ] }
+dhat = "0.3.0"
 directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.24"
