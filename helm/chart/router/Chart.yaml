@@ -2,7 +2,7 @@ apiVersion: v2
 name: router
 description: Rust Graph Routing runtime for Apollo Federation
 
-# Note: Do not make changes to this document *unless* you are cutting a router
+# Note: Do not make changes to this document *unless* you are creating a router
 # release. For example, if you are providing a fix or enhancement, do not
 # change this file.
 #
