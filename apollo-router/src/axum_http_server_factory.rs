@@ -315,20 +315,42 @@ impl HttpServerFactory for AxumHttpServerFactory {
             // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
-            #[cfg_attr(not(unix), allow(unused_mut))]
-            let main_listener = if let Some(listener) = main_listener.take() {
-                listener
-            } else {
-                match all_routers.main.0.clone() {
-                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
-                        TcpListener::bind(addr)
-                            .await
-                            .map_err(ApolloRouterError::ServerCreationError)?,
-                    ),
-                    #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => Listener::Unix(
-                        UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
-                    ),
+            let main_listener = match all_routers.main.0.clone() {
+                ListenAddr::SocketAddr(addr) => {
+                    match main_listener.take().and_then(|listener| {
+                        listener.local_addr().ok().and_then(|l| {
+                            if l == ListenAddr::SocketAddr(addr) {
+                                Some(listener)
+                            } else {
+                                None
+                            }
+                        })
+                    }) {
+                        Some(listener) => listener,
+                        None => Listener::Tcp(
+                            TcpListener::bind(addr)
+                                .await
+                                .map_err(ApolloRouterError::ServerCreationError)?,
+                        ),
+                    }
+                }
+                #[cfg(unix)]
+                ListenAddr::UnixSocket(path) => {
+                    match main_listener.take().and_then(|listener| {
+                        listener.local_addr().ok().and_then(|l| {
+                            if l == ListenAddr::UnixSocket(path.clone()) {
+                                Some(listener)
+                            } else {
+                                None
+                            }
+                        })
+                    }) {
+                        Some(listener) => listener,
+                        None => Listener::Unix(
+                            UnixListener::bind(path)
+                                .map_err(ApolloRouterError::ServerCreationError)?,
+                        ),
+                    }
                 }
             };
             let actual_main_listen_address = main_listener
@@ -2833,20 +2855,6 @@ Content-Type: application/json\r
                 .build()
                 .unwrap(),
         );
-        let endpoint = service_fn(|_req: transport::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
-                    .body("this is a test".to_string().into())
-                    .unwrap(),
-            )
-        })
-        .boxed();
-
-        let mut web_endpoints = MultiMap::new();
-        web_endpoints.insert(
-            SocketAddr::from_str("127.0.0.1:5000").unwrap().into(),
-            Endpoint::new("/".to_string(), endpoint),
-        );
 
         let server_factory = AxumHttpServerFactory::new();
         let (service, _) = tower_test::mock::spawn();
@@ -2858,23 +2866,45 @@ Content-Type: application/json\r
         let server = server_factory
             .create(
                 supergraph_service_factory.clone(),
-                Arc::clone(&configuration),
+                configuration,
                 None,
                 vec![],
-                web_endpoints.clone(),
+                MultiMap::new(),
             )
             .await
             .expect("Failed to create server factory");
 
-        server
+        assert_eq!(
+            ListenAddr::SocketAddr(SocketAddr::from_str("127.0.0.1:4010").unwrap()),
+            server.graphql_listen_address().clone().unwrap()
+        );
+
+        // change the listenaddr
+        let new_configuration = Arc::new(
+            Configuration::fake_builder()
+                .supergraph(
+                    Supergraph::fake_builder()
+                        .listen(SocketAddr::from_str("127.0.0.1:4020").unwrap())
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        );
+
+        let new_server = server
             .restart(
                 &server_factory,
                 supergraph_service_factory,
-                Arc::clone(&configuration),
-                web_endpoints,
+                new_configuration,
+                MultiMap::new(),
             )
             .await
             .unwrap();
+
+        assert_eq!(
+            ListenAddr::SocketAddr(SocketAddr::from_str("127.0.0.1:4020").unwrap()),
+            new_server.graphql_listen_address().clone().unwrap()
+        );
     }
 
     /// A counter of how many GraphQL responses have been sent by an Apollo Router

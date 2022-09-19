@@ -1,5 +1,4 @@
 use apollo_parser::ast;
-use displaydoc::Display;
 
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -9,7 +8,7 @@ use crate::*;
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
@@ -29,6 +28,21 @@ pub(crate) enum FieldType {
     Id,
     /// Boolean
     Boolean,
+}
+
+impl std::fmt::Display for FieldType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldType::Introspection(ty) | FieldType::Named(ty) => write!(f, "{ty}"),
+            FieldType::List(ty) => write!(f, "[{ty}]"),
+            FieldType::NonNull(ty) => write!(f, "{ty}!"),
+            FieldType::String => write!(f, "String"),
+            FieldType::Int => write!(f, "Int"),
+            FieldType::Float => write!(f, "Float"),
+            FieldType::Id => write!(f, "ID"),
+            FieldType::Boolean => write!(f, "Boolean"),
+        }
+    }
 }
 
 impl FieldType {

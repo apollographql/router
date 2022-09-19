@@ -263,9 +263,6 @@ pub enum ConfigurationSource {
 
         /// When watching, the delay to wait before applying the new configuration.
         delay: Option<Duration>,
-
-        /// `true` if dev mode is enabled
-        dev: bool,
     },
 }
 
@@ -285,12 +282,7 @@ impl ConfigurationSource {
             ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
-            ConfigurationSource::File {
-                path,
-                watch,
-                delay,
-                dev,
-            } => {
+            ConfigurationSource::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -298,39 +290,22 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
+                } else if watch {
+                    crate::files::watch(path.to_owned(), delay)
+                        .map(move |_| match ConfigurationSource::read_config(&path) {
+                            Ok(config) => UpdateConfiguration(Box::new(config)),
+                            Err(err) => {
+                                tracing::error!("{}", err);
+                                NoMoreConfiguration
+                            }
+                        })
+                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(mut configuration) => {
-                            if watch {
-                                crate::files::watch(path.to_owned(), delay)
-                                    .filter_map(move |_| {
-                                        future::ready(
-                                            match ConfigurationSource::read_config(&path) {
-                                                Ok(config) => Some(config),
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
-                                                }
-                                            },
-                                        )
-                                    })
-                                    .map(move |mut x| {
-                                        if dev {
-                                            x.enable_dev_mode();
-                                        }
-                                        UpdateConfiguration(Box::new(x))
-                                    })
-                                    .boxed()
-                            } else {
-                                if dev {
-                                    configuration.enable_dev_mode();
-                                }
-                                stream::once(future::ready(UpdateConfiguration(Box::new(
-                                    configuration,
-                                ))))
-                                .boxed()
-                            }
-                        }
+                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
+                            Box::new(configuration),
+                        )))
+                        .boxed(),
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
@@ -689,7 +664,6 @@ mod tests {
             path,
             watch: true,
             delay: Some(Duration::from_millis(10)),
-            dev: false,
         }
         .into_stream()
         .boxed();
@@ -709,22 +683,16 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
+        let event = stream.into_future().now_or_never();
+        assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn config_by_file_dev_mode() {
-        let (path, mut file) = create_temp_file();
-        let contents = include_str!("testdata/supergraph_config.yaml");
-        write_and_flush(&mut file, contents).await;
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: true,
-            delay: Some(Duration::from_millis(10)),
-            dev: true,
-        }
-        .into_stream()
-        .boxed();
+    async fn config_dev_mode_without_file() {
+        let mut stream =
+            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
+                .into_stream()
+                .boxed();
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,
@@ -732,6 +700,7 @@ mod tests {
         };
         assert!(cfg.supergraph.introspection);
         assert!(cfg.sandbox.enabled);
+        assert!(!cfg.homepage.enabled);
         assert!(cfg.plugins().iter().any(
             |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
         ));
@@ -740,27 +709,7 @@ mod tests {
             .iter()
             .any(|(name, val)| name == "apollo.include_subgraph_errors"
                 && val == &json!({"all": true})));
-
-        // Modify the file and try again
-        write_and_flush(&mut file, contents).await;
-        let cfg = match stream.next().await.unwrap() {
-            UpdateConfiguration(configuration) => configuration,
-            _ => panic!("the event from the stream must be UpdateConfiguration"),
-        };
-        assert!(cfg.supergraph.introspection);
-        assert!(cfg.sandbox.enabled);
-        assert!(cfg.plugins().iter().any(
-            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
-        ));
-        assert!(cfg
-            .plugins()
-            .iter()
-            .any(|(name, val)| name == "apollo.include_subgraph_errors"
-                && val == &json!({"all": true})));
-
-        // This time write garbage, there should not be an update.
-        write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
+        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -771,7 +720,6 @@ mod tests {
             path,
             watch: true,
             delay: None,
-            dev: false,
         }
         .into_stream();
 
@@ -785,7 +733,6 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
-            dev: false,
         }
         .into_stream();
 
@@ -803,7 +750,6 @@ mod tests {
             path,
             watch: false,
             delay: None,
-            dev: false,
         }
         .into_stream();
         assert!(matches!(

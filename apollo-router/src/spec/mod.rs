@@ -21,6 +21,8 @@ pub(crate) enum SpecError {
     RecursionLimitExceeded,
     /// invalid type error, expected another type than '{0}'
     InvalidType(String),
+    /// cannot query field '{0}' on type '{1}'
+    InvalidField(String, String),
     /// parsing error: {0}
     ParsingError(String),
     /// subscription operation is not supported

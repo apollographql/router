@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use clap::AppSettings;
+use clap::ArgAction;
 use clap::CommandFactory;
 use clap::Parser;
 use directories::ProjectDirs;
@@ -31,6 +32,7 @@ use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 
 /// Options for the router
 #[derive(Parser, Debug)]
@@ -50,7 +52,12 @@ pub(crate) struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
+    #[clap(
+        alias = "hr",
+        long = "hot-reload",
+        env = "APOLLO_ROUTER_HOT_RELOAD",
+        action(ArgAction::SetTrue)
+    )]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
@@ -63,7 +70,12 @@ pub(crate) struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", hide(true))]
+    #[clap(
+        env = APOLLO_ROUTER_DEV_ENV,
+        long = "dev",
+        hide(true),
+        action(ArgAction::SetTrue)
+    )]
     dev: bool,
 
     /// Schema location relative to the project directory.
@@ -76,7 +88,7 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long)]
+    #[clap(long, action(ArgAction::SetTrue))]
     schema: bool,
 
     /// Your Apollo key.
@@ -140,6 +152,9 @@ impl fmt::Display for ProjectDir {
 
 /// This is the main router entrypoint.
 ///
+/// Starts a Tokio runtime and runs a Router in it based on command-line options.
+/// Returns on fatal error or after graceful shutdown has completed.
+///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -154,17 +169,36 @@ pub fn main() -> Result<()> {
     runtime.block_on(Executable::builder().start())
 }
 
-/// Entry point into creating a router executable.
+/// Entry point into creating a router executable with more customization than [`main`].
 #[non_exhaustive]
 pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable that will parse commandline options and set up logging,
-    /// then start an HTTP server.
+    /// Returns a builder that can parse command-line options and run a Router
+    /// in an existing Tokio runtime.
     ///
-    /// You may optionally specify when the server should gracefully shut down, the schema source and the configuration source.
-    /// The default is on CTRL+C on the terminal (or a `SIGINT` signal).
+    /// Builder methods:
+    ///
+    /// * `.config(impl Into<`[`ConfigurationSource`]`>)`
+    ///   Optional.
+    ///   Specifies where to find the Router configuration.
+    ///   The default is the file specified by the `--config` or `-c` CLI option.
+    ///
+    /// * `.schema(impl Into<`[`SchemaSource`]`>)`
+    ///   Optional.
+    ///   Specifies when to find the supergraph schema.
+    ///   The default is the file specified by the `--supergraph` or `-s` CLI option.
+    ///
+    /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
+    ///   Optional.
+    ///   Specifies when the Router should shut down gracefully.
+    ///   The default is on CTRL+C (`SIGINT`).
+    ///
+    /// * `.start()`
+    ///   Returns a future that resolves to [`anyhow::Result`]`<()>`
+    ///   on fatal error or after graceful shutdown has completed.
+    ///   Must be called (and the future awaited) in the context of an existing Tokio runtime.
     ///
     /// ```no_run
     /// use apollo_router::{Executable, ShutdownSource};
@@ -182,8 +216,6 @@ impl Executable {
     ///   .await
     /// # }
     /// ```
-    /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
-    ///
     #[builder(entry = "builder", exit = "start", visibility = "pub")]
     async fn start(
         shutdown: Option<ShutdownSource>,
@@ -260,12 +292,10 @@ impl Executable {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
-                    dev: opt.dev,
                 }
             }) {
                 Some(configuration) => configuration,
                 None => Configuration::builder()
-                    .dev(opt.dev)
                     .build()
                     .map(std::convert::Into::into)?,
             },
@@ -418,6 +448,8 @@ fn copy_args_to_env() {
                 env::set_var(env, value);
             } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
                 env::set_var(env, value);
+            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id()) {
+                env::set_var(env, value.to_string());
             }
         }
     });
