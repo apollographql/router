@@ -200,13 +200,12 @@ impl PlanNode {
                             return true;
                         }
                     }
-                } else {
-                    if let Some(node) = else_clause {
-                        if node.is_deferred(operation, variables, query) {
-                            return true;
-                        }
+                } else if let Some(node) = else_clause {
+                    if node.is_deferred(operation, variables, query) {
+                        return true;
                     }
                 }
+
                 false
             }
         }
