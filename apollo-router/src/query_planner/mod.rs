@@ -83,6 +83,12 @@ impl QueryPlan {
     }
 }
 
+impl QueryPlan {
+    pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
+        self.root.is_deferred(operation, &variables, &self.query)
+    }
+}
+
 /// Query plans are composed of a set of nodes.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]

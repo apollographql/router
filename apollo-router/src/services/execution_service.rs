@@ -63,11 +63,9 @@ where
             let operation_name = &req.supergraph_request.body().operation_name;
             let variables = &req.supergraph_request.body().variables;
 
-            let is_deferred = req.query_plan.root.is_deferred(
-                operation_name.as_deref(),
-                variables,
-                &req.query_plan.query,
-            );
+            let is_deferred = req
+                .query_plan
+                .is_deferred(operation_name.as_deref(), variables);
 
             let first = req
                 .query_plan

@@ -46,14 +46,14 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
-        can_be_deferred: bool,
+        is_deferred: bool,
         variables: Object,
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
             let operation = self.operation(operation_name);
-            if can_be_deferred {
+            if is_deferred {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
                     match self.subselections.get(&(
