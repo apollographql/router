@@ -28,5 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Headline ([Issue #1824](https://github.com/apollographql/router/issues/1824))
+
+Fixed extraVolumeMounts not be being read into the deployment template correctly.
+
+By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1825
+
 ## 🛠 Maintenance
 ## 📚 Documentation
