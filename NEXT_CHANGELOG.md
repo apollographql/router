@@ -56,7 +56,6 @@ This PR also improves the usage of mocked subgraphs with `TestHarness`.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1819
 
-
 ### Defer: default defer condition to true ([Issue #1820](https://github.com/apollographql/router/issues/1820))
 
 According to the defer specification, defer conditions are mandatory and default to true.
@@ -64,6 +63,13 @@ We fixed a bug where the default value wasn't initialized properly.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1832
 
+### Support query plans with empty primary subselections ([Issue #1778](https://github.com/apollographql/router/issues/1778))
+
+When a query with `@defer` would result in an empty primary response, the router was returning
+an error in interpreting the query plan. It is now using the query plan properly, and detects
+more precisely queries containing `@defer`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1778
 
 ## 🛠 Maintenance
 

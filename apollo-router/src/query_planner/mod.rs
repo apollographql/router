@@ -22,6 +22,7 @@ pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -79,6 +80,12 @@ impl QueryPlan {
             query: Arc::new(Query::default()),
             options: QueryPlanOptions::default(),
         }
+    }
+}
+
+impl QueryPlan {
+    pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
+        self.root.is_deferred(operation, variables, &self.query)
     }
 }
 
@@ -160,30 +167,45 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn contains_defer(&self) -> bool {
+    pub(crate) fn is_deferred(
+        &self,
+        operation: Option<&str>,
+        variables: &Object,
+        query: &Query,
+    ) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_defer()),
-            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_defer()),
-            Self::Flatten(node) => node.node.contains_defer(),
+            Self::Sequence { nodes } => nodes
+                .iter()
+                .any(|n| n.is_deferred(operation, variables, query)),
+            Self::Parallel { nodes } => nodes
+                .iter()
+                .any(|n| n.is_deferred(operation, variables, query)),
+            Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
             Self::Condition {
                 if_clause,
                 else_clause,
-                ..
+                condition,
             } => {
-                // right now ConditionNode is only used with defer, but it might be used
-                // in the future to implement @skip and @include execution
-                if let Some(node) = if_clause {
-                    if node.contains_defer() {
+                if query
+                    .variable_value(operation, condition.as_str(), variables)
+                    .map(|v| *v == Value::Bool(true))
+                    .unwrap_or(true)
+                {
+                    // right now ConditionNode is only used with defer, but it might be used
+                    // in the future to implement @skip and @include execution
+                    if let Some(node) = if_clause {
+                        if node.is_deferred(operation, variables, query) {
+                            return true;
+                        }
+                    }
+                } else if let Some(node) = else_clause {
+                    if node.is_deferred(operation, variables, query) {
                         return true;
                     }
                 }
-                if let Some(node) = else_clause {
-                    if node.contains_defer() {
-                        return true;
-                    }
-                }
+
                 false
             }
         }
@@ -193,9 +215,6 @@ impl PlanNode {
         &self,
         schema: &Schema,
     ) -> HashMap<(Option<Path>, String), Query> {
-        if !self.contains_defer() {
-            return HashMap::new();
-        }
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -227,16 +246,19 @@ impl PlanNode {
             Self::Defer { primary, deferred } => {
                 // TODO rebuilt subselection from the root thanks to the path
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
-                let query = reconstruct_full_query(&primary_path, &primary.subselection);
-                // ----------------------- Parse ---------------------------------
-                let sub_selection = Query::parse(&query, schema, &Default::default())
-                    .expect("it must respect the schema");
-                // ----------------------- END Parse ---------------------------------
+                if let Some(primary_subselection) = &primary.subselection {
+                    let query = reconstruct_full_query(&primary_path, primary_subselection);
+                    // ----------------------- Parse ---------------------------------
+                    let sub_selection = Query::parse(&query, schema, &Default::default())
+                        .expect("it must respect the schema");
+                    // ----------------------- END Parse ---------------------------------
 
-                subselections.insert(
-                    (Some(primary_path), primary.subselection.clone()),
-                    sub_selection,
-                );
+                    subselections.insert(
+                        (Some(primary_path), primary_subselection.clone()),
+                        sub_selection,
+                    );
+                }
+
                 deferred.iter().fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
                         // TODO rebuilt subselection from the root thanks to the path
@@ -629,13 +651,13 @@ impl PlanNode {
                         let _guard = span.enter();
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
-                        subselection = primary_subselection.clone().into();
+                        subselection = primary_subselection.clone();
 
                         let _ = primary_sender.send(value.clone());
                     } else {
                         let _guard = span.enter();
 
-                        subselection = primary_subselection.clone().into();
+                        subselection = primary_subselection.clone();
 
                         let _ = primary_sender.send(value.clone());
                     }
@@ -648,21 +670,17 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    let v: &Value = parameters
-                        .supergraph_request
-                        .body()
-                        .variables
-                        .get(condition.as_str())
-                        .or_else(|| {
-                            parameters.query.default_variable_value(
-                                parameters
-                                    .supergraph_request
-                                    .body()
-                                    .operation_name
-                                    .as_deref(),
-                                condition.as_str(),
-                            )
-                        })
+                    let v = parameters
+                        .query
+                        .variable_value(
+                            parameters
+                                .supergraph_request
+                                .body()
+                                .operation_name
+                                .as_deref(),
+                            condition.as_str(),
+                            &parameters.supergraph_request.body().variables,
+                        )
                         .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 
                     if let &Value::Bool(true) = v {
@@ -1155,7 +1173,7 @@ pub(crate) struct Primary {
 
     /// The part of the original query that "selects" the data to
     /// send in that primary response (once the plan in `node` completes).
-    subselection: String,
+    subselection: Option<String>,
 
     // The plan to get all the data for that primary part
     node: Option<Box<PlanNode>>,
@@ -1188,7 +1206,7 @@ impl DeferredNode {
     fn subselection(&self) -> Option<String> {
         self.subselection.clone().or_else(|| {
             self.node.as_ref().and_then(|node| match node.as_ref() {
-                PlanNode::Defer { primary, .. } => Some(primary.subselection.clone()),
+                PlanNode::Defer { primary, .. } => primary.subselection.clone(),
                 _ => None,
             })
         })
@@ -1459,7 +1477,7 @@ mod tests {
             root: PlanNode::Defer {
                 primary: Primary {
                     path: None,
-                    subselection: "{ t { x } }".to_string(),
+                    subselection: Some("{ t { x } }".to_string()),
                     node: Some(Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "X".to_string(),
                         requires: vec![],
