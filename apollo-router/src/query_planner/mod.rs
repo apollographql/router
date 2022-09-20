@@ -262,7 +262,6 @@ impl PlanNode {
 
                 deferred.iter().try_fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
-                        // TODO rebuilt subselection from the root thanks to the path
                         let query = reconstruct_full_query(&current.path, subselection);
                         // ----------------------- Parse ---------------------------------
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
