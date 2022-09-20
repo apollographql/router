@@ -1,23 +1,14 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
-use async_compression::tokio::write::BrotliDecoder;
-use async_compression::tokio::write::GzipDecoder;
-use async_compression::tokio::write::ZlibDecoder;
-use axum::body::StreamBody;
 use axum::extract::Extension;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
 use axum::http::header::HeaderMap;
 use axum::http::StatusCode;
-use axum::middleware::Next;
-use axum::middleware::{self};
+use axum::middleware;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
@@ -25,63 +16,48 @@ use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
-use futures::future::ready;
 use futures::prelude::*;
-use futures::stream::once;
-use futures::StreamExt;
-use http::header::CONTENT_ENCODING;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
-use http::HeaderValue;
 use http::Request;
-use http::Uri;
-use hyper::server::conn::Http;
 use hyper::Body;
 use itertools::Itertools;
-use mediatype::names::HTML;
-use mediatype::names::TEXT;
-use mediatype::MediaType;
-use mediatype::MediaTypeList;
 use multimap::MultiMap;
-use opentelemetry::global;
-use opentelemetry::trace::SpanKind;
-use opentelemetry::trace::TraceContextExt;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::Notify;
 use tower::service_fn;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::DefaultPredicate;
 use tower_http::compression::Predicate;
-use tower_http::trace::MakeSpan;
 use tower_http::trace::TraceLayer;
-use tower_service::Service;
-use tracing::Level;
 use tracing::Span;
 
+use super::handlers::handle_get;
+use super::handlers::handle_get_with_static;
+use super::handlers::handle_post;
+use super::listeners::ensure_endpoints_consistency;
+use super::listeners::ensure_listenaddrs_consistency;
+use super::listeners::extra_endpoints;
+use super::listeners::ListenersAndRouters;
+use super::utils::decompress_request_body;
+use super::utils::PropagatingMakeSpan;
+use super::ListenAddrAndRouter;
+use crate::axum_factory::listeners::get_extra_listeners;
+use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
 use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
 use crate::configuration::Sandbox;
 use crate::graphql;
-use crate::http_ext;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::http_server_factory::NetworkStream;
-use crate::plugins::traffic_shaping::Elapsed;
-use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::transport;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -92,15 +68,6 @@ impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
         Self
     }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
-
-#[derive(Debug)]
-pub(crate) struct ListenersAndRouters {
-    pub(crate) main: ListenAddrAndRouter,
-    pub(crate) extra: MultiMap<ListenAddr, Router>,
 }
 
 pub(crate) fn make_axum_router<RF>(
@@ -154,145 +121,6 @@ where
         main: main_endpoint,
         extra: extra_endpoints,
     })
-}
-
-/// Binding different listen addresses to the same port will "relax" the requirements, which
-/// could result in a security issue:
-/// If endpoint A is exposed to 127.0.0.1:4000/foo and endpoint B is exposed to 0.0.0.0:4000/bar
-/// 0.0.0.0:4000/foo would be accessible.
-///
-/// `ensure_listenaddrs_consistency` makes sure listen addresses that bind to the same port
-/// have the same IP:
-/// 127.0.0.1:4000 and 127.0.0.1:4000 will not trigger an error
-/// 127.0.0.1:4000 and 0.0.0.0:4001 will not trigger an error
-///
-/// 127.0.0.1:4000 and 0.0.0.0:4000 will trigger an error
-fn ensure_listenaddrs_consistency(
-    configuration: &Configuration,
-    endpoints: &MultiMap<ListenAddr, Endpoint>,
-) -> Result<(), ApolloRouterError> {
-    let mut all_ports = HashMap::new();
-    if let Some((main_ip, main_port)) = configuration.supergraph.listen.ip_and_port() {
-        all_ports.insert(main_port, main_ip);
-    }
-
-    for addr in endpoints.keys() {
-        if let Some((ip, port)) = addr.ip_and_port() {
-            if let Some(previous_ip) = all_ports.insert(port, ip) {
-                if ip != previous_ip {
-                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                        previous_ip,
-                        ip,
-                        port,
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Merging `axum::Router`s that use the same path panics (yes it doesn't raise an error, it panics.)
-///
-/// In order to not crash the router if paths clash using hot reload, we make sure the configuration is consistent,
-/// and raise an error instead.
-fn ensure_endpoints_consistency(
-    configuration: &Configuration,
-    endpoints: &MultiMap<ListenAddr, Endpoint>,
-) -> Result<(), ApolloRouterError> {
-    // check the main endpoint
-    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
-        if supergraph_listen_endpoint
-            .iter()
-            .any(|e| e.path == configuration.supergraph.path)
-        {
-            if let Some((ip, port)) = configuration.supergraph.listen.ip_and_port() {
-                return Err(ApolloRouterError::SameRouteUsedTwice(
-                    ip,
-                    port,
-                    configuration.supergraph.path.clone(),
-                ));
-            }
-        }
-    }
-
-    // check the extra endpoints
-    let mut listen_addrs_and_paths = HashSet::new();
-    for (listen, endpoints) in endpoints.iter_all() {
-        for endpoint in endpoints {
-            if let Some((ip, port)) = listen.ip_and_port() {
-                if !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone())) {
-                    return Err(ApolloRouterError::SameRouteUsedTwice(
-                        ip,
-                        port,
-                        endpoint.path.clone(),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn main_endpoint<RF>(
-    service_factory: RF,
-    configuration: &Configuration,
-    endpoints_on_main_listener: Vec<Endpoint>,
-) -> Result<ListenAddrAndRouter, ApolloRouterError>
-where
-    RF: SupergraphServiceFactory,
-{
-    let cors = configuration.cors.clone().into_layer().map_err(|e| {
-        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
-    })?;
-
-    let main_route = main_router::<RF>(configuration)
-        .layer(middleware::from_fn(decompress_request_body))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(PropagatingMakeSpan::new())
-                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
-                    // Duration here is instant based
-                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
-                    if resp.status() >= StatusCode::BAD_REQUEST {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Error.as_str(),
-                        );
-                    } else {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Ok.as_str(),
-                        );
-                    }
-                }),
-        )
-        .layer(Extension(service_factory))
-        .layer(cors)
-        // Compress the response body, except for multipart responses such as with `@defer`.
-        // This is a work-around for https://github.com/apollographql/router/issues/1572
-        .layer(CompressionLayer::new().compress_when(
-            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
-        ));
-
-    let route = endpoints_on_main_listener
-        .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
-
-    let listener = configuration.supergraph.listen.clone();
-    Ok(ListenAddrAndRouter(listener, route))
-}
-
-fn extra_endpoints(endpoints: MultiMap<ListenAddr, Endpoint>) -> MultiMap<ListenAddr, Router> {
-    let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
-    mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
-        (
-            listen_addr,
-            e.into_iter().map(|e| e.into_router()).collect::<Vec<_>>(),
-        )
-    }));
-    mm
 }
 
 impl HttpServerFactory for AxumHttpServerFactory {
@@ -429,230 +257,56 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-async fn get_extra_listeners(
-    previous_listeners: Vec<(ListenAddr, Listener)>,
-    mut extra_routers: MultiMap<ListenAddr, Router>,
-) -> Result<Vec<((ListenAddr, Listener), axum::Router)>, ApolloRouterError> {
-    let mut listeners_and_routers: Vec<((ListenAddr, Listener), axum::Router)> =
-        Vec::with_capacity(extra_routers.len());
+fn main_endpoint<RF>(
+    service_factory: RF,
+    configuration: &Configuration,
+    endpoints_on_main_listener: Vec<Endpoint>,
+) -> Result<ListenAddrAndRouter, ApolloRouterError>
+where
+    RF: SupergraphServiceFactory,
+{
+    let cors = configuration.cors.clone().into_layer().map_err(|e| {
+        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
+    })?;
 
-    // reuse previous extra listen addrs
-    for (listen_addr, listener) in previous_listeners.into_iter() {
-        if let Some(routers) = extra_routers.remove(&listen_addr) {
-            listeners_and_routers.push((
-                (listen_addr, listener),
-                routers
-                    .iter()
-                    .fold(axum::Router::new(), |acc, r| acc.merge(r.clone())),
-            ));
-        }
-    }
-
-    // populate the new listen addrs
-    for (listen_addr, routers) in extra_routers.into_iter() {
-        // if we received a TCP listener, reuse it, otherwise create a new one
-        #[cfg_attr(not(unix), allow(unused_mut))]
-        let listener = match listen_addr.clone() {
-            ListenAddr::SocketAddr(addr) => Listener::Tcp(
-                TcpListener::bind(addr)
-                    .await
-                    .map_err(ApolloRouterError::ServerCreationError)?,
-            ),
-            #[cfg(unix)]
-            ListenAddr::UnixSocket(path) => Listener::Unix(
-                UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
-            ),
-        };
-        listeners_and_routers.push((
-            (listen_addr, listener),
-            routers
-                .iter()
-                .fold(axum::Router::new(), |acc, r| acc.merge(r.clone())),
-        ));
-    }
-
-    Ok(listeners_and_routers)
-}
-
-fn serve_router_on_listen_addr(
-    mut listener: Listener,
-    router: axum::Router,
-) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
-    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-    // this server reproduces most of hyper::server::Server's behaviour
-    // we select over the stop_listen_receiver channel and the listener's
-    // accept future. If the channel received something or the sender
-    // was dropped, we stop using the listener and send it back through
-    // listener_receiver
-    let server = async move {
-        tokio::pin!(shutdown_receiver);
-
-        let connection_shutdown = Arc::new(Notify::new());
-        let mut max_open_file_warning = None;
-
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_receiver => {
-                    break;
-                }
-                res = listener.accept() => {
-                    let app = router.clone();
-                    let connection_shutdown = connection_shutdown.clone();
-
-                    match res {
-                        Ok(res) => {
-                            if max_open_file_warning.is_some(){
-                                tracing::info!("can accept connections again");
-                                max_open_file_warning = None;
-                            }
-
-                            tokio::task::spawn(async move {
-                                match res {
-                                    NetworkStream::Tcp(stream) => {
-                                        stream
-                                            .set_nodelay(true)
-                                            .expect(
-                                                "this should not fail unless the socket is invalid",
-                                            );
-                                            let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .serve_connection(stream, app);
-
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
-
-                                                let _= connection.await;
-                                            }
-                                        }
-                                    }
-                                    #[cfg(unix)]
-                                    NetworkStream::Unix(stream) => {
-                                        let connection = Http::new()
-                                        .http1_keep_alive(true)
-                                        .serve_connection(stream, app);
-
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
-
-                                                let _= connection.await;
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        }
-
-                        Err(e) => match e.kind() {
-                            // this is already handled by moi and tokio
-                            //std::io::ErrorKind::WouldBlock => todo!(),
-
-                            // should be treated as EAGAIN
-                            // https://man7.org/linux/man-pages/man2/accept.2.html
-                            // Linux accept() (and accept4()) passes already-pending network
-                            // errors on the new socket as an error code from accept().  This
-                            // behavior differs from other BSD socket implementations.  For
-                            // reliable operation the application should detect the network
-                            // errors defined for the protocol after accept() and treat them
-                            // like EAGAIN by retrying.  In the case of TCP/IP, these are
-                            // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
-                            // EOPNOTSUPP, and ENETUNREACH.
-                            //
-                            // those errors are not supported though: needs the unstable io_error_more feature
-                            // std::io::ErrorKind::NetworkDown => todo!(),
-                            // std::io::ErrorKind::HostUnreachable => todo!(),
-                            // std::io::ErrorKind::NetworkUnreachable => todo!(),
-
-                            //ECONNABORTED
-                            std::io::ErrorKind::ConnectionAborted|
-                            //EINTR
-                            std::io::ErrorKind::Interrupted|
-                            // EINVAL
-                            std::io::ErrorKind::InvalidInput|
-                            std::io::ErrorKind::PermissionDenied |
-                            std::io::ErrorKind::TimedOut |
-                            std::io::ErrorKind::ConnectionReset|
-                            std::io::ErrorKind::NotConnected => {
-                                // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
-                                // we should ignore that and get to the next one
-                                continue;
-                            }
-
-                            // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
-                            std::io::ErrorKind::Other => {
-                                match e.raw_os_error() {
-                                    Some(libc::EMFILE) | Some(libc::ENFILE) => {
-                                        match max_open_file_warning {
-                                            None => {
-                                                tracing::error!("reached the max open file limit, cannot accept any new connection");
-                                                max_open_file_warning = Some(Instant::now());
-                                            }
-                                            Some(last) => if Instant::now() - last < Duration::from_secs(60) {
-                                                tracing::error!("still at the max open file limit, cannot accept any new connection");
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-
-                            /* we should ignore the remaining errors as they're not supposed
-                            to happen with the accept() call
-                            std::io::ErrorKind::NotFound => todo!(),
-                            std::io::ErrorKind::AddrInUse => todo!(),
-                            std::io::ErrorKind::AddrNotAvailable => todo!(),
-                            std::io::ErrorKind::BrokenPipe => todo!(),
-                            std::io::ErrorKind::AlreadyExists => todo!(),
-                            std::io::ErrorKind::InvalidData => todo!(),
-                            std::io::ErrorKind::WriteZero => todo!(),
-
-                            std::io::ErrorKind::Unsupported => todo!(),
-                            std::io::ErrorKind::UnexpectedEof => todo!(),
-                            std::io::ErrorKind::OutOfMemory => todo!(),*/
-                            _ => {
-                                continue;
-                            }
-
-                        }
+    let main_route = main_router::<RF>(configuration)
+        .layer(middleware::from_fn(decompress_request_body))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(PropagatingMakeSpan::new())
+                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
+                    // Duration here is instant based
+                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
+                    if resp.status() >= StatusCode::BAD_REQUEST {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Error.as_str(),
+                        );
+                    } else {
+                        span.record(
+                            "otel.status_code",
+                            &opentelemetry::trace::StatusCode::Ok.as_str(),
+                        );
                     }
-                }
-            }
-        }
+                }),
+        )
+        .layer(Extension(service_factory))
+        .layer(cors)
+        // Compress the response body, except for multipart responses such as with `@defer`.
+        // This is a work-around for https://github.com/apollographql/router/issues/1572
+        .layer(CompressionLayer::new().compress_when(
+            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
+        ));
 
-        // the shutdown receiver was triggered so we break out of
-        // the server loop, tell the currently active connections to stop
-        // then return the TCP listen socket
-        connection_shutdown.notify_waiters();
-        listener
-    };
-    (server, shutdown_sender)
+    let route = endpoints_on_main_listener
+        .into_iter()
+        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+
+    let listener = configuration.supergraph.listen.clone();
+    Ok(ListenAddrAndRouter(listener, route))
 }
 
-#[derive(Debug)]
-struct CustomRejection {
-    #[allow(dead_code)]
-    msg: String,
-}
-
-fn main_router<RF>(configuration: &Configuration) -> axum::Router
+pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: SupergraphServiceFactory,
 {
@@ -712,339 +366,6 @@ where
     )
 }
 
-async fn handle_get_with_static(
-    static_page: Bytes,
-    Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
-    http_request: Request<Body>,
-) -> impl IntoResponse {
-    if prefers_html(http_request.headers()) {
-        return Html(static_page).into_response();
-    }
-
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
-            .await
-            .into_response();
-    }
-
-    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
-}
-
-async fn handle_get(
-    Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
-    http_request: Request<Body>,
-) -> impl IntoResponse {
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
-            .await
-            .into_response();
-    }
-
-    (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
-}
-
-async fn handle_post(
-    Host(host): Host,
-    OriginalUri(uri): OriginalUri,
-    Json(request): Json<graphql::Request>,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
-    header_map: HeaderMap,
-) -> impl IntoResponse {
-    let mut http_request = Request::post(
-        Uri::from_str(&format!("http://{}{}", host, uri))
-            .expect("the URL is already valid because it comes from axum; qed"),
-    )
-    .body(request)
-    .expect("body has already been parsed; qed");
-    *http_request.headers_mut() = header_map;
-
-    run_graphql_request(service, http_request)
-        .await
-        .into_response()
-}
-
-// Process the headers to make sure that `VARY` is set correctly
-fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).is_none() {
-        // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, HeaderValue::from_static("origin"));
-    }
-}
-async fn run_graphql_request<RS>(
-    service: RS,
-    http_request: Request<graphql::Request>,
-) -> impl IntoResponse
-where
-    RS: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<graphql::ResponseStream>,
-            Error = BoxError,
-        > + Send,
-{
-    match service.ready_oneshot().await {
-        Ok(mut service) => {
-            let (head, body) = http_request.into_parts();
-
-            match service.call(Request::from_parts(head, body)).await {
-                Err(e) => {
-                    if let Some(source_err) = e.source() {
-                        if source_err.is::<RateLimited>() {
-                            return RateLimited::new().into_response();
-                        }
-                        if source_err.is::<Elapsed>() {
-                            return Elapsed::new().into_response();
-                        }
-                    }
-                    tracing::error!("router service call failed: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "router service call failed",
-                    )
-                        .into_response()
-                }
-                Ok(response) => {
-                    let (mut parts, mut stream) = response.into_parts();
-
-                    process_vary_header(&mut parts.headers);
-
-                    match stream.next().await {
-                        None => {
-                            tracing::error!("router service is not available to process request",);
-                            (
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                "router service is not available to process request",
-                            )
-                                .into_response()
-                        }
-                        Some(response) => {
-                            if response.has_next.unwrap_or(false) {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                                );
-
-                                // each chunk contains a response and the next delimiter, to let client parsers
-                                // know that they can process the response right away
-                                let mut first_buf = Vec::from(
-                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
-                                );
-                                serde_json::to_writer(&mut first_buf, &response).unwrap();
-                                first_buf.extend_from_slice(b"\r\n--graphql\r\n");
-
-                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(
-                                    stream.map(|res| {
-                                        let mut buf = Vec::from(
-                                            &b"content-type: application/json\r\n\r\n"[..],
-                                        );
-                                        serde_json::to_writer(&mut buf, &res).unwrap();
-
-                                        // the last chunk has a different end delimiter
-                                        if res.has_next.unwrap_or(false) {
-                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                        } else {
-                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                        }
-
-                                        Ok::<_, BoxError>(buf.into())
-                                    }),
-                                );
-
-                                (parts, StreamBody::new(body)).into_response()
-                            } else {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static("application/json"),
-                                );
-                                tracing::trace_span!("serialize_response").in_scope(|| {
-                                    http_ext::Response::from(http::Response::from_parts(
-                                        parts, response,
-                                    ))
-                                    .into_response()
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            tracing::error!("router service is not available to process request: {}", e);
-            if let Some(source_err) = e.source() {
-                if source_err.is::<RateLimited>() {
-                    return RateLimited::new().into_response();
-                }
-                if source_err.is::<Elapsed>() {
-                    return Elapsed::new().into_response();
-                }
-            }
-
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "router service is not available to process request",
-            )
-                .into_response()
-        }
-    }
-}
-
-fn prefers_html(headers: &HeaderMap) -> bool {
-    let text_html = MediaType::new(TEXT, HTML);
-
-    headers.get_all(&http::header::ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
-
-                list.any(|mime| mime.as_ref() == Ok(&text_html))
-            })
-            .unwrap_or(false)
-    })
-}
-
-async fn decompress_request_body(
-    req: Request<Body>,
-    next: Next<Body>,
-) -> Result<Response, Response> {
-    let (parts, body) = req.into_parts();
-    let content_encoding = parts.headers.get(&CONTENT_ENCODING);
-    macro_rules! decode_body {
-        ($decoder: ident, $error_message: expr) => {{
-            let body_bytes = hyper::body::to_bytes(body)
-                .map_err(|err| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!("cannot read request body: {err}"),
-                    )
-                        .into_response()
-                })
-                .await?;
-            let mut decoder = $decoder::new(Vec::new());
-            decoder.write_all(&body_bytes).await.map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("{}: {err}", $error_message),
-                )
-                    .into_response()
-            })?;
-            decoder.shutdown().await.map_err(|err| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("{}: {err}", $error_message),
-                )
-                    .into_response()
-            })?;
-
-            Ok(next
-                .run(Request::from_parts(parts, Body::from(decoder.into_inner())))
-                .await)
-        }};
-    }
-
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str() {
-            Ok(content_encoding_str) => match content_encoding_str {
-                "br" => decode_body!(BrotliDecoder, "cannot decompress (brotli) request body"),
-                "gzip" => decode_body!(GzipDecoder, "cannot decompress (gzip) request body"),
-                "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
-                "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
-                unknown => {
-                    tracing::error!("unknown content-encoding header value {:?}", unknown);
-                    Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("unknown content-encoding header value: {unknown:?}"),
-                    )
-                        .into_response())
-                }
-            },
-
-            Err(err) => Err((
-                StatusCode::BAD_REQUEST,
-                format!("cannot read content-encoding header: {err}"),
-            )
-                .into_response()),
-        },
-        None => Ok(next.run(Request::from_parts(parts, body)).await),
-    }
-}
-
-#[derive(Clone)]
-struct PropagatingMakeSpan;
-
-impl PropagatingMakeSpan {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<B> MakeSpan<B> for PropagatingMakeSpan {
-    fn make_span(&mut self, request: &http::Request<B>) -> Span {
-        // This method needs to be moved to the telemetry plugin once we have a hook for the http request.
-
-        // Before we make the span we need to attach span info that may have come in from the request.
-        let context = global::get_text_map_propagator(|propagator| {
-            propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
-        });
-
-        // If there was no span from the request then it will default to the NOOP span.
-        // Attaching the NOOP span has the effect of preventing further tracing.
-        if context.span().span_context().is_valid() {
-            // We have a valid remote span, attach it to the current thread before creating the root span.
-            let _context_guard = context.attach();
-            tracing::span!(
-                Level::INFO,
-                "request",
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                "apollo_private.duration_ns" = tracing::field::Empty
-            )
-        } else {
-            // No remote span, we can go ahead and create the span without context.
-            tracing::span!(
-                Level::INFO,
-                "request",
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                "apollo_private.duration_ns" = tracing::field::Empty
-            )
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
@@ -1052,10 +373,15 @@ mod tests {
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
 
+    use async_compression::tokio::write::GzipDecoder;
     use async_compression::tokio::write::GzipEncoder;
+    use futures::Stream;
+    use futures::StreamExt;
     use http::header::ACCEPT_ENCODING;
+    use http::header::CONTENT_ENCODING;
     use http::header::CONTENT_TYPE;
     use http::header::{self};
+    use http::HeaderValue;
     use mockall::mock;
     use reqwest::header::ACCEPT;
     use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
@@ -1070,14 +396,17 @@ mod tests {
     use reqwest::StatusCode;
     use serde_json::json;
     use test_log::test;
+    use tokio::io::AsyncWriteExt;
     use tokio::io::BufReader;
     use tower::service_fn;
+    use tower::Service;
 
     use super::*;
     use crate::configuration::Cors;
     use crate::configuration::Homepage;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
+    use crate::http_ext;
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
@@ -1413,7 +742,7 @@ mod tests {
 
         // Decompress body
         let body_bytes = response.bytes().await.unwrap();
-        let mut decoder = GzipDecoder::new(Vec::new());
+        let mut decoder = GzipEncoder::new(Vec::new());
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
@@ -2725,42 +2054,6 @@ Content-Type: application/json\r
         );
 
         server.shutdown().await
-    }
-
-    // Test Vary processing
-
-    #[test]
-    fn it_adds_default_with_value_origin_if_no_vary_header() {
-        let mut default_headers = HeaderMap::new();
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "origin");
-    }
-
-    #[test]
-    fn it_leaves_vary_alone_if_set() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("*"));
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "*");
-    }
-
-    #[test]
-    fn it_leaves_varys_alone_if_there_are_more_than_one() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("one"));
-        default_headers.append(VARY, HeaderValue::from_static("two"));
-        process_vary_header(&mut default_headers);
-        let vary = default_headers.get_all(VARY);
-        assert_eq!(vary.iter().count(), 2);
-        for value in vary {
-            assert!(value == "one" || value == "two");
-        }
     }
 
     #[tokio::test]

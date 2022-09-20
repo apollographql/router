@@ -216,8 +216,8 @@ impl<'a> TestHarness<'a> {
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_http_server_factory::make_axum_router;
-        use crate::axum_http_server_factory::ListenAddrAndRouter;
+        use crate::axum_factory::make_axum_router;
+        use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::SupergraphServiceFactory;
 
         let (config, router_creator) = self.build_common().await?;
