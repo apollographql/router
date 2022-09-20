@@ -28,6 +28,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+### update apollo-parser to 0.2.11
+
+Fixes error creation for missing selection sets in named operation definitions.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/1841
 
 ### Fix router scaffold version ([Issue #1836](https://github.com/apollographql/router/issues/1836))
 
