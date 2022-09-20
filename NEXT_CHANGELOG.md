@@ -90,4 +90,11 @@ Add more gates (for `console` feature) to not have warnings when using `--all-fe
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
+### Remove potential panics from query plan execution ([PR #1842](https://github.com/apollographql/router/pull/1842))
+
+Some parts of the code were using `expect()`, `unwrap()` and `panic()` to guard some assumptions
+about data. They are now replaced with errors returned in the response.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1842
+
 ## 📚 Documentation
