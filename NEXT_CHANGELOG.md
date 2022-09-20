@@ -29,6 +29,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Fix router scaffold version ([Issue #1836](https://github.com/apollographql/router/issues/1836))
+
+Add `v` prefix to the cargo version when it's a crate version to match the git tag.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1838
+
 ### Fixed extraVolumeMounts ([Issue #1824](https://github.com/apollographql/router/issues/1824))
 
 Fixed extraVolumeMounts not be being read into the deployment template correctly.
