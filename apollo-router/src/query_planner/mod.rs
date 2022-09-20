@@ -20,7 +20,6 @@ use tracing::Instrument;
 
 pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::error::QueryPlannerError;
 use crate::graphql::Request;
 use crate::graphql::Response;
