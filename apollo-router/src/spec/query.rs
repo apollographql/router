@@ -817,7 +817,13 @@ impl Query {
                 .operations
                 .iter()
                 // we should have an error if the only operation is anonymous but the query specifies a name
-                .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
+                .find(|op| {
+                    if let Some(op_name) = op.name.as_deref() {
+                        op_name == name
+                    } else {
+                        false
+                    }
+                }),
             None => self.operations.get(0),
         }
     }
@@ -864,7 +870,11 @@ impl Operation {
 
         let selection_set = operation
             .selection_set()
-            .expect("the node SelectionSet is not optional in the spec; qed")
+            .ok_or_else(|| {
+                SpecError::ParsingError(
+                    "the node SelectionSet is not optional in the spec".to_string(),
+                )
+            })?
             .selections()
             .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
             .collect::<Result<Vec<Option<_>>, _>>()?
@@ -879,23 +889,29 @@ impl Operation {
             .map(|definition| {
                 let name = definition
                     .variable()
-                    .expect("the node Variable is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Variable is not optional in the spec".to_string(),
+                        )
+                    })?
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Name is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
-                let ty = FieldType::from(
-                    definition
-                        .ty()
-                        .expect("the node Type is not optional in the spec; qed"),
-                );
+                let ty = FieldType::try_from(definition.ty().ok_or_else(|| {
+                    SpecError::ParsingError("the node Type is not optional in the spec".to_string())
+                })?)?;
 
-                (
+                Ok((
                     ByteString::from(name),
                     (ty, parse_default_value(&definition)),
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         Ok(Operation {
             selection_set,
