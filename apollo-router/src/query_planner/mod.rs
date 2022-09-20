@@ -20,6 +20,7 @@ use tracing::Instrument;
 
 pub(crate) use self::fetch::OperationKind;
 use crate::error::Error;
+use crate::error::QueryPlannerError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -214,13 +215,13 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> HashMap<(Option<Path>, String), Query> {
+    ) -> Result<HashMap<(Option<Path>, String), Query>, QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
-        self.collect_subselections(schema, &Path::default(), &mut subselections);
+        self.collect_subselections(schema, &Path::default(), &mut subselections)?;
 
-        subselections
+        Ok(subselections)
     }
 
     fn collect_subselections(
@@ -228,20 +229,21 @@ impl PlanNode {
         schema: &Schema,
         initial_path: &Path,
         subselections: &mut HashMap<(Option<Path>, String), Query>,
-    ) {
+    ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         match self {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
-                nodes.iter().fold(subselections, |subs, current| {
-                    current.collect_subselections(schema, initial_path, subs);
+                nodes.iter().try_fold(subselections, |subs, current| {
+                    current.collect_subselections(schema, initial_path, subs)?;
 
-                    subs
-                });
+                    Ok::<_, QueryPlannerError>(subs)
+                })?;
+                Ok(())
             }
             Self::Flatten(node) => {
                 node.node
-                    .collect_subselections(schema, initial_path, subselections);
+                    .collect_subselections(schema, initial_path, subselections)
             }
             Self::Defer { primary, deferred } => {
                 // TODO rebuilt subselection from the root thanks to the path
@@ -249,8 +251,7 @@ impl PlanNode {
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, primary_subselection);
                     // ----------------------- Parse ---------------------------------
-                    let sub_selection = Query::parse(&query, schema, &Default::default())
-                        .expect("it must respect the schema");
+                    let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
                     subselections.insert(
@@ -259,13 +260,11 @@ impl PlanNode {
                     );
                 }
 
-                deferred.iter().fold(subselections, |subs, current| {
+                deferred.iter().try_fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
-                        // TODO rebuilt subselection from the root thanks to the path
                         let query = reconstruct_full_query(&current.path, subselection);
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection = Query::parse(&query, schema, &Default::default())
-                            .expect("it must respect the schema");
+                        let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
@@ -278,24 +277,26 @@ impl PlanNode {
                             schema,
                             &initial_path.join(&current.path),
                             subs,
-                        );
+                        )?;
                     }
 
-                    subs
-                });
+                    Ok::<_, QueryPlannerError>(subs)
+                })?;
+                Ok(())
             }
-            Self::Fetch(..) => {}
+            Self::Fetch(..) => Ok(()),
             Self::Condition {
                 if_clause,
                 else_clause,
                 ..
             } => {
                 if let Some(node) = if_clause {
-                    node.collect_subselections(schema, initial_path, subselections);
+                    node.collect_subselections(schema, initial_path, subselections)?;
                 }
                 if let Some(node) = else_clause {
-                    node.collect_subselections(schema, initial_path, subselections);
+                    node.collect_subselections(schema, initial_path, subselections)?;
                 }
+                Ok(())
             }
         }
     }
@@ -875,36 +876,38 @@ pub(crate) mod fetch {
                 }
             };
 
-            let subgraph_request = SubgraphRequest::builder()
-                .supergraph_request(parameters.supergraph_request.clone())
-                .subgraph_request(
-                    http_ext::Request::builder()
-                        .method(http::Method::POST)
-                        .uri(
-                            parameters
-                                .schema
-                                .subgraphs()
-                                .find_map(|(name, url)| (name == service_name).then(|| url))
-                                .unwrap_or_else(|| {
-                                    panic!(
+            let subgraph_url = parameters
+                .schema
+                .subgraphs()
+                .find_map(|(name, url)| (name == service_name).then(|| url))
+                .ok_or_else(|| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: format!(
                         "schema uri for subgraph '{}' should already have been checked",
                         service_name
-                    )
-                                })
-                                .clone(),
-                        )
-                        .body(
-                            Request::builder()
-                                .query(operation)
-                                .and_operation_name(operation_name.clone())
-                                .variables(variables.clone())
-                                .build(),
-                        )
-                        .build()
-                        .expect(
-                            "it won't fail because the url is correct and already checked; qed",
-                        ),
+                    ),
+                })?
+                .clone();
+
+            let request = http_ext::Request::builder()
+                .method(http::Method::POST)
+                .uri(subgraph_url)
+                .body(
+                    Request::builder()
+                        .query(operation)
+                        .and_operation_name(operation_name.clone())
+                        .variables(variables.clone())
+                        .build(),
                 )
+                .build()
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: format!("could not construct subgraph request: {}", e),
+                })?;
+
+            let subgraph_request = SubgraphRequest::builder()
+                .supergraph_request(parameters.supergraph_request.clone())
+                .subgraph_request(request)
                 .operation_kind(*operation_kind)
                 .context(parameters.context.clone())
                 .build();
@@ -912,7 +915,10 @@ pub(crate) mod fetch {
             let service = parameters
                 .service_factory
                 .new_service(service_name)
-                .expect("we already checked that the service exists during planning; qed");
+                .ok_or_else(|| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: "could not create subgraph service".to_string(),
+                })?;
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service

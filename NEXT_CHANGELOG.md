@@ -28,6 +28,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+### update apollo-parser to 0.2.11
+
+Fixes error creation for missing selection sets in named operation definitions.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/1841
 
 ### Fix router scaffold version ([Issue #1836](https://github.com/apollographql/router/issues/1836))
 
@@ -84,5 +89,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 Add more gates (for `console` feature) to not have warnings when using `--all-features`.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+
+### Remove potential panics from query plan execution ([PR #1842](https://github.com/apollographql/router/pull/1842))
+
+Some parts of the code were using `expect()`, `unwrap()` and `panic()` to guard some assumptions
+about data. They are now replaced with errors returned in the response.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1842
 
 ## 📚 Documentation
