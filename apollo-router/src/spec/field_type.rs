@@ -105,6 +105,8 @@ impl FieldType {
             {
                 Ok(())
             }
+            // NOTE: graphql's types are all optional by default
+            (_, Value::Null) => Ok(()),
             (FieldType::Named(name), value) => {
                 if let Some(value) = value.as_object() {
                     if let Some(object_ty) = schema.input_types.get(name) {
@@ -118,8 +120,6 @@ impl FieldType {
                     Err(InvalidValue)
                 }
             }
-            // NOTE: graphql's types are all optional by default
-            (_, Value::Null) => Ok(()),
             _ => Err(InvalidValue),
         }
     }
