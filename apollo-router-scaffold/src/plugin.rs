@@ -129,7 +129,7 @@ fn get_router_version(cargo_toml: Value) -> String {
         .unwrap_or_else(|| Value::Table(toml::value::Table::default()))
         .get("apollo-router")
     {
-        Some(Value::String(version)) => version.clone(),
+        Some(Value::String(version)) => format!("v{version}"),
         Some(Value::Table(table)) => {
             if let Some(Value::String(branch)) = table.get("branch") {
                 format!("origin/{}", branch.clone())
