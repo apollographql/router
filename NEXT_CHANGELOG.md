@@ -27,6 +27,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### Support serviceMonitor in helm chart
+
+`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+
+By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
+
 ## 🐛 Fixes
 
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
