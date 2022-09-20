@@ -56,7 +56,7 @@ According to recent updates in the `@defer` specification, defer conditions must
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1832
 
-### Support query plans with empty primary subselections ([Issue #1778](https://github.com/apollographql/router/issues/1778))
+### Support query plans with empty primary subselections ([Issue #1800](https://github.com/apollographql/router/issues/1800))
 
 When a query with `@defer` would result in an empty primary response, the router was returning
 an error in interpreting the query plan. It is now using the query plan properly, and detects
@@ -72,7 +72,7 @@ Add more gates (for the `console` feature introduced in [PR #1632](https://githu
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
-### Deny `panic`, `unwrap` and `expect` in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
+### Deny `panic`, `unwrap` and `expect` in the spec module ([PR #1844](https://github.com/apollographql/router/pull/1844))
 
 We are generally working to eliminate `unwrap()` and `expect()` statements from critical paths in the codebase and have done so on the `spec` module.  The `spec` module, in particular, is reached after parsing has occurred so any invariants expressed by these `expect`s would have already been enforced or validated.  Still, we've decided to tighten things even further, by raising errors instead to provide end-users with even more stability.
 
