@@ -71,6 +71,14 @@ more precisely queries containing `@defer`.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1778
 
+### Move response formatting to the execution service ([Issue #1771](https://github.com/apollographql/router/issues/1771))
+
+The response formatting process, where response data is filtered according to deferred responses subselections
+and the API schema, was executed in the supergraph service. This is a bit late, because it results in the
+execution service returning a stream of invalid responses, so the execution plugins work on invalid data.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
+
 ## 🛠 Maintenance
 
 ### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
