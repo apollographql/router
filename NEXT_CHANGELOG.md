@@ -28,9 +28,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
-### Update `apollo-parser` to v0.2.11
+### Update `apollo-parser` to v0.2.11 ([PR #1841](https://github.com/apollographql/router/pull/1841))
 
-Fixes error creation for missing selection sets in named operation definitions.
+Fixes error creation for missing selection sets in named operation definitions by updating to `apollo-rs`'s [`apollo-parser` v0.2.11](https://crates.io/crates/apollo-parser/0.2.11).
 
 By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/1841
 
@@ -92,20 +92,17 @@ Add more gates (for the `console` feature introduced in [PR #1632](https://githu
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
-### Deny panic, unwrap and expect in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
+### Deny `panic`, `unwrap` and `expect` in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
 
-As we are progressing towards 1.0, we are progressively banning `unwrap()` and `expect()` from the critical parts of the codebase.
+We are generally working to eliminate `unwrap()` and `expect()` statements from critical paths in the codebase and have done so on the `spec` module.  The `spec` module, in particular, is reached after parsing has occurred so any invariants expressed by these `expect`s would have already been enforced or validated.  Still, we've decided to tighten things even further, by raising errors instead to provide end-users with even more stability.
 
-This codepath is exercised after Parsing has happened, so invariants expressed by `expect`s would always have been enforced or checked before. However we decided to tighten the router even further, by raising errors instead, which will provide users with even more stability guarantees.
-
-The spec module now has gates that prevent its content from using code that explicitly panics.
+To further defend against re-introduction, the `spec` module now has linting annotations that prevent its content from using any code that explicitly panics.
 
 ```rust
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
 ```
-
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1844
 
