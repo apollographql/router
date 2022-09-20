@@ -17,14 +17,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::new_service::NewService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
-use crate::json_ext::Object;
 use crate::json_ext::ValueExt;
 use crate::services::execution;
 use crate::ExecutionRequest;
@@ -81,10 +79,12 @@ where
                 )
                 .await;
 
-            let rest = receiver;
-
             let query = req.query_plan.query.clone();
-            let stream = once(ready(first)).chain(rest).boxed();
+            let stream = if is_deferred {
+                filter_stream(first, receiver).boxed()
+            } else {
+                once(ready(first)).chain(receiver).boxed()
+            };
 
             let schema = this.schema.clone();
 
