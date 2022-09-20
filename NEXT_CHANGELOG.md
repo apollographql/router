@@ -29,4 +29,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Disable Deno snapshotting on docs.rs
+
+This works around [V8 linking errors](https://docs.rs/crate/apollo-router/1.0.0-rc.2/builds/633287).
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1847
+
 ## 📚 Documentation

@@ -22,6 +22,12 @@ failfast = []
 # tokio-console also requires at build time the environment variable
 # RUSTFLAGS="--cfg tokio_unstable"
 console = ["tokio/tracing", "console-subscriber"]
+# "fake" feature to disable V8 usage when building on docs.rs
+# See https://github.com/apollographql/federation-rs/pull/185
+docs_rs = ["router-bridge/docs_rs"]
+
+[package.metadata.docs.rs]
+features = ["docs_rs"]
 
 [dependencies]
 access-json = "0.1.0"
