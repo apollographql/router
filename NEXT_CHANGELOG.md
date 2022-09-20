@@ -68,7 +68,7 @@ Add more gates (for `console` feature) to not have warnings when using `--all-fe
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
 
-### Deny unwrap and expect in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
+### Deny panic, unwrap and expect in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
 
 As we are progressing towards 1.0, we are progressively banning `unwrap()` and `expect()` from the critical parts of the codebase.
 
