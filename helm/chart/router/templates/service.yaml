@@ -15,6 +15,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.serviceMonitor.enabled }}
+    - port: {{ .Values.serviceMonitor.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
 
