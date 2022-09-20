@@ -92,6 +92,23 @@ Add more gates (for the `console` feature introduced in [PR #1632](https://githu
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
+### Deny panic, unwrap and expect in the spec module ([Issue #1844](https://github.com/apollographql/router/pull/1844))
+
+As we are progressing towards 1.0, we are progressively banning `unwrap()` and `expect()` from the critical parts of the codebase.
+
+This codepath is exercised after Parsing has happened, so invariants expressed by `expect`s would always have been enforced or checked before. However we decided to tighten the router even further, by raising errors instead, which will provide users with even more stability guarantees.
+
+The spec module now has gates that prevent its content from using code that explicitly panics.
+
+```rust
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+```
+
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1844
+
 ### Remove potential panics from query plan execution ([PR #1842](https://github.com/apollographql/router/pull/1842))
 
 Some remaining parts of the query plan execution code were using `expect()`, `unwrap()` and `panic()` to guard against assumptions
