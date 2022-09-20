@@ -26,7 +26,7 @@ console = ["tokio/tracing", "console-subscriber"]
 [dependencies]
 access-json = "0.1.0"
 anyhow = "1.0.64"
-apollo-parser = "0.2.10"
+apollo-parser = "0.2.11"
 async-compression = { version = "0.3.14", features = [
     "tokio",
     "brotli",
@@ -157,7 +157,7 @@ tower-http = { version = "0.3.4", features = [
     "decompression-br",
     "decompression-deflate",
     "decompression-gzip",
-    "timeout"
+    "timeout",
 ] }
 tower-service = "0.3.2"
 
@@ -188,7 +188,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.19.1", features = [ "json", "redactions" ] }
+insta = { version = "1.19.1", features = ["json", "redactions"] }
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
