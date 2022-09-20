@@ -103,6 +103,8 @@ mod tracing;
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
+pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
+
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -238,15 +240,21 @@ impl Plugin for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let config = self.config.apollo.clone().unwrap_or_default();
+
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 // disable ftv1 sampling for deferred queries
-                let do_not_sample_reason = if req.query_plan.root.contains_condition_or_defer() {
+                let do_not_sample_reason = if config.field_level_instrumentation_sampler.is_none() {
+                    req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
+                    "FTV1 not activated"
+                } else if req.query_plan.root.contains_condition_or_defer() {
                     req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
                     "query is deferred"
                 } else {
                     ""
                 };
+
                 let query = req
                     .supergraph_request
                     .body()
@@ -259,12 +267,43 @@ impl Plugin for Telemetry {
                     .operation_name
                     .clone()
                     .unwrap_or_default();
-                info_span!("execution",
+                let span = info_span!(EXECUTION_SPAN_NAME,
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
                     ftv1.do_not_sample_reason = do_not_sample_reason
-                )
+                );
+
+                // add headers and values if
+                // * the span is sampled? do we need that condition
+                // * studio reporting or FTV1 are activated
+                if Span::current().context().span().span_context().is_sampled()
+                    && (config.apollo_key.is_some()
+                        || !req
+                            .context
+                            .get(FTV1_DO_NOT_SAMPLE)
+                            .unwrap_or_default()
+                            .unwrap_or(false))
+                {
+                    span.record(
+                        "apollo_private.graphql.variables",
+                        &Self::filter_variables_values(
+                            &req.supergraph_request.body().variables,
+                            &config.send_variable_values,
+                        )
+                        .as_str(),
+                    );
+                    span.record(
+                        "apollo_private.http.request_headers",
+                        &Self::filter_headers(
+                            req.supergraph_request.headers(),
+                            &config.send_headers,
+                        )
+                        .as_str(),
+                    );
+                }
+
+                span
             })
             .service(service)
             .boxed()
@@ -617,25 +656,6 @@ impl Telemetry {
                 apollo_private.graphql.variables = field::Empty,
                 apollo_private.http.request_headers = field::Empty
             );
-
-            if is_span_sampled(&request.context) {
-                span.record(
-                    "apollo_private.graphql.variables",
-                    &Self::filter_variables_values(
-                        &request.supergraph_request.body().variables,
-                        &config.send_variable_values,
-                    )
-                    .as_str(),
-                );
-                span.record(
-                    "apollo_private.http.request_headers",
-                    &Self::filter_headers(
-                        request.supergraph_request.headers(),
-                        &config.send_headers,
-                    )
-                    .as_str(),
-                );
-            }
 
             span
         }
@@ -1079,7 +1099,11 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
-        if is_span_sampled(context) {
+        if !context
+            .get(FTV1_DO_NOT_SAMPLE)
+            .unwrap_or_default()
+            .unwrap_or(false)
+        {
             ::tracing::trace!("span is sampled then skip the apollo metrics");
             return;
         }

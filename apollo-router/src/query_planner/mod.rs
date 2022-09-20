@@ -372,7 +372,7 @@ impl PlanNode {
         SF: SubgraphServiceFactory,
     {
         Box::pin(async move {
-            tracing::trace!("executing plan:\n{:#?}", self);
+            tracing::info!("executing plan:\n");
             let mut value;
             let mut errors;
             let mut subselection = None;

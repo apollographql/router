@@ -333,7 +333,7 @@ impl Exporter {
             SUBGRAPH_SPAN_NAME => {
                 vec![TreeData::Trace(self.find_ftv1_trace(span))]
             }
-            SUPERGRAPH_SPAN_NAME => {
+            EXECUTION_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
                     http: self.extract_http_data(span),
