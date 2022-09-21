@@ -372,6 +372,35 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:8088",
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9494",
+          "default": "127.0.0.1:8088",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "homepage": {
       "description": "Configuration options pertaining to the home page.",
       "default": {

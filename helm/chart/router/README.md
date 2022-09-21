@@ -70,7 +70,7 @@ helm show values apollographql/router
 | resources | object | `{}` |  |
 | rhai | object | `{"input_file":""}` | If using rhai, specify the location of your input file |
 | rhai.input_file | string | `""` | input rhai file, contents will be stored in a ConfigMap |
-| router | object | `{"args":["--hot-reload"],"configuration":{"supergraph":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
+| router | object | `{"args":["--hot-reload"],"configuration":{"graphql":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
 | service.annotations | object | `{}` |  |
 | service.port | int | `80` |  |

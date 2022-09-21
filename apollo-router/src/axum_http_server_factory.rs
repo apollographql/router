@@ -114,17 +114,15 @@ where
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     endpoints.insert(
-        configuration.supergraph.listen.clone(),
+        configuration.health_check.listen.clone(),
         Endpoint::new(
-            "/.well-known/apollo/server-health".to_string(),
+            "/live".to_string(),
             service_fn(|_req: transport::Request| async move {
+                // TODO: use the service factory and send a query to it
                 Ok::<_, BoxError>(
                     http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(
-                            Bytes::from_static(b"The health check is no longer at this endpoint")
-                                .into(),
-                        )
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
                         .unwrap(),
                 )
             })
@@ -1075,6 +1073,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::HealthCheck;
     use crate::configuration::Homepage;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
@@ -1196,6 +1195,11 @@ mod tests {
                         .homepage(
                             crate::configuration::Homepage::fake_builder()
                                 .enabled(false)
+                                .build(),
+                        )
+                        .health_check(
+                            crate::configuration::HealthCheck::builder()
+                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                 .build(),
                         )
                         .build()
@@ -2173,16 +2177,52 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
-    async fn test_health_check_returns_four_oh_four() {
+    async fn test_health_check() {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
-        let url = format!(
-            "{}/.well-known/apollo/server-health",
-            server.graphql_listen_address().as_ref().unwrap()
-        );
+        let url = format!("{}/live", server.graphql_listen_address().as_ref().unwrap());
 
         let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_default_listener() {
+        let conf = Configuration::fake_builder()
+            .health_check(HealthCheck::builder().build())
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        // keep the server handle around otherwise it will immediately shutdown
+        let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap();
+        let url = "http://localhost:8088/live";
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_custom_listener() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        // keep the server handle around otherwise it will immediately shutdown
+        let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap();
+        let url = "http://localhost:4012/live";
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test(tokio::test)]
