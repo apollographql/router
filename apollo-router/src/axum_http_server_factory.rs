@@ -35,6 +35,7 @@ use http::header::VARY;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
+use hyper::body::to_bytes;
 use hyper::server::conn::Http;
 use hyper::Body;
 use itertools::Itertools;
@@ -46,6 +47,7 @@ use multimap::MultiMap;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
+use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -103,6 +105,18 @@ pub(crate) struct ListenersAndRouters {
     pub(crate) extra: MultiMap<ListenAddr, Router>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+enum HealthStatus {
+    Up,
+    Down,
+}
+
+#[derive(Serialize)]
+struct Health {
+    status: HealthStatus,
+}
+
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -114,18 +128,48 @@ where
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     if configuration.health_check.enabled {
+        let router_service_factory = service_factory.clone();
+
         endpoints.insert(
             configuration.health_check.listen.clone(),
             Endpoint::new(
-                "/live".to_string(),
-                service_fn(|_req: transport::Request| async move {
-                    // TODO: use the service factory and send a query to it
-                    Ok::<_, BoxError>(
-                        http::Response::builder()
-                            .header(CONTENT_TYPE, "application/json")
-                            .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
-                            .unwrap(),
-                    )
+                "/health".to_string(),
+                service_fn(move |_req: transport::Request| {
+                    let service = router_service_factory.clone().new_service();
+                    let health_check_request = http::Request::builder()
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(
+                            crate::request::Request::builder()
+                                .query("{__typename}")
+                                .build(),
+                        )
+                        .expect("query is always valid");
+                    async move {
+                        let (parts, body) = run_graphql_request(service, health_check_request)
+                            .await
+                            .into_response()
+                            .into_parts();
+
+                        let bytes = to_bytes(body).await.map_err(BoxError::from)?;
+
+                        let mut health = Health {
+                            status: HealthStatus::Down,
+                        };
+
+                        if parts.status == StatusCode::OK {
+                            let graphql_response: graphql::Response =
+                                serde_json::from_slice(bytes.to_vec().as_slice()).unwrap();
+
+                            if graphql_response.errors.is_empty() {
+                                health.status = HealthStatus::Up;
+                            }
+                        }
+
+                        Ok(http::Response::from_parts(
+                            parts,
+                            serde_json::to_vec(&health).unwrap().into(),
+                        ))
+                    }
                 })
                 .boxed(),
             ),
@@ -1213,11 +1257,7 @@ mod tests {
                                 .enabled(false)
                                 .build(),
                         )
-                        .health_check(
-                            crate::configuration::HealthCheck::builder()
-                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
-                                .build(),
-                        )
+                        .health_check(crate::configuration::HealthCheck::fake_builder().build())
                         .build()
                         .unwrap(),
                 ),
@@ -2207,29 +2247,32 @@ Content-Type: application/json\r
 
     #[tokio::test]
     async fn test_health_check() {
-        let expectations = MockSupergraphService::new();
+        let mut expectations = MockSupergraphService::new();
+        expectations.expect_service_call().once().returning(|_| {
+            Ok(http_ext::from_response_to_stream(
+                http::Response::builder()
+                    .status(200)
+                    .body(
+                        graphql::Response::builder()
+                            .data(json!({ "__typename": "Query"}))
+                            .build(),
+                    )
+                    .unwrap(),
+            ))
+        });
+
         let (server, client) = init(expectations).await;
-        let url = format!("{}/live", server.graphql_listen_address().as_ref().unwrap());
+        let url = format!(
+            "{}/health",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_health_check_default_listener() {
-        let conf = Configuration::fake_builder()
-            .health_check(HealthCheck::builder().build())
-            .build()
-            .unwrap();
-        let expectations = MockSupergraphService::new();
-        // keep the server handle around otherwise it will immediately shutdown
-        let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
-            .await
-            .unwrap();
-        let url = "http://localhost:8088/live";
-
-        let response = client.get(url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json!({"status": "UP" }),
+            response.json::<serde_json::Value>().await.unwrap()
+        )
     }
 
     #[tokio::test]
@@ -2243,15 +2286,33 @@ Content-Type: application/json\r
             )
             .build()
             .unwrap();
-        let expectations = MockSupergraphService::new();
+
+        let mut expectations = MockSupergraphService::new();
+        expectations.expect_service_call().once().returning(|_| {
+            Ok(http_ext::from_response_to_stream(
+                http::Response::builder()
+                    .status(200)
+                    .body(
+                        graphql::Response::builder()
+                            .data(json!({ "__typename": "Query"}))
+                            .build(),
+                    )
+                    .unwrap(),
+            ))
+        });
+
         // keep the server handle around otherwise it will immediately shutdown
         let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
             .await
             .unwrap();
-        let url = "http://localhost:4012/live";
+        let url = "http://localhost:4012/health";
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json!({"status": "UP" }),
+            response.json::<serde_json::Value>().await.unwrap()
+        )
     }
 
     #[tokio::test]
@@ -2263,7 +2324,7 @@ Content-Type: application/json\r
                     .enabled(true)
                     .build(),
             )
-            .supergraph(Supergraph::fake_builder().path("/live").build()) // here be dragons
+            .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
             .build()
             .unwrap();
         let expectations = MockSupergraphService::new();
@@ -2272,7 +2333,7 @@ Content-Type: application/json\r
             .unwrap_err();
 
         assert_eq!(
-            "tried to register two endpoints on `127.0.0.1:0/live`",
+            "tried to register two endpoints on `127.0.0.1:0/health`",
             error.to_string()
         );
     }
@@ -2286,7 +2347,7 @@ Content-Type: application/json\r
                     .enabled(false)
                     .build(),
             )
-            .supergraph(Supergraph::fake_builder().path("/live").build())
+            .supergraph(Supergraph::fake_builder().path("/health").build())
             .build()
             .unwrap();
         let expectations = MockSupergraphService::new();
