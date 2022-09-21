@@ -101,24 +101,33 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 >
 > ```json
 > {
->   "items": [
->     {
->       "unwanted": 7,
->       "wanted": { "x": 3, "y": 7 },
->       "array": [3, 2, 1]
->     },
->     {
->       "isImportant": true
->     }
->   ]
+>   "query": "{ products { id name } }",
+>   "extensions": {
+>     "metadata": [
+>       {
+>         "app_name": "random_app_name"
+>       }
+>     ]
+>   }
 > }
 > ```
 >
-> To fetch the value of the field `isImportant`, the corresponding path is `.items[1].isImportant`.
->
-> To fetch the value of the field `x`, the corresponding path is `.items[0].wanted.x`.
+> To fetch the value of the field `app_name`, the corresponding path is `.extensions.metadata[0].app_name`.
 >
 > JSON path queries always begin with a period `.`
+>
+> With this configuration:
+>
+> ```yaml
+> headers:
+>   all:
+>     request:
+>       - insert:
+>           name: from_app_name
+>           path: .extensions.metadata[0].app_name
+> ```
+>
+> You will pass a header to all your subgraphs: `"from_app_name": "random_app_name"`
 
 ## Rule ordering
 
