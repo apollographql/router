@@ -23,25 +23,49 @@ impl Fragments {
             .map(|fragment_definition| {
                 let name = fragment_definition
                     .fragment_name()
-                    .expect("the node FragmentName is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node FragmentName is not optional in the spec".to_string(),
+                        )
+                    })?
                     .name()
-                    .unwrap()
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node FragmentName is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
 
                 let type_condition = fragment_definition
                     .type_condition()
-                    .expect("Fragments must specify the type they apply to; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "Fragments must specify the type they apply to".to_string(),
+                        )
+                    })?
                     .named_type()
-                    .expect("Fragments must specify the type they apply to; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "Fragments must specify the type they apply to".to_string(),
+                        )
+                    })?
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "Fragments must specify the type they apply to".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
 
                 let selection_set = fragment_definition
                     .selection_set()
-                    .expect("the node SelectionSet is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node SelectionSet is not optional in the spec".to_string(),
+                        )
+                    })?
                     .selections()
                     .map(|selection| {
                         Selection::from_ast(
