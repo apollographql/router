@@ -341,3 +341,100 @@ pub(super) fn serve_router_on_listen_addr(
     };
     (server, shutdown_sender)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+
+    use axum::BoxError;
+    use tower::service_fn;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::axum_factory::tests::init_with_config;
+    use crate::axum_factory::tests::MockSupergraphService;
+    use crate::configuration::Sandbox;
+    use crate::configuration::Supergraph;
+    use crate::services::transport;
+
+    #[tokio::test]
+    async fn it_makes_sure_same_listenaddrs_are_accepted() {
+        let configuration = Configuration::fake_builder().build().unwrap();
+
+        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
+        let configuration = Configuration::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
+                    .build(),
+            )
+            .sandbox(Sandbox::fake_builder().build())
+            .build()
+            .unwrap();
+
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut web_endpoints = MultiMap::new();
+        web_endpoints.insert(
+            SocketAddr::from_str("0.0.0.0:4010").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let error = init_with_config(MockSupergraphService::new(), configuration, web_endpoints)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
+            error.to_string()
+        )
+    }
+
+    #[tokio::test]
+    async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
+        let configuration = Configuration::fake_builder()
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:4010").unwrap())
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let endpoint = service_fn(|_req: transport::Request| async move {
+            Ok::<_, BoxError>(
+                http::Response::builder()
+                    .body("this is a test".to_string().into())
+                    .unwrap(),
+            )
+        })
+        .boxed();
+
+        let mut mm = MultiMap::new();
+        mm.insert(
+            SocketAddr::from_str("127.0.0.1:4010").unwrap().into(),
+            Endpoint::new("/".to_string(), endpoint),
+        );
+
+        let error = init_with_config(MockSupergraphService::new(), configuration, mm)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:4010/`",
+            error.to_string()
+        )
+    }
+}
