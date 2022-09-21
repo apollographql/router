@@ -174,6 +174,18 @@ fn ensure_listenaddrs_consistency(
         all_ports.insert(main_port, main_ip);
     }
 
+    if let Some((ip, port)) = configuration.health_check.listen.ip_and_port() {
+        if let Some(previous_ip) = all_ports.insert(port, ip) {
+            if ip != previous_ip {
+                return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                    previous_ip,
+                    ip,
+                    port,
+                ));
+            }
+        }
+    }
+
     for addr in endpoints.keys() {
         if let Some((ip, port)) = addr.ip_and_port() {
             if let Some(previous_ip) = all_ports.insert(port, ip) {
@@ -2236,6 +2248,74 @@ Content-Type: application/json\r
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_sneaky_supergraph_and_health_check_configuration() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(Supergraph::fake_builder().path("/live").build()) // here be dragons
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let error = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:0/live`",
+            error.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                    .enabled(false)
+                    .build(),
+            )
+            .supergraph(Supergraph::fake_builder().path("/live").build())
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let _ = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_and_health_check_same_port_different_listener() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(ListenAddr::SocketAddr("0.0.0.0:4013".parse().unwrap()))
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let error = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
+            error.to_string()
+        );
     }
 
     #[test(tokio::test)]
