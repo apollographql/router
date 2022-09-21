@@ -113,22 +113,24 @@ where
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
-    endpoints.insert(
-        configuration.health_check.listen.clone(),
-        Endpoint::new(
-            "/live".to_string(),
-            service_fn(|_req: transport::Request| async move {
-                // TODO: use the service factory and send a query to it
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        ),
-    );
+    if configuration.health_check.enabled {
+        endpoints.insert(
+            configuration.health_check.listen.clone(),
+            Endpoint::new(
+                "/live".to_string(),
+                service_fn(|_req: transport::Request| async move {
+                    // TODO: use the service factory and send a query to it
+                    Ok::<_, BoxError>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, "application/json")
+                            .body(Bytes::from_static(b"{ \"status\": \"pass\" }").into())
+                            .unwrap(),
+                    )
+                })
+                .boxed(),
+            ),
+        );
+    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
