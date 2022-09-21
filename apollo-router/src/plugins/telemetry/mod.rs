@@ -240,12 +240,31 @@ impl Plugin for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-        let config = self.config.apollo.clone().unwrap_or_default();
+        let ftv1_activated = self
+            .config
+            .apollo
+            .map(|c| c.field_level_instrumentation_sampler.is_some())
+            .unwrap_or(false);
+        let studio_activated = self
+            .config
+            .apollo
+            .map(|c| c.apollo_key.is_some())
+            .unwrap_or(false);
+        let send_headers = self
+            .config
+            .apollo
+            .map(|c| c.send_headers)
+            .unwrap_or_default();
+        let send_variable_values = self
+            .config
+            .apollo
+            .map(|c| c.send_variable_values)
+            .unwrap_or_default();
 
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 // disable ftv1 sampling for deferred queries
-                let do_not_sample_reason = if config.field_level_instrumentation_sampler.is_none() {
+                let do_not_sample_reason = if !ftv1_activated {
                     req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
                     "FTV1 not activated"
                 } else if req.query_plan.root.contains_condition_or_defer() {
@@ -278,7 +297,7 @@ impl Plugin for Telemetry {
                 // * the span is sampled? do we need that condition
                 // * studio reporting or FTV1 are activated
                 if Span::current().context().span().span_context().is_sampled()
-                    && (config.apollo_key.is_some()
+                    && (studio_activated
                         || !req
                             .context
                             .get(FTV1_DO_NOT_SAMPLE)
@@ -289,17 +308,14 @@ impl Plugin for Telemetry {
                         "apollo_private.graphql.variables",
                         &Self::filter_variables_values(
                             &req.supergraph_request.body().variables,
-                            &config.send_variable_values,
+                            &send_variable_values,
                         )
                         .as_str(),
                     );
                     span.record(
                         "apollo_private.http.request_headers",
-                        &Self::filter_headers(
-                            req.supergraph_request.headers(),
-                            &config.send_headers,
-                        )
-                        .as_str(),
+                        &Self::filter_headers(req.supergraph_request.headers(), &send_headers)
+                            .as_str(),
                     );
                 }
 
