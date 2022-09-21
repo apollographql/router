@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use derivative::Derivative;
 use serde::de::Error;
 use serde::Deserialize;
