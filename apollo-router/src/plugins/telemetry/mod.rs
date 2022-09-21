@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
+use ::tracing::span::Record;
 #[cfg(not(feature = "console"))]
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
@@ -45,6 +46,14 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_subscriber::field::MakeExt;
+use tracing_subscriber::field::RecordFields;
+use tracing_subscriber::field::VisitOutput;
+use tracing_subscriber::fmt::format::debug_fn;
+use tracing_subscriber::fmt::format::JsonVisitor;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 #[cfg(not(feature = "console"))]
@@ -432,9 +441,22 @@ impl Telemetry {
                     .map(|s| s.as_str())
                     .unwrap_or("info");
 
-                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-                );
+                let formatter = debug_fn(|writer, field, value| {
+                    if field.name().starts_with("apollo_private") {
+                        // XXX: Are these being correctly delimited?
+                        write!(writer, "{}: null", field)
+                    } else {
+                        write!(writer, "{}: {:?}", field, value)
+                    }
+                })
+                .delimited(", ");
+
+                let sub_builder = tracing_subscriber::fmt::fmt()
+                    .with_env_filter(
+                        EnvFilter::try_new(log_level)
+                            .context("could not parse log configuration")?,
+                    )
+                    .fmt_fields(formatter);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -452,7 +474,11 @@ impl Telemetry {
                 } else {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder.json().finish().with(telemetry);
+                    let subscriber = sub_builder
+                        .json()
+                        .fmt_fields(RouterJsonFields::new())
+                        .finish()
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -1229,6 +1255,90 @@ impl ApolloFtv1Handler {
             }
         }
         resp
+    }
+}
+
+/// The JSON [`FormatFields`] implementation.
+///
+#[derive(Debug)]
+struct RouterJsonFields;
+
+impl RouterJsonFields {
+    /// Returns a new JSON [`FormatFields`] implementation.
+    ///
+    fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for RouterJsonFields {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> FormatFields<'a> for RouterJsonFields {
+    /// Format the provided `fields` to the provided `writer`, returning a result.
+    fn format_fields<R: RecordFields>(&self, mut writer: Writer<'_>, fields: R) -> fmt::Result {
+        let mut v = JsonVisitor::new(&mut writer);
+        fields.record(&mut v);
+        v.finish()
+    }
+
+    /// Record additional field(s) on an existing span.
+    ///
+    /// By default, this appends a space to the current set of fields if it is
+    /// non-empty, and then calls `self.format_fields`. If different behavior is
+    /// required, the default implementation of this method can be overridden.
+    fn add_fields(
+        &self,
+        current: &'a mut FormattedFields<Self>,
+        fields: &Record<'_>,
+    ) -> fmt::Result {
+        if current.is_empty() {
+            // If there are no previously recorded fields, we can just reuse the
+            // existing string.
+            let mut writer = current.as_writer();
+            let mut v = JsonVisitor::new(&mut writer);
+            fields.record(&mut v);
+            v.finish()?;
+            return Ok(());
+        }
+
+        // If fields were previously recorded on this span, we need to parse
+        // the current set of fields as JSON, add the new fields, and
+        // re-serialize them. Otherwise, if we just appended the new fields
+        // to a previously serialized JSON object, we would end up with
+        // malformed JSON.
+        //
+        // XXX(eliza): this is far from efficient, but unfortunately, it is
+        // necessary as long as the JSON formatter is implemented on top of
+        // an interface that stores all formatted fields as strings.
+        //
+        // We should consider reimplementing the JSON formatter as a
+        // separate layer, rather than a formatter for the `fmt` layer —
+        // then, we could store fields as JSON values, and add to them
+        // without having to parse and re-serialize.
+        let mut new = String::new();
+        let mut v = JsonVisitor::new(&mut new);
+        fields.record(&mut v);
+        v.finish()?;
+        // XXX I can't merge like in the tracing crate. Is this correct?
+        current.fields.pop();
+        new.remove(0);
+        current.fields = format!("{}, {}", current.fields, new);
+        let mut map: BTreeMap<&'_ str, serde_json::Value> =
+            serde_json::from_str(current).map_err(|_| fmt::Error)?;
+        for (key, value) in map.iter_mut() {
+            if key.starts_with("apollo_private") {
+                // XXX: WHY DOES THIS NOT WORK?
+                // *value = serde_json::from_str("REDACTED").map_err(|_| fmt::Error)?;
+                *value = serde_json::Value::Null;
+            }
+        }
+        current.fields = serde_json::to_string(&map).map_err(|_| fmt::Error)?;
+
+        Ok(())
     }
 }
 
