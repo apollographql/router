@@ -2177,6 +2177,19 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
+    async fn test_previous_health_check_returns_four_oh_four() {
+        let expectations = MockSupergraphService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!(
+            "{}/.well-known/apollo/server-health",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn test_health_check() {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
