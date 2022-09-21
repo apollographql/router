@@ -157,17 +157,18 @@ where
                         };
 
                         if parts.status == StatusCode::OK {
-                            let graphql_response: graphql::Response =
-                                serde_json::from_slice(bytes.to_vec().as_slice()).unwrap();
-
-                            if graphql_response.errors.is_empty() {
-                                health.status = HealthStatus::Up;
+                            let res: Result<graphql::Response, _> =
+                                serde_json::from_slice(bytes.to_vec().as_slice());
+                            if let Ok(graphql_response) = res {
+                                if graphql_response.errors.is_empty() {
+                                    health.status = HealthStatus::Up;
+                                }
                             }
                         }
 
                         Ok(http::Response::from_parts(
                             parts,
-                            serde_json::to_vec(&health).unwrap().into(),
+                            serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
                         ))
                     }
                 })
