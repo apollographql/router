@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use derivative::Derivative;
 use serde::de::Error;
 use serde::Deserialize;
@@ -179,36 +178,6 @@ impl Request {
         };
 
         Ok(request)
-    }
-
-    /// Create a [`Request`] from the supplied [`Bytes`].
-    ///
-    /// This will return an error if the input is invalid.
-    pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {
-        let value = Value::from_bytes(b)?;
-        let mut object = ensure_object!(value).map_err(serde::de::Error::custom)?;
-
-        let variables = extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
-            .map_err(serde::de::Error::custom)?
-            .unwrap_or_default();
-        let extensions =
-            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(serde::de::Error::custom)?
-                .unwrap_or_default();
-        let query = extract_key_value_from_object!(object, "query", Value::String(s) => s)
-            .map_err(serde::de::Error::custom)?
-            .map(|s| s.as_str().to_string());
-        let operation_name =
-            extract_key_value_from_object!(object, "operation_name", Value::String(s) => s)
-                .map_err(serde::de::Error::custom)?
-                .map(|s| s.as_str().to_string());
-
-        Ok(Request {
-            query,
-            operation_name,
-            variables,
-            extensions,
-        })
     }
 }
 
