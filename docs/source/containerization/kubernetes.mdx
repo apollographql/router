@@ -185,12 +185,12 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /health
-              port: 9494
+              path: "/health"
+              port: 8088
           readinessProbe:
             httpGet:
-              path: /health
-              port: 9494
+              path: "/health"
+              port: 8088
           resources:
             {}
           volumeMounts:
