@@ -742,7 +742,7 @@ mod tests {
 
         // Decompress body
         let body_bytes = response.bytes().await.unwrap();
-        let mut decoder = GzipEncoder::new(Vec::new());
+        let mut decoder = GzipDecoder::new(Vec::new());
         decoder.write_all(&body_bytes.to_vec()).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
