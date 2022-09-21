@@ -26,6 +26,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Removed unused `Request::from_bytes()` from public API ([Issue #1855](https://github.com/apollographql/router/issues/1855))
+
+We've removed `Request::from_bytes()` from the public API.  We were no longer using it and we don't expect anyone external to have been relying on it.
+
+We discovered this function during an exercise of documenting our entire public API.  While we considered keeping it, it didn't necessarily meet our requirements for shipping it in the public API.  It's internal usage was removed in [`d147f97d`](https://github.com/apollographql/router/commit/d147f97d as part of [PR #429](https://github.com/apollographql/router/pull/429).
+
+We're happy to consider re-introducing this in the future (it even has a matching `Response::from_bytes()` which it composes against nicely!), but we thought it was best to remove it for the time-being.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
+
 ## 🚀 Features
 ## 🐛 Fixes
 
