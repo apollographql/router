@@ -721,7 +721,7 @@ impl DeferredNode {
         })
     }
 
-    fn execute<'a, 'b, 'c, SF>(
+    fn execute<'a, 'b, SF>(
         &'b self,
         parameters: &'a ExecutionParameters<'a, SF>,
         parent_value: &Value,
@@ -761,7 +761,7 @@ impl DeferredNode {
         let deferred_path = self.path.clone();
         let subselection = self.subselection();
         let label = self.label.clone();
-        let mut tx = sender.clone();
+        let mut tx = sender;
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
