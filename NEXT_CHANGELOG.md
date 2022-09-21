@@ -35,7 +35,7 @@ We discovered this function during an exercise of documenting our entire public 
 
 We're happy to consider re-introducing this in the future (it even has a matching `Response::from_bytes()` which it composes against nicely!), but we thought it was best to remove it for the time-being.
 
-By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1858
 
 ## 🚀 Features
 ## 🐛 Fixes
