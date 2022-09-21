@@ -127,16 +127,16 @@ checksum = "344a1afec31ce0273dc2061105b04e5c4ab620fe0748a76244338aa893db42f3"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bcfad5b20c7edffbfe4425828152f6f1575ea44b959031456ade138ccd732f0"
+checksum = "c12416e40e4a1883da10af9238c3dec2fd2573015df79a969ec947c8683e2f65"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "access-json",
  "anyhow",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -6375,7 +6375,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "ansi_term",
  "anyhow",

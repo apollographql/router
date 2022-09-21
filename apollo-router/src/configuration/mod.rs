@@ -1612,7 +1612,11 @@ cors:
             WalkDir::new(path).into_iter().filter_map(|e| e.ok())
         }
 
-        for entry in it(".").chain(it("../examples")).chain(it("../docs")) {
+        for entry in it(".")
+            .chain(it("../examples"))
+            .chain(it("../docs"))
+            .chain(it("../dockerfiles"))
+        {
             if entry
                 .path()
                 .with_file_name(".skipconfigvalidation")

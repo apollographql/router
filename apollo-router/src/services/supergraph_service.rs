@@ -203,9 +203,11 @@ where
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
-            let can_be_deferred = plan.root.contains_defer();
+            let operation_name = body.operation_name.clone();
 
-            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
+            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
+
+            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -218,8 +220,6 @@ where
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let operation_name = body.operation_name.clone();
-
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
@@ -236,7 +236,7 @@ where
                     operation_name,
                     variables,
                     schema,
-                    can_be_deferred,
+                    is_deferred,
                 )
             }
         }
@@ -315,6 +315,7 @@ fn process_execution_response(
                 plan.query.format_response(
                     &mut response,
                     operation_name.as_deref(),
+                    can_be_deferred,
                     variables.clone(),
                     schema.api_schema(),
                 )

@@ -8,6 +8,5 @@ expression: first
       "id": "1",
       "name": "Ada Lovelace"
     }
-  },
-  "hasNext": false
+  }
 }

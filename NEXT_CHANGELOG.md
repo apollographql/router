@@ -69,48 +69,27 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Fixed extraVolumeMounts ([Issue #1824](https://github.com/apollographql/router/issues/1824))
+### update and validate configuration files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
 
-Fixed extraVolumeMounts not be being read into the deployment template correctly.
+Several of the dockerfiles in the router repository were out of date with respect to recent configuration changes. This fix extends our configuration testing range and updates the configuration files.
 
-By [@LockedThread](https://github.com/LockedThread) in https://github.com/apollographql/router/pull/1831
-
-### Do not fill in a skeleton object when canceling a subgraph request ([Issue #1819](https://github.com/apollographql/router/issues/1819))
-
-in a query spanning multiple subgraphs like this:
-
-query {
-  currentUser {
-    activeOrganization {
-      id
-      creatorUser {
-        name
-      }
-    }
-  }
-}
-if the user subgraph returns {"currentUser": { "activeOrganization": null }}, then the request to the organization subgraph
-is cancelled, and no data should be generated, but the query planner was wrongly creating an object at the target path.
-
-This PR also improves the usage of mocked subgraphs with `TestHarness`.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1819
-
-
-### Defer: default defer condition to true ([Issue #1820](https://github.com/apollographql/router/issues/1820))
-
-According to the defer specification, defer conditions are mandatory and default to true.
-We fixed a bug where the default value wasn't initialized properly.
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1832
-
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1857
 
 ## 🛠 Maintenance
 
-### Add more compilation gates to delete useless warnings ([PR #1830](https://github.com/apollographql/router/pull/1830))
+### Disable Deno snapshotting on docs.rs
 
-Add more gates (for `console` feature) to not have warnings when using `--all-features`.
+This works around [V8 linking errors](https://docs.rs/crate/apollo-router/1.0.0-rc.2/builds/633287).
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1847
+
+### Add the Uplink schema to the repository, with a test checking that it is up to date.
+
+Previously it was downloaded at compile-time, 
+which would [fail](https://docs.rs/crate/lets-see-if-this-builds-on-docs-rs/0.0.1/builds/633305) 
+in build environments without Internet access.
+If an update is needed, the test failure prints a message with the command to run.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1847
 
 ## 📚 Documentation

@@ -1,3 +1,6 @@
+[![Version](https://img.shields.io/crates/v/apollo-router.svg)](https://crates.io/crates/apollo-router)
+[![Docs.rs](https://docs.rs/apollo-router/badge.svg)](https://docs.rs/apollo-router)
+
 # Apollo Router
 
 [<img alt="Apollo Router" src="https://raw.githubusercontent.com/apollographql/space-kit/main/src/illustrations/svgs/satellite1.svg" height="144">](https://www.apollographql.com/docs/router/)
