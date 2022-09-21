@@ -28,6 +28,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### update and validate configuration files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
+
+Several of the dockerfiles in the router repository were out of date with respect to recent configuration changes. This fix extends our configuration testing range and updates the configuration files.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1857
+
 ## 🛠 Maintenance
 
 ### Disable Deno snapshotting on docs.rs
