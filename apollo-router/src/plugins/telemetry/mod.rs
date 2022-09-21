@@ -243,22 +243,26 @@ impl Plugin for Telemetry {
         let ftv1_activated = self
             .config
             .apollo
+            .as_ref()
             .map(|c| c.field_level_instrumentation_sampler.is_some())
             .unwrap_or(false);
         let studio_activated = self
             .config
             .apollo
+            .as_ref()
             .map(|c| c.apollo_key.is_some())
             .unwrap_or(false);
         let send_headers = self
             .config
             .apollo
-            .map(|c| c.send_headers)
+            .as_ref()
+            .map(|c| c.send_headers.clone())
             .unwrap_or_default();
         let send_variable_values = self
             .config
             .apollo
-            .map(|c| c.send_variable_values)
+            .as_ref()
+            .map(|c| c.send_variable_values.clone())
             .unwrap_or_default();
 
         ServiceBuilder::new()
