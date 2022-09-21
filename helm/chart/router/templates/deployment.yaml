@@ -8,7 +8,11 @@ metadata:
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
-    prometheus.io/port: {{ (splitList ":"  (.Values.router.configuration.telemetry.metrics.prometheus.listen | default ":9090")) | last }}
+    {{- if  .Values.router.configuration.telemetry.metrics.prometheus.listen }}
+    prometheus.io/port: {{ (split ":" .Values.router.configuration.telemetry.metrics.prometheus.listen)._1 | quote }}
+    {{- else }}
+    prometheus.io/port: "9090"
+    {{- end }}
     prometheus.io/scrape: "true"
   {{- end }}
 spec:
@@ -85,12 +89,18 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: {{ (index .Values.router.configuration "health-check").path | default "/health" }}
-              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":9494") | last }}
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
+              port: {{ .Values.containerPorts.http }}
           readinessProbe:
             httpGet:
-              path: {{ (index .Values.router.configuration "health-check").path  | default "/health" }}
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":9494")) | last }}
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
+              port: {{ .Values.containerPorts.http }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
@@ -107,12 +117,12 @@ spec:
               readOnly: true
             {{- end }}
             {{- end }}
-      volumes:
           {{- if .Values.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
           {{- end }}
           {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
+      volumes:
         {{- if .Values.router.configuration }}
         - name: router-configuration
           configMap:

@@ -22,11 +22,7 @@ static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
     vec![error]
 });
 
-register_plugin!(
-    "experimental",
-    "include_subgraph_errors",
-    IncludeSubgraphErrors
-);
+register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -103,7 +99,10 @@ mod test {
     use crate::SupergraphResponse;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+        serde_json::from_str(r#"{"data": {"topProducts":null},
+        "errors":[{"message":
+        "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
+        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
@@ -192,7 +191,7 @@ mod test {
 
         let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
-            .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
+            .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -205,7 +204,7 @@ mod test {
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
-            .get("experimental.include_subgraph_errors")
+            .get("apollo.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await

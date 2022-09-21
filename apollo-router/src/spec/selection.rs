@@ -86,7 +86,11 @@ impl Selection {
 
                 let field_name = field
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Name is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
 
@@ -97,27 +101,40 @@ impl Selection {
                 } else if field_name == "__type" {
                     FieldType::Introspection("__Type".to_string())
                 } else {
-                    current_type
+                    let name = current_type
                         .inner_type_name()
-                        .and_then(|name| {
-                            //looking into object types
+                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+
+                    //looking into object types
+                    schema
+                        .object_types
+                        .get(name)
+                        .and_then(|ty| ty.field(&field_name))
+                        // otherwise, it might be an interface
+                        .or_else(|| {
                             schema
-                                .object_types
+                                .interfaces
                                 .get(name)
                                 .and_then(|ty| ty.field(&field_name))
-                                // otherwise, it might be an interface
-                                .or_else(|| {
-                                    schema
-                                        .interfaces
-                                        .get(name)
-                                        .and_then(|ty| ty.field(&field_name))
-                                })
                         })
-                        .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?
+                        .ok_or_else(|| {
+                            SpecError::InvalidField(field_name.clone(), current_type.to_string())
+                        })?
                         .clone()
                 };
 
-                let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
+                let alias = field
+                    .alias()
+                    .map(|x| {
+                        x.name()
+                            .ok_or_else(|| {
+                                SpecError::ParsingError(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
+                            })
+                            .map(|name| name.text().to_string())
+                    })
+                    .transpose()?;
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
@@ -185,12 +202,24 @@ impl Selection {
                     .map(|condition| {
                         condition
                             .named_type()
-                            .expect("TypeCondition must specify the NamedType it applies to; qed")
-                            .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string()
+                            .ok_or_else(|| {
+                                SpecError::ParsingError(
+                                    "TypeCondition must specify the NamedType it applies to"
+                                        .to_string(),
+                                )
+                            })
+                            .and_then(|named_type| {
+                                named_type
+                                    .name()
+                                    .ok_or_else(|| {
+                                        SpecError::ParsingError(
+                                            "the node Name is not optional in the spec".to_string(),
+                                        )
+                                    })
+                                    .map(|name| name.text().to_string())
+                            })
                     })
+                    .transpose()?
                     // if we can't get a type name from the current type, that means we're applying
                     // a fragment onto a scalar
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
@@ -200,7 +229,11 @@ impl Selection {
 
                 let selection_set = inline_fragment
                     .selection_set()
-                    .expect("the node SelectionSet is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node SelectionSet is not optional in the spec".to_string(),
+                        )
+                    })?
                     .selections()
                     .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
                     .collect::<Result<Vec<Option<_>>, _>>()?
@@ -253,9 +286,17 @@ impl Selection {
 
                 let name = fragment_spread
                     .fragment_name()
-                    .expect("the node FragmentName is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node FragmentName is not optional in the spec".to_string(),
+                        )
+                    })?
                     .name()
-                    .unwrap()
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Name is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -6,6 +7,7 @@ use tower::ServiceExt;
 
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
+use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -34,7 +36,6 @@ pub(crate) mod http_client;
 /// this test harness is lacking:
 ///
 /// * Custom endpoints from plugins
-/// * The health check endpoint
 /// * CORS (FIXME: should this include CORS?)
 /// * HTTP compression
 ///
@@ -71,7 +72,7 @@ pub struct TestHarness<'a> {
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
 impl<'a> TestHarness<'a> {
-    #![allow(missing_docs)] // FIXME
+    /// Creates a new builder.
     pub fn builder() -> Self {
         Self {
             schema: None,
@@ -170,7 +171,6 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    /// Builds the GraphQL service
     async fn build_common(self) -> Result<(Arc<Configuration>, RouterCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
@@ -207,6 +207,7 @@ impl<'a> TestHarness<'a> {
         Ok((config, router_creator))
     }
 
+    /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
         let apq = APQLayer::new().await;
@@ -297,5 +298,36 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         (self.0)(subgraph_name, service)
+    }
+}
+
+/// a list of subgraphs with pregenerated responses
+#[derive(Default)]
+pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
+
+impl MockedSubgraphs {
+    /// adds a mocked subgraph to the list
+    pub fn insert(&mut self, name: &'static str, subgraph: MockSubgraph) {
+        self.0.insert(name, subgraph);
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for MockedSubgraphs {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        default: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        self.0
+            .get(subgraph_name)
+            .map(|service| service.clone().boxed())
+            .unwrap_or(default)
     }
 }

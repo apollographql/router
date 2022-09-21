@@ -499,7 +499,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -520,7 +520,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateSchema(example_schema()),
                     Shutdown
@@ -542,7 +542,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     UpdateConfiguration(
                         Configuration::builder()
@@ -552,6 +552,7 @@ mod tests {
                                     .build()
                             )
                             .build()
+                            .unwrap()
                             .boxed()
                     ),
                     Shutdown
@@ -573,7 +574,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -599,7 +600,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                 ],
             )
@@ -636,7 +637,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
                     UpdateSchema(example_schema()),
                     UpdateSchema(example_schema()),
                     Shutdown

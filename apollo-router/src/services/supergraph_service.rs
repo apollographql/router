@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -26,6 +27,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::execution::QueryPlan;
 use super::new_service::NewService;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
@@ -48,7 +50,6 @@ use crate::response::IncrementalResponse;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::spec::Query;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -198,10 +199,13 @@ where
             *response.response.status_mut() = StatusCode::BAD_REQUEST;
             Ok(response)
         }
-        Some(QueryPlannerContent::Plan { query, plan }) => {
-            let can_be_deferred = plan.root.contains_defer();
 
-            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
+        Some(QueryPlannerContent::Plan { plan }) => {
+            let operation_name = body.operation_name.clone();
+
+            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
+
+            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -209,18 +213,16 @@ where
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
-            } else if let Some(err) = query.validate_variables(body, &schema).err() {
+            } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let operation_name = body.operation_name.clone();
-
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
                             .supergraph_request(req.supergraph_request)
-                            .query_plan(plan)
+                            .query_plan(plan.clone())
                             .context(context)
                             .build(),
                     )
@@ -228,11 +230,11 @@ where
 
                 process_execution_response(
                     execution_response,
-                    query,
+                    plan,
                     operation_name,
                     variables,
                     schema,
-                    can_be_deferred,
+                    is_deferred,
                 )
             }
         }
@@ -295,7 +297,7 @@ fn accepts_multipart(headers: &HeaderMap) -> bool {
 
 fn process_execution_response(
     execution_response: ExecutionResponse,
-    query: Arc<Query>,
+    plan: Arc<QueryPlan>,
     operation_name: Option<String>,
     variables: Map<ByteString, Value>,
     schema: Arc<Schema>,
@@ -304,74 +306,80 @@ fn process_execution_response(
     let ExecutionResponse { response, context } = execution_response;
 
     let (parts, response_stream) = response.into_parts();
-    let stream = response_stream.map(move |mut response: Response| {
-        let has_next = response.has_next.unwrap_or(true);
-        tracing::debug_span!("format_response").in_scope(|| {
-            query.format_response(
-                &mut response,
-                operation_name.as_deref(),
-                variables.clone(),
-                schema.api_schema(),
+
+    let stream = response_stream
+        .map(move |mut response: Response| {
+            tracing::debug_span!("format_response").in_scope(|| {
+                plan.query.format_response(
+                    &mut response,
+                    operation_name.as_deref(),
+                    can_be_deferred,
+                    variables.clone(),
+                    schema.api_schema(),
+                )
+            });
+
+            match (response.path.as_ref(), response.data.as_ref()) {
+                (None, _) | (_, None) => {
+                    if can_be_deferred && response.has_next.is_none() {
+                        response.has_next = Some(true);
+                    }
+
+                    response
+                }
+                // if the deferred response specified a path, we must extract the
+                //values matched by that path and create a separate response for
+                //each of them.
+                // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+                // would merge in the same ways, some clients will generate code
+                // that checks the specific type of the deferred response at that
+                // path, instead of starting from the root object, so to support
+                // this, we extract the value at that path.
+                // In particular, that means that a deferred fragment in an object
+                // under an array would generate one response par array element
+                (Some(response_path), Some(response_data)) => {
+                    let mut sub_responses = Vec::new();
+                    response_data.select_values_and_paths(response_path, |path, value| {
+                        sub_responses.push((path.clone(), value.clone()));
+                    });
+
+                    let has_next = response.has_next.unwrap_or(true);
+
+                    Response::builder()
+                        .has_next(has_next)
+                        .incremental(
+                            sub_responses
+                                .into_iter()
+                                .map(move |(path, data)| {
+                                    IncrementalResponse::builder()
+                                        .and_label(response.label.clone())
+                                        .data(data)
+                                        .path(path)
+                                        .errors(response.errors.clone())
+                                        .extensions(response.extensions.clone())
+                                        .build()
+                                })
+                                .collect(),
+                        )
+                        .build()
+                }
+            }
+        })
+        // avoid sending an empty deferred response if possible
+        .filter(|response| {
+            ready(
+                // this is a single response
+                response.data.is_some()
+                    // the formatting step for incremental responses returned an empty array
+                    || !response.incremental.is_empty()
+                    // even if the response is empty, we have to send a final response with `has_next` set to false
+                    || response.has_next == Some(false),
             )
         });
 
-        match (response.path.as_ref(), response.data.as_ref()) {
-            (None, _) | (_, None) => {
-                if can_be_deferred {
-                    response.has_next = Some(has_next);
-                }
-
-                response
-            }
-            // if the deferred response specified a path, we must extract the
-            //values matched by that path and create a separate response for
-            //each of them.
-            // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
-            // would merge in the same ways, some clients will generate code
-            // that checks the specific type of the deferred response at that
-            // path, instead of starting from the root object, so to support
-            // this, we extract the value at that path.
-            // In particular, that means that a deferred fragment in an object
-            // under an array would generate one response par array element
-            (Some(response_path), Some(response_data)) => {
-                let mut sub_responses = Vec::new();
-                response_data.select_values_and_paths(response_path, |path, value| {
-                    sub_responses.push((path.clone(), value.clone()));
-                });
-
-                Response::builder()
-                    .has_next(has_next)
-                    .incremental(
-                        sub_responses
-                            .into_iter()
-                            .map(move |(path, data)| {
-                                IncrementalResponse::builder()
-                                    .and_label(response.label.clone())
-                                    .data(data)
-                                    .path(path)
-                                    .errors(response.errors.clone())
-                                    .extensions(response.extensions.clone())
-                                    .build()
-                            })
-                            .collect(),
-                    )
-                    .build()
-            }
-        }
-    });
-
     Ok(SupergraphResponse {
         context,
-        response: http::Response::from_parts(
-            parts,
-            if can_be_deferred {
-                stream.left_stream()
-            } else {
-                stream.right_stream()
-            }
-            .in_current_span()
-            .boxed(),
-        ),
+        response: http::Response::from_parts(parts, stream.in_current_span().boxed()),
     })
 }
 
@@ -542,5 +550,90 @@ impl RouterCreator {
         use tower::buffer::Buffer;
 
         Buffer::new(self.make(), 512).boxed_clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin::test::MockSubgraph;
+    use crate::services::supergraph;
+    use crate::test_harness::MockedSubgraphs;
+    use crate::TestHarness;
+
+    #[tokio::test]
+    async fn nullability_formatting() {
+        let schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+
+   type Query {
+       currentUser: User @join__field(graph: USER)
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+       activeOrganization: Organization
+   }
+
+   type Organization
+   @join__owner(graph: ORGA)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id") {
+       id: ID
+       creatorUser: User
+   }"#;
+
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
+            // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
     }
 }

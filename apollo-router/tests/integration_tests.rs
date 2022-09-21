@@ -540,7 +540,7 @@ async fn defer_path_with_disabled_config() {
             "preview_defer_support": false,
         },
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -572,7 +572,7 @@ async fn defer_path_with_disabled_config() {
 async fn defer_path() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -607,7 +607,7 @@ async fn defer_path() {
 async fn defer_path_in_array() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -638,16 +638,20 @@ async fn defer_path_in_array() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+    assert_eq!(first.has_next, Some(true));
 
     let second = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(second);
+    assert_eq!(second.has_next, Some(false));
+
+    assert_eq!(stream.next_response().await, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
         "plugins": {
-            "experimental.include_subgraph_errors": {
+            "apollo.include_subgraph_errors": {
                 "all": true
             }
         }
@@ -678,6 +682,91 @@ async fn defer_query_without_accept() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_empty_primary_response() {
+    let config = serde_json::json!({
+        "plugins": {
+            "apollo.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"{
+            me {
+                ...@defer(label: "name") {
+                    name
+                }
+            }
+        }"#,
+        )
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_default_variable() {
+    let config = serde_json::json!({
+        "include_subgraph_errors": {
+            "all": true
+        }
+    });
+
+    let query = r#"query X($if: Boolean! = true){
+        me {
+            id
+            ...@defer(label: "name", if: $if) {
+                name
+            }
+        }
+    }"#;
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config.clone()).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .variable("if", false)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await;
+    assert!(second.is_none());
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
