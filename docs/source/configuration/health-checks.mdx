@@ -12,3 +12,52 @@ health-check:
   listen: 127.0.0.1:8088
   enabled: true
 ```
+
+## Testing with `curl`
+
+The following example demonstrates using the `curl` command to send a basic health check query to an Apollo Router instance running at `127.0.0.1:4000`:
+
+```sh
+$ curl -v "http://127.0.0.1:8088/health"
+*   Trying 127.0.0.1:8088...
+* Connected to 127.0.0.1 (127.0.0.1) port 8088 (#0)
+> GET /health HTTP/1.1
+> Host: 127.0.0.1:8088
+> User-Agent: curl/7.79.1
+> Accept: */*
+> 
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 200 OK
+< vary: origin
+< content-type: application/json
+< content-length: 15
+< date: Wed, 21 Sep 2022 17:10:45 GMT
+< 
+* Connection #0 to host 127.0.0.1 left intact
+{"status":"UP"}
+
+## Using with Kubernetes
+In Kubernetes, you can configure health checks by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
+```yaml
+      # ... snipped for partial example ...
+      containers:
+        - name: router
+          # ... snipped for partial example ...
+          livenessProbe:
+            httpGet:
+              path: "/health"
+              port: 8088
+          readinessProbe:
+            httpGet:
+              path: "/health"
+              port: 8088
+          # ... snipped for partial example ...
+```
+See a more complete example in our [Kubernetes documentation](../containerization/kubernetes/).
+## Using with Docker
+Docker has a `HEALTHCHECK` instruction that tells Docker how to test whether a container is still working. These are defined in the `Dockerfile` when building your container:
+```
+HEALTHCHECK CMD curl --fail \
+  "http://127.0.0.1:8088/health" || exit 1
+```
+We don't define these in our example `Dockerfile`s, because they aren't commonly used. You can add them to your own images as needed.
