@@ -3,11 +3,13 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use futures::StreamExt;
 use http::Method;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 
 use super::*;
+use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphFactory;

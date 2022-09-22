@@ -9,9 +9,9 @@ use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
 
+use super::execution::ExecutionParameters;
 use super::selection::select_object;
 use super::selection::Selection;
-use super::ExecutionParameters;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request;
