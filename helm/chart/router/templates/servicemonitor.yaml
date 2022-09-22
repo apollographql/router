@@ -5,12 +5,12 @@ metadata:
   name: {{ .Release.Name }}
 spec:
   endpoints:
-  - path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
+  - path: {{ include "router.prometheusMetricsPath" . }}
     port: metrics
   namespaceSelector:
     matchNames:
     - {{ .Release.Namespace }}
   selector:
     matchLabels:
-      {{- include router.selectorLabels . |  nindent 6 }}
+      {{- include "router.selectorLabels" . |  nindent 6 }}
 {{- end }}
