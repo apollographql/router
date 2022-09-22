@@ -29,6 +29,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
+
+in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
+was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
+This will now aggregate the subgraph error and the missing `_entities` error.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
+
 ### Move response formatting to the execution service ([Issue #1771](https://github.com/apollographql/router/issues/1771))
 
 The response formatting process, where response data is filtered according to deferred responses subselections
