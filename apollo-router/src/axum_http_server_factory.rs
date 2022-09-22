@@ -2251,15 +2251,18 @@ Content-Type: application/json\r
     async fn test_health_check() {
         let mut expectations = MockSupergraphService::new();
         expectations.expect_service_call().once().returning(|_| {
-            Ok(http_ext::from_response_to_stream(
-                http::Response::builder()
-                    .status(200)
-                    .body(
-                        graphql::Response::builder()
-                            .data(json!({ "__typename": "Query"}))
-                            .build(),
-                    )
-                    .unwrap(),
+            Ok(SupergraphResponse::new_from_response(
+                http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({ "__typename": "Query"}))
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                Context::new(),
             ))
         });
 
@@ -2291,15 +2294,18 @@ Content-Type: application/json\r
 
         let mut expectations = MockSupergraphService::new();
         expectations.expect_service_call().once().returning(|_| {
-            Ok(http_ext::from_response_to_stream(
-                http::Response::builder()
-                    .status(200)
-                    .body(
-                        graphql::Response::builder()
-                            .data(json!({ "__typename": "Query"}))
-                            .build(),
-                    )
-                    .unwrap(),
+            Ok(SupergraphResponse::new_from_response(
+                http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({ "__typename": "Query"}))
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                Context::new(),
             ))
         });
 
