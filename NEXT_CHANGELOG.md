@@ -39,11 +39,16 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-
 ### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
 
 This splits the query plan execution in multiple modules to make the code more manageable.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
+
+### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
+
+This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
 
 ## 📚 Documentation
