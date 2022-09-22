@@ -385,7 +385,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:9494",
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:8088",
           "default": "127.0.0.1:8088",
           "anyOf": [
             {
