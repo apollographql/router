@@ -46,6 +46,14 @@ Several of the dockerfiles in the router repository were out of date with respec
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1857
 
+### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
+
+in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
+was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
+This will now aggregate the subgraph error and the missing `_entities` error.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
+
 ## 🛠 Maintenance
 
 ### Disable Deno snapshotting on docs.rs
