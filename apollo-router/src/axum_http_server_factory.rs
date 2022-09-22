@@ -84,6 +84,8 @@ use crate::router_factory::SupergraphServiceFactory;
 use crate::services::transport;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
+pub(crate) const REQUEST_SPAN_NAME: &str = "request";
+
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug)]
@@ -1054,7 +1056,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             let _context_guard = context.attach();
             tracing::span!(
                 Level::INFO,
-                "request",
+                REQUEST_SPAN_NAME,
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
@@ -1066,7 +1068,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             // No remote span, we can go ahead and create the span without context.
             tracing::span!(
                 Level::INFO,
-                "request",
+                REQUEST_SPAN_NAME,
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
