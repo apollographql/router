@@ -38,6 +38,22 @@ We're happy to consider re-introducing this in the future (it even has a matchin
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1858
 
 ## 🚀 Features
+
+### Reintroduce health liveliness check ([Issue #1861](https://github.com/apollographql/router/issues/1861))
+
+Depending on their environments and cloud settings, users may or may not be able to craft health probes that are able to make CSRF compatible GraphQL queries.
+This is one of the reasons why we reintroduced a health check in the router.
+
+The health liveness check endpoint is exposed on `127.0.0.1:8088/health`, and its listen address can be changed in the yaml configuration:
+
+```yaml
+health-check:
+  listen: 127.0.0.1:8088 # default
+  enabled: true # default
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1859
+
 ## 🐛 Fixes
 
 ### Update and validate configuration files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
