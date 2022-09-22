@@ -1124,7 +1124,10 @@ pub(crate) mod fetch {
                 errors.push(
                     Error::builder()
                         .path(current_dir.clone())
-                        .message("Missing key `_entities`!".to_string())
+                        .message(format!(
+                            "Subgraph response from '{}' was missing key `_entities`",
+                            self.service_name
+                        ))
                         .build(),
                 );
 
