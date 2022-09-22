@@ -443,10 +443,9 @@ impl Telemetry {
 
                 let formatter = debug_fn(|writer, field, value| {
                     if field.name().starts_with("apollo_private") {
-                        // XXX: Are these being correctly delimited?
-                        write!(writer, "{}: null", field)
+                        write!(writer, "")
                     } else {
-                        write!(writer, "{}: {:?}", field, value)
+                        write!(writer, "{}={:?}", field, value)
                     }
                 })
                 .delimited(", ")
@@ -1330,15 +1329,9 @@ impl<'a> FormatFields<'a> for RouterJsonFields {
 
         current_map.extend(new_map);
 
-        for (key, value) in current_map.iter_mut() {
-            if key.starts_with("apollo_private") {
-                // XXX: WHY DOES THIS NOT WORK?
-                // *value = serde_json::from_str("REDACTED").map_err(|_| fmt::Error)?;
-                *value = serde_json::Value::Null;
-            }
-        }
+        current_map.retain(|k, _v| !k.starts_with("apollo_private"));
 
-        // Finally serialize our merged, redacted output to be our set of fields.
+        // Serialize our merged, redacted output to be our set of fields.
         current.fields = serde_json::to_string(&current_map).map_err(|_| fmt::Error)?;
 
         Ok(())
