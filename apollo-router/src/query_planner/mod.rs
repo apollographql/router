@@ -1111,18 +1111,6 @@ pub(crate) mod fetch {
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
 
-                            if paths.len() != array.len() {
-                                errors.push(
-                                    Error::builder()
-                                        .path(current_dir.clone())
-                                        .message(format!(
-                                            "Expected \"data._entities\" to contain {} elements",
-                                            paths.len()
-                                        ))
-                                        .build(),
-                                );
-                            }
-
                             for (path, entity_idx) in paths {
                                 if let Some(entity) = array.get(entity_idx) {
                                     let _ = value.insert(&path, entity.clone());
