@@ -35,12 +35,14 @@ use self::Event::UpdateSchema;
 use crate::axum_http_server_factory::make_axum_router;
 use crate::axum_http_server_factory::AxumHttpServerFactory;
 use crate::axum_http_server_factory::ListenAddrAndRouter;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
 use crate::spec::Schema;
 use crate::state_machine::StateMachine;
@@ -61,8 +63,10 @@ async fn make_transport_service<RF>(
     let service_factory = YamlSupergraphServiceFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
+
+    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // FIXME: how should
     let ListenAddrAndRouter(_listener, router) = routers.main;
     Ok(router

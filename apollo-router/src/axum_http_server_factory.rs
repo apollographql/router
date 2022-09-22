@@ -66,6 +66,7 @@ use tower_service::Service;
 use tracing::Level;
 use tracing::Span;
 
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
@@ -81,7 +82,10 @@ use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 
 /// A basic http server using Axum.
@@ -121,6 +125,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    apq: APQLayer,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -159,6 +164,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        apq,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -271,7 +277,9 @@ fn ensure_endpoints_consistency(
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
+
     endpoints_on_main_listener: Vec<Endpoint>,
+    apq: APQLayer,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -280,7 +288,7 @@ where
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let main_route = main_router::<RF>(configuration)
+    let main_route = main_router::<RF>(configuration, apq)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
             TraceLayer::new_for_http()
@@ -343,7 +351,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
+            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;
 
             // serve main router
 
@@ -685,7 +696,7 @@ struct CustomRejection {
     msg: String,
 }
 
-fn main_router<RF>(configuration: &Configuration) -> axum::Router
+fn main_router<RF>(configuration: &Configuration, apq: APQLayer) -> axum::Router
 where
     RF: SupergraphServiceFactory,
 {
@@ -695,12 +706,15 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
+    let apq2 = apq.clone();
+
     let get_handler = if configuration.sandbox.enabled {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
                     Sandbox::display_page(),
                     host,
+                    apq2,
                     service.new_service().boxed(),
                     http_request,
                 )
@@ -712,6 +726,7 @@ where
                 handle_get_with_static(
                     Homepage::display_page(),
                     host,
+                    apq2,
                     service.new_service().boxed(),
                     http_request,
                 )
@@ -720,7 +735,7 @@ where
     } else {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(host, service.new_service().boxed(), http_request)
+                handle_get(host, apq2, service.new_service().boxed(), http_request)
             }
         })
     };
@@ -737,6 +752,7 @@ where
                     host,
                     uri,
                     request,
+                    apq,
                     service.new_service().boxed(),
                     header_map,
                 )
@@ -748,11 +764,8 @@ where
 async fn handle_get_with_static(
     static_page: Bytes,
     Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if prefers_html(http_request.headers()) {
@@ -767,7 +780,7 @@ async fn handle_get_with_static(
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
             .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
+        return run_graphql_request(service, apq, http_request)
             .await
             .into_response();
     }
@@ -777,11 +790,8 @@ async fn handle_get_with_static(
 
 async fn handle_get(
     Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if let Some(request) = http_request
@@ -792,7 +802,7 @@ async fn handle_get(
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
             .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
+        return run_graphql_request(service, apq, http_request)
             .await
             .into_response();
     }
@@ -804,11 +814,8 @@ async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     let mut http_request = Request::post(
@@ -819,7 +826,7 @@ async fn handle_post(
     .expect("body has already been parsed; qed");
     *http_request.headers_mut() = header_map;
 
-    run_graphql_request(service, http_request)
+    run_graphql_request(service, apq, http_request)
         .await
         .into_response()
 }
@@ -833,20 +840,37 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 }
 async fn run_graphql_request<RS>(
     service: RS,
+    apq: APQLayer,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse
 where
-    RS: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<graphql::ResponseStream>,
-            Error = BoxError,
-        > + Send,
+    RS: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send,
 {
+    let (head, body) = http_request.into_parts();
+    let mut req: SupergraphRequest = Request::from_parts(head, body).into();
+    req = match apq.apq_request(req).await {
+        Ok(req) => req,
+        Err(res) => {
+            let (parts, mut stream) = res.response.into_parts();
+
+            return match stream.next().await {
+                None => {
+                    tracing::error!("router service is not available to process request",);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "router service is not available to process request",
+                    )
+                        .into_response()
+                }
+                Some(body) => http_ext::Response::from(http::Response::from_parts(parts, body))
+                    .into_response(),
+            };
+        }
+    };
+
     match service.ready_oneshot().await {
         Ok(mut service) => {
-            let (head, body) = http_request.into_parts();
-
-            match service.call(Request::from_parts(head, body)).await {
+            match service.call(req).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
                         if source_err.is::<RateLimited>() {
@@ -864,7 +888,7 @@ where
                         .into_response()
                 }
                 Ok(response) => {
-                    let (mut parts, mut stream) = response.into_parts();
+                    let (mut parts, mut stream) = response.response.into_parts();
 
                     process_vary_header(&mut parts.headers);
 
@@ -1115,9 +1139,12 @@ mod tests {
     use crate::json_ext::Path;
     use crate::services::new_service::NewService;
     use crate::services::transport;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
     use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
     use crate::test_harness::http_client;
     use crate::test_harness::http_client::MaybeMultipart;
+    use crate::Context;
     use crate::TestHarness;
 
     macro_rules! assert_header {
@@ -1162,21 +1189,18 @@ mod tests {
     mock! {
         #[derive(Debug)]
         SupergraphService {
-            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<http::Response<graphql::ResponseStream>, BoxError>;
+            fn service_call(&mut self, req: SupergraphRequest) -> Result<SupergraphResponse, BoxError>;
         }
     }
 
-    type MockSupergraphServiceType = tower_test::mock::Mock<
-        http::Request<graphql::Request>,
-        http::Response<Pin<Box<dyn Stream<Item = graphql::Response> + Send>>>,
-    >;
+    type MockSupergraphServiceType = tower_test::mock::Mock<SupergraphRequest, SupergraphResponse>;
 
     #[derive(Clone)]
     struct TestSupergraphServiceFactory {
         inner: MockSupergraphServiceType,
     }
 
-    impl NewService<http::Request<graphql::Request>> for TestSupergraphServiceFactory {
+    impl NewService<SupergraphRequest> for TestSupergraphServiceFactory {
         type Service = MockSupergraphServiceType;
 
         fn new_service(&self) -> Self::Service {
@@ -1187,9 +1211,10 @@ mod tests {
     impl SupergraphServiceFactory for TestSupergraphServiceFactory {
         type SupergraphService = MockSupergraphServiceType;
 
-        type Future = <<TestSupergraphServiceFactory as NewService<
-            http::Request<graphql::Request>,
-        >>::Service as Service<http::Request<graphql::Request>>>::Future;
+        type Future =
+            <<TestSupergraphServiceFactory as NewService<SupergraphRequest>>::Service as Service<
+                SupergraphRequest,
+            >>::Future;
 
         fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
             MultiMap::new()
@@ -1419,11 +1444,9 @@ mod tests {
             .times(2)
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1505,16 +1528,17 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_ref().unwrap(), "query");
+                assert_eq!(
+                    req.supergraph_request.body().query.as_ref().unwrap(),
+                    "query"
+                );
                 true
             })
             .returning(move |_req| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1570,11 +1594,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1667,11 +1689,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::fake_builder()
@@ -1734,11 +1754,9 @@ mod tests {
             .times(2)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::fake_builder()
@@ -1801,11 +1819,9 @@ mod tests {
             .times(4)
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let conf = Configuration::fake_builder()
@@ -1885,20 +1901,25 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
                 assert_eq!(
-                    req.body().operation_name.as_deref().unwrap(),
+                    req.supergraph_request.body().query.as_deref().unwrap(),
+                    expected_query
+                );
+                assert_eq!(
+                    req.supergraph_request
+                        .body()
+                        .operation_name
+                        .as_deref()
+                        .unwrap(),
                     expected_operation_name
                 );
                 true
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1945,20 +1966,25 @@ mod tests {
             .expect_service_call()
             .times(1)
             .withf(move |req| {
-                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
                 assert_eq!(
-                    req.body().operation_name.as_deref().unwrap(),
+                    req.supergraph_request.body().query.as_deref().unwrap(),
+                    expected_query
+                );
+                assert_eq!(
+                    req.supergraph_request
+                        .body()
+                        .operation_name
+                        .as_deref()
+                        .unwrap(),
                     expected_operation_name
                 );
                 true
             })
             .returning(move |_| {
                 let example_response = example_response.clone();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -1993,11 +2019,9 @@ mod tests {
                     reason: "Mock error".to_string(),
                 }
                 .to_response();
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    example_response,
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -2106,11 +2130,14 @@ mod tests {
             .returning(move |_| {
                 let example_response = example_response.clone();
 
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(example_response)
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_response(
+                    http_ext::from_response_to_stream(
+                        http::Response::builder()
+                            .status(200)
+                            .body(example_response)
+                            .unwrap(),
+                    ),
+                    Context::new(),
                 ))
             });
         let server = init_unix(expectations, &temp_dir).await;
@@ -2222,15 +2249,18 @@ Content-Type: application/json\r
     async fn test_health_check() {
         let mut expectations = MockSupergraphService::new();
         expectations.expect_service_call().once().returning(|_| {
-            Ok(http_ext::from_response_to_stream(
-                http::Response::builder()
-                    .status(200)
-                    .body(
-                        graphql::Response::builder()
-                            .data(json!({ "__typename": "Query"}))
-                            .build(),
-                    )
-                    .unwrap(),
+            Ok(SupergraphResponse::new_from_response(
+                http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({ "__typename": "Query"}))
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                Context::new(),
             ))
         });
 
@@ -2262,15 +2292,18 @@ Content-Type: application/json\r
 
         let mut expectations = MockSupergraphService::new();
         expectations.expect_service_call().once().returning(|_| {
-            Ok(http_ext::from_response_to_stream(
-                http::Response::builder()
-                    .status(200)
-                    .body(
-                        graphql::Response::builder()
-                            .data(json!({ "__typename": "Query"}))
-                            .build(),
-                    )
-                    .unwrap(),
+            Ok(SupergraphResponse::new_from_response(
+                http_ext::from_response_to_stream(
+                    http::Response::builder()
+                        .status(200)
+                        .body(
+                            graphql::Response::builder()
+                                .data(json!({ "__typename": "Query"}))
+                                .build(),
+                        )
+                        .unwrap(),
+                ),
+                Context::new(),
             ))
         });
 
@@ -2575,20 +2608,16 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(2)
             .returning(move |req| {
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(
-                            graphql::Response::builder()
-                                .data(json!(format!(
-                                    "{} + {} + {:?}",
-                                    req.method(),
-                                    req.uri(),
-                                    serde_json::to_string(req.body()).unwrap()
-                                )))
-                                .build(),
-                        )
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!(format!(
+                            "{} + {} + {:?}",
+                            req.supergraph_request.method(),
+                            req.supergraph_request.uri(),
+                            serde_json::to_string(req.supergraph_request.body()).unwrap()
+                        )))
+                        .build(),
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -2783,17 +2812,13 @@ Content-Type: application/json\r
             .expect_service_call()
             .times(1)
             .returning(move |_| {
-                Ok(http_ext::from_response_to_stream(
-                    http::Response::builder()
-                        .status(200)
-                        .body(
-                            graphql::Response::builder()
-                                .data(json!({
-                                    "test": "hello"
-                                }))
-                                .build(),
-                        )
-                        .unwrap(),
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello"
+                        }))
+                        .build(),
+                    Context::new(),
                 ))
             });
         let (server, client) = init(expectations).await;
@@ -2855,7 +2880,10 @@ Content-Type: application/json\r
                     graphql::Response::builder().has_next(false).build(),
                 ])
                 .boxed();
-                Ok(http::Response::builder().status(200).body(body).unwrap())
+                Ok(SupergraphResponse::new_from_response(
+                    http::Response::builder().status(200).body(body).unwrap(),
+                    Context::new(),
+                ))
             });
         let (server, client) = init(expectations).await;
         let query = json!(

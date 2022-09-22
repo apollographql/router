@@ -38,4 +38,11 @@ This will now aggregate the subgraph error and the missing `_entities` error.
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
 
 ## 🛠 Maintenance
+
+### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
+
+This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
+
 ## 📚 Documentation
