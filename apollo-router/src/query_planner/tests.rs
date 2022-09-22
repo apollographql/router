@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use http::Method;
+use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 
 use super::*;
