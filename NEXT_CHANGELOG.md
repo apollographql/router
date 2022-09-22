@@ -79,4 +79,10 @@ If an update is needed, the test failure prints a message with the command to ru
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/1847
 
+### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
+
+This splits the query plan execution in multiple modules to make the code more manageable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
+
 ## 📚 Documentation
