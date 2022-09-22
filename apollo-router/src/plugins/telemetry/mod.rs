@@ -446,12 +446,10 @@ impl Telemetry {
                         || field.name().starts_with("otel")
                     {
                         write!(writer, "")
+                    } else if field.name() == "message" {
+                        write!(writer, "{:?}", value)
                     } else {
-                        if field.name() == "message" {
-                            write!(writer, "{:?}", value)
-                        } else {
-                            write!(writer, "{}={:?}", field, value)
-                        }
+                        write!(writer, "{}={:?}", field, value)
                     }
                 })
                 .delimited(" ")
