@@ -1026,7 +1026,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )
         } else {
@@ -1038,7 +1038,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "otel.status_code" =  tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )
         }

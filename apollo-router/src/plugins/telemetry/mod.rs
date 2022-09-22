@@ -442,13 +442,19 @@ impl Telemetry {
                     .unwrap_or("info");
 
                 let formatter = debug_fn(|writer, field, value| {
-                    if field.name().starts_with("apollo_private") {
+                    if field.name().starts_with("apollo_private")
+                        || field.name().starts_with("otel")
+                    {
                         write!(writer, "")
                     } else {
-                        write!(writer, "{}={:?}", field, value)
+                        if field.name() == "message" {
+                            write!(writer, "{:?}", value)
+                        } else {
+                            write!(writer, "{}={:?}", field, value)
+                        }
                     }
                 })
-                .delimited(", ")
+                .delimited(" ")
                 .display_messages();
 
                 let sub_builder = tracing_subscriber::fmt::fmt()
@@ -1329,7 +1335,7 @@ impl<'a> FormatFields<'a> for RouterJsonFields {
 
         current_map.extend(new_map);
 
-        current_map.retain(|k, _v| !k.starts_with("apollo_private"));
+        current_map.retain(|k, _v| !k.starts_with("apollo_private") && !k.starts_with("otel"));
 
         // Serialize our merged, redacted output to be our set of fields.
         current.fields = serde_json::to_string(&current_map).map_err(|_| fmt::Error)?;
