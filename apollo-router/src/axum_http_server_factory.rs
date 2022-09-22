@@ -3048,12 +3048,11 @@ Content-Type: application/json\r
                     },
                     "errors": [
                         {
-                            "message": "invalid content: Missing key `_entities`!",
-                            "path": ["topProducts", "@"],
-                            "extensions": {
-                                "type": "ExecutionInvalidContent",
-                                "reason": "Missing key `_entities`!"
-                            }
+                            "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}"
+                        },
+                        {
+                            "message": "Missing key `_entities`!",
+                            "path": [ "topProducts", "@" ]
                         }],
                     "hasNext": true,
                 },
