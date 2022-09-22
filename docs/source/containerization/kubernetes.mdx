@@ -236,5 +236,7 @@ curl "http://localhost:8088/health"
 {"status":"UP"}
 ```
 
-This health endpoint can be used to check the health of the router. It will always return a status of pass if all is well.
+If you had a router running on your localhost, with default health-check configuration, you could exercise the health endpoint as follows:
+
+curl "http://localhost:8088/health"
 
