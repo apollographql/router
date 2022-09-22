@@ -56,7 +56,13 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
-### Update and validate configuration files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
+### Remove `apollo_private` and OpenTelemetry entries from logs ([Issue #1862](https://github.com/apollographql/router/issues/1862))
+
+This change removes some `apollo_private` and OpenTelemetry (e.g., `otel.kind`) fields from the logs.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1868
+
+### Update and validate `Dockerfile` files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
 
 Several of the `Dockerfile`s in the repository were out-of-date with respect to recent configuration changes.  We've updated the configuration files and extended our tests to catch this automatically in the future.
 
