@@ -56,6 +56,12 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
+### remove apollo_private and otel entries from log ([Issue #1862](https://github.com/apollographql/router/issues/1862))
+
+This change removes some apollo_private and otel fields from the logs.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1868
+
 ### update and validate configuration files ([Issue #1854](https://github.com/apollographql/router/issues/1854))
 
 Several of the dockerfiles in the router repository were out of date with respect to recent configuration changes. This fix extends our configuration testing range and updates the configuration files.
