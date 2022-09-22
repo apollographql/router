@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -5,6 +6,7 @@ use tower::ServiceExt;
 
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
+use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -32,6 +34,7 @@ pub(crate) mod http_client;
 /// this test harness is lacking:
 ///
 /// * Custom endpoints from plugins
+/// * The health check endpoint
 /// * CORS (FIXME: should this include CORS?)
 /// * HTTP compression
 ///
@@ -287,5 +290,36 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         (self.0)(subgraph_name, service)
+    }
+}
+
+/// a list of subgraphs with pregenerated responses
+#[derive(Default)]
+pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
+
+impl MockedSubgraphs {
+    /// adds a mocked subgraph to the list
+    pub fn insert(&mut self, name: &'static str, subgraph: MockSubgraph) {
+        self.0.insert(name, subgraph);
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for MockedSubgraphs {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        default: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        self.0
+            .get(subgraph_name)
+            .map(|service| service.clone().boxed())
+            .unwrap_or(default)
     }
 }

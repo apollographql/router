@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://www.apollographql.com/docs/router/"
@@ -22,11 +22,17 @@ failfast = []
 # tokio-console also requires at build time the environment variable
 # RUSTFLAGS="--cfg tokio_unstable"
 console = ["tokio/tracing", "console-subscriber"]
+# "fake" feature to disable V8 usage when building on docs.rs
+# See https://github.com/apollographql/federation-rs/pull/185
+docs_rs = ["router-bridge/docs_rs"]
+
+[package.metadata.docs.rs]
+features = ["docs_rs"]
 
 [dependencies]
 access-json = "0.1.0"
 anyhow = "1.0.64"
-apollo-parser = "0.2.10"
+apollo-parser = "0.2.11"
 async-compression = { version = "0.3.14", features = [
     "tokio",
     "brotli",
@@ -157,7 +163,7 @@ tower-http = { version = "0.3.4", features = [
     "decompression-br",
     "decompression-deflate",
     "decompression-gzip",
-    "timeout"
+    "timeout",
 ] }
 tower-service = "0.3.2"
 
@@ -188,7 +194,8 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.19.1", features = [ "json", "redactions" ] }
+insta = { version = "1.19.1", features = ["json", "redactions"] }
+introspector-gadget = "0.1.0"
 jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
@@ -215,7 +222,6 @@ tracing-test = "0.2.2"
 walkdir = "2.3.2"
 
 [build-dependencies]
-introspector-gadget = "0.1.0"
 reqwest = { version = "0.11.11", default-features = false, features = [
     "rustls-tls",
     "blocking",

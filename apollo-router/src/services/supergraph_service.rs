@@ -203,9 +203,11 @@ where
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
-            let can_be_deferred = plan.root.contains_defer();
+            let operation_name = body.operation_name.clone();
 
-            if can_be_deferred && !accepts_multipart(req.supergraph_request.headers()) {
+            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
+
+            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
@@ -218,8 +220,6 @@ where
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let operation_name = body.operation_name.clone();
-
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
@@ -236,7 +236,7 @@ where
                     operation_name,
                     variables,
                     schema,
-                    can_be_deferred,
+                    is_deferred,
                 )
             }
         }
@@ -315,6 +315,7 @@ fn process_execution_response(
                 plan.query.format_response(
                     &mut response,
                     operation_name.as_deref(),
+                    can_be_deferred,
                     variables.clone(),
                     schema.api_schema(),
                 )
@@ -568,5 +569,90 @@ impl RouterCreator {
         use tower::buffer::Buffer;
 
         Buffer::new(self.make(), 512).boxed_clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin::test::MockSubgraph;
+    use crate::services::supergraph;
+    use crate::test_harness::MockedSubgraphs;
+    use crate::TestHarness;
+
+    #[tokio::test]
+    async fn nullability_formatting() {
+        let schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+
+   type Query {
+       currentUser: User @join__field(graph: USER)
+   }
+
+   type User
+   @join__owner(graph: USER)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id"){
+       id: ID!
+       name: String
+       activeOrganization: Organization
+   }
+
+   type Organization
+   @join__owner(graph: ORGA)
+   @join__type(graph: ORGA, key: "id")
+   @join__type(graph: USER, key: "id") {
+       id: ID
+       creatorUser: User
+   }"#;
+
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
+            // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
     }
 }

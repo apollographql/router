@@ -46,6 +46,7 @@ use multimap::MultiMap;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
+use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -103,6 +104,19 @@ pub(crate) struct ListenersAndRouters {
     pub(crate) extra: MultiMap<ListenAddr, Router>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+#[allow(dead_code)]
+enum HealthStatus {
+    Up,
+    Down,
+}
+
+#[derive(Serialize)]
+struct Health {
+    status: HealthStatus,
+}
+
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -113,24 +127,29 @@ where
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
-    endpoints.insert(
-        configuration.supergraph.listen.clone(),
-        Endpoint::new(
-            "/.well-known/apollo/server-health".to_string(),
-            service_fn(|_req: transport::Request| async move {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(
-                            Bytes::from_static(b"The health check is no longer at this endpoint")
-                                .into(),
-                        )
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        ),
-    );
+    if configuration.health_check.enabled {
+        tracing::info!(
+            "healthcheck endpoint exposed at {}/health",
+            configuration.health_check.listen
+        );
+        endpoints.insert(
+            configuration.health_check.listen.clone(),
+            Endpoint::new(
+                "/health".to_string(),
+                service_fn(move |_req: transport::Request| {
+                    let health = Health {
+                        status: HealthStatus::Up,
+                    };
+
+                    async move {
+                        Ok(http::Response::builder()
+                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
+                    }
+                })
+                .boxed(),
+            ),
+        );
+    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
@@ -174,6 +193,20 @@ fn ensure_listenaddrs_consistency(
     let mut all_ports = HashMap::new();
     if let Some((main_ip, main_port)) = configuration.supergraph.listen.ip_and_port() {
         all_ports.insert(main_port, main_ip);
+    }
+
+    if configuration.health_check.enabled {
+        if let Some((ip, port)) = configuration.health_check.listen.ip_and_port() {
+            if let Some(previous_ip) = all_ports.insert(port, ip) {
+                if ip != previous_ip {
+                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                        previous_ip,
+                        ip,
+                        port,
+                    ));
+                }
+            }
+        }
     }
 
     for addr in endpoints.keys() {
@@ -1026,7 +1059,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )
         } else {
@@ -1038,7 +1071,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 uri = %request.uri(),
                 version = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
-                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                "otel.status_code" =  tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )
         }
@@ -1075,6 +1108,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::Cors;
+    use crate::configuration::HealthCheck;
     use crate::configuration::Homepage;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
@@ -1198,6 +1232,7 @@ mod tests {
                                 .enabled(false)
                                 .build(),
                         )
+                        .health_check(crate::configuration::HealthCheck::fake_builder().build())
                         .build()
                         .unwrap(),
                 ),
@@ -2171,7 +2206,7 @@ Content-Type: application/json\r
     }
 
     #[tokio::test]
-    async fn test_health_check_returns_four_oh_four() {
+    async fn test_previous_health_check_returns_four_oh_four() {
         let expectations = MockSupergraphService::new();
         let (server, client) = init(expectations).await;
         let url = format!(
@@ -2181,6 +2216,144 @@ Content-Type: application/json\r
 
         let response = client.get(url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let mut expectations = MockSupergraphService::new();
+        expectations.expect_service_call().once().returning(|_| {
+            Ok(http_ext::from_response_to_stream(
+                http::Response::builder()
+                    .status(200)
+                    .body(
+                        graphql::Response::builder()
+                            .data(json!({ "__typename": "Query"}))
+                            .build(),
+                    )
+                    .unwrap(),
+            ))
+        });
+
+        let (server, client) = init(expectations).await;
+        let url = format!(
+            "{}/health",
+            server.graphql_listen_address().as_ref().unwrap()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json!({"status": "UP" }),
+            response.json::<serde_json::Value>().await.unwrap()
+        )
+    }
+
+    #[tokio::test]
+    async fn test_health_check_custom_listener() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .build()
+            .unwrap();
+
+        let mut expectations = MockSupergraphService::new();
+        expectations.expect_service_call().once().returning(|_| {
+            Ok(http_ext::from_response_to_stream(
+                http::Response::builder()
+                    .status(200)
+                    .body(
+                        graphql::Response::builder()
+                            .data(json!({ "__typename": "Query"}))
+                            .build(),
+                    )
+                    .unwrap(),
+            ))
+        });
+
+        // keep the server handle around otherwise it will immediately shutdown
+        let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap();
+        let url = "http://localhost:4012/health";
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json!({"status": "UP" }),
+            response.json::<serde_json::Value>().await.unwrap()
+        )
+    }
+
+    #[tokio::test]
+    async fn test_sneaky_supergraph_and_health_check_configuration() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let error = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to register two endpoints on `127.0.0.1:0/health`",
+            error.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                    .enabled(false)
+                    .build(),
+            )
+            .supergraph(Supergraph::fake_builder().path("/health").build())
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let _ = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_and_health_check_same_port_different_listener() {
+        let conf = Configuration::fake_builder()
+            .health_check(
+                HealthCheck::fake_builder()
+                    .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
+                    .enabled(true)
+                    .build(),
+            )
+            .supergraph(
+                Supergraph::fake_builder()
+                    .listen(ListenAddr::SocketAddr("0.0.0.0:4013".parse().unwrap()))
+                    .build(),
+            )
+            .build()
+            .unwrap();
+        let expectations = MockSupergraphService::new();
+        let error = init_with_config(expectations, conf, MultiMap::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
+            error.to_string()
+        );
     }
 
     #[test(tokio::test)]

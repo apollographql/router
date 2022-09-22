@@ -83,6 +83,7 @@ pub use crate::router::ConfigurationSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
+pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 
 /// Not part of the public API
