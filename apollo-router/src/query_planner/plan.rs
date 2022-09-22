@@ -1,17 +1,18 @@
+use std::collections::HashMap;
+use std::fmt::Write;
+use std::sync::Arc;
+
+use router_bridge::planner::UsageReporting;
+use serde::Deserialize;
+use serde::Serialize;
+
 pub(crate) use self::fetch::OperationKind;
+use super::fetch;
 use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::*;
-use router_bridge::planner::UsageReporting;
-use serde::Deserialize;
-use serde::Serialize;
-use std::collections::HashMap;
-use std::fmt::Write;
-use std::sync::Arc;
-
-use super::fetch;
 
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
