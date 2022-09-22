@@ -1072,9 +1072,25 @@ pub(crate) mod fetch {
                 });
             }
 
-            // fix error path and erase subgraph error messages (we cannot expose subgraph information
-            // to the client)
-            let errors: Vec<Error> = response
+            let (value, errors) = self.response_at_path(current_dir, paths, response);
+            if let Some(id) = &self.id {
+                if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                    if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                        tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                    }
+                }
+            }
+            Ok((value, errors))
+        }
+
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
+        fn response_at_path<'a>(
+            &'a self,
+            current_dir: &'a Path,
+            paths: HashMap<Path, usize>,
+            response: graphql::Response,
+        ) -> (Value, Vec<Error>) {
+            let mut errors: Vec<Error> = response
                 .errors
                 .into_iter()
                 .map(|error| Error {
@@ -1085,65 +1101,51 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            match self.response_at_path(current_dir, paths, response.data.unwrap_or_default()) {
-                Ok(value) => {
-                    if let Some(id) = &self.id {
-                        if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
-                            if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
-                                tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
-                            }
-                        }
-                    }
-
-                    Ok((value, errors))
-                }
-                Err(e) => Err(e),
-            }
-        }
-
-        #[instrument(skip_all, level = "debug", name = "response_insert")]
-        fn response_at_path<'a>(
-            &'a self,
-            current_dir: &'a Path,
-            paths: HashMap<Path, usize>,
-            data: Value,
-        ) -> Result<Value, FetchError> {
             if !self.requires.is_empty() {
                 // we have to nest conditions and do early returns here
                 // because we need to take ownership of the inner value
-                if let Value::Object(mut map) = data {
+                if let Some(Value::Object(mut map)) = response.data {
                     if let Some(entities) = map.remove("_entities") {
                         tracing::trace!("received entities: {:?}", &entities);
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
 
-                            for (path, entity_idx) in paths {
-                                value.insert(
-                                    &path,
-                                    array
-                                        .get(entity_idx)
-                                        .ok_or_else(|| FetchError::ExecutionInvalidContent {
-                                            reason: "Received invalid content for key `_entities`!"
-                                                .to_string(),
-                                        })?
-                                        .clone(),
-                                )?;
+                            if paths.len() != array.len() {
+                                errors.push(
+                                    Error::builder()
+                                        .path(current_dir.clone())
+                                        .message(format!(
+                                            "Expected \"data._entities\" to contain {} elements",
+                                            paths.len()
+                                        ))
+                                        .build(),
+                                );
                             }
-                            return Ok(value);
-                        } else {
-                            return Err(FetchError::ExecutionInvalidContent {
-                                reason: "Received invalid type for key `_entities`!".to_string(),
-                            });
+
+                            for (path, entity_idx) in paths {
+                                if let Some(entity) = array.get(entity_idx) {
+                                    let _ = value.insert(&path, entity.clone());
+                                }
+                            }
+                            return (value, errors);
                         }
                     }
                 }
 
-                Err(FetchError::ExecutionInvalidContent {
-                    reason: "Missing key `_entities`!".to_string(),
-                })
+                errors.push(
+                    Error::builder()
+                        .path(current_dir.clone())
+                        .message("Missing key `_entities`!".to_string())
+                        .build(),
+                );
+
+                (Value::Null, errors)
             } else {
-                Ok(Value::from_path(current_dir, data))
+                (
+                    Value::from_path(current_dir, response.data.unwrap_or_default()),
+                    errors,
+                )
             }
         }
 
