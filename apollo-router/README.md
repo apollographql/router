@@ -5,7 +5,7 @@
 
 [<img alt="Apollo Router" src="https://raw.githubusercontent.com/apollographql/space-kit/main/src/illustrations/svgs/satellite1.svg" height="144">](https://www.apollographql.com/docs/router/)
 
-The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).  It is well-tested, regularly benchmarked, includes major features of Apollo Gateway and is able to serve production-scale workloads.
+The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2). It is well-tested, regularly benchmarked, includes major features of Apollo Gateway and serves production-scale workloads.
 
 The latest release can always be found at the top of [the Releases page](https://github.com/apollographql/router/releases/) along with past releases and release notes.  We follow the [Semantic Versioning 2.0.0](https://semver.org/) specification when publishing new versions.  A [`CHANGELOG.md` is also included](https://github.com/apollographql/router/blob/main/CHANGELOG.md) in the Git repository with information about each release.
 
