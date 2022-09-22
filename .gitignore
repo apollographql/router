@@ -18,3 +18,7 @@
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
 /jaeger/
+
+# Previous git submodules
+dockerfiles/federation-demo
+dockerfiles/federation2-demo

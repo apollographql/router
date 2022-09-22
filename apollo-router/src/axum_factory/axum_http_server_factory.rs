@@ -12,7 +12,6 @@ use axum::middleware;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
-use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
@@ -21,6 +20,7 @@ use http::Request;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
+use serde::Serialize;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -70,6 +70,19 @@ impl AxumHttpServerFactory {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+#[allow(dead_code)]
+enum HealthStatus {
+    Up,
+    Down,
+}
+
+#[derive(Serialize)]
+struct Health {
+    status: HealthStatus,
+}
+
 pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -80,24 +93,29 @@ where
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
-    endpoints.insert(
-        configuration.supergraph.listen.clone(),
-        Endpoint::new(
-            "/.well-known/apollo/server-health".to_string(),
-            service_fn(|_req: transport::Request| async move {
-                Ok::<_, BoxError>(
-                    http::Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(
-                            Bytes::from_static(b"The health check is no longer at this endpoint")
-                                .into(),
-                        )
-                        .unwrap(),
-                )
-            })
-            .boxed(),
-        ),
-    );
+    if configuration.health_check.enabled {
+        tracing::info!(
+            "healthcheck endpoint exposed at {}/health",
+            configuration.health_check.listen
+        );
+        endpoints.insert(
+            configuration.health_check.listen.clone(),
+            Endpoint::new(
+                "/health".to_string(),
+                service_fn(move |_req: transport::Request| {
+                    let health = Health {
+                        status: HealthStatus::Up,
+                    };
+
+                    async move {
+                        Ok(http::Response::builder()
+                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
+                    }
+                })
+                .boxed(),
+            ),
+        );
+    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 

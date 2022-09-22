@@ -40,6 +40,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::configuration::Cors;
+use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
@@ -1030,7 +1031,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
 }
 
 #[tokio::test]
-async fn test_health_check_returns_four_oh_four() {
+async fn test_previous_health_check_returns_four_oh_four() {
     let expectations = MockSupergraphService::new();
     let (server, client) = init(expectations).await;
     let url = format!(
@@ -1921,4 +1922,142 @@ Content-Type: application/json\r
     let body = stream.buffer().to_vec();
     assert!(header_first_line.contains(" 200 "), "");
     body
+}
+
+#[tokio::test]
+async fn test_health_check() {
+    let mut expectations = MockSupergraphService::new();
+    expectations.expect_service_call().once().returning(|_| {
+        Ok(http_ext::from_response_to_stream(
+            http::Response::builder()
+                .status(200)
+                .body(
+                    graphql::Response::builder()
+                        .data(json!({ "__typename": "Query"}))
+                        .build(),
+                )
+                .unwrap(),
+        ))
+    });
+
+    let (server, client) = init(expectations).await;
+    let url = format!(
+        "{}/health",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
+
+    let response = client.get(url).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        json!({"status": "UP" }),
+        response.json::<serde_json::Value>().await.unwrap()
+    )
+}
+
+#[tokio::test]
+async fn test_health_check_custom_listener() {
+    let conf = Configuration::fake_builder()
+        .health_check(
+            HealthCheck::fake_builder()
+                .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
+                .enabled(true)
+                .build(),
+        )
+        .build()
+        .unwrap();
+
+    let mut expectations = MockSupergraphService::new();
+    expectations.expect_service_call().once().returning(|_| {
+        Ok(http_ext::from_response_to_stream(
+            http::Response::builder()
+                .status(200)
+                .body(
+                    graphql::Response::builder()
+                        .data(json!({ "__typename": "Query"}))
+                        .build(),
+                )
+                .unwrap(),
+        ))
+    });
+
+    // keep the server handle around otherwise it will immediately shutdown
+    let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
+        .await
+        .unwrap();
+    let url = "http://localhost:4012/health";
+
+    let response = client.get(url).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        json!({"status": "UP" }),
+        response.json::<serde_json::Value>().await.unwrap()
+    )
+}
+
+#[tokio::test]
+async fn test_sneaky_supergraph_and_health_check_configuration() {
+    let conf = Configuration::fake_builder()
+        .health_check(
+            HealthCheck::fake_builder()
+                .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                .enabled(true)
+                .build(),
+        )
+        .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
+        .build()
+        .unwrap();
+    let expectations = MockSupergraphService::new();
+    let error = init_with_config(expectations, conf, MultiMap::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        "tried to register two endpoints on `127.0.0.1:0/health`",
+        error.to_string()
+    );
+}
+
+#[tokio::test]
+async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
+    let conf = Configuration::fake_builder()
+        .health_check(
+            HealthCheck::fake_builder()
+                .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
+                .enabled(false)
+                .build(),
+        )
+        .supergraph(Supergraph::fake_builder().path("/health").build())
+        .build()
+        .unwrap();
+    let expectations = MockSupergraphService::new();
+    let _ = init_with_config(expectations, conf, MultiMap::new())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_supergraph_and_health_check_same_port_different_listener() {
+    let conf = Configuration::fake_builder()
+        .health_check(
+            HealthCheck::fake_builder()
+                .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
+                .enabled(true)
+                .build(),
+        )
+        .supergraph(
+            Supergraph::fake_builder()
+                .listen(ListenAddr::SocketAddr("0.0.0.0:4013".parse().unwrap()))
+                .build(),
+        )
+        .build()
+        .unwrap();
+    let expectations = MockSupergraphService::new();
+    let error = init_with_config(expectations, conf, MultiMap::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
+        error.to_string()
+    );
 }
