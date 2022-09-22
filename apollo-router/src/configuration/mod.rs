@@ -688,7 +688,7 @@ impl Homepage {
 #[serde(deny_unknown_fields)]
 pub(crate) struct HealthCheck {
     /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:9494
+    /// Defaults to 127.0.0.1:8088
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
