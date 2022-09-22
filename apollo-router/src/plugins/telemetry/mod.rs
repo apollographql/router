@@ -449,7 +449,8 @@ impl Telemetry {
                         write!(writer, "{}: {:?}", field, value)
                     }
                 })
-                .delimited(", ");
+                .delimited(", ")
+                .display_messages();
 
                 let sub_builder = tracing_subscriber::fmt::fmt()
                     .with_env_filter(
@@ -1311,32 +1312,34 @@ impl<'a> FormatFields<'a> for RouterJsonFields {
         // to a previously serialized JSON object, we would end up with
         // malformed JSON.
         //
-        // XXX(eliza): this is far from efficient, but unfortunately, it is
-        // necessary as long as the JSON formatter is implemented on top of
-        // an interface that stores all formatted fields as strings.
+        // We do this by converting our existing formatted string into a
+        // map and creating a new visitor to record the new fields, which
+        // we then convert into a map.
         //
-        // We should consider reimplementing the JSON formatter as a
-        // separate layer, rather than a formatter for the `fmt` layer —
-        // then, we could store fields as JSON values, and add to them
-        // without having to parse and re-serialize.
+        // We merge the maps and then remove the apollo_private keys.
+
         let mut new = String::new();
         let mut v = JsonVisitor::new(&mut new);
         fields.record(&mut v);
         v.finish()?;
-        // XXX I can't merge like in the tracing crate. Is this correct?
-        current.fields.pop();
-        new.remove(0);
-        current.fields = format!("{}, {}", current.fields, new);
-        let mut map: BTreeMap<&'_ str, serde_json::Value> =
+
+        let mut current_map: BTreeMap<&'_ str, serde_json::Value> =
             serde_json::from_str(current).map_err(|_| fmt::Error)?;
-        for (key, value) in map.iter_mut() {
+        let new_map: BTreeMap<&'_ str, serde_json::Value> =
+            serde_json::from_str(&new).map_err(|_| fmt::Error)?;
+
+        current_map.extend(new_map);
+
+        for (key, value) in current_map.iter_mut() {
             if key.starts_with("apollo_private") {
                 // XXX: WHY DOES THIS NOT WORK?
                 // *value = serde_json::from_str("REDACTED").map_err(|_| fmt::Error)?;
                 *value = serde_json::Value::Null;
             }
         }
-        current.fields = serde_json::to_string(&map).map_err(|_| fmt::Error)?;
+
+        // Finally serialize our merged, redacted output to be our set of fields.
+        current.fields = serde_json::to_string(&current_map).map_err(|_| fmt::Error)?;
 
         Ok(())
     }
