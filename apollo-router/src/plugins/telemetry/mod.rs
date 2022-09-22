@@ -46,8 +46,12 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+#[cfg(not(feature = "console"))]
+use tracing_subscriber::field::MakeExt;
 use tracing_subscriber::field::RecordFields;
 use tracing_subscriber::field::VisitOutput;
+#[cfg(not(feature = "console"))]
+use tracing_subscriber::fmt::format::debug_fn;
 use tracing_subscriber::fmt::format::JsonVisitor;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatFields;
