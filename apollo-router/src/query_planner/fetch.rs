@@ -274,19 +274,6 @@ impl FetchNode {
             });
         }
 
-        // fix error path and erase subgraph error messages (we cannot expose subgraph information
-        // to the client)
-        let errors: Vec<Error> = response
-            .errors
-            .into_iter()
-            .map(|error| Error {
-                locations: error.locations,
-                path: error.path.map(|path| current_dir.join(path)),
-                message: error.message,
-                extensions: error.extensions,
-            })
-            .collect();
-
         let (value, errors) = self.response_at_path(current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
