@@ -49,6 +49,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::field::MakeExt;
 use tracing_subscriber::field::RecordFields;
 use tracing_subscriber::field::VisitOutput;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::format::debug_fn;
 use tracing_subscriber::fmt::format::JsonVisitor;
 use tracing_subscriber::fmt::format::Writer;
@@ -456,10 +457,7 @@ impl Telemetry {
                 .display_messages();
 
                 let sub_builder = tracing_subscriber::fmt::fmt()
-                    .with_env_filter(
-                        EnvFilter::try_new(log_level)
-                            .context("could not parse log configuration")?,
-                    )
+                    .with_max_level(log_level.parse::<LevelFilter>().expect("test"))
                     .fmt_fields(formatter);
 
                 if let Some(sub) = subscriber {
