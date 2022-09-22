@@ -35,7 +35,6 @@ use http::header::VARY;
 use http::HeaderValue;
 use http::Request;
 use http::Uri;
-use hyper::body::to_bytes;
 use hyper::server::conn::Http;
 use hyper::Body;
 use itertools::Itertools;
@@ -107,6 +106,7 @@ pub(crate) struct ListenersAndRouters {
 
 #[derive(Serialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[allow(dead_code)]
 enum HealthStatus {
     Up,
     Down,
@@ -128,48 +128,22 @@ where
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     if configuration.health_check.enabled {
-        let router_service_factory = service_factory.clone();
-
+        tracing::info!(
+            "healthcheck endpoint exposed at {}/health",
+            configuration.health_check.listen
+        );
         endpoints.insert(
             configuration.health_check.listen.clone(),
             Endpoint::new(
                 "/health".to_string(),
                 service_fn(move |_req: transport::Request| {
-                    let service = router_service_factory.clone().new_service();
-                    let health_check_request = http::Request::builder()
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(
-                            crate::request::Request::builder()
-                                .query("{__typename}")
-                                .build(),
-                        )
-                        .expect("query is always valid");
+                    let health = Health {
+                        status: HealthStatus::Up,
+                    };
+
                     async move {
-                        let (parts, body) = run_graphql_request(service, health_check_request)
-                            .await
-                            .into_response()
-                            .into_parts();
-
-                        let bytes = to_bytes(body).await.map_err(BoxError::from)?;
-
-                        let mut health = Health {
-                            status: HealthStatus::Down,
-                        };
-
-                        if parts.status == StatusCode::OK {
-                            let res: Result<graphql::Response, _> =
-                                serde_json::from_slice(bytes.to_vec().as_slice());
-                            if let Ok(graphql_response) = res {
-                                if graphql_response.errors.is_empty() {
-                                    health.status = HealthStatus::Up;
-                                }
-                            }
-                        }
-
-                        Ok(http::Response::from_parts(
-                            parts,
-                            serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                        ))
+                        Ok(http::Response::builder()
+                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
                     }
                 })
                 .boxed(),
