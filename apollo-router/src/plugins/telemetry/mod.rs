@@ -442,8 +442,8 @@ impl Telemetry {
                     .unwrap_or("info");
 
                 let formatter = debug_fn(|writer, field, value| {
-                    if field.name().starts_with("apollo_private")
-                        || field.name().starts_with("otel")
+                    if field.name().starts_with("apollo_private.")
+                        || field.name().starts_with("otel.")
                     {
                         write!(writer, "")
                     } else if field.name() == "message" {
@@ -1317,9 +1317,10 @@ impl<'a> FormatFields<'a> for RouterJsonFields {
         //
         // We do this by converting our existing formatted string into a
         // map and creating a new visitor to record the new fields, which
-        // we then convert into a map.
+        // we also convert into a map.
         //
-        // We merge the maps and then remove the apollo_private keys.
+        // We merge the maps and finally remove the apollo_private and otel
+        // keys.
 
         let mut new = String::new();
         let mut v = JsonVisitor::new(&mut new);
@@ -1333,7 +1334,7 @@ impl<'a> FormatFields<'a> for RouterJsonFields {
 
         current_map.extend(new_map);
 
-        current_map.retain(|k, _v| !k.starts_with("apollo_private") && !k.starts_with("otel"));
+        current_map.retain(|k, _v| !k.starts_with("apollo_private.") && !k.starts_with("otel."));
 
         // Serialize our merged, redacted output to be our set of fields.
         current.fields = serde_json::to_string(&current_map).map_err(|_| fmt::Error)?;
