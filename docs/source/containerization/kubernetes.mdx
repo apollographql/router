@@ -29,7 +29,7 @@ router docker images.
 You can use helm to install charts from an OCI registry as follows:
 
 ```bash
-helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0 --values router/values.yaml
+helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.3 --values router/values.yaml
 ```
 
 For more details about using helm with OCI based registries, see [here](https://helm.sh/docs/topics/registries/)
