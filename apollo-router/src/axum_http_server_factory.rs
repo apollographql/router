@@ -1311,7 +1311,7 @@ mod tests {
                 }
             }
         });
-        let server = server_factory
+        server_factory
             .create(
                 TestSupergraphServiceFactory {
                     inner: service.into_inner(),
@@ -1331,9 +1331,7 @@ mod tests {
                 MultiMap::new(),
             )
             .await
-            .expect("Failed to create server factory");
-
-        server
+            .expect("Failed to create server factory")
     }
 
     #[tokio::test]
@@ -1449,7 +1447,7 @@ mod tests {
         // Decompress body
         let body_bytes = response.bytes().await.unwrap();
         let mut decoder = GzipDecoder::new(Vec::new());
-        decoder.write_all(&body_bytes.to_vec()).await.unwrap();
+        decoder.write_all(&body_bytes).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
         let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
@@ -1478,7 +1476,7 @@ mod tests {
         // Decompress body
         let body_bytes = response.bytes().await.unwrap();
         let mut decoder = GzipDecoder::new(Vec::new());
-        decoder.write_all(&body_bytes.to_vec()).await.unwrap();
+        decoder.write_all(&body_bytes).await.unwrap();
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
         let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();

@@ -582,7 +582,7 @@ fn generate_event_stream(
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     // Chain is required so that the final shutdown message is sent.
-    let messages = stream::select_all(vec![
+    stream::select_all(vec![
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
@@ -590,8 +590,7 @@ fn generate_event_stream(
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
     .chain(stream::iter(vec![Shutdown]))
-    .boxed();
-    messages
+    .boxed()
 }
 
 #[cfg(test)]

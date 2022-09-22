@@ -746,10 +746,9 @@ mod tests {
         events: Vec<Event>,
     ) -> Result<(), ApolloRouterError> {
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let result = state_machine
+        state_machine
             .process_events(stream::iter(events).boxed())
-            .await;
-        result
+            .await
     }
 
     fn create_mock_server_factory(
