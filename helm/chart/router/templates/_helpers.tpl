@@ -91,3 +91,11 @@ Usage:
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
 {{- end -}}
+
+{{- define "router.prometheusMetricsPath" -}}
+{{- if ((((.Values.router).configuration).telemetry).metrics).prometheus }}
+{{- .Values.router.configuration.telemetry.metrics.prometheus.path | quote }}
+{{- else -}}
+"/metrics"
+{{- end }}
+{{- end -}}

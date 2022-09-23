@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Support serviceMonitor in helm chart
+
+`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+
+By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
+
 ### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
 
 + Insert static header
