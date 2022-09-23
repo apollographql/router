@@ -9,6 +9,13 @@ router:
   configuration:
     supergraph:
       listen: 0.0.0.0:80
+    telemetry:
+      metrics:
+        prometheus:
+          enabled: false
+          listen: 127.0.0.1:9090
+          path: "/metrics"
+
   args:
   - --hot-reload
 
