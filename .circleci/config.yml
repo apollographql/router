@@ -3,10 +3,6 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  # Rust steps which are used below (like `rust/install`, `rust/test`) are
-  # defined in this orb. For reference, the orb can be found here:
-  # https://github.com/CircleCI-Public/rust-orb
-  rust: circleci/rust@1.6.0
   gh: circleci/github-cli@2.1.0
 
 executors:
@@ -111,11 +107,6 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
-  prepare_env:
-    steps:
-      - rust/install:
-          version: stable
-
   install_extra_tools:
     parameters:
       os:
@@ -389,8 +380,6 @@ jobs:
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
             - run: test -e "$OPENSSL_ROOT_DIR"
             - run: brew install cmake
-            - rust/install:
-                version: stable
             - run:
                 command: >
                   cargo xtask dist
@@ -417,8 +406,6 @@ jobs:
                 command: |
                   sudo apt-get update
                   sudo apt-get install -y libssl-dev
-            - rust/install:
-                version: stable
             - run:
                 command: >
                   cargo xtask dist
