@@ -121,7 +121,6 @@ commands:
             curl https://sh.rustup.rs -sSf -o rustup.sh
             chmod 755 ./rustup.sh
             ./rustup.sh -y --default-toolchain none
-            source "$HOME/.cargo/env"
 
   install_extra_tools:
     parameters:
@@ -195,6 +194,7 @@ commands:
       os:
         type: string
     steps:
+      - install_minimal_rust
       - restore_cache:
           name: Restore .cargo
           keys:
@@ -244,6 +244,7 @@ commands:
       os:
         type: string
     steps:
+      - install_minimal_rust
       - run:
           name: Start jaeger
           background: true
