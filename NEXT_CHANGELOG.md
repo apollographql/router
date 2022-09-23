@@ -39,6 +39,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
+
+Avoids redundant work in CI and makes the YAML configuration less mis-leading.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
 
 This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
