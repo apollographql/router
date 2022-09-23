@@ -61,6 +61,8 @@ containerPorts:
   http: 80
   # -- For exposing the metrics port when running a serviceMonitor for example
   metrics: 9090
+  # -- For exposing the healthcheck endpoint
+  health: 8088
 
 imagePullSecrets: []
 nameOverride: ""

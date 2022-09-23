@@ -83,6 +83,9 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}
               protocol: TCP
+            - name: health
+              containerPort: {{ .Values.containerPorts.health }}
+              protocol: TCP
             {{- if .Values.serviceMonitor.enabled }}
             - name: metrics
               containerPort: {{ .Values.containerPorts.metrics }}
