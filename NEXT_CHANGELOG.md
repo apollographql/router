@@ -27,6 +27,46 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
+
++ Insert static header
+
+```yaml
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    - insert:
+        name: "sent-from-our-apollo-router"
+        value: "indeed"
+```
+
++ Insert header from context
+
+```yaml
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    - insert:
+        name: "sent-from-our-apollo-router-context"
+        from_context: "my_key_in_context"
+```
+
++ Insert header from request body
+
+```yaml
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    + insert:
+        name: "sent-from-our-apollo-router-request-body"
+        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
+        default: "UNKNOWN" # If no operationName has been specified
+```
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+
 ## 🐛 Fixes
 
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
