@@ -286,9 +286,9 @@ dependencies = [
 
 [[package]]
 name = "arbitrary"
-version = "1.1.3"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a7924531f38b1970ff630f03eb20a2fde69db5c590c93b0f3482e95dcc5fd60"
+checksum = "5b0d87f4e4aaa9f3a00706edc7cbbeab0e3cc45ff1062b1160bc0204d6481ad4"
 dependencies = [
  "derive_arbitrary",
 ]
@@ -1549,9 +1549,9 @@ dependencies = [
 
 [[package]]
 name = "derive_arbitrary"
-version = "1.1.3"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9a577516173adb681466d517d39bd468293bc2c2a16439375ef0f35bba45f3d"
+checksum = "d12f7983d7849dbd48d7754de36d4a5edc919806c8a54eba6281f6d7af4446fc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2851,9 +2851,9 @@ checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
 
 [[package]]
 name = "libfuzzer-sys"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "336244aaeab6a12df46480dc585802aa743a72d66b11937844c61bbca84c991d"
+checksum = "ae185684fe19814afd066da15a7cc41e126886c21282934225d9fc847582da58"
 dependencies = [
  "arbitrary",
  "cc",
