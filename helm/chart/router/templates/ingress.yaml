@@ -37,7 +37,7 @@ spec:
               service:
                 name: {{ $fullName }}
                 port:
-                  number: {{ .backendPort | default $svcPort }}
+                  number: {{ .port | default $svcPort }}
           {{- end }}
     {{- end }}
 {{- end }}
