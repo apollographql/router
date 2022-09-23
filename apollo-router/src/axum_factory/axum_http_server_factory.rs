@@ -46,6 +46,7 @@ use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
@@ -57,6 +58,7 @@ use crate::http_server_factory::Listener;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
 
 /// A basic http server using Axum.
@@ -87,6 +89,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    apq: APQLayer,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -125,6 +128,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        apq,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -156,7 +160,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
+            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;
 
             // serve main router
 
@@ -279,6 +286,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    apq: APQLayer,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: SupergraphServiceFactory,
@@ -287,7 +295,7 @@ where
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let main_route = main_router::<RF>(configuration)
+    let main_route = main_router::<RF>(configuration, apq)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
             TraceLayer::new_for_http()
@@ -324,7 +332,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
+pub(super) fn main_router<RF>(configuration: &Configuration, apq: APQLayer) -> axum::Router
 where
     RF: SupergraphServiceFactory,
 {
@@ -334,12 +342,14 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
+    let apq2 = apq.clone();
     let get_handler = if configuration.sandbox.enabled {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
                     Sandbox::display_page(),
                     host,
+                    apq2,
                     service.new_service().boxed(),
                     http_request,
                 )
@@ -351,6 +361,7 @@ where
                 handle_get_with_static(
                     Homepage::display_page(),
                     host,
+                    apq2,
                     service.new_service().boxed(),
                     http_request,
                 )
@@ -359,7 +370,7 @@ where
     } else {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(host, service.new_service().boxed(), http_request)
+                handle_get(host, apq2, service.new_service().boxed(), http_request)
             }
         })
     };
@@ -376,6 +387,7 @@ where
                     host,
                     uri,
                     request,
+                    apq,
                     service.new_service().boxed(),
                     header_map,
                 )

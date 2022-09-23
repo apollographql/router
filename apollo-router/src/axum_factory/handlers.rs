@@ -27,16 +27,16 @@ use crate::graphql;
 use crate::http_ext;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
+use crate::services::layers::apq::APQLayer;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 pub(super) async fn handle_get_with_static(
     static_page: Bytes,
     Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if prefers_html(http_request.headers()) {
@@ -51,7 +51,7 @@ pub(super) async fn handle_get_with_static(
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
             .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
+        return run_graphql_request(service, apq, http_request)
             .await
             .into_response();
     }
@@ -61,11 +61,8 @@ pub(super) async fn handle_get_with_static(
 
 pub(super) async fn handle_get(
     Host(host): Host,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if let Some(request) = http_request
@@ -76,7 +73,7 @@ pub(super) async fn handle_get(
         let mut http_request = http_request.map(|_| request);
         *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
             .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, http_request)
+        return run_graphql_request(service, apq, http_request)
             .await
             .into_response();
     }
@@ -88,11 +85,8 @@ pub(super) async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
-    service: BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >,
+    apq: APQLayer,
+    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     let mut http_request = Request::post(
@@ -103,27 +97,44 @@ pub(super) async fn handle_post(
     .expect("body has already been parsed; qed");
     *http_request.headers_mut() = header_map;
 
-    run_graphql_request(service, http_request)
+    run_graphql_request(service, apq, http_request)
         .await
         .into_response()
 }
 
 async fn run_graphql_request<RS>(
     service: RS,
+    apq: APQLayer,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse
 where
-    RS: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<graphql::ResponseStream>,
-            Error = BoxError,
-        > + Send,
+    RS: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send,
 {
+    let (head, body) = http_request.into_parts();
+    let mut req: SupergraphRequest = Request::from_parts(head, body).into();
+    req = match apq.apq_request(req).await {
+        Ok(req) => req,
+        Err(res) => {
+            let (parts, mut stream) = res.response.into_parts();
+
+            return match stream.next().await {
+                None => {
+                    tracing::error!("router service is not available to process request",);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "router service is not available to process request",
+                    )
+                        .into_response()
+                }
+                Some(body) => http_ext::Response::from(http::Response::from_parts(parts, body))
+                    .into_response(),
+            };
+        }
+    };
+
     match service.ready_oneshot().await {
         Ok(mut service) => {
-            let (head, body) = http_request.into_parts();
-
-            match service.call(Request::from_parts(head, body)).await {
+            match service.call(req).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
                         if source_err.is::<RateLimited>() {
@@ -141,7 +152,7 @@ where
                         .into_response()
                 }
                 Ok(response) => {
-                    let (mut parts, mut stream) = response.into_parts();
+                    let (mut parts, mut stream) = response.response.into_parts();
 
                     process_vary_header(&mut parts.headers);
 
