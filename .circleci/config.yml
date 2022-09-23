@@ -53,6 +53,8 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-linux-amd64 jaeger
+      - install_minimal_rust
+
   macos_install_baseline:
     steps:
       - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
@@ -65,6 +67,8 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-darwin-amd64 jaeger
+      - install_minimal_rust
+
   windows_install_baseline:
     steps:
       - run:
@@ -107,6 +111,15 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
+
+  install_minimal_rust:
+    steps:
+      - run:
+          # Install a minimal rust environment
+          name: Install minimal rust
+          command: |
+            curl https://sh.rustup.rs -sSf -o rustup.sh
+            ./rustup.sh --default-toolchain none
 
   install_extra_tools:
     parameters:
