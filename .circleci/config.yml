@@ -50,7 +50,7 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
-            sudo apt-get install -y libssl-dev cmake
+          # sudo apt-get install -y libssl-dev cmake
       - run:
           name: Download jaeger
           command: |
@@ -416,7 +416,7 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
-                  sudo apt-get install -y libssl-dev
+                #  sudo apt-get install -y libssl-dev
             - rust/install:
                 version: stable
             - run:
