@@ -31,7 +31,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v8.{{ checksum "rust-toolchain.toml" }}
+    default: v9.{{ checksum "rust-toolchain.toml" }}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
