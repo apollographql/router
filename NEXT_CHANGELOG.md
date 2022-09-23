@@ -83,6 +83,14 @@ This will now aggregate the subgraph error and the missing `_entities` error.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
 
+### Fix prometheus annotation and healthcheck default
+
+The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
+defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
+
+
+By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
+
 ## 🛠 Maintenance
 
 ### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
