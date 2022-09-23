@@ -9,11 +9,13 @@ router:
   configuration:
     supergraph:
       listen: 0.0.0.0:80
+    health-check:
+      listen: 0.0.0.0:8088
     telemetry:
       metrics:
         prometheus:
           enabled: false
-          listen: 127.0.0.1:9090
+          listen: 0.0.0.0:9090
           path: "/metrics"
 
   args:
