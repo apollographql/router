@@ -222,10 +222,6 @@ tracing-test = "0.2.2"
 walkdir = "2.3.2"
 
 [build-dependencies]
-reqwest = { version = "0.11.11", default-features = false, features = [
-    "rustls-tls",
-    "blocking",
-] }
 tonic-build = "0.6.2"
 
 
