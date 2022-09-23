@@ -83,7 +83,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 Avoids redundant work in CI and makes the YAML configuration less mis-leading.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
 
 ### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
 
