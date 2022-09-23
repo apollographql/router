@@ -107,6 +107,7 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
+
   install_extra_tools:
     parameters:
       os:
@@ -271,7 +272,6 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - prepare_env
             - xtask_lint:
                 os: linux
   check_compliance:
@@ -288,7 +288,6 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - prepare_env
             - xtask_check_compliance:
                 os: linux
   build:
@@ -305,7 +304,6 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - prepare_env
             - build_workspace:
                 os: linux
       - when:
@@ -320,7 +318,6 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
-            - prepare_env
             - build_workspace:
                 os: macos
   test:
@@ -337,7 +334,6 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - prepare_env
             - test_workspace:
                 os: linux
       - when:
@@ -352,7 +348,6 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
-            - prepare_env
             - test_workspace:
                 os: macos
 
