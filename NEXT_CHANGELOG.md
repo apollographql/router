@@ -75,6 +75,16 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### fix external secret support in our helm chart ([Issue #1750](https://github.com/apollographql/router/issues/1750))
+
+If an external secret is specified, e.g.: 
+
+`helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>`
+
+then the router should be deployed and configured to use the existing secret.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
 
 in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
