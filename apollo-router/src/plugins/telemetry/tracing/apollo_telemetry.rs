@@ -12,7 +12,6 @@ use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
 use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use thiserror::Error;
 use url::Url;
@@ -55,6 +54,7 @@ const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
 const FTV1_DO_NOT_SAMPLE_REASON: Key = Key::from_static_str("ftv1.do_not_sample_reason");
+const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 const CLIENT_NAME: Key = Key::from_static_str("client.name");
 const CLIENT_VERSION: Key = Key::from_static_str("client.version");
 
@@ -279,7 +279,7 @@ impl Exporter {
                 };
                 let service_name = (span
                     .attributes
-                    .get(&SERVICE_NAME)
+                    .get(&SUBGRAPH_NAME)
                     .cloned()
                     .unwrap_or_else(|| Value::String("unknown service".into()))
                     .as_str())

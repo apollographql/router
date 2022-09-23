@@ -1081,9 +1081,9 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             tracing::span!(
                 Level::INFO,
                 REQUEST_SPAN_NAME,
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version(),
+                "http.method" = %request.method(),
+                "http.route" = %request.uri(),
+                "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
@@ -1093,9 +1093,9 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             tracing::span!(
                 Level::INFO,
                 REQUEST_SPAN_NAME,
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version(),
+                "http.method" = %request.method(),
+                "http.route" = %request.uri(),
+                "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" =  tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
