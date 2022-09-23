@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v8.{{ checksum "rust-toolchain.toml" }}
+    default: v9.{{ checksum "rust-toolchain.toml" }}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -46,7 +46,6 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
-            sudo apt-get install -y libssl-dev cmake
       - run:
           name: Download jaeger
           command: |
@@ -57,10 +56,6 @@ commands:
 
   macos_install_baseline:
     steps:
-      - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
-      - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
-      - run: test -e "$OPENSSL_ROOT_DIR"
-      - run: brew install cmake
       - run:
           name: Download jaeger
           command: |
@@ -386,10 +381,6 @@ jobs:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
-            - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
-            - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
-            - run: test -e "$OPENSSL_ROOT_DIR"
-            - run: brew install cmake
             - run:
                 command: >
                   cargo xtask dist
@@ -415,7 +406,6 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
-                  sudo apt-get install -y libssl-dev
             - run:
                 command: >
                   cargo xtask dist
