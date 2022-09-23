@@ -83,7 +83,7 @@ If an external secret is specified, e.g.:
 
 then the router should be deployed and configured to use the existing secret.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1878
 
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
 
