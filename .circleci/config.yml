@@ -120,7 +120,7 @@ commands:
           command: |
             curl https://sh.rustup.rs -sSf -o rustup.sh
             chmod 755 ./rustup.sh
-            ./rustup.sh --default-toolchain none
+            ./rustup.sh -y --default-toolchain none
 
   install_extra_tools:
     parameters:
