@@ -2,9 +2,9 @@
 mod axum_http_server_factory;
 mod handlers;
 mod listeners;
-mod utils;
 #[cfg(test)]
 mod tests;
+mod utils;
 
 pub(crate) use axum_http_server_factory::make_axum_router;
 pub(crate) use axum_http_server_factory::AxumHttpServerFactory;
