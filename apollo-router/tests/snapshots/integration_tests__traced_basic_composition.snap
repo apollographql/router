@@ -197,7 +197,7 @@ expression: get_spans()
                         "internal"
                       ],
                       [
-                        "service.name",
+                        "subgraph.name",
                         "products"
                       ],
                       [
@@ -213,7 +213,7 @@ expression: get_spans()
                       "fields": {
                         "names": [
                           "otel.kind",
-                          "service.name",
+                          "subgraph.name",
                           "apollo_private.sent_time_offset"
                         ]
                       }
@@ -241,7 +241,7 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "name",
+                            "subgraph.name",
                             "products"
                           ],
                           [
@@ -264,7 +264,7 @@ expression: get_spans()
                           "module_path": "apollo_router::plugins::telemetry",
                           "fields": {
                             "names": [
-                              "name",
+                              "subgraph.name",
                               "graphql.document",
                               "graphql.operation.name",
                               "otel.kind",
@@ -313,6 +313,10 @@ expression: get_spans()
                               [
                                 "net.transport",
                                 "ip_tcp"
+                              ],
+                              [
+                                "subgraph.name",
+                                "products"
                               ]
                             ],
                             "metadata": {
@@ -326,7 +330,8 @@ expression: get_spans()
                                   "net.peer.name",
                                   "net.peer.port",
                                   "http.route",
-                                  "net.transport"
+                                  "net.transport",
+                                  "subgraph.name"
                                 ]
                               }
                             }
@@ -416,7 +421,7 @@ expression: get_spans()
                             "internal"
                           ],
                           [
-                            "service.name",
+                            "subgraph.name",
                             "reviews"
                           ],
                           [
@@ -432,7 +437,7 @@ expression: get_spans()
                           "fields": {
                             "names": [
                               "otel.kind",
-                              "service.name",
+                              "subgraph.name",
                               "apollo_private.sent_time_offset"
                             ]
                           }
@@ -460,7 +465,7 @@ expression: get_spans()
                           "record": {
                             "entries": [
                               [
-                                "name",
+                                "subgraph.name",
                                 "reviews"
                               ],
                               [
@@ -483,7 +488,7 @@ expression: get_spans()
                               "module_path": "apollo_router::plugins::telemetry",
                               "fields": {
                                 "names": [
-                                  "name",
+                                  "subgraph.name",
                                   "graphql.document",
                                   "graphql.operation.name",
                                   "otel.kind",
@@ -532,6 +537,10 @@ expression: get_spans()
                                   [
                                     "net.transport",
                                     "ip_tcp"
+                                  ],
+                                  [
+                                    "subgraph.name",
+                                    "reviews"
                                   ]
                                 ],
                                 "metadata": {
@@ -545,7 +554,8 @@ expression: get_spans()
                                       "net.peer.name",
                                       "net.peer.port",
                                       "http.route",
-                                      "net.transport"
+                                      "net.transport",
+                                      "subgraph.name"
                                     ]
                                   }
                                 }
@@ -652,7 +662,7 @@ expression: get_spans()
                                 "internal"
                               ],
                               [
-                                "service.name",
+                                "subgraph.name",
                                 "products"
                               ],
                               [
@@ -668,7 +678,7 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "otel.kind",
-                                  "service.name",
+                                  "subgraph.name",
                                   "apollo_private.sent_time_offset"
                                 ]
                               }
@@ -696,7 +706,7 @@ expression: get_spans()
                               "record": {
                                 "entries": [
                                   [
-                                    "name",
+                                    "subgraph.name",
                                     "products"
                                   ],
                                   [
@@ -719,7 +729,7 @@ expression: get_spans()
                                   "module_path": "apollo_router::plugins::telemetry",
                                   "fields": {
                                     "names": [
-                                      "name",
+                                      "subgraph.name",
                                       "graphql.document",
                                       "graphql.operation.name",
                                       "otel.kind",
@@ -768,6 +778,10 @@ expression: get_spans()
                                       [
                                         "net.transport",
                                         "ip_tcp"
+                                      ],
+                                      [
+                                        "subgraph.name",
+                                        "products"
                                       ]
                                     ],
                                     "metadata": {
@@ -781,7 +795,8 @@ expression: get_spans()
                                           "net.peer.name",
                                           "net.peer.port",
                                           "http.route",
-                                          "net.transport"
+                                          "net.transport",
+                                          "subgraph.name"
                                         ]
                                       }
                                     }
@@ -873,7 +888,7 @@ expression: get_spans()
                                 "internal"
                               ],
                               [
-                                "service.name",
+                                "subgraph.name",
                                 "accounts"
                               ],
                               [
@@ -889,7 +904,7 @@ expression: get_spans()
                               "fields": {
                                 "names": [
                                   "otel.kind",
-                                  "service.name",
+                                  "subgraph.name",
                                   "apollo_private.sent_time_offset"
                                 ]
                               }
@@ -917,7 +932,7 @@ expression: get_spans()
                               "record": {
                                 "entries": [
                                   [
-                                    "name",
+                                    "subgraph.name",
                                     "accounts"
                                   ],
                                   [
@@ -940,7 +955,7 @@ expression: get_spans()
                                   "module_path": "apollo_router::plugins::telemetry",
                                   "fields": {
                                     "names": [
-                                      "name",
+                                      "subgraph.name",
                                       "graphql.document",
                                       "graphql.operation.name",
                                       "otel.kind",
@@ -989,6 +1004,10 @@ expression: get_spans()
                                       [
                                         "net.transport",
                                         "ip_tcp"
+                                      ],
+                                      [
+                                        "subgraph.name",
+                                        "accounts"
                                       ]
                                     ],
                                     "metadata": {
@@ -1002,7 +1021,8 @@ expression: get_spans()
                                           "net.peer.name",
                                           "net.peer.port",
                                           "http.route",
-                                          "net.transport"
+                                          "net.transport",
+                                          "subgraph.name"
                                         ]
                                       }
                                     }
