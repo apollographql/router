@@ -55,7 +55,6 @@ commands:
       - install_minimal_rust
       - run:
           name: Download nextest
-          shell: bash.exe
           command: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
   macos_install_baseline:
@@ -69,7 +68,6 @@ commands:
       - install_minimal_rust
       - run:
           name: Download nextest
-          shell: bash.exe
           command: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
   windows_install_baseline:
