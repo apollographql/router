@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Support serviceMonitor in helm chart
+
+`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+
+By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
+
 ### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
 
 + Insert static header
@@ -84,6 +90,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
+
+### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
+
+Avoids redundant work in CI and makes the YAML configuration less mis-leading.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
 
 ### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
 
