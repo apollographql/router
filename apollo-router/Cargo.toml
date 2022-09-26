@@ -5,8 +5,11 @@ authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://www.apollographql.com/docs/router/"
 description = "A configurable, high-performance routing runtime for Apollo Federation 🚀"
-edition = "2021"
 license = "LicenseRef-ELv2"
+
+# renovate-automation: rustc version
+rust-version = "1.63.0"
+edition = "2021"
 build = "build/main.rs"
 
 [[bin]]

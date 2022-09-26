@@ -1089,15 +1089,15 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::services::supergraph_service::format_response": {
-          "name": "apollo_router::services::supergraph_service::format_response",
+        "apollo_router::services::execution_service::format_response": {
+          "name": "apollo_router::services::execution_service::format_response",
           "record": {
             "entries": [],
             "metadata": {
               "name": "format_response",
-              "target": "apollo_router::services::supergraph_service",
+              "target": "apollo_router::services::execution_service",
               "level": "DEBUG",
-              "module_path": "apollo_router::services::supergraph_service",
+              "module_path": "apollo_router::services::execution_service",
               "fields": {
                 "names": []
               }
