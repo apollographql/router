@@ -21,17 +21,20 @@ use super::state_machine::State::Errored;
 use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
+use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::RouterCreator;
 use crate::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
 #[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum State<RS> {
+enum State {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<String>,
@@ -40,14 +43,14 @@ enum State<RS> {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         #[derivative(Debug = "ignore")]
-        router_service_factory: RS,
+        router_service_factory: RouterCreator,
         server_handle: HttpServerHandle,
     },
     Stopped,
     Errored(ApolloRouterError),
 }
 
-impl<T> Display for State<T> {
+impl Display for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Startup { .. } => write!(f, "startup"),
@@ -64,13 +67,9 @@ impl<T> Display for State<T> {
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will cause the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, FA>
-where
-    S: HttpServerFactory,
-    FA: SupergraphServiceConfigurator,
-{
-    http_server_factory: S,
-    router_configurator: FA,
+pub(crate) struct StateMachine {
+    http_server_factory: AxumHttpServerFactory,
+    router_configurator: YamlSupergraphServiceFactory,
 
     // The reason we have extra_listen_adresses and extra_listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
     pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
@@ -79,13 +78,11 @@ where
     graphql_listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
 }
 
-impl<S, FA> StateMachine<S, FA>
-where
-    S: HttpServerFactory,
-    FA: SupergraphServiceConfigurator + Send,
-    FA::SupergraphServiceFactory: SupergraphServiceFactory,
-{
-    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
+impl StateMachine {
+    pub(crate) fn new(
+        http_server_factory: AxumHttpServerFactory,
+        router_factory: YamlSupergraphServiceFactory,
+    ) -> Self {
         let graphql_ready = Arc::new(RwLock::new(None));
         let graphql_ready_guard = graphql_ready.clone().try_write_owned().expect("owned lock");
         let extra_ready = Arc::new(RwLock::new(Vec::new()));
@@ -260,10 +257,7 @@ where
         }
     }
 
-    async fn maybe_update_listen_addresses(
-        &mut self,
-        state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-    ) {
+    async fn maybe_update_listen_addresses(&mut self, state: &mut State) {
         let (graphql_listen_address, extra_listen_addresses) =
             if let Running { server_handle, .. } = &state {
                 let listen_addresses = server_handle.listen_addresses().to_vec();
@@ -286,13 +280,7 @@ where
         }
     }
 
-    async fn maybe_transition_to_running(
-        &mut self,
-        state: State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-    ) -> Result<
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-    > {
+    async fn maybe_transition_to_running(&mut self, state: State) -> Result<State, State> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -354,14 +342,11 @@ where
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        router_service: <FA as SupergraphServiceConfigurator>::SupergraphServiceFactory,
+        router_service: RouterCreator,
         server_handle: HttpServerHandle,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
-    ) -> Result<
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-    > {
+    ) -> Result<State, State> {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
 
@@ -454,7 +439,7 @@ mod tests {
     use crate::services::new_service::NewService;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-
+    /*
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
     }
@@ -807,5 +792,5 @@ mod tests {
                 Ok(router)
             });
         router_factory
-    }
+    }*/
 }
