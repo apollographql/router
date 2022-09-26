@@ -88,8 +88,15 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
 defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
 
-
 By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
+
+### Move response formatting to the execution service ([PR #1771](https://github.com/apollographql/router/pull/1771))
+
+The response formatting process, where response data is filtered according to deferred responses subselections
+and the API schema, was executed in the supergraph service. This is a bit late, because it results in the
+execution service returning a stream of invalid responses, so the execution plugins work on invalid data.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
 
 ## 🛠 Maintenance
 
