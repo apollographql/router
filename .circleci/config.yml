@@ -269,7 +269,7 @@ commands:
                 command: |
                   sudo apt-get update
                   sudo apt-get install lld
-            - run: RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo nextest run --workspace --locked
+            - run: RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo test run --workspace --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
