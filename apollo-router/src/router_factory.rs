@@ -114,7 +114,6 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
 
-        let bin_plugins = crate::plugin::binary_plugins::scan_plugins().await?;
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
@@ -127,6 +126,17 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
+
+        // TODO: Let users know if binary plugins can't be scanned. This
+        // is most likely because there are none, so could be handled
+        // better.
+        let bin_plugins = match crate::plugin::binary_plugins::scan_plugins().await {
+            Ok(bp) => bp,
+            Err(e) => {
+                tracing::info!("no binary plugins found: {}", e);
+                vec![]
+            }
+        };
 
         for (plugin_name, plugin) in bin_plugins {
             tracing::info!("adding binary plugin: {}", plugin_name);
