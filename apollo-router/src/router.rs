@@ -1,6 +1,7 @@
 #![allow(missing_docs)] // FIXME
 
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -31,16 +32,17 @@ use self::Event::NoMoreSchema;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateSchema;
-use crate::axum_http_server_factory::make_axum_router;
-use crate::axum_http_server_factory::AxumHttpServerFactory;
-use crate::axum_http_server_factory::ListenAddrAndRouter;
-use crate::configuration::validate_configuration;
+use crate::axum_factory::make_axum_router;
+use crate::axum_factory::AxumHttpServerFactory;
+use crate::axum_factory::ListenAddrAndRouter;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
 use crate::spec::Schema;
 use crate::state_machine::StateMachine;
@@ -61,8 +63,10 @@ async fn make_transport_service<RF>(
     let service_factory = YamlSupergraphServiceFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
+
+    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // FIXME: how should
     let ListenAddrAndRouter(_listener, router) = routers.main;
     Ok(router
@@ -107,6 +111,12 @@ pub enum ApolloRouterError {
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// tried to bind {0} and {1} on port {2}
+    DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
+
+    /// tried to register two endpoints on `{0}:{1}{2}`
+    SameRouteUsedTwice(IpAddr, u16, String),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
@@ -206,7 +216,7 @@ impl SchemaSource {
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
+                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
@@ -284,31 +294,22 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
+                } else if watch {
+                    crate::files::watch(path.to_owned(), delay)
+                        .map(move |_| match ConfigurationSource::read_config(&path) {
+                            Ok(config) => UpdateConfiguration(Box::new(config)),
+                            Err(err) => {
+                                tracing::error!("{}", err);
+                                NoMoreConfiguration
+                            }
+                        })
+                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => {
-                            if watch {
-                                crate::files::watch(path.to_owned(), delay)
-                                    .filter_map(move |_| {
-                                        future::ready(
-                                            match ConfigurationSource::read_config(&path) {
-                                                Ok(config) => Some(config),
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
-                                                }
-                                            },
-                                        )
-                                    })
-                                    .map(|x| UpdateConfiguration(Box::new(x)))
-                                    .boxed()
-                            } else {
-                                stream::once(future::ready(UpdateConfiguration(Box::new(
-                                    configuration,
-                                ))))
-                                .boxed()
-                            }
-                        }
+                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
+                            Box::new(configuration),
+                        )))
+                        .boxed(),
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
@@ -323,9 +324,7 @@ impl ConfigurationSource {
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
         let config = fs::read_to_string(path)?;
-        let config = validate_configuration(&config)?;
-
-        Ok(config)
+        config.parse().map_err(ReadConfigError::Validation)
     }
 }
 
@@ -587,7 +586,7 @@ fn generate_event_stream(
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     // Chain is required so that the final shutdown message is sent.
-    let messages = stream::select_all(vec![
+    stream::select_all(vec![
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
@@ -595,15 +594,16 @@ fn generate_event_stream(
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
     .chain(stream::iter(vec![Shutdown]))
-    .boxed();
-    messages
+    .boxed()
 }
 
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
 
+    use serde_json::json;
     use serde_json::to_string_pretty;
+    use serde_json::Value;
     use test_log::test;
 
     use super::*;
@@ -686,7 +686,33 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
+        let event = stream.into_future().now_or_never();
+        assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_dev_mode_without_file() {
+        let mut stream =
+            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
+                .into_stream()
+                .boxed();
+
+        let cfg = match stream.next().await.unwrap() {
+            UpdateConfiguration(configuration) => configuration,
+            _ => panic!("the event from the stream must be UpdateConfiguration"),
+        };
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
+        assert!(!cfg.homepage.enabled);
+        assert!(cfg.plugins().iter().any(
+            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
+        ));
+        assert!(cfg
+            .plugins()
+            .iter()
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
+                && val == &json!({"all": true})));
+        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

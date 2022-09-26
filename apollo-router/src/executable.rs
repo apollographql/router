@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use clap::AppSettings;
+use clap::ArgAction;
 use clap::CommandFactory;
 use clap::Parser;
 use directories::ProjectDirs;
@@ -31,6 +32,7 @@ use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 
 /// Options for the router
 #[derive(Parser, Debug)]
@@ -50,7 +52,12 @@ pub(crate) struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
+    #[clap(
+        alias = "hr",
+        long = "hot-reload",
+        env = "APOLLO_ROUTER_HOT_RELOAD",
+        action(ArgAction::SetTrue)
+    )]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
@@ -62,6 +69,15 @@ pub(crate) struct Opt {
     )]
     config_path: Option<PathBuf>,
 
+    /// Enable development mode.
+    #[clap(
+        env = APOLLO_ROUTER_DEV_ENV,
+        long = "dev",
+        hide(true),
+        action(ArgAction::SetTrue)
+    )]
+    dev: bool,
+
     /// Schema location relative to the project directory.
     #[clap(
         short,
@@ -72,7 +88,7 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long)]
+    #[clap(long, action(ArgAction::SetTrue))]
     schema: bool,
 
     /// Your Apollo key.
@@ -136,6 +152,9 @@ impl fmt::Display for ProjectDir {
 
 /// This is the main router entrypoint.
 ///
+/// Starts a Tokio runtime and runs a Router in it based on command-line options.
+/// Returns on fatal error or after graceful shutdown has completed.
+///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -150,17 +169,36 @@ pub fn main() -> Result<()> {
     runtime.block_on(Executable::builder().start())
 }
 
-/// Entry point into creating a router executable.
+/// Entry point into creating a router executable with more customization than [`main`].
 #[non_exhaustive]
 pub struct Executable {}
 
 #[buildstructor::buildstructor]
 impl Executable {
-    /// Build an executable that will parse commandline options and set up logging,
-    /// then start an HTTP server.
+    /// Returns a builder that can parse command-line options and run a Router
+    /// in an existing Tokio runtime.
     ///
-    /// You may optionally specify when the server should gracefully shut down, the schema source and the configuration source.
-    /// The default is on CTRL+C on the terminal (or a `SIGINT` signal).
+    /// Builder methods:
+    ///
+    /// * `.config(impl Into<`[`ConfigurationSource`]`>)`
+    ///   Optional.
+    ///   Specifies where to find the Router configuration.
+    ///   The default is the file specified by the `--config` or `-c` CLI option.
+    ///
+    /// * `.schema(impl Into<`[`SchemaSource`]`>)`
+    ///   Optional.
+    ///   Specifies when to find the supergraph schema.
+    ///   The default is the file specified by the `--supergraph` or `-s` CLI option.
+    ///
+    /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
+    ///   Optional.
+    ///   Specifies when the Router should shut down gracefully.
+    ///   The default is on CTRL+C (`SIGINT`).
+    ///
+    /// * `.start()`
+    ///   Returns a future that resolves to [`anyhow::Result`]`<()>`
+    ///   on fatal error or after graceful shutdown has completed.
+    ///   Must be called (and the future awaited) in the context of an existing Tokio runtime.
     ///
     /// ```no_run
     /// use apollo_router::{Executable, ShutdownSource};
@@ -178,8 +216,6 @@ impl Executable {
     ///   .await
     /// # }
     /// ```
-    /// Note that if you do not specify a runtime you must be in the context of an existing tokio runtime.
-    ///
     #[builder(entry = "builder", exit = "start", visibility = "pub")]
     async fn start(
         shutdown: Option<ShutdownSource>,
@@ -206,7 +242,11 @@ impl Executable {
         );
 
         let dispatcher = if atty::is(atty::Stream::Stdout) {
-            Dispatch::new(builder.finish())
+            Dispatch::new(
+                builder
+                    .with_target(!opt.log_level.eq_ignore_ascii_case("info"))
+                    .finish(),
+            )
         } else {
             Dispatch::new(builder.json().finish())
         };
@@ -227,10 +267,12 @@ impl Executable {
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
-        opt: Opt,
+        mut opt: Opt,
         dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+        // Enable hot reload when dev mode is enabled
+        opt.hot_reload = opt.hot_reload || opt.dev;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -239,23 +281,31 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
-            _ => opt
-                .config_path
-                .as_ref()
-                .map(|path| {
-                    let path = if path.is_relative() {
-                        current_directory.join(path)
-                    } else {
-                        path.to_path_buf()
-                    };
+            _ => match opt.config_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
 
-                    ConfigurationSource::File {
-                        path,
-                        watch: opt.hot_reload,
-                        delay: None,
-                    }
-                })
-                .unwrap_or_else(|| Configuration::builder().build().into()),
+                ConfigurationSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                }
+            }) {
+                Some(configuration) => configuration,
+                None => Configuration::builder()
+                    .build()
+                    .map(std::convert::Into::into)?,
+            },
+        };
+
+        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
+        let apollo_telemetry_msg = if is_telemetry_disabled {
+            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        } else {
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
@@ -268,6 +318,8 @@ impl Executable {
             (Some(source), None, _) => source,
             (_, Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+
                 setup_panic_handler(dispatcher.clone());
 
                 let supergraph_path = if supergraph_path.is_relative() {
@@ -283,6 +335,7 @@ impl Executable {
             }
             (_, None, Some(apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
 
                 let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
                 if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
@@ -334,9 +387,9 @@ impl Executable {
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router with the supergraph schema:
+  2. Run the Apollo Router in development mode with the supergraph schema:
 
-    $ ./router --supergraph starstuff.graphql
+    $ ./router --dev --supergraph starstuff.graphql
 
     "#
                 ));
@@ -395,6 +448,8 @@ fn copy_args_to_env() {
                 env::set_var(env, value);
             } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
                 env::set_var(env, value);
+            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id()) {
+                env::set_var(env, value.to_string());
             }
         }
     });

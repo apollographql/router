@@ -1,4 +1,6 @@
-#![allow(missing_docs)]
+//! Extension of map_future layer. Allows mapping of the first graphql response. Useful when working with a stream of responses.
+//!
+//! See [`Layer`] and [`Service`] for more details.
 
 use std::future::ready;
 use std::task::Poll;
@@ -14,10 +16,12 @@ use crate::graphql;
 use crate::services::supergraph;
 use crate::Context;
 
+/// [`Layer`] for mapping first graphql responses. See [`ServiceBuilderExt::map_first_graphql_response()`](crate::layers::ServiceBuilderExt::map_first_graphql_response()).
 pub struct MapFirstGraphqlResponseLayer<Callback> {
     pub(super) callback: Callback,
 }
 
+/// [`Service`] for mapping first graphql responses. See [`ServiceBuilderExt::map_first_graphql_response()`](crate::layers::ServiceBuilderExt::map_first_graphql_response()).
 pub struct MapFirstGraphqlResponseService<InnerService, Callback> {
     inner: InnerService,
     callback: Callback,

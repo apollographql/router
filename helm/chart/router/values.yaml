@@ -7,7 +7,7 @@ replicaCount: 1
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
 router:
   configuration:
-    server:
+    supergraph:
       listen: 0.0.0.0:80
   args:
   - --hot-reload
@@ -50,6 +50,8 @@ image:
 containerPorts:
   # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
   http: 80
+  # -- For exposing the metrics port when running a serviceMonitor for example
+  metrics: 9090
 
 imagePullSecrets: []
 nameOverride: ""
@@ -81,6 +83,9 @@ service:
   type: ClusterIP
   port: 80
   annotations: {}
+
+serviceMonitor:
+  enabled: false
 
 ingress:
   enabled: false

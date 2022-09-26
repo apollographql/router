@@ -225,16 +225,18 @@ impl Schema {
                     // Spec: https://spec.graphql.org/draft/#SchemaDefinition
                     ast::Definition::SchemaDefinition(schema) => {
                         for operation in schema.root_operation_type_definitions() {
-                            match (
-                                operation.operation_type(),
-                                operation.named_type().map(|n| {
-                                    n.name()
-                                        .expect("the node Name is not optional in the spec; qed")
-                                        .text()
-                                        .to_string()
-                                }),
-                            ) {
+                            match (operation.operation_type(), operation.named_type()) {
                                 (Some(optype), Some(name)) => {
+                                    let name = name
+                                        .name()
+                                        .ok_or_else(|| {
+                                            SchemaError::Api(
+                                                "the node Name is not optional in the spec"
+                                                    .to_string(),
+                                            )
+                                        })?
+                                        .text()
+                                        .to_string();
                                     root_operations.insert(optype.into(), name);
                                 }
                                 _ => {
@@ -253,23 +255,30 @@ impl Schema {
                         .definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
-                                let instance = <$ty>::from(definition);
-                                Some((instance.name.clone(), instance))
+                                match <$ty>::try_from(definition) {
+                                    Ok(instance) => Some(Ok((instance.name.clone(), instance))),
+                                    Err(e) => Some(Err(e)),
+                                }
                             } else {
                                 None
                             }
                         })
-                        .collect::<HashMap<String, $ty>>();
+                        .collect::<Result<HashMap<String, $ty>, SchemaError>>()?;
 
                     document
                         .definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
-                                Some(<$ty>::from(extension))
+                                match <$ty>::try_from(extension) {
+                                    Ok(extension) => Some(Ok(extension)),
+                                    Err(e) => Some(Err(e)),
+                                }
                             } else {
                                 None
                             }
                         })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
                         .for_each(|extension| {
                             if let Some(instance) = map.get_mut(&extension.name) {
                                 instance.fields.extend(extension.fields);
@@ -308,23 +317,31 @@ impl Schema {
                         .definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
-                                let instance = <$ty>::from(definition);
-                                Some((instance.name.clone(), instance))
+                                match <$ty>::try_from(definition) {
+                                    Ok(instance) => Some(Ok((instance.name.clone(), instance))),
+                                    Err(e) => Some(Err(e)),
+                                }
                             } else {
                                 None
                             }
                         })
-                        .collect::<HashMap<String, $ty>>();
+                        // todo: impl from
+                        .collect::<Result<HashMap<String, $ty>, _>>()
+                        .map_err(|e| SchemaError::Api(e.to_string()))?;
 
                     document
                         .definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
-                                Some(<$ty>::from(extension))
+                                Some(<$ty>::try_from(extension))
                             } else {
                                 None
                             }
                         })
+                        // todo: impl from
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| SchemaError::Api(e.to_string()))?
+                        .into_iter()
                         .for_each(|extension| {
                             if let Some(instance) = map.get_mut(&extension.name) {
                                 instance.fields.extend(extension.fields);
@@ -358,20 +375,26 @@ impl Schema {
                     ast::Definition::ScalarTypeDefinition(definition) => Some(
                         definition
                             .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string(),
+                            .ok_or_else(|| {
+                                SchemaError::Api(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
+                            })
+                            .map(|name| name.text().to_string()),
                     ),
                     ast::Definition::ScalarTypeExtension(extension) => Some(
                         extension
                             .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string(),
+                            .ok_or_else(|| {
+                                SchemaError::Api(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
+                            })
+                            .map(|name| name.text().to_string()),
                     ),
                     _ => None,
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             let enums: HashMap<String, HashSet<String>> = document
                 .definitions()
@@ -380,34 +403,51 @@ impl Schema {
                     ast::Definition::EnumTypeDefinition(definition) => {
                         let name = definition
                             .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string();
-
-                        let enum_values: HashSet<String> = definition
-                            .enum_values_definition()
-                            .expect(
-                                "the node EnumValuesDefinition is not optional in the spec; qed",
-                            )
-                            .enum_value_definitions()
-                            .filter_map(|value| {
-                                value.enum_value().map(|val| {
-                                    //FIXME: should we check for true/false/null here
-                                    // https://spec.graphql.org/draft/#EnumValue
-                                    val.name()
-                                        .expect("the node Name is not optional in the spec; qed")
-                                        .text()
-                                        .to_string()
-                                })
+                            .ok_or_else(|| {
+                                SchemaError::Api(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
                             })
-                            .collect();
+                            .map(|name| name.text().to_string());
 
-                        Some((name, enum_values))
+                        let enum_values: Result<HashSet<String>, _> = definition
+                            .enum_values_definition()
+                            .ok_or_else(|| {
+                                SchemaError::Api(
+                                    "the node EnumValuesDefinition is not optional in the spec"
+                                        .to_string(),
+                                )
+                            })
+                            .and_then(|definition| {
+                                definition
+                                    .enum_value_definitions()
+                                    .filter_map(|value| {
+                                        value.enum_value().map(|val| {
+                                            //FIXME: should we check for true/false/null here
+                                            // https://spec.graphql.org/draft/#EnumValue
+                                            val.name()
+                                                .ok_or_else(|| {
+                                                    SchemaError::Api(
+                                                        "the node Name is not optional in the spec"
+                                                            .to_string(),
+                                                    )
+                                                })
+                                                .map(|name| name.text().to_string())
+                                        })
+                                    })
+                                    .collect()
+                            });
+
+                        match (name, enum_values) {
+                            (Ok(name), Ok(enum_values)) => Some(Ok((name, enum_values))),
+                            (Err(schema_error), _) => Some(Err(schema_error)),
+                            (_, Err(schema_error)) => Some(Err(schema_error)),
+                        }
                     }
 
                     _ => None,
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             let mut hasher = Sha256::new();
             hasher.update(schema.as_bytes());
@@ -494,11 +534,17 @@ macro_rules! implement_object_type_or_interface {
         }
 
         $(
-        impl From<$ast_ty> for $name {
-            fn from(definition: $ast_ty) -> Self {
+        impl TryFrom<$ast_ty> for $name {
+            type Error = SchemaError;
+
+            fn try_from(definition: $ast_ty) -> Result<Self, Self::Error> {
                 let name = definition
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SchemaError::Api(
+                            "the node Name is not optional in the spec;".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
                 let fields = definition
@@ -508,33 +554,47 @@ macro_rules! implement_object_type_or_interface {
                     .map(|x| {
                         let name = x
                             .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string();
-                        let ty = x
-                            .ty()
-                            .expect("the node Type is not optional in the spec; qed")
-                            .into();
-                        (name, ty)
+
+                    .ok_or_else(|| {
+                        SchemaError::Api(
+                            "the node Name is not optional in the spec;".to_string(),
+                        )
+                    })?
+                    .text()
+                    .to_string();
+                    let ty = x
+                        .ty()
+                        .ok_or_else(|| {
+                            SchemaError::Api(
+                                "the node Type is not optional in the spec;".to_string(),
+                            )
+                        })?
+                        // todo: there must be a better way
+                        .try_into().map_err(|e: SpecError|SchemaError::Api(e.to_string()))?;
+                        Ok((name, ty))
                     })
-                    .collect();
+                    .collect::<Result<_,_>>()?;
                 let interfaces = definition
                     .implements_interfaces()
                     .iter()
                     .flat_map(|x| x.named_types())
                     .map(|x| {
-                        x.name()
-                            .expect("neither Name neither NamedType are optionals; qed")
+                        Ok(x.name()
+                            .ok_or_else(|| {
+                                SchemaError::Api(
+                                    "neither Name nor NamedType are optionals".to_string(),
+                                )
+                            })?
                             .text()
-                            .to_string()
+                            .to_string())
                     })
-                    .collect();
+                    .collect::<Result<_,_>>()?;
 
-                $name {
+                Ok($name {
                     name,
                     fields,
                     interfaces,
-                }
+                })
             }
         }
         )+
@@ -582,11 +642,17 @@ macro_rules! implement_input_object_type_or_interface {
         }
 
         $(
-        impl From<$ast_ty> for $name {
-            fn from(definition: $ast_ty) -> Self {
+
+        impl TryFrom<$ast_ty> for $name {
+            type Error = SpecError;
+            fn try_from(definition: $ast_ty) -> Result<Self, Self::Error> {
                 let name = definition
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Name is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
                 let fields = definition
@@ -596,21 +662,29 @@ macro_rules! implement_input_object_type_or_interface {
                     .map(|x| {
                         let name = x
                             .name()
-                            .expect("the node Name is not optional in the spec; qed")
+                            .ok_or_else(|| {
+                                SpecError::ParsingError(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
+                            })?
                             .text()
                             .to_string();
                         let ty = x
                             .ty()
-                            .expect("the node Type is not optional in the spec; qed")
-                            .into();
-                        (name, ty)
+                            .ok_or_else(|| {
+                                SpecError::ParsingError(
+                                    "the node Name is not optional in the spec".to_string(),
+                                )
+                            })?
+                            .try_into()?;
+                        Ok((name, ty))
                     })
-                    .collect();
+                    .collect::<Result<_,_>>()?;
 
-                $name {
+                Ok($name {
                     name,
                     fields,
-                }
+                })
             }
         }
         )+

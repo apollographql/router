@@ -26,119 +26,81 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-
-### Remove over-exposed functions from the public API ([PR #1746](https://github.com/apollographql/router/pull/1746))
-
-The following functions are only required for router implementation, so removing from external API.
-subgraph::new_from_response
-supergraph::new_from_response
-supergraph::new_from_graphql_response
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1746
-
-### Span client_name and client_version attributes renamed ([#1514](https://github.com/apollographql/router/issues/1514))
-OpenTelemetry attributes should be grouped by `.` rather than `_`, therefore the following attributes have changed:
-
-* `client_name` => `client.name`
-* `client_version` => `client.version`
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1514
-
 ## 🚀 Features
 
-### Provide access to the supergraph SDL from rhai scripts ([Issue #1735](https://github.com/apollographql/router/issues/1735))
+### Support serviceMonitor in helm chart
 
-There is a new global constant `apollo_sdl` which can be use to read the
-supergraph SDL as a string.
+`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1737
+By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
 
-### Add federated tracing support to Apollo studio usage reporting ([#1514](https://github.com/apollographql/router/issues/1514))
+### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
 
-Add support of [federated tracing](https://www.apollographql.com/docs/federation/metrics/) in Apollo Studio:
++ Insert static header
 
 ```yaml
-telemetry:
-    apollo:
-        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
-        # This is expensive and should be left at a low value.
-        # This cannot be higher than tracing->trace_config->sampler
-        field_level_instrumentation_sampler: 0.01 # (default)
-        
-        # Include HTTP request and response headers in traces sent to Apollo Studio
-        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all headers except referer
-            - referer
-
-        # Send variable values in Apollo in traces sent to Apollo Studio
-        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all variable values except for variable named first
-            - first
-    tracing:
-        trace_config:
-            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    - insert:
+        name: "sent-from-our-apollo-router"
+        value: "indeed"
 ```
 
-By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) & [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1514
++ Insert header from context
 
-### Add support for `tokio-console` ([PR #1632](https://github.com/apollographql/router/issues/1632))
-
-to aid in debugging the router, this adds support for [tokio-console](https://github.com/tokio-rs/console), enabled by a Cargo feature.
-
-To run the router with tokio-console, build it with `RUSTFLAGS="--cfg tokio_unstable" cargo run --features console`.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1632
-
-### Restore the ability to specify custom schema and configuration sources ([#1733](https://github.com/apollographql/router/issues/1733))
-You may now specify custom schema and config sources when constructing an executable.
-```rust
-Executable::builder()
-  .shutdown(ShutdownSource::None)
-  .schema(SchemaSource::Stream(schemas))
-  .config(ConfigurationSource::Stream(configs))
-  .start()
-  .await
+```yaml
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    - insert:
+        name: "sent-from-our-apollo-router-context"
+        from_context: "my_key_in_context"
 ```
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/1734
+
++ Insert header from request body
+
+```yaml
+headers:
+  all: # Header rules for all subgraphs
+    request:
+    + insert:
+        name: "sent-from-our-apollo-router-request-body"
+        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
+        default: "UNKNOWN" # If no operationName has been specified
+```
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
 ## 🐛 Fixes
 
-### Set correctly hasNext for the last chunk of a deferred response ([#1687](https://github.com/apollographql/router/issues/1687))
+### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
 
-You no longer will receive a last chunk `{"hasNext": false}` in a deferred response.
+in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
+was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
+This will now aggregate the subgraph error and the missing `_entities` error.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1736
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
 
 ## 🛠 Maintenance
 
-### Add errors vec in `QueryPlannerResponse` to handle errors in `query_planning_service` ([PR #1504](https://github.com/apollographql/router/pull/1504))
+### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
 
-We changed `QueryPlannerResponse` to:
+Avoids redundant work in CI and makes the YAML configuration less mis-leading.
 
-+ Add a `Vec<apollo_router::graphql::Error>`
-+ Make the query plan optional, so that it is not present when the query planner encountered a fatal error. Such an error would be in the `Vec`
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1504
+### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
 
-### Disable compression of multipart HTTP responses ([Issue #1572](https://github.com/apollographql/router/issues/1572))
+This splits the query plan execution in multiple modules to make the code more manageable.
 
-For features such a `@defer`, the Router may send a stream of multiple GraphQL responses
-in a single HTTP response.
-The body of the HTTP response is a single byte stream.
-When HTTP compression is used, that byte stream is compressed as a whole.
-Due to limitations in current versions of the `async-compression` crate,
-[issue #1572](https://github.com/apollographql/router/issues/1572) was a bug where
-some GraphQL responses might not be sent to the client until more of them became available.
-This buffering yields better compression, but defeats the point of `@defer`.
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
 
-Our previous work-around involved a patched `async-compression`,
-which was not trivial to apply when using the Router as a dependency
-since [Cargo patching](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)
-is done in a project’s root `Cargo.toml`.
+### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
 
-The Router now reverts to using unpatched `async-compression`,
-and instead disables compression of multipart responses.
-We aim to re-enable compression soon, with a proper solution that is being designed in
-<https://github.com/Nemo157/async-compression/issues/154>.
+This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
 
 ## 📚 Documentation

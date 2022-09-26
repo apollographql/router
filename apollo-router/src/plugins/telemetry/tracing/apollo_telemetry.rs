@@ -3,16 +3,6 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::SystemTimeError;
 
-use apollo_spaceport::trace::http::Values;
-use apollo_spaceport::trace::query_plan_node::FetchNode;
-use apollo_spaceport::trace::query_plan_node::FlattenNode;
-use apollo_spaceport::trace::query_plan_node::ParallelNode;
-use apollo_spaceport::trace::query_plan_node::ResponsePathElement;
-use apollo_spaceport::trace::query_plan_node::SequenceNode;
-use apollo_spaceport::trace::Details;
-use apollo_spaceport::trace::Http;
-use apollo_spaceport::trace::QueryPlanNode;
-use apollo_spaceport::Message;
 use async_trait::async_trait;
 use derivative::Derivative;
 use lru::LruCache;
@@ -22,9 +12,12 @@ use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::SpanId;
 use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use thiserror::Error;
 use url::Url;
 
+use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::Sender;
@@ -33,13 +26,22 @@ use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
-use crate::plugins::telemetry::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::spaceport::trace::http::Values;
+use crate::spaceport::trace::query_plan_node::FetchNode;
+use crate::spaceport::trace::query_plan_node::FlattenNode;
+use crate::spaceport::trace::query_plan_node::ParallelNode;
+use crate::spaceport::trace::query_plan_node::ResponsePathElement;
+use crate::spaceport::trace::query_plan_node::SequenceNode;
+use crate::spaceport::trace::Details;
+use crate::spaceport::trace::Http;
+use crate::spaceport::trace::QueryPlanNode;
+use crate::spaceport::Message;
 
 const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
@@ -53,15 +55,13 @@ const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
 const FTV1_DO_NOT_SAMPLE_REASON: Key = Key::from_static_str("ftv1.do_not_sample_reason");
-const SERVICE_NAME: Key = Key::from_static_str("service.name");
 const CLIENT_NAME: Key = Key::from_static_str("client.name");
 const CLIENT_VERSION: Key = Key::from_static_str("client.version");
-const HTTP_METHOD: Key = Key::from_static_str("http.method");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("subgraph protobuf decode error")]
-    ProtobufDecode(#[from] apollo_spaceport::DecodeError),
+    ProtobufDecode(#[from] crate::spaceport::DecodeError),
 
     #[error("subgraph trace payload was not base64")]
     Base64Decode(#[from] base64::DecodeError),
@@ -82,7 +82,7 @@ pub(crate) enum Error {
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
-/// [`Reporter`]: apollo_spaceport::Reporter
+/// [`Reporter`]: crate::spaceport::Reporter
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
@@ -96,7 +96,7 @@ pub(crate) struct Exporter {
 }
 
 enum TreeData {
-    Request(Result<Box<apollo_spaceport::Trace>, Error>),
+    Request(Result<Box<crate::spaceport::Trace>, Error>),
     Supergraph {
         http: Http,
         client_name: Option<String>,
@@ -104,7 +104,7 @@ enum TreeData {
         operation_signature: String,
     },
     QueryPlan(QueryPlanNode),
-    Trace(Result<Option<Box<apollo_spaceport::Trace>>, Error>),
+    Trace(Result<Option<Box<crate::spaceport::Trace>>, Error>),
 }
 
 #[buildstructor::buildstructor]
@@ -140,7 +140,7 @@ impl Exporter {
         &mut self,
         span: &SpanData,
         child_nodes: Vec<TreeData>,
-    ) -> Result<Box<apollo_spaceport::Trace>, Error> {
+    ) -> Result<Box<crate::spaceport::Trace>, Error> {
         let variables = span
             .attributes
             .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
@@ -159,7 +159,7 @@ impl Exporter {
 
         let http = self.extract_http_data(span);
 
-        let mut root_trace = apollo_spaceport::Trace {
+        let mut root_trace = crate::spaceport::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
             duration_ns: span
@@ -203,7 +203,7 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(&mut self, span: SpanData) -> Result<Box<apollo_spaceport::Trace>, Error> {
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<crate::spaceport::Trace>, Error> {
         self.extract_data_from_spans(&span, &span)?
             .pop()
             .and_then(|node| {
@@ -246,7 +246,7 @@ impl Exporter {
 
         Ok(match span.name.as_ref() {
             PARALLEL_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
-                node: Some(apollo_spaceport::trace::query_plan_node::Node::Parallel(
+                node: Some(crate::spaceport::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes
                             .into_iter()
@@ -259,7 +259,7 @@ impl Exporter {
                 )),
             })],
             SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlan(QueryPlanNode {
-                node: Some(apollo_spaceport::trace::query_plan_node::Node::Sequence(
+                node: Some(crate::spaceport::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes
                             .into_iter()
@@ -285,7 +285,7 @@ impl Exporter {
                     .as_str())
                 .to_string();
                 vec![TreeData::QueryPlan(QueryPlanNode {
-                    node: Some(apollo_spaceport::trace::query_plan_node::Node::Fetch(
+                    node: Some(crate::spaceport::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
                             service_name,
                             trace_parsing_failed,
@@ -304,7 +304,7 @@ impl Exporter {
             }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlan(QueryPlanNode {
-                    node: Some(apollo_spaceport::trace::query_plan_node::Node::Flatten(
+                    node: Some(crate::spaceport::trace::query_plan_node::Node::Flatten(
                         Box::new(FlattenNode {
                             response_path: span
                                 .attributes
@@ -313,9 +313,9 @@ impl Exporter {
                                 .map(|v| {
                                     v.split('/').filter(|v|!v.is_empty() && *v != "@").map(|v| {
                                         if let Ok(index) = v.parse::<u32>() {
-                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
+                                            ResponsePathElement { id: Some(crate::spaceport::trace::query_plan_node::response_path_element::Id::Index(index))}
                                         } else {
-                                            ResponsePathElement { id: Some(apollo_spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
+                                            ResponsePathElement { id: Some(crate::spaceport::trace::query_plan_node::response_path_element::Id::FieldName(v.to_string())) }
                                         }
                                     }).collect()
                                 }).unwrap_or_default(),
@@ -381,12 +381,12 @@ impl Exporter {
     fn find_ftv1_trace(
         &mut self,
         span: &SpanData,
-    ) -> Result<Option<Box<apollo_spaceport::Trace>>, Error> {
+    ) -> Result<Option<Box<crate::spaceport::Trace>>, Error> {
         span.attributes
             .get(&APOLLO_PRIVATE_FTV1)
             .map(|data| {
                 if let Value::String(data) = data {
-                    Ok(Box::new(apollo_spaceport::Trace::decode(Cursor::new(
+                    Ok(Box::new(crate::spaceport::Trace::decode(Cursor::new(
                         base64::decode(data.to_string())?,
                     ))?))
                 } else {
@@ -404,16 +404,16 @@ impl Exporter {
             .unwrap_or_default()
             .as_ref()
         {
-            "OPTIONS" => apollo_spaceport::trace::http::Method::Options,
-            "GET" => apollo_spaceport::trace::http::Method::Get,
-            "HEAD" => apollo_spaceport::trace::http::Method::Head,
-            "POST" => apollo_spaceport::trace::http::Method::Post,
-            "PUT" => apollo_spaceport::trace::http::Method::Put,
-            "DELETE" => apollo_spaceport::trace::http::Method::Delete,
-            "TRACE" => apollo_spaceport::trace::http::Method::Trace,
-            "CONNECT" => apollo_spaceport::trace::http::Method::Connect,
-            "PATCH" => apollo_spaceport::trace::http::Method::Patch,
-            _ => apollo_spaceport::trace::http::Method::Unknown,
+            "OPTIONS" => crate::spaceport::trace::http::Method::Options,
+            "GET" => crate::spaceport::trace::http::Method::Get,
+            "HEAD" => crate::spaceport::trace::http::Method::Head,
+            "POST" => crate::spaceport::trace::http::Method::Post,
+            "PUT" => crate::spaceport::trace::http::Method::Put,
+            "DELETE" => crate::spaceport::trace::http::Method::Delete,
+            "TRACE" => crate::spaceport::trace::http::Method::Trace,
+            "CONNECT" => crate::spaceport::trace::http::Method::Connect,
+            "PATCH" => crate::spaceport::trace::http::Method::Patch,
+            _ => crate::spaceport::trace::http::Method::Unknown,
         };
         let headers = span
             .attributes
@@ -444,7 +444,7 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
 
         // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut traces: Vec<(String, apollo_spaceport::Trace)> = Vec::new();
+        let mut traces: Vec<(String, crate::spaceport::Trace)> = Vec::new();
         for span in batch {
             if span.name == REQUEST_SPAN_NAME {
                 match self.extract_trace(span) {

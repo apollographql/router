@@ -251,4 +251,4 @@ After the new configuration is deemed valid, the router shifts to it. The previo
 
 Unit testing of a plugin is typically most helpful and there are extensive examples of plugin testing in the examples and plugins directories.
 
-> If you need an unique identifier for your request, we generate a `RequestId` in the orinating request extensions. You can get it by writing `req.supergraph_request.extensions().get::<RequestId>().expect("request id must be set").clone()` in a `map_request` callback.
+> If you need a unique identifier for your request, use the functionality provided in the `apollo_router::tracer` module.

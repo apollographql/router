@@ -69,11 +69,10 @@ impl TracingTest {
                 .args([
                     "--hr",
                     "--config",
-                    &test_config_location.to_string_lossy().to_string(),
+                    &test_config_location.to_string_lossy(),
                     "--supergraph",
                     &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
-                        .to_string_lossy()
-                        .to_string(),
+                        .to_string_lossy(),
                 ])
                 .spawn()
                 .expect("Router should start"),

@@ -38,7 +38,16 @@ git config --local core.hooksPath .githooks/
 Use `cargo build --all-targets` to build the project.
 
 Some tests run against the existing Node.js implementation of the Apollo Router. This
-requires that the `federation-demo` project is running:
+requires that the `federation-demo` project is running. 
+
+First, initialize and update required git submodules. 
+
+```
+git submodule init
+git submodule update
+```
+
+Then, start the service: 
 
 ```
 docker-compose up -d

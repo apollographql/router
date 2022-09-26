@@ -47,7 +47,7 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
-mod axum_http_server_factory;
+mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
@@ -66,10 +66,12 @@ mod response;
 mod router;
 mod router_factory;
 pub mod services;
+mod spaceport;
 mod spec;
 mod state_machine;
 mod test_harness;
 pub mod tracer;
+mod uplink;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -81,6 +83,7 @@ pub use crate::router::ConfigurationSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
+pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 
 /// Not part of the public API

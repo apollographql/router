@@ -173,8 +173,8 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::query_planner::fetch": {
-              "name": "apollo_router::query_planner::fetch",
+            "apollo_router::query_planner::execution::fetch": {
+              "name": "apollo_router::query_planner::execution::fetch",
               "record": {
                 "entries": [
                   [
@@ -192,9 +192,9 @@ expression: get_spans()
                 ],
                 "metadata": {
                   "name": "fetch",
-                  "target": "apollo_router::query_planner",
+                  "target": "apollo_router::query_planner::execution",
                   "level": "INFO",
-                  "module_path": "apollo_router::query_planner",
+                  "module_path": "apollo_router::query_planner::execution",
                   "fields": {
                     "names": [
                       "otel.kind",

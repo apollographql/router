@@ -118,234 +118,419 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
-          "type": "array",
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": [
-                  "insert"
-                ],
-                "properties": {
-                  "insert": {
+          "type": "object",
+          "required": [
+            "request"
+          ],
+          "properties": {
+            "request": {
+              "description": "Propagate/Insert/Remove headers from request",
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "required": [
-                      "name",
-                      "value"
+                      "insert"
                     ],
                     "properties": {
-                      "name": {
-                        "type": "string"
-                      },
-                      "value": {
-                        "type": "string"
+                      "insert": {
+                        "description": "Insert header",
+                        "anyOf": [
+                          {
+                            "description": "Insert static header",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "value"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                            "type": "object",
+                            "required": [
+                              "from_context",
+                              "name"
+                            ],
+                            "properties": {
+                              "from_context": {
+                                "description": "Specify context key to fetch value",
+                                "type": "string"
+                              },
+                              "name": {
+                                "description": "Specify header name",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Insert header with a value coming from body",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "path"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "remove"
+                    ],
+                    "properties": {
+                      "remove": {
+                        "description": "Remove header",
+                        "oneOf": [
+                          {
+                            "description": "Remove a header given a header name",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "named": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Remove a header given a regex matching header name",
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "propagate"
+                    ],
+                    "properties": {
+                      "propagate": {
+                        "description": "Propagate header",
+                        "anyOf": [
+                          {
+                            "description": "Propagate header given a header name",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "named": {
+                                "type": "string"
+                              },
+                              "rename": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Propagate header given a regex to match header name",
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
                   }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "remove"
-                ],
-                "properties": {
-                  "remove": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "named": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "propagate"
-                ],
-                "properties": {
-                  "propagate": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "default": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "named": {
-                            "type": "string"
-                          },
-                          "rename": {
-                            "type": "string",
-                            "nullable": true
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
+                ]
               }
-            ]
-          }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         },
         "subgraphs": {
           "type": "object",
           "additionalProperties": {
-            "type": "array",
-            "items": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "required": [
-                    "insert"
-                  ],
-                  "properties": {
-                    "insert": {
+            "type": "object",
+            "required": [
+              "request"
+            ],
+            "properties": {
+              "request": {
+                "description": "Propagate/Insert/Remove headers from request",
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
                       "type": "object",
                       "required": [
-                        "name",
-                        "value"
+                        "insert"
                       ],
                       "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "value": {
-                          "type": "string"
+                        "insert": {
+                          "description": "Insert header",
+                          "anyOf": [
+                            {
+                              "description": "Insert static header",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "value"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                              "type": "object",
+                              "required": [
+                                "from_context",
+                                "name"
+                              ],
+                              "properties": {
+                                "from_context": {
+                                  "description": "Specify context key to fetch value",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "description": "Specify header name",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Insert header with a value coming from body",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "path"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "remove"
+                      ],
+                      "properties": {
+                        "remove": {
+                          "description": "Remove header",
+                          "oneOf": [
+                            {
+                              "description": "Remove a header given a header name",
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "named": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Remove a header given a regex matching header name",
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "propagate"
+                      ],
+                      "properties": {
+                        "propagate": {
+                          "description": "Propagate header",
+                          "anyOf": [
+                            {
+                              "description": "Propagate header given a header name",
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "named": {
+                                  "type": "string"
+                                },
+                                "rename": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Propagate header given a regex to match header name",
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
                         }
                       },
                       "additionalProperties": false
                     }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "remove"
-                  ],
-                  "properties": {
-                    "remove": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "named": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "propagate"
-                  ],
-                  "properties": {
-                    "propagate": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "default": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "named": {
-                              "type": "string"
-                            },
-                            "rename": {
-                              "type": "string",
-                              "nullable": true
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
+                  ]
                 }
-              ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:8088",
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:8088",
+          "default": "127.0.0.1:8088",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
             }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "homepage": {
+      "description": "Configuration options pertaining to the home page.",
+      "default": {
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "include_subgraph_errors": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "default": false,
+          "type": "boolean"
+        },
+        "subgraphs": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
           }
         }
       },
@@ -364,23 +549,6 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
-        },
-        "experimental.include_subgraph_errors": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "default": false,
-              "type": "boolean"
-            },
-            "subgraphs": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -400,15 +568,23 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "sandbox": {
+      "description": "Configuration options pertaining to the sandbox page.",
+      "default": {
+        "enabled": false
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "listen": "127.0.0.1:4000",
-        "introspection": true,
-        "landing_page": true,
-        "graphql_path": "/",
-        "health_check_path": "/.well-known/apollo/server-health",
-        "preview_defer_support": true,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
@@ -419,25 +595,23 @@ expression: "&schema"
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
-        },
-        "graphql_path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
-          "type": "string"
-        },
+        }
+      },
+      "additionalProperties": false
+    },
+    "supergraph": {
+      "description": "Configuration options pertaining to the supergraph server component.",
+      "default": {
+        "listen": "127.0.0.1:4000",
+        "path": "/",
+        "introspection": false,
+        "preview_defer_support": true
+      },
+      "type": "object",
+      "properties": {
         "introspection": {
-          "description": "introspection queries enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "landing_page": {
-          "description": "display landing page enabled by default",
-          "default": true,
+          "description": "Enable introspection Default: false",
+          "default": false,
           "type": "boolean"
         },
         "listen": {
@@ -454,8 +628,12 @@ expression: "&schema"
             }
           ]
         },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
         "preview_defer_support": {
-          "description": "Preview @defer directive support default: true",
           "default": true,
           "type": "boolean"
         }
@@ -1409,61 +1587,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1471,32 +1599,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {
@@ -1667,61 +1770,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1729,32 +1782,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {

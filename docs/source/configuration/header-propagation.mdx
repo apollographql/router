@@ -11,16 +11,17 @@ You define header rules in your [YAML configuration file](./overview/#yaml-confi
 # ...other configuration...
 headers:
   all: # Header rules for all subgraphs
-    - propagate:
-        matching: ^upstream-header-.*
-    - remove:
-        named: "x-legacy-account-id"
+    request:
+      - propagate:
+          matching: ^upstream-header-.*
+      - remove:
+          named: "x-legacy-account-id"
   subgraphs:
     products: # Header rules for just the products subgraph
-    - insert:
-        name: "router-subgraph-name"
-        value: "products"
-
+      request:
+        - insert:
+            name: "router-subgraph-name"
+            value: "products"
 ```
 
 ## Supported header rules
@@ -37,8 +38,8 @@ You can specify which headers to propagate based on a matching [regex pattern](h
 - propagate:
     matching: .*
 ```
-> **Note:** The Apollo Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
 
+> **Note:** The Apollo Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
 
 Alternatively, you can provide a static string via the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
@@ -47,9 +48,9 @@ Alternatively, you can provide a static string via the `named` option. These `na
 
 ```yaml
 - propagate:
-      named: "x-user-id"
-      default: "abc123"
-      rename: "account-id"
+    named: "x-user-id"
+    default: "abc123"
+    rename: "account-id"
 ```
 
 ### `remove`
@@ -67,13 +68,66 @@ Enables you to selectively remove headers that were included in the client's req
 
 ### `insert`
 
-Enables you to add custom headers to requests going to a specific subgraph. These headers are always static strings that originate in the router, instead of originating in the client.
+Enables you to add custom headers to requests going to a specific subgraph. These headers are strings (statics, coming from request body or from context) that originate in the router, instead of originating in the client.
+
+- Insert static header
 
 ```yaml
 - insert:
     name: "sent-from-our-apollo-router"
     value: "indeed"
 ```
+
+- Insert header from context
+
+```yaml
+- insert:
+    name: "sent-from-our-apollo-router-context"
+    from_context: "my_key_in_context"
+```
+
+- Insert header from request body
+
+```yaml
+- insert:
+    name: "sent-from-our-apollo-router-request-body"
+    path: ".operationName" # It's a JSON path query to fetch the operation name from request body
+    default: "UNKNOWN" # If no operationName has been specified
+```
+
+> Example JSON path queries
+>
+> Let's say you have a JSON request body with the following structure:
+>
+> ```json
+> {
+>   "query": "{ products { id name } }",
+>   "extensions": {
+>     "metadata": [
+>       {
+>         "app_name": "random_app_name"
+>       }
+>     ]
+>   }
+> }
+> ```
+>
+> To fetch the value of the field `app_name`, the corresponding path is `.extensions.metadata[0].app_name`.
+>
+> JSON path queries always begin with a period `.`
+>
+> With this configuration:
+>
+> ```yaml
+> headers:
+>   all:
+>     request:
+>       - insert:
+>           name: from_app_name
+>           path: .extensions.metadata[0].app_name
+> ```
+>
+> You will pass a header to all your subgraphs: `"from_app_name": "random_app_name"`
 
 ## Rule ordering
 
@@ -83,11 +137,12 @@ Header rules are applied in the same order they're declared, and later rules can
 
 ```yaml title="bad_configuration.yaml"
 headers:
-all:
-  - remove:
-    named: "test"
-  - propagate:
-    matching: .*
+  all:
+    request:
+      - remove:
+        named: "test"
+      - propagate:
+        matching: .*
 ```
 
 In this example, first any header named `test` is removed from the list of headers to propagate. However, _the list of headers to propagate is currently empty!_ Next, the `propagate` rule adds _all_ headers to the propagation list, _including_ `test`.
@@ -98,11 +153,12 @@ To correctly remove a header from the propagation list, make sure to define your
 
 ```yaml title="good_configuration.yaml"
 headers:
-all:
-  - propagate:
-    matching: .*
-  - remove:
-    named: "test"
+  all:
+    request:
+      - propagate:
+        matching: .*
+      - remove:
+        named: "test"
 ```
 
 With this ordering, first all headers are added to the propagation list, then the `test` header is removed.
@@ -115,34 +171,37 @@ Here's a complete example showing all the possible configuration options in use:
 headers:
   # Header rules for all subgraphs
   all:
-  # Propagate matching headers
-  - propagate:
-      matching: ^upstream-header-.*
-  # Propagate matching headers
-  - propagate:
-      named: "some-header"
-      default: "default-value"
-      rename: "destination-header"
-  # Remove the "x-legacy-account-id" header
-  - remove:
-      named: "x-legacy-account-id"
-  # Remove matching headers
-  - remove:
-      matching: ^x-deprecated-.*
-  # Insert the 'my-company' header
-  - insert:
-      name: "my-company"
-      value: "acme"
+    request:
+      # Propagate matching headers
+      - propagate:
+          matching: ^upstream-header-.*
+      # Propagate matching headers
+      - propagate:
+          named: "some-header"
+          default: "default-value"
+          rename: "destination-header"
+      # Remove the "x-legacy-account-id" header
+      - remove:
+          named: "x-legacy-account-id"
+      # Remove matching headers
+      - remove:
+          matching: ^x-deprecated-.*
+      # Insert the 'my-company' header
+      - insert:
+          name: "my-company"
+          value: "acme"
   # Subgraph-specific header rules
   subgraphs:
     products:
-      # Calls to the products subgraph have the "router-subgraph-name" header set to `products`.
-      - insert:
-          name: "router-subgraph-name"
-          value: "products"
+      request:
+        # Calls to the products subgraph have the "router-subgraph-name" header set to `products`.
+        - insert:
+            name: "router-subgraph-name"
+            value: "products"
     accounts:
-      # Calls to the accounts subgraph have the "router-subgraph-name" header set to `accounts`.
-      - insert:
-          name: "router-subgraph-name"
-          value: "accounts"
+      request:
+        # Calls to the accounts subgraph have the "router-subgraph-name" header set to `accounts`.
+        - insert:
+            name: "router-subgraph-name"
+            value: "accounts"
 ```

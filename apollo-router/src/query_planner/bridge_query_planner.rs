@@ -12,12 +12,14 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
+use serde_json_bytes::json;
 use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
+use super::TYPENAME;
 use crate::error::QueryPlannerError;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -53,7 +55,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.server.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.preview_defer_support),
                         }),
                     },
                 )
@@ -120,18 +122,18 @@ impl BridgeQueryPlanner {
                     },
                 usage_reporting,
             } => {
-                let subselections = node.parse_subselections(&*self.schema);
+                let subselections = node.parse_subselections(&*self.schema)?;
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
+                        query: Arc::new(selections),
                         options: QueryPlanOptions {
                             enable_deduplicate_variables: self.deduplicate_variables,
                         },
                     }),
-                    query: Arc::new(selections),
                 })
             }
             PlanSuccess {
@@ -222,7 +224,18 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            return self.introspection(key.0).await;
+            // If we have only one operation containing a single root field `__typename`
+            if selections.contains_only_typename() {
+                return Ok(QueryPlannerContent::Introspection {
+                    response: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
+                            .build(),
+                    ),
+                });
+            } else {
+                return self.introspection(key.0).await;
+            }
         }
 
         self.plan(key.0, key.1, selections).await

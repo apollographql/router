@@ -173,23 +173,23 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::query_planner::sequence": {
-              "name": "apollo_router::query_planner::sequence",
+            "apollo_router::query_planner::execution::sequence": {
+              "name": "apollo_router::query_planner::execution::sequence",
               "record": {
                 "entries": [],
                 "metadata": {
                   "name": "sequence",
-                  "target": "apollo_router::query_planner",
+                  "target": "apollo_router::query_planner::execution",
                   "level": "INFO",
-                  "module_path": "apollo_router::query_planner",
+                  "module_path": "apollo_router::query_planner::execution",
                   "fields": {
                     "names": []
                   }
                 }
               },
               "children": {
-                "apollo_router::query_planner::fetch": {
-                  "name": "apollo_router::query_planner::fetch",
+                "apollo_router::query_planner::execution::fetch": {
+                  "name": "apollo_router::query_planner::execution::fetch",
                   "record": {
                     "entries": [
                       [
@@ -207,9 +207,9 @@ expression: get_spans()
                     ],
                     "metadata": {
                       "name": "fetch",
-                      "target": "apollo_router::query_planner",
+                      "target": "apollo_router::query_planner::execution",
                       "level": "INFO",
-                      "module_path": "apollo_router::query_planner",
+                      "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": [
                           "otel.kind",
@@ -385,8 +385,8 @@ expression: get_spans()
                     }
                   }
                 },
-                "apollo_router::query_planner::flatten": {
-                  "name": "apollo_router::query_planner::flatten",
+                "apollo_router::query_planner::execution::flatten": {
+                  "name": "apollo_router::query_planner::execution::flatten",
                   "record": {
                     "entries": [
                       [
@@ -396,9 +396,9 @@ expression: get_spans()
                     ],
                     "metadata": {
                       "name": "flatten",
-                      "target": "apollo_router::query_planner",
+                      "target": "apollo_router::query_planner::execution",
                       "level": "INFO",
-                      "module_path": "apollo_router::query_planner",
+                      "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": [
                           "apollo_private.path"
@@ -407,8 +407,8 @@ expression: get_spans()
                     }
                   },
                   "children": {
-                    "apollo_router::query_planner::fetch": {
-                      "name": "apollo_router::query_planner::fetch",
+                    "apollo_router::query_planner::execution::fetch": {
+                      "name": "apollo_router::query_planner::execution::fetch",
                       "record": {
                         "entries": [
                           [
@@ -426,9 +426,9 @@ expression: get_spans()
                         ],
                         "metadata": {
                           "name": "fetch",
-                          "target": "apollo_router::query_planner",
+                          "target": "apollo_router::query_planner::execution",
                           "level": "INFO",
-                          "module_path": "apollo_router::query_planner",
+                          "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
                               "otel.kind",
@@ -606,23 +606,23 @@ expression: get_spans()
                     }
                   }
                 },
-                "apollo_router::query_planner::parallel": {
-                  "name": "apollo_router::query_planner::parallel",
+                "apollo_router::query_planner::execution::parallel": {
+                  "name": "apollo_router::query_planner::execution::parallel",
                   "record": {
                     "entries": [],
                     "metadata": {
                       "name": "parallel",
-                      "target": "apollo_router::query_planner",
+                      "target": "apollo_router::query_planner::execution",
                       "level": "INFO",
-                      "module_path": "apollo_router::query_planner",
+                      "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": []
                       }
                     }
                   },
                   "children": {
-                    "apollo_router::query_planner::flatten": {
-                      "name": "apollo_router::query_planner::flatten",
+                    "apollo_router::query_planner::execution::flatten": {
+                      "name": "apollo_router::query_planner::execution::flatten",
                       "record": {
                         "entries": [
                           [
@@ -632,9 +632,9 @@ expression: get_spans()
                         ],
                         "metadata": {
                           "name": "flatten",
-                          "target": "apollo_router::query_planner",
+                          "target": "apollo_router::query_planner::execution",
                           "level": "INFO",
-                          "module_path": "apollo_router::query_planner",
+                          "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
                               "apollo_private.path"
@@ -643,8 +643,8 @@ expression: get_spans()
                         }
                       },
                       "children": {
-                        "apollo_router::query_planner::fetch": {
-                          "name": "apollo_router::query_planner::fetch",
+                        "apollo_router::query_planner::execution::fetch": {
+                          "name": "apollo_router::query_planner::execution::fetch",
                           "record": {
                             "entries": [
                               [
@@ -662,9 +662,9 @@ expression: get_spans()
                             ],
                             "metadata": {
                               "name": "fetch",
-                              "target": "apollo_router::query_planner",
+                              "target": "apollo_router::query_planner::execution",
                               "level": "INFO",
-                              "module_path": "apollo_router::query_planner",
+                              "module_path": "apollo_router::query_planner::execution",
                               "fields": {
                                 "names": [
                                   "otel.kind",
@@ -842,8 +842,8 @@ expression: get_spans()
                         }
                       }
                     },
-                    "apollo_router::query_planner::flatten": {
-                      "name": "apollo_router::query_planner::flatten",
+                    "apollo_router::query_planner::execution::flatten": {
+                      "name": "apollo_router::query_planner::execution::flatten",
                       "record": {
                         "entries": [
                           [
@@ -853,9 +853,9 @@ expression: get_spans()
                         ],
                         "metadata": {
                           "name": "flatten",
-                          "target": "apollo_router::query_planner",
+                          "target": "apollo_router::query_planner::execution",
                           "level": "INFO",
-                          "module_path": "apollo_router::query_planner",
+                          "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
                               "apollo_private.path"
@@ -864,8 +864,8 @@ expression: get_spans()
                         }
                       },
                       "children": {
-                        "apollo_router::query_planner::fetch": {
-                          "name": "apollo_router::query_planner::fetch",
+                        "apollo_router::query_planner::execution::fetch": {
+                          "name": "apollo_router::query_planner::execution::fetch",
                           "record": {
                             "entries": [
                               [
@@ -883,9 +883,9 @@ expression: get_spans()
                             ],
                             "metadata": {
                               "name": "fetch",
-                              "target": "apollo_router::query_planner",
+                              "target": "apollo_router::query_planner::execution",
                               "level": "INFO",
-                              "module_path": "apollo_router::query_planner",
+                              "module_path": "apollo_router::query_planner::execution",
                               "fields": {
                                 "names": [
                                   "otel.kind",

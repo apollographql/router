@@ -13,12 +13,13 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::graphql;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::transport;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
@@ -26,7 +27,7 @@ use crate::Schema;
 
 #[derive(Clone)]
 pub struct Endpoint {
-    path: String,
+    pub(crate) path: String,
     // Plugins need to be Send + Sync
     // BoxCloneService isn't enough
     handler: Handler,
@@ -66,15 +67,11 @@ impl Endpoint {
 /// Instances of this traits are used by the HTTP server to generate a new
 /// SupergraphService on each request
 pub(crate) trait SupergraphServiceFactory:
-    NewService<http::Request<graphql::Request>, Service = Self::SupergraphService>
-    + Clone
-    + Send
-    + Sync
-    + 'static
+    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
 {
     type SupergraphService: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<graphql::ResponseStream>,
+            SupergraphRequest,
+            Response = SupergraphResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -173,7 +170,7 @@ async fn create_plugins(
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
     let mandatory_plugins = vec![
-        "experimental.include_subgraph_errors",
+        "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
     ];
@@ -272,7 +269,13 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(?plugin_details, "list of plugins");
+    tracing::debug!(
+        "plugins list: {:?}",
+        plugin_details
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&&String>>()
+    );
 
     if !errors.is_empty() {
         for error in &errors {
@@ -391,7 +394,7 @@ mod test {
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
-        let config = Configuration::builder().build();
+        let config = Configuration::builder().build().unwrap();
         let service = create_service(config).await;
         assert!(service.is_ok())
     }
