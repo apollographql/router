@@ -117,4 +117,10 @@ This removes `tower::Buffer` usage from the Automated Persisted Queries implemen
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
 
+### Remove `Buffer` from query deduplication ([PR #1889](https://github.com/apollographql/router/pull/1889))
+
+This removes `tower::Buffer` usage from the query deduplication implementation to improve reliability.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1889
+
 ## 📚 Documentation
