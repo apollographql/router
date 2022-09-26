@@ -264,7 +264,7 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo nextest run --workspace --locked
+            - run: RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo nextest run --workspace --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
@@ -416,6 +416,7 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
+                  sudo apt-get install lld
             - run:
                 command: >
                   cargo xtask dist
