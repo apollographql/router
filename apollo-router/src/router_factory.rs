@@ -132,7 +132,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         for (name, _) in schema.subgraphs() {
             builder = builder.with_subgraph_service(
                 name,
-                option_layer(deduplicate_queries.then(|| QueryDeduplicationLayer::default()))
+                option_layer(deduplicate_queries.then(QueryDeduplicationLayer::default))
                     .layer(SubgraphService::new(name)),
             );
         }
