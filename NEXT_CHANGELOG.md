@@ -79,6 +79,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
+
+Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
+
 ### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
 
 This splits the query plan execution in multiple modules to make the code more manageable.
