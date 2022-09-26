@@ -46,9 +46,11 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+#[cfg(not(feature = "console"))]
 use tracing_subscriber::field::MakeExt;
 use tracing_subscriber::field::RecordFields;
 use tracing_subscriber::field::VisitOutput;
+#[cfg(not(feature = "console"))]
 use tracing_subscriber::fmt::format::debug_fn;
 use tracing_subscriber::fmt::format::JsonVisitor;
 use tracing_subscriber::fmt::format::Writer;
@@ -109,7 +111,6 @@ pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
-pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
