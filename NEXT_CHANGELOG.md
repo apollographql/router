@@ -130,4 +130,14 @@ This removes `tower::Buffer` usage from the query deduplication implementation t
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1889
 
+### Set MSRV to 1.63.0 ([PR #1886](https://github.com/apollographql/router/issues/1886))
+
+We compile and test with 1.63.0 on CI at the moment,
+so it is our de-facto minimum supported rust version.
+Setting [`rust-version`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field)
+in `Cargo.toml` provides a more helpful error message when using an older version
+that random compilation errors.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/1886
+
 ## 📚 Documentation
