@@ -303,7 +303,7 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
 
                 info_span!(SUBGRAPH_SPAN_NAME,
-                    "subgraph.name" = name.as_str(),
+                    "apollo.subgraph.name" = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,

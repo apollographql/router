@@ -158,7 +158,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),
                     "net.transport" = "ip_tcp",
-                    "subgraph.name" = %service_name
+                    "apollo.subgraph.name" = %service_name
                 ))
                 .await
                 .map_err(|err| {
