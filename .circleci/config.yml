@@ -269,7 +269,7 @@ commands:
                 command: |
                   sudo apt-get update
                   sudo apt-get install lld
-            - run: cargo nextest run --workspace --locked
+            - run: cargo test run --jobs 4 --workspace --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
