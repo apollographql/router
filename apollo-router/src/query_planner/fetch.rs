@@ -295,11 +295,30 @@ impl FetchNode {
         let mut errors: Vec<Error> = response
             .errors
             .into_iter()
-            .map(|error| Error {
-                locations: error.locations,
-                path: error.path.map(|path| current_dir.join(path)),
-                message: error.message,
-                extensions: error.extensions,
+            .map(|error| {
+                let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
+                    &current_dir.0[..current_dir.0.len() - 1]
+                } else {
+                    &current_dir.0[..]
+                };
+
+                let path = if self.requires.is_empty() {
+                    error.path.as_ref().map(|path| {
+                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                    })
+                } else {
+                    // remove `_entities` from the beginning of the path
+                    error.path.as_ref().map(|path| {
+                        Path::from_iter(current_slice.iter().chain(&path.0[1..]).cloned())
+                    })
+                };
+
+                Error {
+                    locations: error.locations,
+                    path,
+                    message: error.message,
+                    extensions: error.extensions,
+                }
             })
             .collect();
 
