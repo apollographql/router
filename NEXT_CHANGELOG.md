@@ -93,6 +93,12 @@ By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/rout
 
 ## 🛠 Maintenance
 
+### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
+
+Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
+
 ### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
 
 Avoids redundant work in CI and makes the YAML configuration less mis-leading.

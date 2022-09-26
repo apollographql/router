@@ -175,7 +175,7 @@ impl PlanNode {
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
                             "otel.kind" = %SpanKind::Internal,
-                            "service.name" = fetch_node.service_name.as_str(),
+                            "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
                         .await
