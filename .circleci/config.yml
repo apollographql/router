@@ -53,6 +53,10 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-linux-amd64 jaeger
       - install_minimal_rust
+      - run:
+          name: Download nextest
+          shell: bash.exe
+          command: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
   macos_install_baseline:
     steps:
@@ -63,6 +67,10 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-darwin-amd64 jaeger
       - install_minimal_rust
+      - run:
+          name: Download nextest
+          shell: bash.exe
+          command: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
   windows_install_baseline:
     steps:
@@ -228,6 +236,10 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
       - run: cargo test --workspace --locked
+      - run:
+          name: Download nextest
+          shell: bash.exe
+          command: curl -LsSf https://get.nexte.st/latest/windows-tar | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -254,12 +266,12 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked -- --test-threads=4
+            - run: cargo nextest run --jobs 4 --workspace --locked -- --test-threads=4
       - when:
           condition:
             equal: [macos, << parameters.os >>]
           steps:
-            - run: cargo test --workspace --locked
+            - run: cargo nextest --workspace --locked
 
       - save_cache:
           name: Save .cargo
