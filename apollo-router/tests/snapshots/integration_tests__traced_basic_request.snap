@@ -173,8 +173,8 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::query_planner::fetch": {
-              "name": "apollo_router::query_planner::fetch",
+            "apollo_router::query_planner::execution::fetch": {
+              "name": "apollo_router::query_planner::execution::fetch",
               "record": {
                 "entries": [
                   [
@@ -182,7 +182,7 @@ expression: get_spans()
                     "internal"
                   ],
                   [
-                    "service.name",
+                    "apollo.subgraph.name",
                     "products"
                   ],
                   [
@@ -192,13 +192,13 @@ expression: get_spans()
                 ],
                 "metadata": {
                   "name": "fetch",
-                  "target": "apollo_router::query_planner",
+                  "target": "apollo_router::query_planner::execution",
                   "level": "INFO",
-                  "module_path": "apollo_router::query_planner",
+                  "module_path": "apollo_router::query_planner::execution",
                   "fields": {
                     "names": [
                       "otel.kind",
-                      "service.name",
+                      "apollo.subgraph.name",
                       "apollo_private.sent_time_offset"
                     ]
                   }
@@ -226,7 +226,7 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "name",
+                        "apollo.subgraph.name",
                         "products"
                       ],
                       [
@@ -249,7 +249,7 @@ expression: get_spans()
                       "module_path": "apollo_router::plugins::telemetry",
                       "fields": {
                         "names": [
-                          "name",
+                          "apollo.subgraph.name",
                           "graphql.document",
                           "graphql.operation.name",
                           "otel.kind",
@@ -298,6 +298,10 @@ expression: get_spans()
                           [
                             "net.transport",
                             "ip_tcp"
+                          ],
+                          [
+                            "apollo.subgraph.name",
+                            "products"
                           ]
                         ],
                         "metadata": {
@@ -311,7 +315,8 @@ expression: get_spans()
                               "net.peer.name",
                               "net.peer.port",
                               "http.route",
-                              "net.transport"
+                              "net.transport",
+                              "apollo.subgraph.name"
                             ]
                           }
                         }

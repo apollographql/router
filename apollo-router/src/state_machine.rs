@@ -446,13 +446,14 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::graphql;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
     use crate::router_factory::Endpoint;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::SupergraphServiceFactory;
     use crate::services::new_service::NewService;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -672,10 +673,10 @@ mod tests {
 
         impl SupergraphServiceFactory for MyRouterFactory {
             type SupergraphService = MockMyRouter;
-            type Future = <Self::SupergraphService as Service<http::Request<graphql::Request>>>::Future;
+            type Future = <Self::SupergraphService as Service<SupergraphRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
-        impl  NewService<http::Request<graphql::Request>> for MyRouterFactory {
+        impl  NewService<SupergraphRequest> for MyRouterFactory {
             type Service = MockMyRouter;
             fn new_service(&self) -> MockMyRouter;
         }
@@ -689,7 +690,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: http::Request<crate::graphql::Request>) -> <MockMyRouter as Service<http::Request<crate::graphql::Request>>>::Future;
+            fn service_call(&mut self, req: SupergraphRequest) -> <MockMyRouter as Service<SupergraphRequest>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -698,15 +699,15 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<http::Request<crate::graphql::Request>> for MockMyRouter {
-        type Response = http::Response<graphql::ResponseStream>;
+    impl Service<SupergraphRequest> for MockMyRouter {
+        type Response = SupergraphResponse;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: http::Request<crate::graphql::Request>) -> Self::Future {
+        fn call(&mut self, req: SupergraphRequest) -> Self::Future {
             self.service_call(req)
         }
     }
@@ -746,10 +747,9 @@ mod tests {
         events: Vec<Event>,
     ) -> Result<(), ApolloRouterError> {
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let result = state_machine
+        state_machine
             .process_events(stream::iter(events).boxed())
-            .await;
-        result
+            .await
     }
 
     fn create_mock_server_factory(

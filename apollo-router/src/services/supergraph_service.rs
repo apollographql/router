@@ -31,7 +31,6 @@ use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use super::MULTIPART_DEFER_SPEC_PARAMETER;
 use super::MULTIPART_DEFER_SPEC_VALUE;
-use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -42,7 +41,6 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
-use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::Configuration;
 use crate::Context;
@@ -381,14 +379,11 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-
         Ok(RouterCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
             plugins,
-            apq,
         })
     }
 }
@@ -400,34 +395,21 @@ pub(crate) struct RouterCreator {
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    apq: APQLayer,
 }
 
-impl NewService<http::Request<graphql::Request>> for RouterCreator {
-    type Service = BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >;
+impl NewService<SupergraphRequest> for RouterCreator {
+    type Service = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
     fn new_service(&self) -> Self::Service {
-        self.make()
-            .map_request(|http_request: http::Request<graphql::Request>| http_request.into())
-            .map_response(|response| response.response)
-            .boxed()
+        self.make().boxed()
     }
 }
 
 impl SupergraphServiceFactory for RouterCreator {
-    type SupergraphService = BoxService<
-        http::Request<graphql::Request>,
-        http::Response<graphql::ResponseStream>,
-        BoxError,
-    >;
+    type SupergraphService = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
 
-    type Future =
-        <<RouterCreator as NewService<http::Request<graphql::Request>>>::Service as Service<
-            http::Request<graphql::Request>,
-        >>::Future;
+    type Future = <<RouterCreator as NewService<SupergraphRequest>>::Service as Service<
+        SupergraphRequest,
+    >>::Future;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
@@ -448,7 +430,6 @@ impl RouterCreator {
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
         ServiceBuilder::new()
-            .layer(self.apq.clone())
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins.iter().rev().fold(

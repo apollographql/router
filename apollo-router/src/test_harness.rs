@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 
 use crate::configuration::Configuration;
@@ -13,6 +14,7 @@ use crate::plugin::PluginInit;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::services::execution;
+use crate::services::layers::apq::APQLayer;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::RouterCreator;
@@ -202,14 +204,19 @@ impl<'a> TestHarness<'a> {
         let router_creator = YamlSupergraphServiceFactory
             .create(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
+
         Ok((config, router_creator))
     }
 
     /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
+        let apq = APQLayer::new().await;
+
         Ok(tower::service_fn(move |request| {
-            let service = router_creator.make();
+            // APQ must be added here because it is implemented in the HTTP server
+            let service = apq.layer(router_creator.make()).boxed();
+
             async move { service.oneshot(request).await }
         })
         .boxed_clone())
@@ -217,13 +224,15 @@ impl<'a> TestHarness<'a> {
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_http_server_factory::make_axum_router;
-        use crate::axum_http_server_factory::ListenAddrAndRouter;
+        use crate::axum_factory::make_axum_router;
+        use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::SupergraphServiceFactory;
 
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();
-        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
+        let apq = APQLayer::new().await;
+
+        let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }

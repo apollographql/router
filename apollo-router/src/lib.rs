@@ -47,7 +47,7 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
-mod axum_http_server_factory;
+mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
