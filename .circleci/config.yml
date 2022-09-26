@@ -264,7 +264,7 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo nextest run --jobs 4 --workspace --locked
+            - run: cargo nextest run --workspace --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
