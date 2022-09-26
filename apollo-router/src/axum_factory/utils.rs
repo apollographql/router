@@ -25,6 +25,8 @@ use tower_http::trace::MakeSpan;
 use tracing::Level;
 use tracing::Span;
 
+pub(crate) const REQUEST_SPAN_NAME: &str = "request";
+
 pub(super) fn prefers_html(headers: &HeaderMap) -> bool {
     let text_html = MediaType::new(TEXT, HTML);
 
@@ -139,7 +141,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             let _context_guard = context.attach();
             tracing::span!(
                 Level::INFO,
-                "request",
+                REQUEST_SPAN_NAME,
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
@@ -151,7 +153,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             // No remote span, we can go ahead and create the span without context.
             tracing::span!(
                 Level::INFO,
-                "request",
+                REQUEST_SPAN_NAME,
                 method = %request.method(),
                 uri = %request.uri(),
                 version = ?request.version(),
