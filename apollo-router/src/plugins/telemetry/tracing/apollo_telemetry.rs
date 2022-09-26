@@ -16,7 +16,7 @@ use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use thiserror::Error;
 use url::Url;
 
-use crate::axum_http_server_factory::REQUEST_SPAN_NAME;
+use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::Sender;
