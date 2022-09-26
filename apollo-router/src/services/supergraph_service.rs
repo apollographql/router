@@ -7,14 +7,8 @@ use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::header::ACCEPT;
-use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
-use mediatype::names::MIXED;
-use mediatype::names::MULTIPART;
-use mediatype::MediaTypeList;
-use mediatype::ReadParams;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
@@ -34,8 +28,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use super::MULTIPART_DEFER_SPEC_PARAMETER;
-use super::MULTIPART_DEFER_SPEC_VALUE;
+use crate::axum_factory::utils::accepts_multipart;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -202,13 +195,19 @@ where
 
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
-
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-
             if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
+                        .build()])
+                    .build(), context);
+                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+                Ok(response)
+            } else if !is_deferred && accepts_multipart(req.supergraph_request.headers()) {
+                let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
+                    .errors(vec![crate::error::Error::builder()
+                        .message(String::from("the router received a query without the @defer directive but the client accepts multipart/mixed HTTP responses."))
                         .build()])
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
@@ -266,33 +265,6 @@ async fn plan_query(
             "otel.kind" = %SpanKind::Internal
         ))
         .await
-}
-
-fn accepts_multipart(headers: &HeaderMap) -> bool {
-    headers.get_all(ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
-
-                list.any(|mime| {
-                    mime.as_ref()
-                        .map(|mime| {
-                            mime.ty == MULTIPART
-                                && mime.subty == MIXED
-                                && mime.get_param(
-                                    mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER)
-                                        .expect("valid name"),
-                                ) == Some(
-                                    mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE)
-                                        .expect("valid value"),
-                                )
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false)
-    })
 }
 
 fn process_execution_response(

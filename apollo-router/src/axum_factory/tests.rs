@@ -1,4 +1,6 @@
+use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
@@ -6,7 +8,9 @@ use std::sync::Arc;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+use axum::body::BoxBody;
 use futures::stream;
+use futures::stream::poll_fn;
 use futures::StreamExt;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
@@ -14,6 +18,7 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
+use http_body::Body;
 use mockall::mock;
 use multimap::MultiMap;
 use reqwest::header::ACCEPT;
@@ -29,8 +34,11 @@ use reqwest::Method;
 use reqwest::StatusCode;
 use serde_json::json;
 use test_log::test;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio_util::io::StreamReader;
 use tower::service_fn;
 use tower::BoxError;
 use tower::Service;
@@ -183,6 +191,7 @@ async fn init(mut mock: MockSupergraphService) -> (HttpServerHandle, Client) {
         .expect("Failed to create server factory");
     let mut default_headers = HeaderMap::new();
     default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
 
     let client = reqwest::Client::builder()
         .default_headers(default_headers)
@@ -223,6 +232,7 @@ pub(super) async fn init_with_config(
         .await?;
     let mut default_headers = HeaderMap::new();
     default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
 
     let client = reqwest::Client::builder()
         .default_headers(default_headers)
@@ -1062,6 +1072,28 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
 }
 
 #[test(tokio::test)]
+async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
+    let query = "query";
+    let operation_name = "operationName";
+
+    let expectations = MockSupergraphService::new();
+    let (server, client) = init(expectations).await;
+    let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
+    let response = client
+        .post(url.as_str())
+        .header(ACCEPT, "foo/bar")
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "query": query, "operationName": operation_name }).to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE,);
+
+    server.shutdown().await
+}
+
+#[test(tokio::test)]
 async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
     let expectations = MockSupergraphService::new();
     let conf = Configuration::fake_builder()
@@ -1650,7 +1682,12 @@ impl GraphQLResponseCounter {
     }
 }
 
-async fn http_service() -> impl Service<
+enum RequestType {
+    Compressed,
+    Deferred,
+}
+
+async fn http_compressed_service() -> impl Service<
     http::Request<serde_json::Value>,
     Response = http::Response<MaybeMultipart<serde_json::Value>>,
     Error = BoxError,
@@ -1681,21 +1718,88 @@ async fn http_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into);
-    let service = http_client::response_decompression(service);
+
+    let service = http_client::response_decompression(service).map_future(|future| async {
+        let response: http::Response<Pin<Box<dyn AsyncRead + Send>>> = future.await?;
+        let (parts, mut body) = response.into_parts();
+
+        let mut vec = Vec::new();
+        body.read_to_end(&mut vec).await.unwrap();
+        let body = MaybeMultipart::NotMultipart(vec);
+        Ok(http::Response::from_parts(parts, body))
+    });
+    http_client::json(service)
+}
+
+async fn http_deferred_service() -> impl Service<
+    http::Request<serde_json::Value>,
+    Response = http::Response<MaybeMultipart<serde_json::Value>>,
+    Error = BoxError,
+> {
+    let counter = GraphQLResponseCounter::default();
+    let service = TestHarness::builder()
+        .configuration_json(json!({
+            "plugins": {
+                "apollo.include_subgraph_errors": {
+                    "all": true
+                }
+            }
+        }))
+        .unwrap()
+        .supergraph_hook(move |service| {
+            let counter = counter.clone();
+            service
+                .map_response(move |mut response| {
+                    response.response.extensions_mut().insert(counter.clone());
+                    response.map_stream(move |graphql_response| {
+                        counter.increment();
+                        graphql_response
+                    })
+                })
+                .boxed()
+        })
+        .build_http_service()
+        .await
+        .unwrap()
+        .map_err(Into::into)
+        .map_response(|response: http::Response<BoxBody>| {
+            let response = response.map(|body| {
+                // Convert from axum’s BoxBody to AsyncBufRead
+                let mut body = Box::pin(body);
+                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
+                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                StreamReader::new(stream)
+            });
+            response.map(|body| Box::pin(body) as _)
+        });
+
     let service = http_client::defer_spec_20220824_multipart(service);
+
     http_client::json(service)
 }
 
 /// Creates an Apollo Router as an HTTP-level Tower service and makes one request.
 async fn make_request(
     request_body: serde_json::Value,
+    request_type: RequestType,
 ) -> http::Response<MaybeMultipart<serde_json::Value>> {
     let request = http::Request::builder()
         .method(http::Method::POST)
         .header("host", "127.0.0.1")
         .body(request_body)
         .unwrap();
-    http_service().await.oneshot(request).await.unwrap()
+    match request_type {
+        RequestType::Compressed => http_compressed_service()
+            .await
+            .oneshot(request)
+            .await
+            .unwrap(),
+        RequestType::Deferred => http_deferred_service()
+            .await
+            .oneshot(request)
+            .await
+            .unwrap(),
+    }
 }
 
 fn assert_compressed<B>(response: &http::Response<B>, expected: bool) {
@@ -1703,16 +1807,17 @@ fn assert_compressed<B>(response: &http::Response<B>, expected: bool) {
         response
             .extensions()
             .get::<http_client::ResponseBodyWasCompressed>()
-            .unwrap()
-            .0,
+            .map(|e| e.0)
+            .unwrap_or_default(),
         expected
     )
 }
 
 #[tokio::test]
 async fn test_compressed_response() {
-    let response = make_request(json!({
-        "query": "
+    let response = make_request(
+        json!({
+            "query": "
                 query TopProducts($first: Int) { 
                     topProducts(first: $first) { 
                         upc 
@@ -1725,8 +1830,10 @@ async fn test_compressed_response() {
                     } 
                 }
             ",
-        "variables": {"first": 2_u32},
-    }))
+            "variables": {"first": 2_u32},
+        }),
+        RequestType::Compressed,
+    )
     .await;
     assert_compressed(&response, true);
     let status = response.status().as_u16();
@@ -1737,8 +1844,9 @@ async fn test_compressed_response() {
 
 #[tokio::test]
 async fn test_defer_is_not_buffered() {
-    let mut response = make_request(json!({
-        "query": "
+    let mut response = make_request(
+        json!({
+            "query": "
                 query TopProducts($first: Int) { 
                     topProducts(first: $first) { 
                         upc 
@@ -1751,8 +1859,10 @@ async fn test_defer_is_not_buffered() {
                     } 
                 }
             ",
-        "variables": {"first": 2_u32},
-    }))
+            "variables": {"first": 2_u32},
+        }),
+        RequestType::Deferred,
+    )
     .await;
     assert_compressed(&response, false);
     let status = response.status().as_u16();
@@ -1864,6 +1974,7 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> V
 Host: localhost:4100\r
 Content-Length: {}\r
 Content-Type: application/json\r
+Accept: application/json\r
 
 \n",
                 method.as_str(),
@@ -1877,6 +1988,7 @@ Content-Type: application/json\r
 Host: localhost:4100\r
 Content-Length: {}\r
 Content-Type: application/json\r
+Accept: application/json\r
 
 {}\n",
                 method.as_str(),
@@ -1958,22 +2070,7 @@ async fn test_health_check_custom_listener() {
         .build()
         .unwrap();
 
-    let mut expectations = MockSupergraphService::new();
-    expectations.expect_service_call().once().returning(|_| {
-        Ok(SupergraphResponse::new_from_response(
-            http_ext::from_response_to_stream(
-                http::Response::builder()
-                    .status(200)
-                    .body(
-                        graphql::Response::builder()
-                            .data(json!({ "__typename": "Query"}))
-                            .build(),
-                    )
-                    .unwrap(),
-            ),
-            Context::new(),
-        ))
-    });
+    let expectations = MockSupergraphService::new();
 
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(expectations, conf, MultiMap::new())

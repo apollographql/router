@@ -534,6 +534,20 @@ async fn query_just_at_recursion_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn normal_query_with_defer_accept_header() {
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
+
+    assert_eq!(1, actual.errors.len());
+    let err = actual.errors.get(0).unwrap();
+    assert_eq!(err.message.as_str(), "the router received a query without the @defer directive but the client accepts multipart/mixed HTTP responses.");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {
