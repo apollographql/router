@@ -108,6 +108,7 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+pub(crate) mod formatter;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -472,7 +473,10 @@ impl Telemetry {
                 } else if atty::is(atty::Stream::Stdout) {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder.finish().with(telemetry);
+                    let subscriber = sub_builder
+                        .event_format(formatter::MyFormatter)
+                        .finish()
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
