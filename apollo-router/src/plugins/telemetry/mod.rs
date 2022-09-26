@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use ::tracing::field;
+use ::tracing::field::Visit;
 use ::tracing::info_span;
 use ::tracing::span::Record;
 #[cfg(not(feature = "console"))]
@@ -447,7 +448,7 @@ impl Telemetry {
                     if field.name().starts_with("apollo_private.")
                         || field.name().starts_with("otel.")
                     {
-                        write!(writer, "")
+                        Ok(())
                     } else if field.name() == "message" {
                         write!(writer, "{:?}", value)
                     } else {
@@ -457,6 +458,19 @@ impl Telemetry {
                 .delimited(" ")
                 .display_messages();
 
+                let json_formatter = debug_fn(|writer, field, value| {
+                    if field.name().starts_with("apollo_private.")
+                        || field.name().starts_with("otel.")
+                    {
+                        Ok(())
+                    } else {
+                        let mut v = JsonVisitor::new(writer);
+                        v.record_debug(field, value);
+                        v.finish()
+                    }
+                })
+                .delimited(" ")
+                .display_messages();
                 let sub_builder = tracing_subscriber::fmt::fmt()
                     .with_env_filter(
                         EnvFilter::try_new(log_level)
@@ -485,7 +499,8 @@ impl Telemetry {
 
                     let subscriber = sub_builder
                         .json()
-                        .fmt_fields(RouterJsonFields::new())
+                        // .fmt_fields(RouterJsonFields::new())
+                        .fmt_fields(json_formatter)
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
