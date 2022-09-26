@@ -9,6 +9,15 @@ router:
   configuration:
     supergraph:
       listen: 0.0.0.0:80
+    health-check:
+      listen: 0.0.0.0:8088
+    telemetry:
+      metrics:
+        prometheus:
+          enabled: false
+          listen: 0.0.0.0:9090
+          path: "/metrics"
+
   args:
   - --hot-reload
 
@@ -52,6 +61,8 @@ containerPorts:
   http: 80
   # -- For exposing the metrics port when running a serviceMonitor for example
   metrics: 9090
+  # -- For exposing the healthcheck endpoint
+  health: 8088
 
 imagePullSecrets: []
 nameOverride: ""
