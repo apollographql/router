@@ -269,7 +269,7 @@ commands:
           condition:
             equal: [macos, << parameters.os >>]
           steps:
-            - run: cargo nextest --workspace --locked
+            - run: cargo nextest run --workspace --locked
 
       - save_cache:
           name: Save .cargo
