@@ -182,7 +182,7 @@ expression: get_spans()
                     "internal"
                   ],
                   [
-                    "service.name",
+                    "apollo.subgraph.name",
                     "products"
                   ],
                   [
@@ -198,7 +198,7 @@ expression: get_spans()
                   "fields": {
                     "names": [
                       "otel.kind",
-                      "service.name",
+                      "apollo.subgraph.name",
                       "apollo_private.sent_time_offset"
                     ]
                   }
@@ -226,7 +226,7 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "name",
+                        "apollo.subgraph.name",
                         "products"
                       ],
                       [
@@ -249,7 +249,7 @@ expression: get_spans()
                       "module_path": "apollo_router::plugins::telemetry",
                       "fields": {
                         "names": [
-                          "name",
+                          "apollo.subgraph.name",
                           "graphql.document",
                           "graphql.operation.name",
                           "otel.kind",
@@ -298,6 +298,10 @@ expression: get_spans()
                           [
                             "net.transport",
                             "ip_tcp"
+                          ],
+                          [
+                            "apollo.subgraph.name",
+                            "products"
                           ]
                         ],
                         "metadata": {
@@ -311,7 +315,8 @@ expression: get_spans()
                               "net.peer.name",
                               "net.peer.port",
                               "http.route",
-                              "net.transport"
+                              "net.transport",
+                              "apollo.subgraph.name"
                             ]
                           }
                         }
@@ -372,15 +377,15 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::services::supergraph_service::format_response": {
-          "name": "apollo_router::services::supergraph_service::format_response",
+        "apollo_router::services::execution_service::format_response": {
+          "name": "apollo_router::services::execution_service::format_response",
           "record": {
             "entries": [],
             "metadata": {
               "name": "format_response",
-              "target": "apollo_router::services::supergraph_service",
+              "target": "apollo_router::services::execution_service",
               "level": "DEBUG",
-              "module_path": "apollo_router::services::supergraph_service",
+              "module_path": "apollo_router::services::execution_service",
               "fields": {
                 "names": []
               }

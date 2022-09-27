@@ -8,7 +8,7 @@ metadata:
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
-    prometheus.io/port: {{ (splitList ":"  (.Values.router.configuration.telemetry.metrics.prometheus.listen | default ":9090")) | last }}
+    prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
     prometheus.io/scrape: "true"
   {{- end }}
 spec:
@@ -82,6 +82,9 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.containerPorts.health }}
               protocol: TCP
             {{- if .Values.serviceMonitor.enabled }}
             - name: metrics
