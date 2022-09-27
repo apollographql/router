@@ -148,6 +148,7 @@ pub(super) async fn check_accept_header(
     }
 }
 
+/// Returns true if the headers contain header `accept: */*`
 fn accepts_wildcard(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
@@ -156,6 +157,8 @@ fn accepts_wildcard(headers: &HeaderMap) -> bool {
             .unwrap_or(false)
     })
 }
+
+/// Returns true if the headers contain header `accept: application/json` or `accept: application/graphql-response+json`
 fn accepts_json(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
@@ -178,6 +181,7 @@ fn accepts_json(headers: &HeaderMap) -> bool {
     })
 }
 
+/// Returns true if the headers contain accept header to enable defer
 pub(crate) fn accepts_multipart(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
