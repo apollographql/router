@@ -3,9 +3,10 @@ source: apollo-router/tests/integration_tests.rs
 expression: first
 ---
 {
-  "errors": [
-    {
-      "message": "the router received a query without the @defer directive but the client accepts multipart/mixed HTTP responses."
+  "data": {
+    "me": {
+      "id": "1",
+      "name": "Ada Lovelace"
     }
-  ]
+  }
 }

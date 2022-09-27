@@ -204,14 +204,6 @@ where
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
-            } else if !is_deferred && accepts_multipart(req.supergraph_request.headers()) {
-                let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query without the @defer directive but the client accepts multipart/mixed HTTP responses."))
-                        .build()])
-                    .build(), context);
-                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                Ok(response)
             } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;

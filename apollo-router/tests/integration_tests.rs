@@ -542,9 +542,7 @@ async fn normal_query_with_defer_accept_header() {
         .expect("expecting valid request");
     let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
 
-    assert_eq!(1, actual.errors.len());
-    let err = actual.errors.get(0).unwrap();
-    assert_eq!(err.message.as_str(), "the router received a query without the @defer directive but the client accepts multipart/mixed HTTP responses.");
+    assert!(actual.errors.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
