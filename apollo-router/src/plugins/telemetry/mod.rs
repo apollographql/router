@@ -446,7 +446,7 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        // .event_format(formatter::TextFormatter::new())
+                        .event_format(formatter::TextFormatter::new())
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
