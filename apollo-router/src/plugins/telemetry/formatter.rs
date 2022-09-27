@@ -1,14 +1,102 @@
 use std::fmt;
-use tracing_core::{Event, Subscriber};
-use tracing_subscriber::fmt::{
-    format::{self, FormatEvent, FormatFields},
-    FmtContext, FormattedFields,
-};
+
+use ansi_term::Color;
+use ansi_term::Style;
+use tracing_core::Event;
+use tracing_core::Level;
+use tracing_core::Subscriber;
+use tracing_subscriber::fmt::format::FormatEvent;
+use tracing_subscriber::fmt::format::FormatFields;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::FormatTime;
+use tracing_subscriber::fmt::time::SystemTime;
+use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
-pub(crate) struct MyFormatter;
+#[derive(Debug, Clone)]
+pub(crate) struct TextFormatter {
+    pub(crate) timer: SystemTime,
+}
 
-impl<S, N> FormatEvent<S, N> for MyFormatter
+impl Default for TextFormatter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TextFormatter {
+    const TRACE_STR: &'static str = "TRACE";
+    const DEBUG_STR: &'static str = "DEBUG";
+    const INFO_STR: &'static str = " INFO";
+    const WARN_STR: &'static str = " WARN";
+    const ERROR_STR: &'static str = "ERROR";
+
+    pub(crate) fn new() -> Self {
+        Self {
+            timer: Default::default(),
+        }
+    }
+
+    #[inline]
+    fn format_level(&self, level: &Level, writer: &mut Writer<'_>) -> fmt::Result {
+        if writer.has_ansi_escapes() {
+            match *level {
+                Level::TRACE => write!(writer, "{}", Color::Purple.paint(TextFormatter::TRACE_STR)),
+                Level::DEBUG => write!(writer, "{}", Color::Blue.paint(TextFormatter::DEBUG_STR)),
+                Level::INFO => write!(writer, "{}", Color::Green.paint(TextFormatter::INFO_STR)),
+                Level::WARN => write!(writer, "{}", Color::Yellow.paint(TextFormatter::WARN_STR)),
+                Level::ERROR => write!(writer, "{}", Color::Red.paint(TextFormatter::ERROR_STR)),
+            }?;
+        } else {
+            match *level {
+                Level::TRACE => write!(writer, "{}", TextFormatter::TRACE_STR),
+                Level::DEBUG => write!(writer, "{}", TextFormatter::DEBUG_STR),
+                Level::INFO => write!(writer, "{}", TextFormatter::INFO_STR),
+                Level::WARN => write!(writer, "{}", TextFormatter::WARN_STR),
+                Level::ERROR => write!(writer, "{}", TextFormatter::ERROR_STR),
+            }?;
+        }
+        writer.write_char(' ')
+    }
+
+    #[inline]
+    fn format_timestamp(&self, writer: &mut Writer<'_>) -> fmt::Result {
+        if writer.has_ansi_escapes() {
+            let style = Style::new().dimmed();
+            write!(writer, "{}", style.prefix())?;
+
+            // If getting the timestamp failed, don't bail --- only bail on
+            // formatting errors.
+            if self.timer.format_time(writer).is_err() {
+                writer.write_str("<unknown time>")?;
+            }
+
+            write!(writer, "{}", style.suffix())?;
+        } else {
+            // If getting the timestamp failed, don't bail --- only bail on
+            // formatting errors.
+            if self.timer.format_time(writer).is_err() {
+                writer.write_str("<unknown time>")?;
+            }
+        }
+        writer.write_char(' ')
+    }
+
+    #[inline]
+    fn format_target(&self, target: &str, writer: &mut Writer<'_>) -> fmt::Result {
+        if writer.has_ansi_escapes() {
+            let style = Style::new().dimmed();
+            write!(writer, "{}", style.prefix())?;
+            write!(writer, "{}:", target)?;
+            write!(writer, "{}", style.suffix())?;
+        } else {
+            write!(writer, "{}:", target)?;
+        }
+        writer.write_char(' ')
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for TextFormatter
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
@@ -16,50 +104,19 @@ where
     fn format_event(
         &self,
         ctx: &FmtContext<'_, S, N>,
-        mut writer: format::Writer<'_>,
+        mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        // Format values from the event's's metadata:
-        let metadata = event.metadata();
-        write!(&mut writer, "{} {}: ", metadata.level(), metadata.target())?;
+        let meta = event.metadata();
 
-        /*
-        // Format all the spans in the event's span context.
-        if let Some(scope) = ctx.event_scope() {
-            for span in scope.from_root() {
-                write!(writer, "{}", span.name())?;
+        self.format_timestamp(&mut writer)?;
 
-                // `FormattedFields` is a formatted representation of the span's
-                // fields, which is stored in its extensions by the `fmt` layer's
-                // `new_span` method. The fields will have been formatted
-                // by the same field formatter that's provided to the event
-                // formatter in the `FmtContext`.
-                let ext = span.extensions();
-                let fields = &ext
-                    .get::<FormattedFields<N>>()
-                    .expect("will never be `None`");
+        self.format_level(meta.level(), &mut writer)?;
 
-                // Skip formatting the fields if the span had no fields.
-                if !fields.is_empty() {
-                    write!(writer, "{{{}}}", fields)?;
-                }
-                write!(writer, ": ")?;
-            }
-        }
-        */
+        self.format_target(meta.target(), &mut writer)?;
 
-        // Write fields on the event
-        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        ctx.format_fields(writer.by_ref(), event)?;
 
         writeln!(writer)
     }
 }
-
-/*
-let _subscriber = tracing_subscriber::fmt()
-    .event_format(MyFormatter)
-    .init();
-
-let _span = tracing::info_span!("my_span", answer = 42).entered();
-tracing::info!(question = "life, the universe, and everything", "hello world");
-*/

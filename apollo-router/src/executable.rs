@@ -256,7 +256,7 @@ impl Executable {
         );
 
         // The dispatcher we created is passed explicitely here to make sure we display the logs
-        // in the initialization pahse and in the state machine code, before a global subscriber
+        // in the initialization phase and in the state machine code, before a global subscriber
         // is set using the configuration file
         Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
             .with_subscriber(dispatcher)

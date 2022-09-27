@@ -32,6 +32,7 @@ features = ["docs_rs"]
 [dependencies]
 access-json = "0.1.0"
 anyhow = "1.0.64"
+ansi_term = "0.12"
 apollo-parser = "0.2.11"
 async-compression = { version = "0.3.14", features = [
     "tokio",
