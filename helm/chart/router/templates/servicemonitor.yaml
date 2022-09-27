@@ -6,7 +6,7 @@ metadata:
 spec:
   endpoints:
   - path: {{ include "router.prometheusMetricsPath" . }}
-    port: metrics
+    port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
   namespaceSelector:
     matchNames:
     - {{ .Release.Namespace }}
