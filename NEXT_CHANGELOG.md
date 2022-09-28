@@ -110,6 +110,18 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Update to Federation 2.1.3 ([Issue #1880](https://github.com/apollographql/router/issues/1880))
+
+This brings in Federation 2.1.3 to bring in updates to `@apollo/federation` via the relevant bump in `router-bridge`.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
+### Update `reqwest` dependency to resolve DNS resolution failures ([Issue #1899](https://github.com/apollographql/router/issues/1899))
+
+This should resolve intermittent failures to resolve DNS in Uplink which were occurring due to an upstream bug in the `reqwest` library.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
 ### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
 
 Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
