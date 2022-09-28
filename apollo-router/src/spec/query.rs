@@ -33,7 +33,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
+    pub(crate) subselections: HashMap<(Path, String), Query>,
 }
 
 impl Query {
@@ -57,8 +57,7 @@ impl Query {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
                     match self.subselections.get(&(
-                        //FIXME: we should not have optional paths at all in the subselections map
-                        response.path.clone().or_else(|| Some(Path::default())),
+                        response.path.clone().unwrap_or_default(),
                         subselection.clone(),
                     )) {
                         Some(subselection_query) => {

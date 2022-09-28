@@ -795,11 +795,6 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
 
 #[tokio::test]
 async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), ApolloRouterError> {
-    // TODO re-enable after the release
-    // test_span::init();
-    // let root_span = info_span!("root");
-    // {
-    // let _guard = root_span.enter();
     let query = "query";
     let expected_query = query;
     let operation_name = "operationName";
@@ -854,11 +849,6 @@ async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), Ap
     );
 
     server.shutdown().await?;
-    // }
-    // insta::assert_json_snapshot!(test_span::get_spans_for_root(
-    //     &root_span.id().unwrap(),
-    //     &test_span::Filter::new(Level::INFO)
-    // ));
     Ok(())
 }
 
