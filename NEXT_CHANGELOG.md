@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add ability to specify repository location to diy docker image builds ([PR #XXXX](https://github.com/apollographql/router/issues/XXXX))
+
+The new `-r` flag allows a developer to specify the location of a repository when building a diy docker image. Handy for developers with local repositories.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Support serviceMonitor in helm chart
 
 `kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
