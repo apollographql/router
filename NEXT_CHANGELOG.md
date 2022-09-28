@@ -122,6 +122,12 @@ This should resolve intermittent failures to resolve DNS in Uplink which were oc
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
 
+### Remove span details from log records ([PR #1896](https://github.com/apollographql/router/pull/1896))
+
+Prior to this change, span details were written to log files. This was unwieldy and contributed to log bloat. Note: spans and logs are still linked in trace aggregators such as jaeger. The change simply affects the content of the written log records.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1896
+
 ### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
 
 Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
