@@ -108,6 +108,12 @@ execution service returning a stream of invalid responses, so the execution plug
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
 
+### Hide footer from "homepage" landing page ([PR #1900](https://github.com/apollographql/router/pull/1900))
+
+Hides some incorrect language about customization on the landing page.  Currently to customize the landing page it requires additional support.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/1900
+
 ## 🛠 Maintenance
 
 ### Update to Federation 2.1.3 ([Issue #1880](https://github.com/apollographql/router/issues/1880))
