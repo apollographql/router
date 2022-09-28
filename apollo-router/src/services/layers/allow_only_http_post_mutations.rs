@@ -47,7 +47,7 @@ where
                         .context(req.context)
                         .build()?;
                     res.response.headers_mut().insert(
-                        HeaderName::from_static("Allow"),
+                        HeaderName::from_static("allow"),
                         HeaderValue::from_static("POST"),
                     );
                     Ok(ControlFlow::Break(res))

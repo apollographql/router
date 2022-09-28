@@ -3,10 +3,10 @@ use apollo_parser::ast::{self};
 use serde_json_bytes::ByteString;
 
 use crate::json_ext::Object;
+use crate::spec::TYPENAME;
 use crate::FieldType;
 use crate::Schema;
 use crate::SpecError;
-use crate::spec::TYPENAME;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {
