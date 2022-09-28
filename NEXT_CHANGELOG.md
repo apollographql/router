@@ -28,11 +28,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Add ability to specify repository location to diy docker image builds ([PR #XXXX](https://github.com/apollographql/router/issues/XXXX))
+### Add ability to specify repository location to diy docker image builds ([PR #1904](https://github.com/apollographql/router/issues/1904))
 
 The new `-r` flag allows a developer to specify the location of a repository when building a diy docker image. Handy for developers with local repositories.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1904
 
 ### Support serviceMonitor in helm chart
 
