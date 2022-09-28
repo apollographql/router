@@ -117,14 +117,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
-        let deduplicate_queries = configuration
-            .as_ref()
-            .plugins()
-            .iter()
-            .find(|(name, _)| name == "apollo.traffic_shaping")
-            .and_then(|(_, shaping)| shaping.get("all"))
-            .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
-            == Some(&serde_json::Value::Bool(true));
+        let deduplicate_queries = is_deduplicate_query_enabled(configuration.as_ref());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
@@ -146,6 +139,15 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
 
         Ok(pluggable_router_service)
     }
+}
+
+fn is_deduplicate_query_enabled(conf: &Configuration) -> bool {
+    conf.plugins()
+        .iter()
+        .find(|(name, _)| name == "apollo.traffic_shaping")
+        .and_then(|(_, shaping)| shaping.get("all"))
+        .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
+        == Some(&serde_json::Value::Bool(true))
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -333,6 +335,7 @@ mod test {
     use serde_json::json;
     use tower_http::BoxError;
 
+    use super::is_deduplicate_query_enabled;
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -449,6 +452,20 @@ mod test {
         .unwrap();
         let service = create_service(config).await;
         assert!(service.is_err())
+    }
+
+    #[tokio::test]
+    async fn test_is_deduplicated_query_enabled() {
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            plugins:
+                apollo.traffic_shaping:
+                    all:
+                        deduplicate_query: true
+        "#,
+        )
+        .unwrap();
+        assert!(is_deduplicate_query_enabled(&config));
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
