@@ -12,7 +12,6 @@ use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
-use ::tracing::span::Record;
 #[cfg(not(feature = "console"))]
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
@@ -46,16 +45,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-#[cfg(not(feature = "console"))]
-use tracing_subscriber::field::MakeExt;
-use tracing_subscriber::field::RecordFields;
-use tracing_subscriber::field::VisitOutput;
-#[cfg(not(feature = "console"))]
-use tracing_subscriber::fmt::format::debug_fn;
-use tracing_subscriber::fmt::format::JsonVisitor;
-use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::FormatFields;
-use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 #[cfg(not(feature = "console"))]
@@ -108,6 +97,7 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+pub(crate) mod formatter;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -442,26 +432,9 @@ impl Telemetry {
                     .map(|s| s.as_str())
                     .unwrap_or("info");
 
-                let formatter = debug_fn(|writer, field, value| {
-                    if field.name().starts_with("apollo_private.")
-                        || field.name().starts_with("otel.")
-                    {
-                        write!(writer, "")
-                    } else if field.name() == "message" {
-                        write!(writer, "{:?}", value)
-                    } else {
-                        write!(writer, "{}={:?}", field, value)
-                    }
-                })
-                .delimited(" ")
-                .display_messages();
-
-                let sub_builder = tracing_subscriber::fmt::fmt()
-                    .with_env_filter(
-                        EnvFilter::try_new(log_level)
-                            .context("could not parse log configuration")?,
-                    )
-                    .fmt_fields(formatter);
+                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
+                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
+                );
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -472,7 +445,10 @@ impl Telemetry {
                 } else if atty::is(atty::Stream::Stdout) {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder.finish().with(telemetry);
+                    let subscriber = sub_builder
+                        .event_format(formatter::TextFormatter::new())
+                        .finish()
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -481,7 +457,8 @@ impl Telemetry {
 
                     let subscriber = sub_builder
                         .json()
-                        .fmt_fields(RouterJsonFields::new())
+                        .with_current_span(false)
+                        .with_span_list(false)
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
@@ -1260,87 +1237,6 @@ impl ApolloFtv1Handler {
             }
         }
         resp
-    }
-}
-
-/// The JSON [`FormatFields`] implementation.
-///
-#[derive(Debug)]
-struct RouterJsonFields;
-
-impl RouterJsonFields {
-    /// Returns a new JSON [`FormatFields`] implementation.
-    ///
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for RouterJsonFields {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'a> FormatFields<'a> for RouterJsonFields {
-    /// Format the provided `fields` to the provided `writer`, returning a result.
-    fn format_fields<R: RecordFields>(&self, mut writer: Writer<'_>, fields: R) -> fmt::Result {
-        let mut v = JsonVisitor::new(&mut writer);
-        fields.record(&mut v);
-        v.finish()
-    }
-
-    /// Record additional field(s) on an existing span.
-    ///
-    /// By default, this appends a space to the current set of fields if it is
-    /// non-empty, and then calls `self.format_fields`. If different behavior is
-    /// required, the default implementation of this method can be overridden.
-    fn add_fields(
-        &self,
-        current: &'a mut FormattedFields<Self>,
-        fields: &Record<'_>,
-    ) -> fmt::Result {
-        if current.is_empty() {
-            // If there are no previously recorded fields, we can just reuse the
-            // existing string.
-            let mut writer = current.as_writer();
-            let mut v = JsonVisitor::new(&mut writer);
-            fields.record(&mut v);
-            v.finish()?;
-            return Ok(());
-        }
-
-        // If fields were previously recorded on this span, we need to parse
-        // the current set of fields as JSON, add the new fields, and
-        // re-serialize them. Otherwise, if we just appended the new fields
-        // to a previously serialized JSON object, we would end up with
-        // malformed JSON.
-        //
-        // We do this by converting our existing formatted string into a
-        // map and creating a new visitor to record the new fields, which
-        // we also convert into a map.
-        //
-        // We merge the maps and finally remove the apollo_private and otel
-        // keys.
-
-        let mut new = String::new();
-        let mut v = JsonVisitor::new(&mut new);
-        fields.record(&mut v);
-        v.finish()?;
-
-        let mut current_map: BTreeMap<&'_ str, serde_json::Value> =
-            serde_json::from_str(current).map_err(|_| fmt::Error)?;
-        let new_map: BTreeMap<&'_ str, serde_json::Value> =
-            serde_json::from_str(&new).map_err(|_| fmt::Error)?;
-
-        current_map.extend(new_map);
-
-        current_map.retain(|k, _v| !k.starts_with("apollo_private.") && !k.starts_with("otel."));
-
-        // Serialize our merged, redacted output to be our set of fields.
-        current.fields = serde_json::to_string(&current_map).map_err(|_| fmt::Error)?;
-
-        Ok(())
     }
 }
 

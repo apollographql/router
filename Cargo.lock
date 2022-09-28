@@ -139,6 +139,7 @@ name = "apollo-router"
 version = "1.0.0"
 dependencies = [
  "access-json",
+ "ansi_term",
  "anyhow",
  "apollo-parser",
  "askama",
