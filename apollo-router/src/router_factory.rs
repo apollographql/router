@@ -117,13 +117,13 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
-
         let deduplicate_queries = configuration
             .as_ref()
             .plugins()
             .iter()
             .find(|(name, _)| name == "apollo.traffic_shaping")
-            .and_then(|(_, shaping)| shaping.get("deduplicate_query"))
+            .and_then(|(_, shaping)| shaping.get("all"))
+            .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
             == Some(&serde_json::Value::Bool(true));
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
