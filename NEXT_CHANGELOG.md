@@ -110,6 +110,18 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Update to Federation 2.1.3 ([Issue #1880](https://github.com/apollographql/router/issues/1880))
+
+This brings in Federation 2.1.3 to bring in updates to `@apollo/federation` via the relevant bump in `router-bridge`.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
+### Update `reqwest` dependency to resolve DNS resolution failures ([Issue #1899](https://github.com/apollographql/router/issues/1899))
+
+This should resolve intermittent failures to resolve DNS in Uplink which were occurring due to an upstream bug in the `reqwest` library.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
 ### Remove span details from log records ([PR #1896](https://github.com/apollographql/router/pull/1896))
 
 Prior to this change, span details were written to log files. This was unwieldy and contributed to log bloat. Note: spans and logs are still linked in trace aggregators such as jaeger. The change simply affects the content of the written log records.
