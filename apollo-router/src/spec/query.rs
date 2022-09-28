@@ -325,20 +325,21 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-                        match self.apply_selection_set(
-                            selection_set,
-                            parameters,
-                            input_object,
-                            output_object,
-                            path,
-                            &FieldType::Named(type_name.to_string()),
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(InvalidValue) => {
-                                *output = Value::Null;
-                                Ok(())
-                            }
+                        if self
+                            .apply_selection_set(
+                                selection_set,
+                                parameters,
+                                input_object,
+                                output_object,
+                                path,
+                                &FieldType::Named(type_name.to_string()),
+                            )
+                            .is_err()
+                        {
+                            *output = Value::Null;
                         }
+
+                        Ok(())
                     }
                     _ => {
                         *output = Value::Null;

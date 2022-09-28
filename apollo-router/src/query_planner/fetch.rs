@@ -34,10 +34,16 @@ pub enum OperationKind {
 
 impl Display for OperationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl OperationKind {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            OperationKind::Query => write!(f, "Query"),
-            OperationKind::Mutation => write!(f, "Mutation"),
-            OperationKind::Subscription => write!(f, "Subscription"),
+            OperationKind::Query => "Query",
+            OperationKind::Mutation => "Mutation",
+            OperationKind::Subscription => "Subscription",
         }
     }
 }

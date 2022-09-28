@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use http::header::HeaderName;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use tower::BoxError;
@@ -46,8 +47,8 @@ where
                         .context(req.context)
                         .build()?;
                     res.response.headers_mut().insert(
-                        "Allow".parse::<HeaderName>().unwrap(),
-                        "POST".parse().unwrap(),
+                        HeaderName::from_static("Allow"),
+                        HeaderValue::from_static("POST"),
                     );
                     Ok(ControlFlow::Break(res))
                 } else {

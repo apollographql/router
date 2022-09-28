@@ -506,11 +506,7 @@ impl Schema {
         self.root_operations
             .get(&kind)
             .map(|s| s.as_str())
-            .unwrap_or_else(|| match kind {
-                OperationKind::Query => "Query",
-                OperationKind::Mutation => "Mutation",
-                OperationKind::Subscription => "SubScription",
-            })
+            .unwrap_or_else(|| kind.as_str())
     }
 }
 
