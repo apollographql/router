@@ -21,11 +21,6 @@ router:
   args:
   - --hot-reload
 
-# -- If using rhai, specify the location of your input file
-rhai:
-  # -- input rhai file, contents will be stored in a ConfigMap
-  input_file: ""
-
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
@@ -49,6 +44,16 @@ extraEnvVarsSecret: ''
 
 extraVolumes: []
 extraVolumeMounts: []
+
+## @param extraConfigmaps Array to mount extra ConfigMaps to the router
+## For example:
+## extraConfigmaps:
+##   - name: rhai
+##     mountPath: /dist/rhai
+##     subPath:
+##     readOnly: true
+##
+extraConfigmaps: []
 
 image:
   repository: ghcr.io/apollographql/router
