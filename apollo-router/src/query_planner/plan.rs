@@ -190,7 +190,7 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> Result<HashMap<(Option<Path>, String), Query>, QueryPlannerError> {
+    ) -> Result<HashMap<(Path, String), Query>, QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -203,7 +203,7 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
-        subselections: &mut HashMap<(Option<Path>, String), Query>,
+        subselections: &mut HashMap<(Path, String), Query>,
     ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
@@ -221,7 +221,6 @@ impl PlanNode {
                     .collect_subselections(schema, initial_path, subselections)
             }
             Self::Defer { primary, deferred } => {
-                // TODO rebuilt subselection from the root thanks to the path
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, primary_subselection);
@@ -229,10 +228,8 @@ impl PlanNode {
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
-                    subselections.insert(
-                        (Some(primary_path), primary_subselection.clone()),
-                        sub_selection,
-                    );
+                    subselections
+                        .insert((primary_path, primary_subselection.clone()), sub_selection);
                 }
 
                 deferred.iter().try_fold(subselections, |subs, current| {
@@ -242,10 +239,7 @@ impl PlanNode {
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
-                        subs.insert(
-                            (current.path.clone().into(), subselection.clone()),
-                            sub_selection,
-                        );
+                        subs.insert((current.path.clone(), subselection.clone()), sub_selection);
                     }
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(

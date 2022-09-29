@@ -23,6 +23,7 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
+pub(crate) const POOL_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub(crate) enum Sender {
@@ -90,8 +91,8 @@ impl ApolloExporter {
         let pool = deadpool::managed::Pool::<ReporterManager>::builder(ReporterManager {
             endpoint: endpoint.clone(),
         })
-        .create_timeout(Some(Duration::from_secs(5)))
-        .wait_timeout(Some(Duration::from_secs(5)))
+        .create_timeout(Some(POOL_TIMEOUT))
+        .wait_timeout(Some(POOL_TIMEOUT))
         .runtime(Runtime::Tokio1)
         .build()
         .unwrap();
