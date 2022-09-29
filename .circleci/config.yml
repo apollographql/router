@@ -6,10 +6,14 @@ orbs:
   gh: circleci/github-cli@2.1.0
 
 executors:
-  rust_linux: &rust_linux_executor
+  rust_amd_linux: &rust_amd_linux_executor
     docker:
       - image: cimg/base:stable
     resource_class: xlarge
+  rust_arm_linux: &rust_arm_linux_executor
+    machine:
+      image: ubuntu-2004:2022.04.1
+    resource_class: arm.large
   rust_macos: &rust_macos_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -26,8 +30,12 @@ executors:
 parameters:
   cache_version:
     type: string
-    # increment that one to invalidate all the caches
-    default: v10.{{ checksum "rust-toolchain.toml" }}
+    # increment this to invalidate all the caches
+    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+  jaeger_version:
+    type: string
+    # update this as new versions of jaeger become available
+    default: "1.33.0"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -46,33 +54,44 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
+            sudo apt-get install -y libssl-dev cmake
+      - install_minimal_rust
+  linux_amd_install_baseline:
+    steps:
+      - linux_install_baseline
       - run:
           name: Download jaeger
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-linux-amd64 jaeger
-      - install_minimal_rust
-
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
+  linux_arm_install_baseline:
+    steps:
+      - linux_install_baseline
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
   macos_install_baseline:
     steps:
       - run:
           name: Download jaeger
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-darwin-amd64 jaeger
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
-
   windows_install_baseline:
     steps:
       - run:
           name: Download jaeger
           shell: bash.exe
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-windows-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-windows-amd64 jaeger
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -252,7 +271,9 @@ commands:
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
           condition:
-            equal: [linux, << parameters.os >>]
+            or:
+              - equal: [linux_amd, << parameters.os >>]
+              - equal: [linux_arm, << parameters.os >>]
           steps:
             - run: cargo test --jobs 4 --workspace --locked -- --test-threads=4
       - when:
@@ -279,11 +300,11 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - xtask_lint:
-                os: linux
+                os: linux_amd
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -295,11 +316,11 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - xtask_check_compliance:
-                os: linux
+                os: linux_amd
   build:
     environment:
       <<: *common_job_environment
@@ -311,11 +332,18 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - build_workspace:
-                os: linux
+                os: linux_amd
+      - when:
+          condition:
+            equal: [*rust_arm_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_arm_install_baseline
+            - build_workspace:
+                os: linux_arm
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
@@ -341,11 +369,18 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - test_workspace:
-                os: linux
+                os: linux_amd
+      - when:
+          condition:
+            equal: [*rust_arm_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_arm_install_baseline
+            - test_workspace:
+                os: linux_arm
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
@@ -400,7 +435,9 @@ jobs:
                   --output artifacts/
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            or:
+              - equal: [*rust_amd_linux_executor, << parameters.platform >>]
+              - equal: [*rust_arm_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -514,7 +551,7 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [rust_linux]
+              platform: [rust_amd_linux]
 
       # check-compliance is disabled for now because it is flaky
       # `cargo about` seems to be non-deterministic and sometimes
@@ -529,17 +566,17 @@ workflows:
       - build:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+              platform: [rust_macos, rust_windows, rust_amd_linux, rust_arm_linux]
       - test:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+              platform: [rust_macos, rust_windows, rust_amd_linux, rust_arm_linux]
   release:
     jobs:
       - build_release:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+              platform: [rust_macos, rust_windows, rust_amd_linux, rust_arm_linux]
           filters:
             branches:
               ignore: /.*/
