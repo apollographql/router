@@ -34,89 +34,89 @@ We're now testing and building `aarch64-unknown-linux-gnu` binaries in our relea
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/1907
 
-### Add ability to specify repository location to diy docker image builds ([PR #1904](https://github.com/apollographql/router/issues/1904))
+### Add ability to specify repository location in "DIY" Docker builds ([PR #1904](https://github.com/apollographql/router/issues/1904))
 
 The new `-r` flag allows a developer to specify the location of a repository when building a diy docker image. Handy for developers with local repositories.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1904
 
-### Support serviceMonitor in helm chart
+### Support `serviceMonitor` in Helm chart
 
-`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` Custom Resource Definition (CRD) is required to scrape a given target to avoid `scrape_configs`.
 
 By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
 
-### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
+### Add support for dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
 
-+ Insert static header
+The following are now possible in our YAML configuration for `headers`:
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router"
-        value: "indeed"
-```
+- Insert static header
 
-+ Insert header from context
+  ```yaml
+  headers:
+    all: # Header rules for all subgraphs
+      request:
+      - insert:
+          name: "sent-from-our-apollo-router"
+          value: "indeed"
+  ```
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router-context"
-        from_context: "my_key_in_context"
-```
+- Insert header from context
 
-+ Insert header from request body
+  ```yaml
+  headers:
+    all: # Header rules for all subgraphs
+      request:
+      - insert:
+          name: "sent-from-our-apollo-router-context"
+          from_context: "my_key_in_context"
+  ```
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    + insert:
-        name: "sent-from-our-apollo-router-request-body"
-        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
-        default: "UNKNOWN" # If no operationName has been specified
-```
+- Insert header from request body
 
+  ```yaml
+  headers:
+    all: # Header rules for all subgraphs
+      request:
+      + insert:
+          name: "sent-from-our-apollo-router-request-body"
+          path: ".operationName" # It's a JSON path query to fetch the operation name from request body
+          default: "UNKNOWN" # If no operationName has been specified
+  ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
 
 ## 🐛 Fixes
 
-### fix external secret support in our helm chart ([Issue #1750](https://github.com/apollographql/router/issues/1750))
+### Fix external secret support in our Helm chart ([Issue #1750](https://github.com/apollographql/router/issues/1750))
 
-If an external secret is specified, e.g.: 
+If an external secret is specified, e.g.:
 
-`helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>`
+```
+helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>
+```
 
-then the router should be deployed and configured to use the existing secret.
+...then the router should be deployed and configured to use the _existing_ secret.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1878
 
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
 
-in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
-was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
-This will now aggregate the subgraph error and the missing `_entities` error.
+In a federated query, if the subgraph returned a response with `errors` and a `null` or absent `data` field, the Router was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
+
+The Router will now aggregate the subgraph error and the missing `_entities` error.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
 
-### Fix prometheus annotation and healthcheck default
+### Fix Prometheus annotation and healthcheck default
 
-The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
-defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
+The Prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally, defaults are now set for `health-check`'s `listen` to be `0.0.0.0:8088` within the Helm chart.
 
 By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
 
 ### Move response formatting to the execution service ([PR #1771](https://github.com/apollographql/router/pull/1771))
 
-The response formatting process, where response data is filtered according to deferred responses subselections
-and the API schema, was executed in the supergraph service. This is a bit late, because it results in the
-execution service returning a stream of invalid responses, so the execution plugins work on invalid data.
+The response formatting process (in which response data is filtered according to deferred responses subselections and the API schema) was being executed in the `supergraph` service. This was a bit late since it resulted in the `execution` service returning a stream of invalid responses leading to the execution plugins operating on invalid data.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
 
@@ -142,13 +142,13 @@ By [@abernix](https://github.com/abernix) in https://github.com/apollographql/ro
 
 ### Remove span details from log records ([PR #1896](https://github.com/apollographql/router/pull/1896))
 
-Prior to this change, span details were written to log files. This was unwieldy and contributed to log bloat. Note: spans and logs are still linked in trace aggregators such as jaeger. The change simply affects the content of the written log records.
+Prior to this change, span details were written to log files. This was unwieldy and contributed to log bloat. Spans and logs are still linked in trace aggregators, such as jaeger, and this change simply affects the content of the written to the console output.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1896
 
-### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
+### Change span attribute names in OpenTelemetry to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
 
-Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
+The span attributes in our OpenTelemetry tracing spans are corrected to be consistently namespaced with attributes that are compliant with the OpenTelemetry specification.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
 
@@ -166,7 +166,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
 
-This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
+This removes `tower::Buffer` usage from the Automated Persisted Queries (APQ) implementation to improve reliability.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
 
@@ -178,11 +178,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Set MSRV to 1.63.0 ([PR #1886](https://github.com/apollographql/router/issues/1886))
 
-We compile and test with 1.63.0 on CI at the moment,
-so it is our de-facto minimum supported rust version.
-Setting [`rust-version`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field)
-in `Cargo.toml` provides a more helpful error message when using an older version
-that random compilation errors.
+We compile and test with 1.63.0 on CI at the moment, so it is our de-facto Minimum Supported Rust Version (MSRV).
+
+Setting [`rust-version`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) in `Cargo.toml` provides a more helpful error message when using an older version rather than unexpected compilation errors.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/1886
 
