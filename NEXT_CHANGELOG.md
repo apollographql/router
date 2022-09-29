@@ -180,4 +180,11 @@ that random compilation errors.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/1886
 
+### Fix hpa yaml for appropriate kubernetes versions ([#1908](https://github.com/apollographql/router/pull/1908))
+
+Correct schema for autoscaling/v2beta2 and autoscaling/v2 api versions of the
+HorizontalPodAutoscaler within the helm chart
+
+By [@damienpontifex](https://github.com/damienpontifex) in https://github.com/apollographql/router/issues/1914
+
 ## 📚 Documentation
