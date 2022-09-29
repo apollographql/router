@@ -31,7 +31,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ checksum "rust-toolchain.toml" }}
+    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -144,7 +144,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>-{{ arch }}
+            - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
       - run:
           name: Install cargo deny if not present
           command: |
@@ -156,7 +156,7 @@ commands:
             set -e -o pipefail
             cargo about --version || cargo install cargo-about
       - save_cache:
-          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>-{{ arch }}
+          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
           paths:
             - ~/.cargo/bin/cargo-deny
             - ~/.cargo/bin/cargo-about
@@ -169,8 +169,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - run: cargo xtask lint
 
   xtask_check_compliance:
@@ -181,8 +181,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
@@ -212,12 +212,12 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - build_all_permutations
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
 
@@ -226,12 +226,12 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows
       - build_common_permutations
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ arch }}-{{ checksum "Cargo.lock" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
 
@@ -244,12 +244,12 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
       - run: cargo test --workspace --locked
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ arch }}-{{ checksum "Cargo.lock" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
 
@@ -265,8 +265,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ arch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -284,7 +284,7 @@ commands:
 
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ arch }}-{{ checksum "Cargo.lock" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
 
