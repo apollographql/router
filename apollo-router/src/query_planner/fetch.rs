@@ -39,7 +39,7 @@ impl Display for OperationKind {
 }
 
 impl OperationKind {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             OperationKind::Query => "Query",
             OperationKind::Mutation => "Mutation",
