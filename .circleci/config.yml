@@ -3,6 +3,10 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
+  # Rust steps which are used below (like `rust/install`, `rust/test`) are
+  # defined in this orb. For reference, the orb can be found here:
+  # https://github.com/CircleCI-Public/rust-orb
+  rust: circleci/rust@1.6.0
   gh: circleci/github-cli@2.1.0
 
 executors:
@@ -27,7 +31,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v9.{{ checksum "rust-toolchain.toml" }}
+    default: v8.{{ checksum "rust-toolchain.toml" }}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -46,24 +50,25 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
+            sudo apt-get install -y libssl-dev cmake
       - run:
           name: Download jaeger
           command: |
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-linux-amd64 jaeger
-      - install_minimal_rust
-
   macos_install_baseline:
     steps:
+      - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+      - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
+      - run: test -e "$OPENSSL_ROOT_DIR"
+      - run: brew install cmake
       - run:
           name: Download jaeger
           command: |
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-darwin-amd64 jaeger
-      - install_minimal_rust
-
   windows_install_baseline:
     steps:
       - run:
@@ -91,13 +96,13 @@ commands:
           environment:
             # Override auto-detection of RAM for Rustc install.
             # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-            RUSTUP_UNPACK_RAM: "1073741824"
+            RUSTUP_UNPACK_RAM: "21474836480"
           command: |
             $installer_dir = "$Env:TEMP"
             echo "Downloading rustup"
             (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
             echo "Installing rustup"
-            & $installer_dir\rustup-init.exe -y --default-toolchain none --profile minimal
+            & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
             exit $LASTEXITCODE
       - run:
           name: Special case for Windows because of ssh-agent
@@ -106,17 +111,10 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
-
-  install_minimal_rust:
+  prepare_env:
     steps:
-      - run:
-          # Install a minimal rust environment
-          name: Install minimal rust
-          command: |
-            curl https://sh.rustup.rs -sSf -o rustup.sh
-            chmod 755 ./rustup.sh
-            ./rustup.sh -y --default-toolchain none --profile minimal
-            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+      - rust/install:
+          version: stable
 
   install_extra_tools:
     parameters:
@@ -153,30 +151,6 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - run: cargo xtask lint
-
-  xtask_check_helm:
-    parameters:
-      os:
-        type: string
-    steps:
-      - run:
-          name: Validate helm manifests
-          command: |
-            TODAY=$(date +"%Y-%m-%d")
-
-            CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
-              | yq -o json '.' \
-              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[0].release')
-
-            TEMPLATE_DIR=$(mktemp -d)
-            echo "${CURRENT_KUBE_VERSIONS}" | while read kube_version; do
-              helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
-
-              kubeval "${TEMPLATE_DIR}/router-${kube_version}.yaml" \
-                --kubernetes-version "${kube_version}" \
-                --strict \
-                --schema-location https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master
-            done
 
   xtask_check_compliance:
     parameters:
@@ -251,7 +225,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --workspace --locked
+      - run: cargo test --all --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -278,12 +252,12 @@ commands:
           condition:
             equal: [linux, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked -- --test-threads=4
+            - run: cargo test --jobs 3 --all --locked
       - when:
           condition:
             equal: [macos, << parameters.os >>]
           steps:
-            - run: cargo test --workspace --locked
+            - run: cargo test --all --locked
 
       - save_cache:
           name: Save .cargo
@@ -306,23 +280,8 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - prepare_env
             - xtask_lint:
-                os: linux
-  check_helm:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - when:
-          condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
-          steps:
-            - linux_install_baseline
-            - xtask_check_helm:
                 os: linux
   check_compliance:
     environment:
@@ -338,6 +297,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - prepare_env
             - xtask_check_compliance:
                 os: linux
   build:
@@ -354,6 +314,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - prepare_env
             - build_workspace:
                 os: linux
       - when:
@@ -368,6 +329,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
+            - prepare_env
             - build_workspace:
                 os: macos
   test:
@@ -384,6 +346,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - prepare_env
             - test_workspace:
                 os: linux
       - when:
@@ -398,6 +361,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
+            - prepare_env
             - test_workspace:
                 os: macos
 
@@ -421,6 +385,12 @@ jobs:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
+            - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+            - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
+            - run: test -e "$OPENSSL_ROOT_DIR"
+            - run: brew install cmake
+            - rust/install:
+                version: stable
             - run:
                 command: >
                   cargo xtask dist
@@ -446,6 +416,9 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
+                  sudo apt-get install -y libssl-dev
+            - rust/install:
+                version: stable
             - run:
                 command: >
                   cargo xtask dist
@@ -464,7 +437,7 @@ jobs:
                 environment:
                   # Override auto-detection of RAM for Rustc install.
                   # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-                  RUSTUP_UNPACK_RAM: "1073741824"
+                  RUSTUP_UNPACK_RAM: "21474836480"
                 command: |
                   $installer_dir = "$Env:TEMP"
                   echo "Downloading rustup"
@@ -552,11 +525,6 @@ workflows:
   ci_checks:
     jobs:
       - lint:
-          matrix:
-            parameters:
-              platform: [rust_linux]
-
-      - check_helm:
           matrix:
             parameters:
               platform: [rust_linux]
