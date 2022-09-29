@@ -21,16 +21,19 @@
 # Terminate with a nice usage message
 ###
 usage () {
-   printf "Usage: build_docker_image.sh [-b] [<release>]\n"
-   printf "\t-b build docker image from a repo, if not present build from a released tarball\n"
+   printf "Usage: build_docker_image.sh [-b [-r <repo>]] [<release>]\n"
+   printf "\t-b build docker image from the default repo, if not present build from a released tarball\n"
+   printf "\t-r build docker image from a specified repo, only valid with -b flag\n"
    printf "\t<release> a valid release. If [-b] is specified, this is optional\n"
    printf "\tExample 1: Building HEAD from the repo\n"
    printf "\t\tbuild_docker_image.sh -b\n"
-   printf "\tExample 2: Building tag from the repo\n"
+   printf "\tExample 2: Building HEAD from a different repo\n"
+   printf "\t\tbuild_docker_image.sh -b -r /Users/anon/dev/router\n"
+   printf "\tExample 3: Building tag from the repo\n"
    printf "\t\tbuild_docker_image.sh -b v0.9.1\n"
-   printf "\tExample 3: Building commit hash from the repo\n"
+   printf "\tExample 4: Building commit hash from the repo\n"
    printf "\t\tbuild_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5\n"
-   printf "\tExample 4: Building tag v0.9.1 from the released tarball\n"
+   printf "\tExample 5: Building tag v0.9.1 from the released tarball\n"
    printf "\t\tbuild_docker_image.sh v0.9.1\n"
    exit 2
 }
@@ -53,11 +56,12 @@ terminate () {
 # If no ROUTER_VERSION specified, we are building HEAD from a repo
 ROUTER_VERSION=
 BUILD_IMAGE=false
+DEFAULT_REPO="https://github.com/apollographql/router.git"
 
 ###
 # Process Command Line
 ###
-if ! args=$(getopt bh "$@"); then
+if ! args=$(getopt bhr: "$@"); then
     usage
 fi
 
@@ -73,6 +77,10 @@ while :; do
        -b)
                BUILD_IMAGE=true
                shift
+               ;;
+       -r)
+               GIT_REPO="${2}"
+               shift; shift
                ;;
        -h)
                usage
@@ -90,12 +98,19 @@ fi
 
 # If we aren't building, we need a ROUTER_VERSION
 if [ $# -gt 0 ]; then
+    if [ "${BUILD_IMAGE}" = false ] && [ "${GIT_REPO}" != "${DEFAULT_REPO}" ]; then
+        usage
+    fi
     ROUTER_VERSION="${1}"
 else
     if [ "${BUILD_IMAGE}" = false ]; then
         usage
     fi
+    if [ -z "${GIT_REPO}" ]; then
+        GIT_REPO="${DEFAULT_REPO}"
+    fi
 fi
+
 
 # We need a place to build
 if ! BUILD_DIR=$(mktemp -d -t "router-build.XXXXXXXXXX"); then
@@ -114,7 +129,7 @@ cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
 
 # If we are building, clone our repo
 if [ "${BUILD_IMAGE}" = true ]; then
-    git clone https://github.com/apollographql/router.git > /dev/null 2>&1 || terminate "Couldn't clone repository"
+    git clone "${GIT_REPO}" > /dev/null 2>&1 || terminate "Couldn't clone repository"
     cd router || terminate "Couldn't cd to router"
     # Either unset or blank (equivalent for our purposes)
     if [ -z "${ROUTER_VERSION}" ]; then

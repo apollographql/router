@@ -20,7 +20,7 @@ spec:
       protocol: TCP
       name: health
     {{- if .Values.serviceMonitor.enabled }}
-    - port: {{ .Values.serviceMonitor.port }}
+    - port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" }}
       targetPort: metrics
       protocol: TCP
       name: metrics
