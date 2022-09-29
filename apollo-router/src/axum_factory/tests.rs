@@ -1574,7 +1574,6 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    println!("response: {:?}", response);
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
@@ -1598,6 +1597,57 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         std::str::from_utf8(&*third).unwrap(),
         "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
+
+    server.shutdown().await
+}
+
+#[test(tokio::test)]
+async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
+    let mut expectations = MockSupergraphService::new();
+    expectations
+        .expect_service_call()
+        .times(1)
+        .returning(move |_| {
+            let body = stream::iter(vec![graphql::Response::builder()
+                .data(json!({
+                    "test": "hello",
+                }))
+                .has_next(false)
+                .build()])
+            .boxed();
+            Ok(SupergraphResponse::new_from_response(
+                http::Response::builder().status(200).body(body).unwrap(),
+                Context::new(),
+            ))
+        });
+    let (server, client) = init(expectations).await;
+    let query = json!(
+    {
+      "query": "query { test }",
+    });
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let mut response = client
+        .post(&url)
+        .body(query.to_string())
+        .header(
+            ACCEPT,
+            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE),
+        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+    );
+
+    let first = response.chunk().await.unwrap().unwrap();
+    assert_eq!(
+            std::str::from_utf8(&*first).unwrap(),
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":false}\r\n--graphql--\r\n"
+        );
 
     server.shutdown().await
 }
@@ -1719,15 +1769,21 @@ async fn http_compressed_service() -> impl Service<
         .unwrap()
         .map_err(Into::into);
 
-    let service = http_client::response_decompression(service).map_future(|future| async {
-        let response: http::Response<Pin<Box<dyn AsyncRead + Send>>> = future.await?;
-        let (parts, mut body) = response.into_parts();
+    let service = http_client::response_decompression(service)
+        .map_request(|mut req: http::Request<hyper::Body>| {
+            req.headers_mut()
+                .append(ACCEPT, HeaderValue::from_static("application/json"));
+            req
+        })
+        .map_future(|future| async {
+            let response: http::Response<Pin<Box<dyn AsyncRead + Send>>> = future.await?;
+            let (parts, mut body) = response.into_parts();
 
-        let mut vec = Vec::new();
-        body.read_to_end(&mut vec).await.unwrap();
-        let body = MaybeMultipart::NotMultipart(vec);
-        Ok(http::Response::from_parts(parts, body))
-    });
+            let mut vec = Vec::new();
+            body.read_to_end(&mut vec).await.unwrap();
+            let body = MaybeMultipart::NotMultipart(vec);
+            Ok(http::Response::from_parts(parts, body))
+        });
     http_client::json(service)
 }
 

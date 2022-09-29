@@ -180,7 +180,11 @@ where
                                     &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
                                 );
                                 serde_json::to_writer(&mut first_buf, &response).unwrap();
-                                first_buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                if response.has_next.unwrap_or(false) {
+                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                } else {
+                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                                }
 
                                 let body = once(ready(Ok(Bytes::from(first_buf)))).chain(
                                     stream.map(|res| {

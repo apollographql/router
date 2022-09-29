@@ -128,11 +128,13 @@ pub(super) async fn check_accept_header(
     let ask_for_html = req.method() == Method::GET && prefers_html(req.headers());
 
     if req.headers().get(ACCEPT).is_some()
-        && !accepts_wildcard(req.headers())
-        && !ask_for_html
-        && !accepts_multipart(req.headers())
-        && !accepts_json(req.headers())
+        && (accepts_wildcard(req.headers())
+            || ask_for_html
+            || accepts_multipart(req.headers())
+            || accepts_json(req.headers()))
     {
+        Ok(next.run(req).await)
+    } else {
         Err((
             StatusCode::NOT_ACCEPTABLE,
             format!(
@@ -143,8 +145,6 @@ pub(super) async fn check_accept_header(
             ),
         )
             .into_response())
-    } else {
-        Ok(next.run(req).await)
     }
 }
 
