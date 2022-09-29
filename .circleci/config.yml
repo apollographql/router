@@ -154,6 +154,30 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - run: cargo xtask lint
 
+  xtask_check_helm:
+    parameters:
+      os:
+        type: string
+    steps:
+      - run:
+          name: Validate helm manifests
+          command: |
+            TODAY=$(date +"%Y-%m-%d")
+
+            CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+              | yq -o json '.' \
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[0].release')
+
+            TEMPLATE_DIR=$(mktemp -d)
+            echo "${CURRENT_KUBE_VERSIONS}" | while read kube_version; do
+              helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+
+              kubeval "${TEMPLATE_DIR}/router-${kube_version}.yaml" \
+                --kubernetes-version "${kube_version}" \
+                --strict \
+                --schema-location https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master
+            done
+
   xtask_check_compliance:
     parameters:
       os:
@@ -283,6 +307,22 @@ jobs:
           steps:
             - linux_install_baseline
             - xtask_lint:
+                os: linux
+  check_helm:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - when:
+          condition:
+            equal: [*rust_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_install_baseline
+            - xtask_check_helm:
                 os: linux
   check_compliance:
     environment:
@@ -512,6 +552,11 @@ workflows:
   ci_checks:
     jobs:
       - lint:
+          matrix:
+            parameters:
+              platform: [rust_linux]
+
+      - check_helm:
           matrix:
             parameters:
               platform: [rust_linux]
