@@ -68,12 +68,15 @@ pub(crate) struct SubgraphService {
 
 impl SubgraphService {
     pub(crate) fn new(service: impl Into<String>) -> Self {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
             .enable_http1()
             .enable_http2()
-            .build();
+            .wrap_connector(http_connector);
 
         Self {
             client: ServiceBuilder::new()
