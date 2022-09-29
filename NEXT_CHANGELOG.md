@@ -87,6 +87,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### `traffic_shaping.all.deduplicate_query` was not correctly set ([PR #1901](https://github.com/apollographql/router/pull/1901))
+
+Due to a change in our traffic_shaping configuration the `deduplicate_query` field for all subgraph wasn't set correctly.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1901
+
 ### fix external secret support in our helm chart ([Issue #1750](https://github.com/apollographql/router/issues/1750))
 
 If an external secret is specified, e.g.: 
