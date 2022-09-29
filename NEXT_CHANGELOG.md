@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add ability to specify repository location to diy docker image builds ([PR #1904](https://github.com/apollographql/router/issues/1904))
+
+The new `-r` flag allows a developer to specify the location of a repository when building a diy docker image. Handy for developers with local repositories.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1904
+
 ### Support serviceMonitor in helm chart
 
 `kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
@@ -75,6 +81,16 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### fix external secret support in our helm chart ([Issue #1750](https://github.com/apollographql/router/issues/1750))
+
+If an external secret is specified, e.g.: 
+
+`helm install --set router.managedFederation.existingSecret="my-secret-name" <etc...>`
+
+then the router should be deployed and configured to use the existing secret.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1878
+
 ### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
 
 in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
@@ -98,7 +114,31 @@ execution service returning a stream of invalid responses, so the execution plug
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
 
+### Hide footer from "homepage" landing page ([PR #1900](https://github.com/apollographql/router/pull/1900))
+
+Hides some incorrect language about customization on the landing page.  Currently to customize the landing page it requires additional support.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/1900
+
 ## 🛠 Maintenance
+
+### Update to Federation 2.1.3 ([Issue #1880](https://github.com/apollographql/router/issues/1880))
+
+This brings in Federation 2.1.3 to bring in updates to `@apollo/federation` via the relevant bump in `router-bridge`.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
+### Update `reqwest` dependency to resolve DNS resolution failures ([Issue #1899](https://github.com/apollographql/router/issues/1899))
+
+This should resolve intermittent failures to resolve DNS in Uplink which were occurring due to an upstream bug in the `reqwest` library.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/1806
+
+### Remove span details from log records ([PR #1896](https://github.com/apollographql/router/pull/1896))
+
+Prior to this change, span details were written to log files. This was unwieldy and contributed to log bloat. Note: spans and logs are still linked in trace aggregators such as jaeger. The change simply affects the content of the written log records.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1896
 
 ### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
 
