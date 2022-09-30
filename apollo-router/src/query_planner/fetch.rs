@@ -313,7 +313,7 @@ impl FetchNode {
                         match path.0.get(1) {
                             Some(json_ext::PathElement::Index(i)) => {
                                 for values_path in
-                                    inverted_paths.get(i).iter().map(|v| v.iter()).flatten()
+                                    inverted_paths.get(i).iter().flat_map(|v| v.iter())
                                 {
                                     errors.push(Error {
                                         locations: error.locations.clone(),
