@@ -3,6 +3,7 @@ use apollo_parser::ast::{self};
 use serde_json_bytes::ByteString;
 
 use crate::json_ext::Object;
+use crate::spec::TYPENAME;
 use crate::FieldType;
 use crate::Schema;
 use crate::SpecError;
@@ -94,7 +95,7 @@ impl Selection {
                     .text()
                     .to_string();
 
-                let field_type = if field_name.as_str() == "__typename" {
+                let field_type = if field_name.as_str() == TYPENAME {
                     FieldType::String
                 } else if field_name == "__schema" {
                     FieldType::Introspection("__Schema".to_string())
