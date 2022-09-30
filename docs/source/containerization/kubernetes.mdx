@@ -13,7 +13,7 @@ import { Link } from 'gatsby';
 
 [Helm](https://helm.sh) is the package manager for kubernetes.
 
-There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.0.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
+There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.1.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
 
 In both the following examples, we are using helm to install the router:
  - into namespace "router-deploy" (create namespace if it doesn't exist)
@@ -29,7 +29,7 @@ router docker images.
 You can use helm to install charts from an OCI registry as follows:
 
 ```bash
-helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.3 --values router/values.yaml
+helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.4 --values router/values.yaml
 ```
 
 For more details about using helm with OCI based registries, see [here](https://helm.sh/docs/topics/registries/)
@@ -64,10 +64,10 @@ kind: ServiceAccount
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -76,10 +76,10 @@ kind: Secret
 metadata:
   name: "release-name-router"
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "UkVEQUNURUQ="
@@ -90,13 +90,15 @@ kind: ConfigMap
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
+    health-check:
+      listen: 0.0.0.0:8088
     supergraph:
       listen: 0.0.0.0:80
     telemetry:
@@ -106,6 +108,8 @@ data:
             service.name: release-name-router
         prometheus:
           enabled: true
+          listen: 0.0.0.0:9090
+          path: /metrics
 ---
 # Source: router/templates/service.yaml
 apiVersion: v1
@@ -113,10 +117,10 @@ kind: Service
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -125,6 +129,10 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: 8088
+      targetPort: health
+      protocol: TCP
+      name: health
   selector:
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
@@ -135,15 +143,15 @@ kind: Deployment
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
 
   annotations:
     prometheus.io/path: /metrics
-    prometheus.io/port: 9090
+    prometheus.io/port: "9090"
     prometheus.io/scrape: "true"
 spec:
   replicas: 1
@@ -164,7 +172,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v1.0.0"
+          image: "ghcr.io/apollographql/router:v1.1.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
@@ -183,6 +191,10 @@ spec:
             - name: http
               containerPort: 80
               protocol: TCP
+            - name: health
+              containerPort: 8088
+              protocol: TCP
+
           livenessProbe:
             httpGet:
               path: "/health"
@@ -209,10 +221,10 @@ kind: Pod
 metadata:
   name: "release-name-router-test-connection"
   labels:
-    helm.sh/chart: router-1.0.0-rc.3
+    helm.sh/chart: router-1.0.0-rc.4
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.0.0"
+    app.kubernetes.io/version: "v1.1.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test
