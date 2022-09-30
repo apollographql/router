@@ -423,8 +423,7 @@ impl Schema {
                                     .enum_value_definitions()
                                     .filter_map(|value| {
                                         value.enum_value().map(|val| {
-                                            //FIXME: should we check for true/false/null here
-                                            // https://spec.graphql.org/draft/#EnumValue
+                                            // No need to check for true/false/null here because it's already checked in apollo-rs
                                             val.name()
                                                 .ok_or_else(|| {
                                                     SchemaError::Api(
@@ -507,11 +506,7 @@ impl Schema {
         self.root_operations
             .get(&kind)
             .map(|s| s.as_str())
-            .unwrap_or_else(|| match kind {
-                OperationKind::Query => "Query",
-                OperationKind::Mutation => "Mutation",
-                OperationKind::Subscription => "SubScription",
-            })
+            .unwrap_or_else(|| kind.as_str())
     }
 }
 

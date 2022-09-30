@@ -1195,6 +1195,7 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     }
 }
 
+#[inline]
 pub(crate) fn is_span_sampled(context: &Context) -> bool {
     Span::current().context().span().span_context().is_sampled()
         && !context

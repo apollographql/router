@@ -136,6 +136,7 @@ impl BridgeQueryPlanner {
                     }),
                 })
             }
+            #[cfg_attr(feature = "failfast", allow(unused_variables))]
             PlanSuccess {
                 data:
                     QueryPlanResult {
@@ -190,14 +191,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                             }
                         }
                         QueryPlannerError::SpecError(e) => {
-                            let error_key = match e {
-                                SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                                _ => "## GraphQLValidationFailure\n",
-                            };
                             if let Err(inner_e) = req.context.insert(
                                 USAGE_REPORTING,
                                 UsageReporting {
-                                    stats_report_key: error_key.to_string(),
+                                    stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 },
                             ) {
