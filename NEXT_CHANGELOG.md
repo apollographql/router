@@ -27,101 +27,21 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
-
-### Support serviceMonitor in helm chart
-
-`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
-
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
-
-### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
-
-+ Insert static header
-
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router"
-        value: "indeed"
-```
-
-+ Insert header from context
-
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router-context"
-        from_context: "my_key_in_context"
-```
-
-+ Insert header from request body
-
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    + insert:
-        name: "sent-from-our-apollo-router-request-body"
-        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
-        default: "UNKNOWN" # If no operationName has been specified
-```
-
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
-
 ## 🐛 Fixes
 
-### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
+### `traffic_shaping.all.deduplicate_query` was not correctly set ([PR #1901](https://github.com/apollographql/router/pull/1901))
 
-in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
-was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
-This will now aggregate the subgraph error and the missing `_entities` error.
+Due to a change in our traffic_shaping configuration the `deduplicate_query` field for all subgraph wasn't set correctly.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
-
-### Fix prometheus annotation and healthcheck default
-
-The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
-defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
-
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
-
-### Move response formatting to the execution service ([PR #1771](https://github.com/apollographql/router/pull/1771))
-
-The response formatting process, where response data is filtered according to deferred responses subselections
-and the API schema, was executed in the supergraph service. This is a bit late, because it results in the
-execution service returning a stream of invalid responses, so the execution plugins work on invalid data.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1901
 
 ## 🛠 Maintenance
 
-### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
+### Fix hpa yaml for appropriate kubernetes versions ([#1908](https://github.com/apollographql/router/pull/1908))
 
-Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
+Correct schema for autoscaling/v2beta2 and autoscaling/v2 api versions of the
+HorizontalPodAutoscaler within the helm chart
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
-
-### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
-
-Avoids redundant work in CI and makes the YAML configuration less mis-leading.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
-
-### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
-
-This splits the query plan execution in multiple modules to make the code more manageable.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
-
-### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
-
-This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
+By [@damienpontifex](https://github.com/damienpontifex) in https://github.com/apollographql/router/issues/1914
 
 ## 📚 Documentation

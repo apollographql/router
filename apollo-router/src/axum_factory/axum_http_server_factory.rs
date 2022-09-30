@@ -41,6 +41,7 @@ use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
 use super::listeners::ListenersAndRouters;
+use super::utils::check_accept_header;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
@@ -377,21 +378,25 @@ where
 
     Router::<hyper::Body>::new().route(
         &graphql_configuration.path,
-        get_handler.post({
-            move |host: Host,
-                  uri: OriginalUri,
-                  request: Json<graphql::Request>,
-                  Extension(service): Extension<RF>,
-                  header_map: HeaderMap| {
-                handle_post(
-                    host,
-                    uri,
-                    request,
-                    apq,
-                    service.new_service().boxed(),
-                    header_map,
-                )
-            }
-        }),
+        get_handler
+            .post({
+                move |host: Host,
+                      uri: OriginalUri,
+                      request: Json<graphql::Request>,
+                      Extension(service): Extension<RF>,
+                      header_map: HeaderMap| {
+                    {
+                        handle_post(
+                            host,
+                            uri,
+                            request,
+                            apq,
+                            service.new_service().boxed(),
+                            header_map,
+                        )
+                    }
+                }
+            })
+            .layer(middleware::from_fn(check_accept_header)),
     )
 }

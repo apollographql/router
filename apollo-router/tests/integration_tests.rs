@@ -534,6 +534,18 @@ async fn query_just_at_recursion_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn normal_query_with_defer_accept_header() {
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
+
+    assert!(actual.errors.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {

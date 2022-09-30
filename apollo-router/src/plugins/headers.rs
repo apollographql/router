@@ -290,7 +290,8 @@ where
                         let output = from_body
                             .path
                             .execute(req.supergraph_request.body())
-                            .unwrap();
+                            .ok()
+                            .flatten();
                         if let Some(val) = output {
                             let header_value = if let Value::String(val_str) = val {
                                 val_str

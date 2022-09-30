@@ -49,7 +49,8 @@ impl Clone for CloneSubgraphResponse {
     }
 }
 
-pub(crate) struct QueryDeduplicationService<S> {
+#[derive(Clone)]
+pub(crate) struct QueryDeduplicationService<S: Clone> {
     service: S,
     wait_map: WaitMap,
 }

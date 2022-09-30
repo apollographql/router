@@ -2,14 +2,12 @@
 //!
 //! Currently includes:
 //! * Query deduplication
-//!
-//! Future functionality:
-//! * APQ (already written, but config needs to be moved here)
-//! * Caching
+//! * Timeout
+//! * Compression
 //! * Rate limiting
 //!
 
-mod deduplication;
+pub(crate) mod deduplication;
 mod rate;
 mod timeout;
 
@@ -32,10 +30,8 @@ pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::error::ConfigurationError;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::register_plugin;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
@@ -209,12 +205,6 @@ impl Plugin for TrafficShaping {
                     .clone()
             });
             ServiceBuilder::new()
-                .option_layer(config.deduplicate_query.unwrap_or_default().then(|| {
-                    // Buffer is required because dedup layer requires a clone service.
-                    ServiceBuilder::new()
-                        .layer(QueryDeduplicationLayer::default())
-                        .buffered()
-                }))
                 .layer(TimeoutLayer::new(
                     config
                     .timeout
@@ -255,6 +245,15 @@ impl TrafficShaping {
             .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
             .unwrap_or_default()
     }
+}
+
+pub(crate) fn is_deduplicate_query_enabled(conf: &Configuration) -> bool {
+    conf.plugins()
+        .iter()
+        .find(|(name, _)| name == "apollo.traffic_shaping")
+        .and_then(|(_, shaping)| shaping.get("all"))
+        .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
+        == Some(&serde_json::Value::Bool(true))
 }
 
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
@@ -557,5 +556,20 @@ mod test {
             .next_response()
             .await
             .unwrap();
+    }
+
+    // This test is useful for supergraph service
+    #[tokio::test]
+    async fn test_is_deduplicated_query_enabled() {
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            plugins:
+                apollo.traffic_shaping:
+                    all:
+                        deduplicate_query: true
+        "#,
+        )
+        .unwrap();
+        assert!(is_deduplicate_query_enabled(&config));
     }
 }

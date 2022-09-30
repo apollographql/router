@@ -138,14 +138,10 @@ where
                                 }
                             }
                             QueryPlannerError::SpecError(e) => {
-                                let error_key = match e {
-                                    SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-                                    _ => "## GraphQLValidationFailure\n",
-                                };
                                 if let Err(inner_e) = request.context.insert(
                                     USAGE_REPORTING,
                                     UsageReporting {
-                                        stats_report_key: error_key.to_string(),
+                                        stats_report_key: e.get_error_key().to_string(),
                                         referenced_fields_by_type: HashMap::new(),
                                     },
                                 ) {
