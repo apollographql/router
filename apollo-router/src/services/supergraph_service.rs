@@ -511,6 +511,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn errors_on_deferred_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {
+                        "representations":[{"__typename": "User", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "User", "name": "AAA"},
+                        ] }]
+                    },
+                    "errors": [
+                        {
+                            "message": "error user 0",
+                            "path": ["_entities", 0],
+                        }
+                    ]
+                    }}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query("query { currentUser { id  ...@defer { name } } }")
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
     async fn errors_on_incremental_responses() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -582,7 +635,6 @@ mod tests {
             .query(
                 "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
             )
-            // Request building here
             .build()
             .unwrap();
 
