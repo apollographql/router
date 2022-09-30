@@ -35,6 +35,12 @@ Due to a change in our traffic_shaping configuration the `deduplicate_query` fie
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1901
 
+### Set no_delay and keepalive on subgraph requests [Issue #1905 #1889](https://github.com/apollographql/router/issues/1905))
+
+It was incorrectly removed in a previous pull request.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+
 ## 🛠 Maintenance
 
 ### Fix hpa yaml for appropriate kubernetes versions ([#1908](https://github.com/apollographql/router/pull/1908))
