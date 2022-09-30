@@ -58,13 +58,13 @@ The following are now possible in our YAML configuration for `headers`:
   headers:
     all: # Header rules for all subgraphs
       request:
-      + insert:
+      - insert:
           name: "sent-from-our-apollo-router-request-body"
           path: ".operationName" # It's a JSON path query to fetch the operation name from request body
           default: "UNKNOWN" # If no operationName has been specified
   ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1833
 
 ## 🐛 Fixes
 
