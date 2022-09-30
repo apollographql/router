@@ -15,11 +15,13 @@ use xtask::*;
 const INCLUDE: &[&str] = &["README.md", "LICENSE", "licenses.html"];
 pub(crate) const TARGET_X86_64_MUSL_LINUX: &str = "x86_64-unknown-linux-musl";
 pub(crate) const TARGET_X86_64_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
+pub(crate) const TARGET_AARCH64_GNU_LINUX: &str = "aarch64-unknown-linux-gnu";
 pub(crate) const TARGET_X86_64_WINDOWS: &str = "x86_64-pc-windows-msvc";
 pub(crate) const TARGET_X86_64_MACOS: &str = "x86_64-apple-darwin";
-pub(crate) const POSSIBLE_TARGETS: [&str; 4] = [
+pub(crate) const POSSIBLE_TARGETS: [&str; 5] = [
     TARGET_X86_64_MUSL_LINUX,
     TARGET_X86_64_GNU_LINUX,
+    TARGET_AARCH64_GNU_LINUX,
     TARGET_X86_64_WINDOWS,
     TARGET_X86_64_MACOS,
 ];
@@ -97,6 +99,7 @@ impl Package {
 pub(crate) enum Target {
     MuslLinux,
     GnuLinux,
+    ArmLinux,
     Windows,
     MacOS,
     Other,
@@ -120,6 +123,11 @@ impl Default for Target {
             } else {
                 Target::Other
             }
+        } else if cfg!(target_arch = "aarch64")
+            && cfg!(target_os = "linux")
+            && cfg!(target_env = "gnu")
+        {
+            Target::ArmLinux
         } else {
             Target::Other
         }
@@ -133,6 +141,7 @@ impl FromStr for Target {
         match input {
             TARGET_X86_64_MUSL_LINUX => Ok(Self::MuslLinux),
             TARGET_X86_64_GNU_LINUX => Ok(Self::GnuLinux),
+            TARGET_AARCH64_GNU_LINUX => Ok(Self::ArmLinux),
             TARGET_X86_64_WINDOWS => Ok(Self::Windows),
             TARGET_X86_64_MACOS => Ok(Self::MacOS),
             _ => Ok(Self::Other),
@@ -145,6 +154,7 @@ impl fmt::Display for Target {
         let msg = match &self {
             Target::MuslLinux => TARGET_X86_64_MUSL_LINUX,
             Target::GnuLinux => TARGET_X86_64_GNU_LINUX,
+            Target::ArmLinux => TARGET_AARCH64_GNU_LINUX,
             Target::Windows => TARGET_X86_64_WINDOWS,
             Target::MacOS => TARGET_X86_64_MACOS,
             Target::Other => "unknown-target",

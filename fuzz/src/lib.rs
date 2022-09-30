@@ -1,3 +1,5 @@
+// The fuzzer won't compile on windows as of 1.63.0
+#![cfg(not(windows))]
 use std::fs;
 
 use apollo_parser::Parser;

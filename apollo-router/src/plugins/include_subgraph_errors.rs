@@ -196,9 +196,7 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let router = builder.build().await.expect("should build").test_service();
-
-        router
+        builder.build().await.expect("should build").test_service()
     }
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {

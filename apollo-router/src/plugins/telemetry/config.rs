@@ -242,6 +242,10 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
                 service_namespace.clone(),
             ));
         }
+        resource_defaults.push(KeyValue::new(
+            opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
+            std::env!("CARGO_PKG_VERSION"),
+        ));
 
         if let Some(executable_name) = std::env::current_exe().ok().and_then(|path| {
             path.file_name()
