@@ -35,6 +35,13 @@ Due to a change in our traffic_shaping configuration the `deduplicate_query` fie
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1901
 
+### `@defer`: duplicated errors across incremental items ([Issue #1834](https://github.com/apollographql/router/pull/1834))
+
+If a deferred response contains incremental responses, the errors should be dispatched in each increment according to the
+error's path.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1892
+
 ## 🛠 Maintenance
 
 ### Fix hpa yaml for appropriate kubernetes versions ([#1908](https://github.com/apollographql/router/pull/1908))
