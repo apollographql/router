@@ -298,37 +298,41 @@ impl FetchNode {
         paths: HashMap<Path, usize>,
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
-        let mut errors: Vec<Error> = response
-            .errors
-            .into_iter()
-            .map(|error| {
-                let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
-                    &current_dir.0[..current_dir.0.len() - 1]
-                } else {
-                    &current_dir.0[..]
-                };
-
-                let path = if self.requires.is_empty() {
-                    error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    })
-                } else {
-                    // remove `_entities` from the beginning of the path
-                    error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(&path.0[1..]).cloned())
-                    })
-                };
-
-                Error {
-                    locations: error.locations,
-                    path,
-                    message: error.message,
-                    extensions: error.extensions,
-                }
-            })
-            .collect();
+        let mut inverted_paths: HashMap<usize, Vec<&Path>> = HashMap::new();
+        for (path, index) in paths.iter() {
+            (*inverted_paths.entry(*index).or_default()).push(path);
+        }
 
         if !self.requires.is_empty() {
+            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
+
+            let mut errors: Vec<Error> = vec![];
+            for error in response.errors {
+                if let Some(ref path) = error.path {
+                    if path.starts_with(&entities_path) {
+                        match path.0.get(1) {
+                            Some(json_ext::PathElement::Index(i)) => {
+                                for values_path in
+                                    inverted_paths.get(i).iter().map(|v| v.iter()).flatten()
+                                {
+                                    errors.push(Error {
+                                        locations: error.locations.clone(),
+                                        path: Some(Path::from_iter(
+                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                        )),
+                                        message: error.message.clone(),
+                                        extensions: error.extensions.clone(),
+                                    })
+                                }
+                            }
+                            _ => errors.push(error),
+                        }
+                    } else {
+                        errors.push(error);
+                    }
+                }
+            }
+
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
             if let Some(Value::Object(mut map)) = response.data {
@@ -360,6 +364,28 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
+            let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
+                &current_dir.0[..current_dir.0.len() - 1]
+            } else {
+                &current_dir.0[..]
+            };
+
+            let errors: Vec<Error> = response
+                .errors
+                .into_iter()
+                .map(|error| {
+                    let path = error.path.as_ref().map(|path| {
+                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                    });
+
+                    Error {
+                        locations: error.locations,
+                        path,
+                        message: error.message,
+                        extensions: error.extensions,
+                    }
+                })
+                .collect();
             (
                 Value::from_path(current_dir, response.data.unwrap_or_default()),
                 errors,
