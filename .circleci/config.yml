@@ -416,6 +416,7 @@ jobs:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
+            - install_minimal_rust
             - run:
                 command: >
                   cargo xtask dist
@@ -443,6 +444,7 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
+            - install_minimal_rust
             - run:
                 command: >
                   cargo xtask dist
