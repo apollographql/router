@@ -85,6 +85,11 @@ impl ApolloExporter {
             ..Default::default()
         };
 
+        // Pool Sizing: by default Deadpool will configure a maximum
+        // pool size based on the number of physical CPUs:
+        //   `cpu_count * 4` ignoring any logical CPUs (Hyper-Threading).
+        // This is going to be very low in containerised environments
+        //
         // Deadpool gives us connection pooling to spaceport
         // It also significantly simplifies initialisation of the connection and gives us options in the future for configuring timeouts.
         let pool = deadpool::managed::Pool::<ReporterManager>::builder(ReporterManager {
@@ -96,6 +101,7 @@ impl ApolloExporter {
         .build()
         .unwrap();
 
+        tracing::info!("pool details: {:?}", pool.status());
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
