@@ -27,11 +27,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
-### Remove support for `rhai.input_file` and support extra configmaps ([PR #XXXX](https://github.com/apollographql/router/issues/XXXX))
+### Remove support for `rhai.input_file` ([Issue #1826](https://github.com/apollographql/router/issues/1826))
 
-The existing `rhai.input_file` mechanism doesn't really work for most helm use cases. This PR removes this mechanism and introduces an alternative method for making rhai scripts available to containerised routers.
-
-By adding support for extraConfigmaps to the router helm chart,  a very convenient mechanism for adding support for rhai scripts is provided.
+The existing `rhai.input_file` mechanism doesn't really work for most helm use cases. This PR removes this mechanism and and encourages the use of the `extraVolumes/extraVolumeMounts` mechanism with rhai.
 
 Example: Create a configmap which contains your rhai scripts.
 
@@ -94,10 +92,14 @@ router:
     rhai:
       scripts: /dist/rhai
       main: main.rhai
-extraConfigmaps:
-  - name: rhai
+extraVolumeMounts:
+  - name: rhai-volume
     mountPath: /dist/rhai
-    readOnly: true
+    readonly: true
+extraVolumes:
+  - name: rhai-volume
+    configMap:
+      name: rhai-config
 ```
 The configuration tells the router to load the rhai script `main.rhai` from the directory `/dist/rhai` (and load any imported modules from /dist/rhai)
 
@@ -105,7 +107,7 @@ This will mount the confimap created above in the `/dist/rhai` directory with tw
  - `main.rhai`
  - `my-module.rhai`
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1917
 
 ## 🚀 Features
 ## 🐛 Fixes

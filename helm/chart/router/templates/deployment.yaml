@@ -110,12 +110,6 @@ spec:
               subPath: configuration.yaml
               readOnly: true
             {{- end }}
-            {{- range .Values.extraConfigmaps }}
-            - name: {{ .name }}
-              mountPath: {{ .mountPath }}
-              subPath: {{ .subPath | default "" }}
-              readOnly: {{ .readOnly }}
-            {{- end }}
             {{- if .Values.extraVolumeMounts }}
               {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
@@ -126,11 +120,6 @@ spec:
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
-        {{- end }}
-        {{- range .Values.extraConfigmaps }}
-        - name: {{ .name }}
-          configMap:
-            name: {{ .name }}
         {{- end }}
         {{- if .Values.extraVolumes }}
           {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
