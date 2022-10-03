@@ -111,7 +111,6 @@ impl ApolloExporter {
         .build()
         .unwrap();
 
-        tracing::info!("pool details: {:?}", pool.status());
         // This is the thread that actually sends metrics
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
