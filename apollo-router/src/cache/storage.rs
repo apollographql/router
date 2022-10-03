@@ -21,7 +21,7 @@ where
     V: Clone + Send,
 {
     pub(crate) async fn new(max_capacity: usize) -> Self {
-        let nodes = vec!["redis://redis-cluster-headless.redis.svc.cluster.local:6379"];
+        let nodes = vec!["redis://redis-redis-cluster-headless.redis.svc.cluster.local:6379"];
         let client = ClusterClientBuilder::new(nodes)
             .password("CzcBquHIjm".to_string())
             .open()
