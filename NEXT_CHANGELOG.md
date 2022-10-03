@@ -109,6 +109,11 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 ## 🐛 Fixes
+### Update `apollo-parser` to v0.2.12 ([PR #1921](https://github.com/apollographql/router/pull/1921))
+
+Correctly lexes and creates an error token for unterminated GraphQL `StringValue`s with unicode and line terminator characters.
+
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/1921
 
 ### `traffic_shaping.all.deduplicate_query` was not correctly set ([PR #1901](https://github.com/apollographql/router/pull/1901))
 
