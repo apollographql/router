@@ -2,7 +2,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use lru::LruCache;
-use redis::cluster::ClusterClient;
+use redis::cluster::ClusterClientBuilder;
 use redis::Commands;
 use tokio::sync::Mutex;
 
@@ -22,7 +22,10 @@ where
 {
     pub(crate) async fn new(max_capacity: usize) -> Self {
         let nodes = vec!["redis://redis-cluster-headless.redis.svc.cluster.local:6379"];
-        let client = ClusterClient::open(nodes).expect("opening ClusterClient");
+        let client = ClusterClientBuilder::new(nodes)
+            .password("CzcBquHIjm".to_string())
+            .open()
+            .expect("opening ClusterClient");
         let mut connection = client.get_connection().expect("got redis connection");
         let _: () = connection.set("test", "test_data").expect("setting data");
         let rv: String = connection.get("test").expect("getting data");
