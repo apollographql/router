@@ -101,6 +101,7 @@ impl std::fmt::Display for ReporterError {
 #[derive(Debug)]
 pub(crate) struct Reporter {
     client: ReporterClient<Channel>,
+    ep: Endpoint,
 }
 
 impl Reporter {
@@ -114,8 +115,8 @@ impl Reporter {
         prost::bytes::Bytes: From<T>,
     {
         let ep = Endpoint::from_shared(addr)?;
-        let client = ReporterClient::connect(ep).await?;
-        Ok(Self { client })
+        let client = ReporterClient::connect(ep.clone()).await?;
+        Ok(Self { client, ep })
     }
 
     /// Submit a report onto the spaceport for eventual processing.
@@ -125,7 +126,21 @@ impl Reporter {
         &mut self,
         request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
-        self.client.add(Request::new(request)).await
+        // After a period of time (days?) `add` starts to fail in certain environments.
+        // This is proving hard to debug. Until we know the root cause, this mitigation
+        // will create a new client and attempt to `add` again.
+        // TODO: Figure out the root cause
+        match self.client.add(Request::new(request.clone())).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::warn!(%e, "adding report failed");
+                // If we can't connect, report Unavailable
+                self.client = ReporterClient::connect(self.ep.clone())
+                    .await
+                    .map_err(|e| Status::new(tonic::Code::Unavailable, e.to_string()))?;
+                self.client.add(Request::new(request)).await
+            }
+        }
     }
 }
 
