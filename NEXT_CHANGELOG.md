@@ -28,6 +28,15 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Mitigate studio reporting failure ([Issue #1903](https://github.com/apollographql/router/issues/1903))
+
+Mitigate spaceport connection error by creating a replacement client on failure and then retrying.
+
+Also make deadpool sizing constant across environments (#1893) 
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1928
+
 ### Update `apollo-parser` to v0.2.12 ([PR #1921](https://github.com/apollographql/router/pull/1921))
 
 Correctly lexes and creates an error token for unterminated GraphQL `StringValue`s with unicode and line terminator characters.
