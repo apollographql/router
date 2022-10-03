@@ -420,7 +420,7 @@ impl AttributesForwardConf {
             }
             if let Some(body_forward) = &from_request.body {
                 for body_fw in body_forward {
-                    let output = body_fw.path.execute(body).unwrap(); //FIXME do not use unwrap
+                    let output = body_fw.path.execute(body).ok().flatten();
                     if let Some(val) = output {
                         if let Value::String(val_str) = val {
                             attributes.insert(body_fw.name.clone(), val_str);

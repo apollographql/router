@@ -29,6 +29,7 @@ use crate::spaceport::report::Report;
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
 pub(crate) struct ReportSpaceport {
@@ -178,7 +179,7 @@ impl ReportSpaceport {
                     msg = e.to_string();
                 }
             }
-            backoff += Duration::from_millis(50);
+            backoff += BACKOFF_INCREMENT;
             tokio::time::sleep(backoff).await;
         }
         Err(Status::unavailable(msg))
