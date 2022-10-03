@@ -20,6 +20,7 @@ use crate::spaceport::ReporterError;
 // use crate::plugins::telemetry::apollo::ReportBuilder;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
+const DEADPOOL_SIZE: usize = 128;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
@@ -89,12 +90,21 @@ impl ApolloExporter {
         // pool size based on the number of physical CPUs:
         //   `cpu_count * 4` ignoring any logical CPUs (Hyper-Threading).
         // This is going to be very low in containerised environments
+        // For example, in my k8s testing I get max_size: 16
+        //
+        // Since we know we can support large numbers of connections to the
+        // data ingestion endpoint, I'm going to manually set this to
+        // be [`DEADPOOL_SIZE`] which should be plenty. I'm not setting
+        // it to be a very high number (e.g.: 100000), because resources
+        // are consumed and conserving them is important.
+
         //
         // Deadpool gives us connection pooling to spaceport
         // It also significantly simplifies initialisation of the connection and gives us options in the future for configuring timeouts.
         let pool = deadpool::managed::Pool::<ReporterManager>::builder(ReporterManager {
             endpoint: endpoint.clone(),
         })
+        .max_size(DEADPOOL_SIZE)
         .create_timeout(Some(Duration::from_secs(5)))
         .wait_timeout(Some(Duration::from_secs(5)))
         .runtime(Runtime::Tokio1)
