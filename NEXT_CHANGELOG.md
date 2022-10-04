@@ -37,10 +37,10 @@ Example: Create a configmap which contains your rhai scripts.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rhai
+  name: rhai-config
   labels:
-    app.kubernetes.io/name: rhai
-    app.kubernetes.io/instance: rhai
+    app.kubernetes.io/name: rhai-config
+    app.kubernetes.io/instance: rhai-config
 data:
   main.rhai: |
     // Call map_request with our service and pass in a string with the name
