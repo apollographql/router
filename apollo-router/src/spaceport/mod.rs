@@ -119,6 +119,15 @@ impl Reporter {
         Ok(Self { client, ep })
     }
 
+    /// Try to re-connect a reporter.
+    ///
+    /// This can fail if:
+    ///  - the reporter can't connect to the address
+    pub(crate) async fn reconnect(&mut self) -> Result<(), ReporterError> {
+        self.client = ReporterClient::connect(self.ep.clone()).await?;
+        Ok(())
+    }
+
     /// Submit a report onto the spaceport for eventual processing.
     ///
     /// The spaceport will buffer reports, transferring them when convenient.
@@ -126,21 +135,7 @@ impl Reporter {
         &mut self,
         request: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
-        // After a period of time (days?) `add` starts to fail in certain environments.
-        // This is proving hard to debug. Until we know the root cause, this mitigation
-        // will create a new client and attempt to `add` again.
-        // TODO: Figure out the root cause
-        match self.client.add(Request::new(request.clone())).await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                tracing::warn!(%e, "adding report failed");
-                // If we can't connect, report Unavailable
-                self.client = ReporterClient::connect(self.ep.clone())
-                    .await
-                    .map_err(|e| Status::new(tonic::Code::Unavailable, e.to_string()))?;
-                self.client.add(Request::new(request)).await
-            }
-        }
+        self.client.add(Request::new(request)).await
     }
 }
 

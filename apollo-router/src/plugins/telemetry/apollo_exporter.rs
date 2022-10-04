@@ -5,6 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use deadpool::managed;
 use deadpool::managed::Pool;
+use deadpool::managed::RecycleError;
 use deadpool::Runtime;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
@@ -21,7 +22,7 @@ use crate::spaceport::ReporterError;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 const DEADPOOL_SIZE: usize = 128;
-// Do not set to 5 secs because it's also the default value for the BatchSpanProcesseur of tracing.
+// Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
 pub(crate) const POOL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -69,7 +70,7 @@ impl ApolloExporter {
         // Desired behavior:
         // * Metrics are batched with a timeout.
         // * If we cannot connect to spaceport metrics are discarded and a warning raised.
-        // * When the stream of metrics finishes we terminate the thread.
+        // * When the stream of metrics finishes we terminate the task.
         // * If the exporter is dropped the remaining records are flushed.
         let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
 
@@ -107,12 +108,14 @@ impl ApolloExporter {
         })
         .max_size(DEADPOOL_SIZE)
         .create_timeout(Some(POOL_TIMEOUT))
+        .recycle_timeout(Some(POOL_TIMEOUT))
         .wait_timeout(Some(POOL_TIMEOUT))
         .runtime(Runtime::Tokio1)
         .build()
         .unwrap();
 
-        // This is the thread that actually sends metrics
+        // This is the task that actually sends metrics
+        tracing::debug!("spawning a new reporting task");
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
             let mut report = Report::default();
@@ -125,7 +128,7 @@ impl ApolloExporter {
                         if let Some(r) = single_report {
                             report += r;
                         } else {
-                            tracing::info!("terminating apollo exporter");
+                            tracing::info!("terminating apollo exporter (no more data)");
                             break;
                         }
                        },
@@ -180,6 +183,7 @@ impl ApolloExporter {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ReporterManager {
     endpoint: Url,
 }
@@ -190,12 +194,14 @@ impl managed::Manager for ReporterManager {
     type Error = ReporterError;
 
     async fn create(&self) -> Result<Reporter, Self::Error> {
+        tracing::debug!("creating reporter: {:?}", self.endpoint);
         let url = self.endpoint.to_string();
-        Ok(Reporter::try_new(url).await?)
+        Reporter::try_new(url).await
     }
 
-    async fn recycle(&self, _r: &mut Reporter) -> managed::RecycleResult<Self::Error> {
-        Ok(())
+    async fn recycle(&self, r: &mut Reporter) -> managed::RecycleResult<Self::Error> {
+        tracing::debug!("recycling reporter: {:?}", r);
+        r.reconnect().await.map_err(RecycleError::Backend)
     }
 }
 
