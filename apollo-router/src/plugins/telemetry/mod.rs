@@ -162,7 +162,7 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        ::tracing::info!("dropping telemetry...");
+        ::tracing::debug!("dropping telemetry...");
         let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
         if count < 2 {
             std::thread::spawn(|| {
@@ -479,7 +479,7 @@ impl Telemetry {
                 ::tracing::debug!("serving spaceport");
                 match spaceport.serve().await {
                     Ok(v) => {
-                        ::tracing::info!("spaceport terminated normally: {:?}", v);
+                        ::tracing::debug!("spaceport terminated normally: {:?}", v);
                     }
                     Err(e) => match e.source() {
                         Some(source) => {
