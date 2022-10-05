@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -7,6 +6,8 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
 use self::storage::CacheStorage;
+use self::storage::KeyType;
+use self::storage::ValueType;
 
 pub(crate) mod storage;
 
@@ -15,15 +16,15 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
-pub(crate) struct DeduplicatingCache<K: Clone + Send + Eq + Hash, V: Clone> {
+pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
 }
 
 impl<K, V> DeduplicatingCache<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) async fn new() -> Self {
         Self::with_capacity(DEFAULT_CACHE_CAPACITY).await
@@ -106,10 +107,10 @@ where
     }
 }
 
-pub(crate) struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+pub(crate) struct Entry<K: KeyType, V: ValueType> {
     inner: EntryInner<K, V>,
 }
-enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
         sender: broadcast::Sender<V>,
@@ -130,8 +131,8 @@ pub(crate) enum EntryError {
 
 impl<K, V> Entry<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) fn is_first(&self) -> bool {
         matches!(self.inner, EntryInner::First { .. })
