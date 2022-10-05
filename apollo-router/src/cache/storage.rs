@@ -1,5 +1,6 @@
 use std::fmt;
 use std::hash::Hash;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use lru::LruCache;
@@ -12,16 +13,13 @@ use redis_cluster_async::Client;
 use redis_cluster_async::Connection;
 use tokio::sync::Mutex;
 
-pub(crate) trait KeyType:
-    Clone + fmt::Debug + Hash + Eq + Send + Sync + ToRedisArgs
-{
-}
-pub(crate) trait ValueType: Clone + fmt::Debug + Send + Sync + ToRedisArgs {}
+pub(crate) trait KeyType: Clone + fmt::Debug + Hash + Eq + Send + Sync {}
+pub(crate) trait ValueType: Clone + fmt::Debug + Send + Sync + FromStr {}
 
 // Blanket implementation which satisfies the compiler
 impl<K> KeyType for K
 where
-    K: Clone + fmt::Debug + Hash + Eq + Send + Sync + ToRedisArgs,
+    K: Clone + fmt::Debug + Hash + Eq + Send + Sync,
 {
     // Nothing to implement, since K already supports the other traits.
     // It has the functions it needs already
@@ -30,7 +28,7 @@ where
 // Blanket implementation which satisfies the compiler
 impl<V> ValueType for V
 where
-    V: Clone + fmt::Debug + Send + Sync + ToRedisArgs,
+    V: Clone + fmt::Debug + Send + Sync + FromStr,
 {
     // Nothing to implement, since V already supports the other traits.
     // It has the functions it needs already
