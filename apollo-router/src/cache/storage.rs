@@ -12,13 +12,16 @@ use redis_cluster_async::Client;
 use redis_cluster_async::Connection;
 use tokio::sync::Mutex;
 
-pub(crate) trait KeyType: Clone + fmt::Debug + Hash + Eq + Send + Sync {}
-pub(crate) trait ValueType: Clone + fmt::Debug + Send + Sync {}
+pub(crate) trait KeyType:
+    Clone + fmt::Debug + Hash + Eq + Send + Sync + ToRedisArgs
+{
+}
+pub(crate) trait ValueType: Clone + fmt::Debug + Send + Sync + ToRedisArgs {}
 
 // Blanket implementation which satisfies the compiler
 impl<K> KeyType for K
 where
-    K: Clone + fmt::Debug + Hash + Eq + Send + Sync,
+    K: Clone + fmt::Debug + Hash + Eq + Send + Sync + ToRedisArgs,
 {
     // Nothing to implement, since K already supports the other traits.
     // It has the functions it needs already
@@ -27,7 +30,7 @@ where
 // Blanket implementation which satisfies the compiler
 impl<V> ValueType for V
 where
-    V: Clone + fmt::Debug + Send + Sync,
+    V: Clone + fmt::Debug + Send + Sync + ToRedisArgs,
 {
     // Nothing to implement, since V already supports the other traits.
     // It has the functions it needs already
@@ -108,12 +111,16 @@ struct RedisCacheStorage {
     inner: Arc<Mutex<Connection>>,
 }
 
+fn get_type_of<T>(_: &T) -> &'static str {
+    std::any::type_name::<T>()
+}
+
 impl<K> fmt::Display for RedisKey<K>
 where
     K: KeyType,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
     }
 }
 
@@ -134,7 +141,7 @@ where
     V: ValueType,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
     }
 }
 
@@ -202,7 +209,8 @@ impl RedisCacheStorage {
     async fn get<K: KeyType, V: ValueType>(&self, key: RedisKey<K>) -> Option<RedisValue<V>> {
         tracing::info!("GETTING FROM REDIS: {:?}", key);
         let mut guard = self.inner.lock().await;
-        guard.get(key).await.ok()
+        guard.get(key.0).await.ok()
+        // guard.get(key).await.ok()
     }
 
     async fn insert<K: KeyType, V: ValueType>(&self, key: RedisKey<K>, value: RedisValue<V>) {
