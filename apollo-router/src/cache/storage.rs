@@ -3,13 +3,13 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use lru::LruCache;
-use redis::aio::Connection;
 use redis::AsyncCommands;
-use redis::Client;
 use redis::FromRedisValue;
 use redis::RedisResult;
 use redis::RedisWrite;
 use redis::ToRedisArgs;
+use redis_cluster_async::Client;
+use redis_cluster_async::Connection;
 use tokio::sync::Mutex;
 
 pub(crate) trait KeyType: Clone + fmt::Debug + Hash + Eq + Send + Sync {}
@@ -165,14 +165,10 @@ where
 
 impl RedisCacheStorage {
     async fn new() -> Self {
-        let client = Client::open(
-            "redis://:CzcBquHIjm@redis-redis-cluster-headless.redis.svc.cluster.local:6379",
-        )
-        .expect("opening ClusterClient");
-        let connection = client
-            .get_async_connection()
-            .await
-            .expect("got redis connection");
+        let nodes =
+            vec!["redis://:CzcBquHIjm@redis-redis-cluster-headless.redis.svc.cluster.local:6379"];
+        let client = Client::open(nodes).expect("opening ClusterClient");
+        let connection = client.get_connection().await.expect("got redis connection");
         /*
         let _: () = connection
             .set("test", "test_data")

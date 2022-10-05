@@ -203,6 +203,7 @@ dependencies = [
  "prost-types 0.9.0",
  "rand",
  "redis",
+ "redis_cluster_async",
  "regex",
  "reqwest",
  "rhai",
@@ -3890,6 +3891,21 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.4",
  "url",
+]
+
+[[package]]
+name = "redis_cluster_async"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b2bda8e41b4abd38386c64fe61e3c2dda2df8cf2768d0b3a47ce060336f0fe0"
+dependencies = [
+ "crc16",
+ "futures",
+ "log",
+ "pin-project-lite",
+ "rand",
+ "redis",
+ "tokio",
 ]
 
 [[package]]
