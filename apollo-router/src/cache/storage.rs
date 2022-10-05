@@ -56,12 +56,16 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        match self.inner.lock().await.get(key) {
+        let mut guard = self.inner.lock().await;
+        match guard.get(key) {
             Some(v) => Some(v.clone()),
             None => {
                 let inner_key = RedisKey(key.clone());
-                match self.redis.get(inner_key).await {
-                    Some(v) => Some(v.0),
+                match self.redis.get::<K, V>(inner_key).await {
+                    Some(v) => {
+                        guard.put(key.clone(), v.0.clone());
+                        Some(v.0)
+                    }
                     None => None,
                 }
             }
@@ -81,12 +85,12 @@ where
     }
 }
 
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct RedisKey<K>(K)
 where
     K: KeyType;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RedisValue<V>(V)
 where
     V: ValueType;
@@ -170,17 +174,20 @@ impl RedisCacheStorage {
         tracing::info!("rv: {:?}", rv);
         */
 
+        tracing::info!("redis connection established");
         Self {
             inner: Arc::new(Mutex::new(connection)),
         }
     }
 
     async fn get<K: KeyType, V: ValueType>(&self, key: RedisKey<K>) -> Option<RedisValue<V>> {
+        tracing::info!("GETTING FROM REDIS: {:?}", key);
         let mut guard = self.inner.lock().await;
         guard.get(key).await.ok()
     }
 
     async fn insert<K: KeyType, V: ValueType>(&self, key: RedisKey<K>, value: RedisValue<V>) {
+        tracing::info!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
         let mut guard = self.inner.lock().await;
         guard
             .set::<RedisKey<K>, RedisValue<V>, RedisValue<V>>(key, value)
