@@ -114,8 +114,10 @@ impl ApolloExporter {
         .build()
         .unwrap();
 
+        let spaceport_endpoint = endpoint.clone();
+        tracing::info!(%spaceport_endpoint, "creating apollo exporter");
+
         // This is the task that actually sends metrics
-        tracing::debug!("spawning a new reporting task");
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
             let mut report = Report::default();
@@ -128,7 +130,7 @@ impl ApolloExporter {
                         if let Some(r) = single_report {
                             report += r;
                         } else {
-                            tracing::info!("terminating apollo exporter (no more data)");
+                            tracing::info!(%spaceport_endpoint, "terminating apollo exporter");
                             break;
                         }
                        },

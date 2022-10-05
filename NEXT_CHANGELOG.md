@@ -114,7 +114,9 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Fix studio reporting failures ([Issue #1903](https://github.com/apollographql/router/issues/1903))
 
-The root cause of most of the issue was letting the server component of spaceport close silently during a re-configuration or schema reload. This fixes the issue by keeping the server component alive as long as the client remains connected.
+The root cause of the issue was letting the server component of spaceport close silently during a re-configuration or schema reload. This fixes the issue by keeping the server component alive as long as the client remains connected.
+
+Additionally, recycled spaceport connections are now re-connected to spaceport to further ensure connection validity.
 
 Also make deadpool sizing constant across environments (#1893) 
 
