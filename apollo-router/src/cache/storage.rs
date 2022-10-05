@@ -159,7 +159,22 @@ where
         // let this: RedisValue<V> = RedisValue(V::from_str(v));
         // RedisResult
         // Ok(RedisValue(v.into()))
-        todo!()
+        match v {
+            redis::Value::Bulk(bulk_data) => {
+                for entry in bulk_data {
+                    tracing::info!("entry: {:?}", entry);
+                    // entry.parse::<V>().unwrap()
+                }
+                Err(redis::RedisError::from((
+                    redis::ErrorKind::TypeError,
+                    "the data is the wrong type",
+                )))
+            }
+            _ => Err(redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "the data is the wrong type",
+            ))),
+        }
     }
 }
 
