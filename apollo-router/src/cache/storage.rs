@@ -56,6 +56,13 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
+        // FORCE TO GET FROM REDIS
+        let inner_key = RedisKey(key.clone());
+        match self.redis.get::<K, V>(inner_key).await {
+            Some(v) => Some(v.0),
+            None => None,
+        }
+        /*
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
             Some(v) => Some(v.clone()),
@@ -70,6 +77,7 @@ where
                 }
             }
         }
+        */
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
