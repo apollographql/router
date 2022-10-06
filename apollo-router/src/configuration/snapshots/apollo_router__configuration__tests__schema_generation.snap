@@ -648,7 +648,7 @@ expression: "&schema"
           "properties": {
             "buffer_size": {
               "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
-              "default": 10000,
+              "default": 64,
               "type": "integer",
               "format": "uint",
               "minimum": 0.0

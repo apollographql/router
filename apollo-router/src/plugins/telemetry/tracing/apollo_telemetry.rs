@@ -5,7 +5,6 @@ use std::time::SystemTimeError;
 
 use async_trait::async_trait;
 use derivative::Derivative;
-use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
@@ -87,7 +86,7 @@ pub(crate) enum Error {
 #[derivative(Debug)]
 pub(crate) struct Exporter {
     trace_config: config::Trace,
-    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
+    spans_by_parent_id: HashMap<SpanId, Vec<SpanData>>,
     endpoint: Url,
     schema_id: String,
     #[derivative(Debug = "ignore")]
@@ -123,7 +122,7 @@ impl Exporter {
         let apollo_exporter =
             ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
         Ok(Self {
-            spans_by_parent_id: LruCache::new(buffer_size),
+            spans_by_parent_id: HashMap::with_capacity(buffer_size),
             trace_config,
             endpoint,
             schema_id,
@@ -224,8 +223,7 @@ impl Exporter {
     ) -> Result<Vec<TreeData>, Error> {
         let (mut child_nodes, errors) = self
             .spans_by_parent_id
-            .pop_entry(&span.span_context.span_id())
-            .map(|(_, spans)| spans)
+            .remove(&span.span_context.span_id())
             .unwrap_or_default()
             .into_iter()
             .map(|span| self.extract_data_from_spans(root_span, &span))
@@ -475,15 +473,11 @@ impl SpanExporter for Exporter {
                 }
             } else {
                 // Not a root span, we may need it later so stash it.
-
-                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
                 self.spans_by_parent_id
-                    .get_or_insert(span.parent_span_id, Vec::new);
-                self.spans_by_parent_id
-                    .get_mut(&span.parent_span_id)
-                    .expect("capacity of cache was zero")
-                    .push(span);
+                    .entry(span.parent_span_id)
+                    // Borrow checker too dumb. requires clone
+                    .and_modify(|v| v.push(span.clone()))
+                    .or_insert_with(|| vec![span]);
             }
         }
         self.apollo_sender

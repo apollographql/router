@@ -106,7 +106,7 @@ const fn client_version_header_default() -> HeaderName {
 }
 
 pub(crate) const fn default_buffer_size() -> usize {
-    10000
+    64
 }
 
 impl Default for Config {
