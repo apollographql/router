@@ -111,6 +111,17 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fix studio reporting failures ([Issue #1903](https://github.com/apollographql/router/issues/1903))
+
+The root cause of the issue was letting the server component of spaceport close silently during a re-configuration or schema reload. This fixes the issue by keeping the server component alive as long as the client remains connected.
+
+Additionally, recycled spaceport connections are now re-connected to spaceport to further ensure connection validity.
+
+Also make deadpool sizing constant across environments (#1893) 
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1928
+
 ### Update `apollo-parser` to v0.2.12 ([PR #1921](https://github.com/apollographql/router/pull/1921))
 
 Correctly lexes and creates an error token for unterminated GraphQL `StringValue`s with unicode and line terminator characters.

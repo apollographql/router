@@ -33,6 +33,7 @@ impl MetricsConfigurator for Config {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
+                tracing::debug!("creating metrics exporter");
                 let exporter = ApolloExporter::new(endpoint, key, reference, schema_id)?;
 
                 builder
