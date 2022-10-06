@@ -338,19 +338,19 @@ impl Plugin for JwtAuth {
                             match req.context.insert("JWTClaims", claims) {
                                 Ok(_v) => Ok(ControlFlow::Continue(req)),
                                 Err(err) => {
-                                    return failure_message(req.context,
+                                    failure_message(req.context,
                                                            format!("couldn't store JWT claims in context: {}", err),
                                         StatusCode::INTERNAL_SERVER_ERROR,
-                                    );
+                                    )
                                 }
                             }
                         },
                         Err(err) => {
                             // Prepare an HTTP 403 response with a GraphQL error message
-                            return failure_message(req.context,
+                            failure_message(req.context,
                                                    format!("{jwt} is not authorized: {}", err),
                                 StatusCode::FORBIDDEN,
-                            );
+                            )
                         }
                     }
                 } else {

@@ -105,17 +105,21 @@ impl FieldType {
             {
                 Ok(())
             }
-            (FieldType::Named(name), value) if value.is_object() => {
-                if let Some(object_ty) = schema.input_types.get(name) {
-                    object_ty
-                        .validate_object(value.as_object().unwrap(), schema)
-                        .map_err(|_| InvalidValue)
+            // NOTE: graphql's types are all optional by default
+            (_, Value::Null) => Ok(()),
+            (FieldType::Named(name), value) => {
+                if let Some(value) = value.as_object() {
+                    if let Some(object_ty) = schema.input_types.get(name) {
+                        object_ty
+                            .validate_object(value, schema)
+                            .map_err(|_| InvalidValue)
+                    } else {
+                        Err(InvalidValue)
+                    }
                 } else {
                     Err(InvalidValue)
                 }
             }
-            // NOTE: graphql's types are all optional by default
-            (_, Value::Null) => Ok(()),
             _ => Err(InvalidValue),
         }
     }
@@ -154,58 +158,68 @@ impl FieldType {
     }
 }
 
-impl From<ast::Type> for FieldType {
+impl TryFrom<ast::Type> for FieldType {
+    type Error = SpecError;
     // Spec: https://spec.graphql.org/draft/#sec-Type-References
-    fn from(ty: ast::Type) -> Self {
+    fn try_from(ty: ast::Type) -> Result<Self, Self::Error> {
         match ty {
-            ast::Type::NamedType(named) => named.into(),
-            ast::Type::ListType(list) => list.into(),
-            ast::Type::NonNullType(non_null) => non_null.into(),
+            ast::Type::NamedType(named) => named.try_into(),
+            ast::Type::ListType(list) => list.try_into(),
+            ast::Type::NonNullType(non_null) => non_null.try_into(),
         }
     }
 }
 
-impl From<ast::NamedType> for FieldType {
+impl TryFrom<ast::NamedType> for FieldType {
+    type Error = SpecError;
     // Spec: https://spec.graphql.org/draft/#NamedType
-    fn from(named: ast::NamedType) -> Self {
+    fn try_from(named: ast::NamedType) -> Result<Self, Self::Error> {
         let name = named
             .name()
-            .expect("the node Name is not optional in the spec; qed")
+            .ok_or_else(|| {
+                SpecError::InvalidType("the node Name is not optional in the spec; qed".to_string())
+            })?
             .text()
             .to_string();
-        match name.as_str() {
+        Ok(match name.as_str() {
             "String" => Self::String,
             "Int" => Self::Int,
             "Float" => Self::Float,
             "ID" => Self::Id,
             "Boolean" => Self::Boolean,
             _ => Self::Named(name),
-        }
+        })
     }
 }
 
-impl From<ast::ListType> for FieldType {
+impl TryFrom<ast::ListType> for FieldType {
+    type Error = SpecError;
+
     // Spec: https://spec.graphql.org/draft/#ListType
-    fn from(list: ast::ListType) -> Self {
-        Self::List(Box::new(
+    fn try_from(list: ast::ListType) -> Result<Self, Self::Error> {
+        Ok(Self::List(Box::new(
             list.ty()
-                .expect("the node Type is not optional in the spec; qed")
-                .into(),
-        ))
+                .ok_or_else(|| {
+                    SpecError::InvalidType("node Type is not optional in the spec; qed".to_string())
+                })?
+                .try_into()?,
+        )))
     }
 }
 
-impl From<ast::NonNullType> for FieldType {
+impl TryFrom<ast::NonNullType> for FieldType {
+    type Error = SpecError;
+
     // Spec: https://spec.graphql.org/draft/#NonNullType
-    fn from(non_null: ast::NonNullType) -> Self {
+    fn try_from(non_null: ast::NonNullType) -> Result<Self, Self::Error> {
         if let Some(list) = non_null.list_type() {
-            Self::NonNull(Box::new(list.into()))
+            Ok(Self::NonNull(Box::new(list.try_into()?)))
         } else if let Some(named) = non_null.named_type() {
-            Self::NonNull(Box::new(named.into()))
+            Ok(Self::NonNull(Box::new(named.try_into()?)))
         } else {
-            eprintln!("{:?}", non_null);
-            eprintln!("{:?}", non_null.to_string());
-            unreachable!("either the NamedType node is provided, either the ListType node; qed")
+            Err(SpecError::InvalidType(
+                "either the NamedType node is provided, either the ListType node; qed".to_string(),
+            ))
         }
     }
 }

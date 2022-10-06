@@ -1,4 +1,8 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
+// tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
+// current suggestion is to explicitly allow the lint in the module that imports the protos.
+// Read more: https://github.com/hyperium/tonic/issues/1056
+#![allow(clippy::derive_partial_eq_without_eq)]
 
 #[allow(unreachable_pub)]
 mod report {
@@ -97,6 +101,7 @@ impl std::fmt::Display for ReporterError {
 #[derive(Debug)]
 pub(crate) struct Reporter {
     client: ReporterClient<Channel>,
+    ep: Endpoint,
 }
 
 impl Reporter {
@@ -110,8 +115,17 @@ impl Reporter {
         prost::bytes::Bytes: From<T>,
     {
         let ep = Endpoint::from_shared(addr)?;
-        let client = ReporterClient::connect(ep).await?;
-        Ok(Self { client })
+        let client = ReporterClient::connect(ep.clone()).await?;
+        Ok(Self { client, ep })
+    }
+
+    /// Try to re-connect a reporter.
+    ///
+    /// This can fail if:
+    ///  - the reporter can't connect to the address
+    pub(crate) async fn reconnect(&mut self) -> Result<(), ReporterError> {
+        self.client = ReporterClient::connect(self.ep.clone()).await?;
+        Ok(())
     }
 
     /// Submit a report onto the spaceport for eventual processing.

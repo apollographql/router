@@ -1,3 +1,7 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic))]
+
 mod field_type;
 mod fragments;
 mod query;
@@ -27,4 +31,13 @@ pub(crate) enum SpecError {
     ParsingError(String),
     /// subscription operation is not supported
     SubscriptionNotSupported,
+}
+
+impl SpecError {
+    pub(crate) const fn get_error_key(&self) -> &'static str {
+        match self {
+            SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+            _ => "## GraphQLValidationFailure\n",
+        }
+    }
 }

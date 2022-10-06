@@ -23,7 +23,7 @@ pub(crate) struct Config {
     pub(crate) endpoint: AgentEndpoint,
 }
 
-fn default_agent_endpoint() -> &'static str {
+const fn default_agent_endpoint() -> &'static str {
     "default"
 }
 

@@ -263,7 +263,7 @@ impl Executable {
         );
 
         // The dispatcher we created is passed explicitely here to make sure we display the logs
-        // in the initialization pahse and in the state machine code, before a global subscriber
+        // in the initialization phase and in the state machine code, before a global subscriber
         // is set using the configuration file
         Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
             .with_subscriber(dispatcher)
@@ -422,7 +422,7 @@ fn setup_panic_handler(dispatcher: Dispatch) {
     let show_backtraces =
         backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
     if show_backtraces {
-        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+        tracing::warn!("RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
     }
     std::panic::set_hook(Box::new(move |e| {
         with_default(&dispatcher, || {

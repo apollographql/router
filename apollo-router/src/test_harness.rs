@@ -1,16 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
+use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::SupergraphServiceConfigurator;
 use crate::router_factory::YamlSupergraphServiceFactory;
 use crate::services::execution;
+use crate::services::layers::apq::APQLayer;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::RouterCreator;
@@ -32,6 +36,7 @@ pub(crate) mod http_client;
 /// this test harness is lacking:
 ///
 /// * Custom endpoints from plugins
+/// * The health check endpoint
 /// * CORS (FIXME: should this include CORS?)
 /// * HTTP compression
 ///
@@ -199,14 +204,19 @@ impl<'a> TestHarness<'a> {
         let router_creator = YamlSupergraphServiceFactory
             .create(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
+
         Ok((config, router_creator))
     }
 
     /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
+        let apq = APQLayer::new().await;
+
         Ok(tower::service_fn(move |request| {
-            let service = router_creator.make();
+            // APQ must be added here because it is implemented in the HTTP server
+            let service = apq.layer(router_creator.make()).boxed();
+
             async move { service.oneshot(request).await }
         })
         .boxed_clone())
@@ -214,13 +224,15 @@ impl<'a> TestHarness<'a> {
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_http_server_factory::make_axum_router;
-        use crate::axum_http_server_factory::ListenAddrAndRouter;
+        use crate::axum_factory::make_axum_router;
+        use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::SupergraphServiceFactory;
 
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();
-        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
+        let apq = APQLayer::new().await;
+
+        let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }
@@ -287,5 +299,36 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         (self.0)(subgraph_name, service)
+    }
+}
+
+/// a list of subgraphs with pregenerated responses
+#[derive(Default)]
+pub struct MockedSubgraphs(pub(crate) HashMap<&'static str, MockSubgraph>);
+
+impl MockedSubgraphs {
+    /// adds a mocked subgraph to the list
+    pub fn insert(&mut self, name: &'static str, subgraph: MockSubgraph) {
+        self.0.insert(name, subgraph);
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for MockedSubgraphs {
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        default: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        self.0
+            .get(subgraph_name)
+            .map(|service| service.clone().boxed())
+            .unwrap_or(default)
     }
 }

@@ -27,6 +27,7 @@ struct FormatTest {
     expected: Option<serde_json_bytes::Value>,
     expected_errors: Option<serde_json_bytes::Value>,
     federation_version: FederationVersion,
+    is_deferred: bool,
 }
 
 enum FederationVersion {
@@ -85,6 +86,12 @@ impl FormatTest {
         self
     }
 
+    #[allow(unused)]
+    fn deferred(mut self) -> Self {
+        self.is_deferred = true;
+        self
+    }
+
     #[track_caller]
     fn test(self) {
         let schema = self.schema.expect("missing schema");
@@ -106,6 +113,7 @@ impl FormatTest {
         query.format_response(
             &mut response,
             self.operation,
+            self.is_deferred,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -4409,7 +4417,7 @@ fn fragment_on_interface_on_query() {
         }})
         .build();
 
-    query.format_response(&mut response, None, Default::default(), api_schema);
+    query.format_response(&mut response, None, false, Default::default(), api_schema);
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
         &json! {{
