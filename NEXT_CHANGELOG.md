@@ -136,6 +136,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
+### replace lrucache with hashmap in telemetry ([PR #1934](https://github.com/apollographql/router/pull/1934))
+
+I didn't see this figure go past 10 entries in my testing, so there doesn't appear to be a requirement for an lrucache. I've left the configuration element, but reduced it to 64 (from 10,000).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1934
+
 ### Fix hpa yaml for appropriate kubernetes versions ([#1908](https://github.com/apollographql/router/pull/1908))
 
 Correct schema for autoscaling/v2beta2 and autoscaling/v2 api versions of the
