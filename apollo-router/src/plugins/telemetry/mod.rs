@@ -105,6 +105,7 @@ pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+const TRACE_ID: &str = "apollo_telemetry::trace_id";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
@@ -817,6 +818,15 @@ impl Telemetry {
                 .unwrap_or_else(|| HeaderValue::from_static(""))
                 .to_str()
                 .unwrap_or_default()
+                .to_string(),
+        );
+        let _ = context.insert(
+            TRACE_ID,
+            Span::current()
+                .context()
+                .span()
+                .span_context()
+                .trace_id()
                 .to_string(),
         );
         if let Some(metrics_conf) = &config.metrics {
