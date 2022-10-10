@@ -133,7 +133,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### Fix studio reporting failures ([Issue #1903](https://github.com/apollographql/router/issues/1937))
+### Fix studio reporting failures ([Issue #1903](https://github.com/apollographql/router/issues/1903))
 
 The root cause of the issue was letting the server component of spaceport close silently during a re-configuration or schema reload. This fixes the issue by keeping the server component alive as long as the client remains connected.
 
