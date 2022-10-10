@@ -39,7 +39,7 @@ impl TraceId {
 
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_u128())
+        write!(f, "{:032x}", self.to_u128())
     }
 }
 

@@ -113,7 +113,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Expose the TraceId functionality to rhai ([Issue #1935](https://github.com/apollographql/router/issues/1935))
     
-A new function, traceid(), is exposed to rhai scripts which may be used to retrieve a unique trace id for a request. The trace id is an opentelemetry span id.     
+A new function, traceid(), is exposed to rhai scripts which may be used to retrieve a unique trace id for a request. The trace id is an opentelemetry span id.  
 
 ```
 fn supergraph_service(service) {
