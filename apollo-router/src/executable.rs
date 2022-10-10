@@ -33,10 +33,66 @@ use crate::router::ShutdownSource;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
+pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(feature = "dhat-heap")]
+pub(crate) static mut GLOBAL_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+
+#[cfg(feature = "dhat-ad-hoc")]
+pub(crate) static mut GLOBAL_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
 
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
+
+#[cfg(feature = "dhat-heap")]
+#[crate::_private::ctor::ctor]
+fn create_profiler() {
+    unsafe {
+        match GLOBAL_PROFILER.set(dhat::Profiler::new_heap()) {
+            Ok(p) => {
+                println!("profiler installed: {:?}", p);
+                libc::atexit(drop_profiler);
+            }
+            Err(e) => eprintln!("profiler install failed: {:?}", e),
+        }
+    }
+}
+
+#[cfg(feature = "dhat-heap")]
+#[no_mangle]
+extern "C" fn drop_profiler() {
+    eprintln!("HAS THIS EXECUTED?");
+    unsafe {
+        if let Some(p) = GLOBAL_PROFILER.take() {
+            drop(p);
+        }
+    }
+}
+
+#[cfg(feature = "dhat-ad-hoc")]
+#[crate::_private::ctor::ctor]
+fn create_profiler() {
+    unsafe {
+        match GLOBAL_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
+            Ok(p) => {
+                println!("profiler installed: {:?}", p);
+                libc::atexit(drop_profiler);
+            }
+            Err(e) => eprintln!("profiler install failed: {:?}", e),
+        }
+    }
+}
+
+#[cfg(feature = "dhat-ad-hoc")]
+#[no_mangle]
+extern "C" fn drop_profiler() {
+    eprintln!("HAS THIS EXECUTED?");
+    unsafe {
+        if let Some(p) = GLOBAL_AD_HOC_PROFILER.take() {
+            drop(p);
+        }
+    }
+}
 
 /// Options for the router
 #[derive(Parser, Debug)]
@@ -161,9 +217,6 @@ impl fmt::Display for ProjectDir {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
@@ -428,9 +481,9 @@ fn setup_panic_handler(dispatcher: Dispatch) {
         with_default(&dispatcher, || {
             if show_backtraces {
                 let backtrace = backtrace::Backtrace::new();
-                tracing::error!("{}\n{:?}", e, backtrace)
+                eprintln!("{}\n{:?}", e, backtrace)
             } else {
-                tracing::error!("{}", e)
+                eprintln!("{}", e)
             }
             // Once we've panic'ed the behaviour of the router is non-deterministic
             // We've logged out the panic details. Terminate with an error code

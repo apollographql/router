@@ -30,3 +30,6 @@ members = [
 # debug = false
 strip = "debuginfo"
 incremental = false
+
+[profile.release]
+debug = 1
