@@ -5,11 +5,12 @@ use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId as OtelTraceId;
+use serde::Serialize;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Trace ID
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
