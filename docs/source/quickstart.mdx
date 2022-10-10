@@ -195,6 +195,23 @@ That's it! Running the Router with the `--dev` flag enables a development mode t
 
 Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
 
+**Do not use development mode in production!**
+
+Add the `--dev` flag is the equivalent runnning `./router --hot-reload` with this configuration:
+
+```yaml
+sandbox:
+  enabled: true
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  experimental.expose_query_plan: true
+```
+
+If you need some of these features enabled in production, specify them directly in your configuration instead of using `--dev`.
+
 ## Next steps
 
 Now that you know how to run Apollo Router with a supergraph schema, you can:
