@@ -330,6 +330,8 @@ impl FetchNode {
                     } else {
                         errors.push(error);
                     }
+                } else {
+                    errors.push(error);
                 }
             }
 
