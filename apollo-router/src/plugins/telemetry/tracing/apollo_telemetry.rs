@@ -119,6 +119,7 @@ impl Exporter {
         buffer_size: usize,
         field_execution_sampler: Option<SamplerOption>,
     ) -> Result<Self, BoxError> {
+        tracing::debug!("creating studio exporter");
         let apollo_exporter =
             ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
         Ok(Self {

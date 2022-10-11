@@ -247,6 +247,15 @@ impl TrafficShaping {
     }
 }
 
+pub(crate) fn is_deduplicate_query_enabled(conf: &Configuration) -> bool {
+    conf.plugins()
+        .iter()
+        .find(|(name, _)| name == "apollo.traffic_shaping")
+        .and_then(|(_, shaping)| shaping.get("all"))
+        .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
+        == Some(&serde_json::Value::Bool(true))
+}
+
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
@@ -547,5 +556,20 @@ mod test {
             .next_response()
             .await
             .unwrap();
+    }
+
+    // This test is useful for supergraph service
+    #[tokio::test]
+    async fn test_is_deduplicated_query_enabled() {
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            plugins:
+                apollo.traffic_shaping:
+                    all:
+                        deduplicate_query: true
+        "#,
+        )
+        .unwrap();
+        assert!(is_deduplicate_query_enabled(&config));
     }
 }
