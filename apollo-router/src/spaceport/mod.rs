@@ -101,6 +101,7 @@ impl std::fmt::Display for ReporterError {
 #[derive(Debug)]
 pub(crate) struct Reporter {
     client: ReporterClient<Channel>,
+    ep: Endpoint,
 }
 
 impl Reporter {
@@ -114,8 +115,17 @@ impl Reporter {
         prost::bytes::Bytes: From<T>,
     {
         let ep = Endpoint::from_shared(addr)?;
-        let client = ReporterClient::connect(ep).await?;
-        Ok(Self { client })
+        let client = ReporterClient::connect(ep.clone()).await?;
+        Ok(Self { client, ep })
+    }
+
+    /// Try to re-connect a reporter.
+    ///
+    /// This can fail if:
+    ///  - the reporter can't connect to the address
+    pub(crate) async fn reconnect(&mut self) -> Result<(), ReporterError> {
+        self.client = ReporterClient::connect(self.ep.clone()).await?;
+        Ok(())
     }
 
     /// Submit a report onto the spaceport for eventual processing.

@@ -36,7 +36,7 @@ features = ["docs_rs"]
 access-json = "0.1.0"
 anyhow = "1.0.64"
 ansi_term = "0.12"
-apollo-parser = "0.2.11"
+apollo-parser = "0.2.12"
 async-compression = { version = "0.3.14", features = [
     "tokio",
     "brotli",
@@ -141,7 +141,7 @@ reqwest = { version = "0.11.12", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.9"
+router-bridge = "0.1.10"
 schemars = { version = "0.8.10", features = ["url"] }
 shellexpand = "2.1.2"
 sha2 = "0.10.6"

@@ -109,16 +109,10 @@ spec:
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
               readOnly: true
-            {{- if index .Values.router.configuration "rhai" }}
-            - name: router-rhai
-              mountPath: {{ .Values.router.configuration.rhai.scripts | default "/dist/rhai" }}/{{ .Values.router.configuration.rhai.main | default "main.rhai" }}
-              subPath: {{ .Values.router.configuration.rhai.main | default "main.rhai" }}
-              readOnly: true
             {{- end }}
+            {{- if .Values.extraVolumeMounts }}
+              {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
-          {{- if .Values.extraVolumeMounts }}
-            {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
-          {{- end }}
           {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
@@ -126,14 +120,9 @@ spec:
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
-        {{- if index .Values.router.configuration "rhai" }}
-        - name: router-rhai
-          configMap:
-            name: {{ include "router.rhaiConfigMapName" . }}
-        {{- end }}
         {{- end }}
         {{- if .Values.extraVolumes }}
-        {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+          {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
