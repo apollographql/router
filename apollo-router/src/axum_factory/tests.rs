@@ -1560,6 +1560,10 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
+        .header(
+            ACCEPT,
+            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+        )
         .send()
         .await
         .unwrap();
