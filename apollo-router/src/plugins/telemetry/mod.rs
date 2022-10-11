@@ -123,7 +123,6 @@ pub struct Telemetry {
     _metrics_exporters: Vec<MetricsExporterHandle>,
     meter_provider: AggregateMeterProvider,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
-    spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
 }
@@ -163,11 +162,7 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        if let Some(sender) = self.spaceport_shutdown.take() {
-            ::tracing::debug!("notifying spaceport to shut down");
-            let _ = sender.send(());
-        }
-
+        ::tracing::debug!("dropping telemetry...");
         let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
         if count < 2 {
             std::thread::spawn(|| {
@@ -366,7 +361,7 @@ impl Telemetry {
             .expect("telemetry apollo config must be present");
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
-        let (spaceport, shutdown_tx) = match apollo {
+        let spaceport = match apollo {
             apollo::Config {
                 apollo_key: Some(_),
                 apollo_graph_ref: Some(_),
@@ -374,20 +369,15 @@ impl Telemetry {
                 ..
             } => {
                 ::tracing::debug!("starting Spaceport");
-                let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
-                let report_spaceport = ReportSpaceport::new(
-                    "127.0.0.1:0".parse()?,
-                    Some(Box::pin(shutdown_rx.map(|_| ()))),
-                )
-                .await?;
+                let report_spaceport = ReportSpaceport::new("127.0.0.1:0".parse()?).await?;
                 // Now that the port is known update the config
                 apollo.endpoint = Some(Url::parse(&format!(
                     "https://{}",
                     report_spaceport.address()
                 ))?);
-                (Some(report_spaceport), Some(shutdown_tx))
+                Some(report_spaceport)
             }
-            _ => (None, None),
+            _ => None,
         };
 
         // Setup metrics
@@ -474,7 +464,6 @@ impl Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
 
         let plugin = Ok(Telemetry {
-            spaceport_shutdown: shutdown_tx,
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
@@ -483,20 +472,25 @@ impl Telemetry {
             config,
         });
 
-        // We're safe now for shutdown.
+        // We're now safe for shutdown.
         // Start spaceport
         if let Some(spaceport) = spaceport {
             tokio::spawn(async move {
-                if let Err(e) = spaceport.serve().await {
-                    match e.source() {
+                ::tracing::debug!("serving spaceport");
+                match spaceport.serve().await {
+                    Ok(v) => {
+                        ::tracing::debug!("spaceport terminated normally: {:?}", v);
+                    }
+                    Err(e) => match e.source() {
                         Some(source) => {
                             ::tracing::warn!("spaceport did not terminate normally: {}", source);
                         }
                         None => {
                             ::tracing::warn!("spaceport did not terminate normally: {}", e);
                         }
-                    }
-                };
+                    },
+                }
+                ::tracing::debug!("stopped serving spaceport");
             });
         }
 

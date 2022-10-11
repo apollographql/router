@@ -1,8 +1,6 @@
 // This entire file is license key functionality
-use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::pin::Pin;
 
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
@@ -33,7 +31,6 @@ const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
 pub(crate) struct ReportSpaceport {
-    shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     listener: Option<TcpListener>,
     addr: SocketAddr,
     tx: Sender<ReporterRequest>,
@@ -47,10 +44,7 @@ impl ReportSpaceport {
     ///
     /// The spaceport will attempt to make the transfer 5 times before failing. If
     /// the spaceport fails, the data is discarded.
-    pub(crate) async fn new(
-        addr: SocketAddr,
-        shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
-    ) -> Result<Self, std::io::Error> {
+    pub(crate) async fn new(addr: SocketAddr) -> Result<Self, std::io::Error> {
         let listener = TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
 
@@ -71,7 +65,6 @@ impl ReportSpaceport {
             }
         });
         Ok(Self {
-            shutdown_signal,
             listener: Some(listener),
             addr,
             tx,
@@ -84,17 +77,13 @@ impl ReportSpaceport {
 
     /// Start serving requests.
     pub(crate) async fn serve(mut self) -> Result<(), Error> {
-        let shutdown_signal = self
-            .shutdown_signal
-            .take()
-            .unwrap_or_else(|| Box::pin(std::future::pending()));
         let listener = self
             .listener
             .take()
             .expect("should have allocated listener");
         Server::builder()
             .add_service(ReporterServer::new(self))
-            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown_signal)
+            .serve_with_incoming(TcpListenerStream::new(listener))
             .await
     }
 
