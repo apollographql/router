@@ -323,6 +323,12 @@ jobs:
             - linux_amd_install_baseline
             - xtask_lint:
                 os: linux_amd
+      - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo
+            - ~/project
   check_compliance:
     environment:
       <<: *common_job_environment
