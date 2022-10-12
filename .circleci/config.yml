@@ -222,6 +222,8 @@ commands:
     parameters:
       os:
         type: string
+      target_dir:
+        type: string
     steps:
       - restore_cache:
           name: Restore .cargo
@@ -234,6 +236,10 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - target.<< parameters.target_dir >>
 
   windows_build_workspace:
     steps:
@@ -271,7 +277,11 @@ commands:
     parameters:
       os:
         type: string
+      target_dir:
+        type: string
     steps:
+      - attach_workspace:
+          at: ~/project/target.<< parameters.target_dir >>
       - run:
           name: Start jaeger
           background: true
@@ -310,7 +320,6 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
-    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
       # - when:
@@ -327,7 +336,6 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
-    working_directory: ~/project/<< parameters.platform >>
     steps:
       - when:
           condition:
@@ -339,11 +347,11 @@ jobs:
   build:
     environment:
       <<: *common_job_environment
+      CARGO_TARGET_DIR: ~/project/target.<< parameters.platform >>
     parameters:
       platform:
         type: executor
     executor: << parameters.platform >>
-    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
       - when:
@@ -353,6 +361,7 @@ jobs:
             - linux_amd_install_baseline
             - build_workspace:
                 os: linux_amd
+                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_arm_linux_build_executor, << parameters.platform >>]
@@ -360,6 +369,7 @@ jobs:
             - linux_arm_install_baseline
             - build_workspace:
                 os: linux_arm
+                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_windows_build_executor, << parameters.platform >>]
@@ -374,22 +384,17 @@ jobs:
             - macos_install_baseline
             - build_workspace:
                 os: macos
-      - persist_to_workspace:
-          root: ~/project/<< parameters.platform >>
-          paths:
-            - target
+                target_dir: ~/project/target.<< parameters.platform>>
   test:
     environment:
       <<: *common_job_environment
+      CARGO_TARGET_DIR: ~/project/target.<< parameters.platform >>
     parameters:
       platform:
         type: executor
     executor: << parameters.platform >>
-    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
-      - attach_workspace:
-          at: ~/project/<< parameters.platform >>/target
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
@@ -397,6 +402,7 @@ jobs:
             - linux_amd_install_baseline
             - test_workspace:
                 os: linux_amd
+                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_arm_linux_test_executor, << parameters.platform >>]
@@ -404,6 +410,7 @@ jobs:
             - linux_arm_install_baseline
             - test_workspace:
                 os: linux_arm
+                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_windows_test_executor, << parameters.platform >>]
@@ -418,6 +425,7 @@ jobs:
             - macos_install_baseline
             - test_workspace:
                 os: macos
+                target_dir: ~/project/target.<< parameters.platform>>
 
   build_release:
     parameters:
