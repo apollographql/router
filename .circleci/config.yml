@@ -6,19 +6,19 @@ orbs:
   gh: circleci/github-cli@2.1.1
 
 executors:
-  rust_amd_linux_build: &rust_amd_linux_executor
+  rust_amd_linux_build: &rust_amd_linux_build_executor
     docker:
       - image: cimg/base:stable
     resource_class: medium
-  rust_amd_linux_test: &rust_amd_linux_executor
+  rust_amd_linux_test: &rust_amd_linux_test_executor
     docker:
       - image: cimg/base:stable
     resource_class: xlarge
-  rust_arm_linux_build: &rust_arm_linux_executor
+  rust_arm_linux_build: &rust_arm_linux_build_executor
     machine:
       image: ubuntu-2004:2022.04.1
     resource_class: arm.medium
-  rust_arm_linux_test: &rust_arm_linux_executor
+  rust_arm_linux_test: &rust_arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
     resource_class: arm.large
@@ -29,12 +29,12 @@ executors:
       # We use the major.minor notation to bring in compatible patches.
       xcode: 13.4
     resource_class: macos.x86.medium.gen2
-  rust_windows_build: &rust_windows_executor
+  rust_windows_build: &rust_windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.medium
     shell: powershell.exe -ExecutionPolicy Bypass
-  rust_windows_test: &rust_windows_executor
+  rust_windows_test: &rust_windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
@@ -314,7 +314,7 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_amd_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
           steps:
             - linux_amd_install_baseline
             - xtask_lint:
@@ -330,7 +330,7 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_amd_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
           steps:
             - linux_amd_install_baseline
             - xtask_check_compliance:
@@ -346,21 +346,21 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_amd_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
           steps:
             - linux_amd_install_baseline
             - build_workspace:
                 os: linux_amd
       - when:
           condition:
-            equal: [*rust_arm_linux_executor, << parameters.platform >>]
+            equal: [*rust_arm_linux_build_executor, << parameters.platform >>]
           steps:
             - linux_arm_install_baseline
             - build_workspace:
                 os: linux_arm
       - when:
           condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
+            equal: [*rust_windows_build_executor, << parameters.platform >>]
           steps:
             - windows_install_baseline
             - windows_prepare_env
@@ -383,21 +383,21 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_amd_linux_executor, << parameters.platform >>]
+            equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
           steps:
             - linux_amd_install_baseline
             - test_workspace:
                 os: linux_amd
       - when:
           condition:
-            equal: [*rust_arm_linux_executor, << parameters.platform >>]
+            equal: [*rust_arm_linux_test_executor, << parameters.platform >>]
           steps:
             - linux_arm_install_baseline
             - test_workspace:
                 os: linux_arm
       - when:
           condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
+            equal: [*rust_windows_test_executor, << parameters.platform >>]
           steps:
             - windows_install_baseline
             - windows_prepare_env
@@ -451,8 +451,8 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [*rust_amd_linux_executor, << parameters.platform >>]
-              - equal: [*rust_arm_linux_executor, << parameters.platform >>]
+              - equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*rust_arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -470,7 +470,7 @@ jobs:
                   cargo xtask package --output artifacts/
       - when:
           condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
+            equal: [*rust_windows_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install rustup
