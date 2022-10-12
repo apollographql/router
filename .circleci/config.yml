@@ -312,15 +312,15 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - xtask_lint:
-                os: linux_amd
+      # - when:
+        # condition:
+          # equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
+          # steps:
+            # - linux_amd_install_baseline
+            # - xtask_lint:
+              # os: linux_amd
       - persist_to_workspace:
-          root: .
+          root: project
           paths:
             - "*"
   check_compliance:
