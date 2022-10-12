@@ -319,10 +319,6 @@ jobs:
             # - linux_amd_install_baseline
             # - xtask_lint:
               # os: linux_amd
-      - persist_to_workspace:
-          root: .
-          paths:
-            - "*"
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -346,8 +342,7 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
-      - attach_workspace:
-          at: .
+      - checkout
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -376,6 +371,10 @@ jobs:
             - macos_install_baseline
             - build_workspace:
                 os: macos
+      - persist_to_workspace:
+          root: .
+          paths:
+            - target
   test:
     environment:
       <<: *common_job_environment
@@ -384,8 +383,9 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
+      - checkout
       - attach_workspace:
-          at: .
+          at: target
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
