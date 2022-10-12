@@ -320,7 +320,7 @@ jobs:
             # - xtask_lint:
               # os: linux_amd
       - persist_to_workspace:
-          root: project
+          root: .
           paths:
             - "*"
   check_compliance:
