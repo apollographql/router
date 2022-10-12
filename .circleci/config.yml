@@ -45,7 +45,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12-lean.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
