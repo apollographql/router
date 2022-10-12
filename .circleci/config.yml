@@ -373,13 +373,13 @@ jobs:
             - linux_arm_install_baseline
             - build_workspace:
                 os: linux_arm
-      - when:
-          condition:
-            equal: [*rust_windows_build_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_build_workspace
+                # - when:
+                  # condition:
+                    # equal: [*rust_windows_build_executor, << parameters.platform >>]
+                    # steps:
+                      # - windows_install_baseline
+                      # - windows_prepare_env
+                      # - windows_build_workspace
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
@@ -411,13 +411,13 @@ jobs:
             - linux_arm_install_baseline
             - test_workspace:
                 os: linux_arm
-      - when:
-          condition:
-            equal: [*rust_windows_test_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_test_workspace
+                # - when:
+                  # condition:
+                    # equal: [*rust_windows_test_executor, << parameters.platform >>]
+                    # steps:
+                      # - windows_install_baseline
+                      # - windows_prepare_env
+                      # - windows_test_workspace
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
@@ -439,9 +439,6 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule update --recursive --init
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
