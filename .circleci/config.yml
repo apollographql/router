@@ -322,7 +322,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - project
+            - "*"
   check_compliance:
     environment:
       <<: *common_job_environment
