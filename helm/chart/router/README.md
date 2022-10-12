@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.0.0-rc.4](https://img.shields.io/badge/Version-1.0.0--rc.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.1.0](https://img.shields.io/badge/AppVersion-v1.1.0-informational?style=flat-square)
+![Version: 1.0.0-rc.5](https://img.shields.io/badge/Version-1.0.0--rc.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.2.0](https://img.shields.io/badge/AppVersion-v1.2.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.4
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.5
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.4
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.4 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.5 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -70,8 +70,6 @@ helm show values apollographql/router
 | podSecurityContext | object | `{}` |  |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
-| rhai | object | `{"input_file":""}` | If using rhai, specify the location of your input file |
-| rhai.input_file | string | `""` | input rhai file, contents will be stored in a ConfigMap |
 | router | object | `{"args":["--hot-reload"],"configuration":{"health-check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:80"},"telemetry":{"metrics":{"prometheus":{"enabled":false,"listen":"0.0.0.0:9090","path":"/metrics"}}}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
 | service.annotations | object | `{}` |  |
