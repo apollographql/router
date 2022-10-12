@@ -322,7 +322,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - .
+            - project
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -347,7 +347,7 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - attach_workspace:
-          at: .
+          at: project
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -385,7 +385,7 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - attach_workspace:
-          at: .
+          at: project
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
