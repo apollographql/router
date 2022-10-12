@@ -50,6 +50,9 @@ parameters:
     type: string
     # update this as new versions of jaeger become available
     default: "1.33.0"
+  target_dir:
+    type: string
+    default: "~/project/target"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -222,8 +225,6 @@ commands:
     parameters:
       os:
         type: string
-      target_dir:
-        type: string
     steps:
       - restore_cache:
           name: Restore .cargo
@@ -239,7 +240,7 @@ commands:
       - persist_to_workspace:
           root: .
           paths:
-            - target.<< parameters.target_dir >>
+            - << pipeline.parameters.target_dir >>
 
   windows_build_workspace:
     steps:
@@ -283,11 +284,9 @@ commands:
     parameters:
       os:
         type: string
-      target_dir:
-        type: string
     steps:
       - attach_workspace:
-          at: target.<< parameters.target_dir >>
+          at: << pipeline.parameters.target_dir >>
       - run:
           name: Start jaeger
           background: true
@@ -353,7 +352,7 @@ jobs:
   build:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: ~/project/target.<< parameters.platform >>
+      CARGO_TARGET_DIR: << pipeline.parameters.target_dir >>
     parameters:
       platform:
         type: executor
@@ -367,7 +366,6 @@ jobs:
             - linux_amd_install_baseline
             - build_workspace:
                 os: linux_amd
-                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_arm_linux_build_executor, << parameters.platform >>]
@@ -375,7 +373,6 @@ jobs:
             - linux_arm_install_baseline
             - build_workspace:
                 os: linux_arm
-                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_windows_build_executor, << parameters.platform >>]
@@ -390,7 +387,6 @@ jobs:
             - macos_install_baseline
             - build_workspace:
                 os: macos
-                target_dir: ~/project/target.<< parameters.platform>>
   test:
     environment:
       <<: *common_job_environment
@@ -408,7 +404,6 @@ jobs:
             - linux_amd_install_baseline
             - test_workspace:
                 os: linux_amd
-                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_arm_linux_test_executor, << parameters.platform >>]
@@ -416,7 +411,6 @@ jobs:
             - linux_arm_install_baseline
             - test_workspace:
                 os: linux_arm
-                target_dir: ~/project/target.<< parameters.platform>>
       - when:
           condition:
             equal: [*rust_windows_test_executor, << parameters.platform >>]
@@ -431,7 +425,6 @@ jobs:
             - macos_install_baseline
             - test_workspace:
                 os: macos
-                target_dir: ~/project/target.<< parameters.platform>>
 
   build_release:
     parameters:
