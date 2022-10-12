@@ -347,7 +347,7 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - attach_workspace:
-          at: project
+          at: .
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -385,7 +385,7 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - attach_workspace:
-          at: project
+          at: .
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
