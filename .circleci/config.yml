@@ -310,6 +310,7 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
+    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
       # - when:
@@ -326,6 +327,7 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
+    working_directory: ~/project/<< parameters.platform >>
     steps:
       - when:
           condition:
@@ -341,6 +343,7 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
+    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
       - when:
@@ -372,7 +375,7 @@ jobs:
             - build_workspace:
                 os: macos
       - persist_to_workspace:
-          root: .
+          root: ~/project/<< parameters.platform >>
           paths:
             - target
   test:
@@ -382,10 +385,11 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
+    working_directory: ~/project/<< parameters.platform >>
     steps:
       - checkout
       - attach_workspace:
-          at: target
+          at: ~/project/<< parameters.platform >>/target
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
