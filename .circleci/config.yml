@@ -52,7 +52,7 @@ parameters:
     default: "1.33.0"
   target_dir:
     type: string
-    default: "~/project/target"
+    default: "project/target"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
