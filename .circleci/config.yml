@@ -258,7 +258,7 @@ commands:
       - persist_to_workspace:
           root: .
           paths:
-            - project\target
+            - target
 
   windows_test_workspace:
     steps:
