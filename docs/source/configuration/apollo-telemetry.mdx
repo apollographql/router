@@ -15,19 +15,6 @@ export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT>
 
 More information on usage reporting is available in the [Studio documentation](/studio/metrics/usage-reporting/).
 
-## Prometheus endpoint customization
-
-You can customize the prometheus scrape URL in your yaml configuration: 
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    prometheus:
-      listen: 0.0.0.0:9090
-      path: /metrics
-      enabled: true
-```
-
 ## Advanced configuration (not recommended)
 
 Spaceport can run either as an internal component of a single Apollo Router instance, or as an external resource shared by _multiple_ router instances.
