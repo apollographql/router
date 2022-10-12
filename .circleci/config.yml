@@ -234,6 +234,7 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
+            - ~/project
 
   windows_build_workspace:
     steps:
@@ -248,6 +249,7 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
+            - C:\\Users\\circleci\project
 
   windows_test_workspace:
     steps:
@@ -266,6 +268,7 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
+            - C:\\Users\\circleci\project
 
   test_workspace:
     parameters:
@@ -301,6 +304,7 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
+            - ~/project
 
 jobs:
   lint:
@@ -327,7 +331,6 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
-      - checkout
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -343,7 +346,6 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
-      - checkout
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -380,7 +382,6 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
-      - checkout
       - when:
           condition:
             equal: [*rust_amd_linux_test_executor, << parameters.platform >>]
@@ -562,12 +563,13 @@ jobs:
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
+  version: 2
   ci_checks:
     jobs:
       - lint:
           matrix:
             parameters:
-              platform: [rust_amd_linux_build]
+              platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
 
       # check-compliance is disabled for now because it is flaky
       # `cargo about` seems to be non-deterministic and sometimes
@@ -575,15 +577,21 @@ workflows:
       # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
 
       # - check_compliance:
+      #     requires:
+      #       - lint
       #     matrix:
       #       parameters:
       #         platform: [rust_linux]
 
       - build:
+          requires:
+            - lint
           matrix:
             parameters:
               platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
       - test:
+          requires:
+            - build
           matrix:
             parameters:
               platform: [rust_macos, rust_windows_test, rust_amd_linux_test, rust_arm_linux_test]
