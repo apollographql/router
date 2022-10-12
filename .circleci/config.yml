@@ -390,7 +390,7 @@ jobs:
   test:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: ~/project/target.<< parameters.platform >>
+      CARGO_TARGET_DIR: << pipeline.parameters.target_dir >>
     parameters:
       platform:
         type: executor
