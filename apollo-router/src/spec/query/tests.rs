@@ -1053,6 +1053,17 @@ fn variable_validation() {
     // When expected as an input type, both integer and float input values are accepted.
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2}));
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+    // double precision floats are valid
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193i64})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193f64})
+    );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
     assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
