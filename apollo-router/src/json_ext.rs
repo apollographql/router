@@ -353,10 +353,7 @@ impl ValueExt for Value {
             // When expected as an input type, both integer and float input values are accepted.
             Value::Number(n) if n.is_f64() => true,
             // Integer input values are coerced to Float by adding an empty fractional part, for example 1.0 for the integer input value 1.
-            Value::Number(n) => n
-                .as_i64()
-                .map(|as_number| i64::try_from(as_number).is_ok())
-                .unwrap_or_default(),
+            Value::Number(n) => n.is_i64(),
             // All other input values, including strings with numeric content, must raise a request error indicating an incorrect type.
             _ => false,
         }
