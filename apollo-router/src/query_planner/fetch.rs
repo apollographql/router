@@ -298,6 +298,7 @@ impl FetchNode {
         paths: HashMap<Path, usize>,
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
+        // for each entity in the response, find out the path where it must be inserted
         let mut inverted_paths: HashMap<usize, Vec<&Path>> = HashMap::new();
         for (path, index) in paths.iter() {
             (*inverted_paths.entry(*index).or_default()).push(path);
@@ -308,6 +309,7 @@ impl FetchNode {
 
             let mut errors: Vec<Error> = vec![];
             for error in response.errors {
+                // errors with path should be updated to the path of the entity they target
                 if let Some(ref path) = error.path {
                     if path.starts_with(&entities_path) {
                         match path.0.get(1) {
