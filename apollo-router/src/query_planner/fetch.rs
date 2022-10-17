@@ -312,6 +312,8 @@ impl FetchNode {
                 // errors with path should be updated to the path of the entity they target
                 if let Some(ref path) = error.path {
                     if path.starts_with(&entities_path) {
+                        // the error's path has the format '/_entities/1/other' so we ignore the
+                        // first element and then get the index
                         match path.0.get(1) {
                             Some(json_ext::PathElement::Index(i)) => {
                                 for values_path in
@@ -319,6 +321,8 @@ impl FetchNode {
                                 {
                                     errors.push(Error {
                                         locations: error.locations.clone(),
+                                        // append to the entitiy's path the error's path without
+                                        //`_entities` and the index
                                         path: Some(Path::from_iter(
                                             values_path.0.iter().chain(&path.0[2..]).cloned(),
                                         )),
