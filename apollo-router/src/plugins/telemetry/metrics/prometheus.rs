@@ -3,8 +3,8 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
-use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
+use opentelemetry::sdk::export::metrics::aggregation;
+use opentelemetry::sdk::metrics::{controllers, processors, selectors};
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -53,21 +53,20 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
+        _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let exporter = opentelemetry_prometheus::exporter()
-                .with_default_histogram_boundaries(vec![
-                    0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-                ])
-                .with_resource(Resource::new(
-                    metrics_config
-                        .resources
-                        .clone()
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                ))
-                .try_init()?;
+            let controller = controllers::basic(
+                processors::factory(
+                    selectors::simple::histogram([
+                        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+                    ]),
+                    aggregation::stateless_temporality_selector(),
+                )
+                .with_memory(true),
+            )
+            .build();
+            let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
@@ -79,7 +78,7 @@ impl MetricsConfigurator for Config {
                     .boxed(),
                 ),
             );
-            builder = builder.with_meter_provider(exporter.provider()?);
+            builder = builder.with_meter_provider(exporter.meter_provider()?);
             builder = builder.with_exporter(exporter);
         }
         Ok(builder)

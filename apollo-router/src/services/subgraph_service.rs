@@ -159,7 +159,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             let response = client
                 .call(request)
                 .instrument(tracing::info_span!("subgraph_request",
-                    "otel.kind" = %SpanKind::Client,
+                    "otel.kind" = ?SpanKind::Client,
                     "net.peer.name" = &display(host),
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),

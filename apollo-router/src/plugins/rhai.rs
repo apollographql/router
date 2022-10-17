@@ -475,7 +475,7 @@ macro_rules! gen_map_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($base::Request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = ?SpanKind::Internal
                     )
                 }
             }
@@ -546,7 +546,7 @@ macro_rules! gen_map_deferred_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = ?SpanKind::Internal
                     )
                 }
             }

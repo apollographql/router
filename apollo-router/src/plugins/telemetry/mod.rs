@@ -70,7 +70,6 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStat
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
-use crate::plugins::telemetry::metrics::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -120,8 +119,8 @@ pub struct Telemetry {
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
+    metrics: BasicMetrics,
     _metrics_exporters: Vec<MetricsExporterHandle>,
-    meter_provider: AggregateMeterProvider,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -182,7 +181,7 @@ impl Plugin for Telemetry {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let metrics = BasicMetrics::new(&self.meter_provider);
+        let metrics = self.metrics.clone();
         let config = Arc::new(self.config.clone());
         let config_map_res = config.clone();
         ServiceBuilder::new()
@@ -257,7 +256,7 @@ impl Plugin for Telemetry {
                 info_span!("execution",
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal,
+                    "otel.kind" = ?SpanKind::Internal,
                     ftv1.do_not_sample_reason = do_not_sample_reason
                 )
             })
@@ -266,7 +265,7 @@ impl Plugin for Telemetry {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let metrics = BasicMetrics::new(&self.meter_provider);
+        let metrics = self.metrics.clone();
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
@@ -291,7 +290,7 @@ impl Plugin for Telemetry {
                     "apollo.subgraph.name" = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = %SpanKind::Internal,
+                    "otel.kind" = ?SpanKind::Internal,
                     "apollo_private.ftv1" = field::Empty
                 )
             })
@@ -383,8 +382,7 @@ impl Telemetry {
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support
-        // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
-        // eventually be one.
+        // sending metrics to multiple providers at once, of which hopefully Apollo Studio is one.
         let mut builder = Self::create_metrics_exporters(&config)?;
 
         // the global tracer and subscriber initialization step must be performed only once
@@ -466,7 +464,7 @@ impl Telemetry {
         let plugin = Ok(Telemetry {
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
-            meter_provider: builder.meter_provider(),
+            metrics: BasicMetrics::new(&*builder.meter_provider()),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             config,
@@ -613,7 +611,7 @@ impl Telemetry {
                 graphql.operation.name = operation_name.as_str(),
                 client.name = client_name.to_str().unwrap_or_default(),
                 client.version = client_version.to_str().unwrap_or_default(),
-                otel.kind = %SpanKind::Internal,
+                otel.kind = ?SpanKind::Internal,
                 apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = field::Empty,
@@ -765,9 +763,17 @@ impl Telemetry {
                     );
 
                     metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
-                    metrics.http_requests_total.add(1, &metric_attrs);
+                    metrics.http_requests_total.add(
+                        &opentelemetry::Context::current(),
+                        1,
+                        &metric_attrs,
+                    );
                 } else {
-                    metrics.http_requests_total.add(1, &metric_attrs);
+                    metrics.http_requests_total.add(
+                        &opentelemetry::Context::current(),
+                        1,
+                        &metric_attrs,
+                    );
                 }
 
                 let response = http::Response::from_parts(
@@ -780,14 +786,20 @@ impl Telemetry {
                 Ok(SupergraphResponse { context, response })
             }
             Err(err) => {
-                metrics.http_requests_error_total.add(1, &metric_attrs);
+                metrics.http_requests_error_total.add(
+                    &opentelemetry::Context::current(),
+                    1,
+                    &metric_attrs,
+                );
 
                 Err(err)
             }
         };
-        metrics
-            .http_requests_duration
-            .record(request_duration.as_secs_f64(), &metric_attrs);
+        metrics.http_requests_duration.record(
+            &opentelemetry::Context::current(),
+            request_duration.as_secs_f64(),
+            &metric_attrs,
+        );
 
         res
     }
@@ -989,7 +1001,11 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_total.add(1, &metric_attrs);
+                metrics.http_requests_total.add(
+                    &opentelemetry::Context::current(),
+                    1,
+                    &metric_attrs,
+                );
             }
             Err(err) => {
                 // Fill attributes from error
@@ -1002,12 +1018,18 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_error_total.add(1, &metric_attrs);
+                metrics.http_requests_error_total.add(
+                    &opentelemetry::Context::current(),
+                    1,
+                    &metric_attrs,
+                );
             }
         }
-        metrics
-            .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &metric_attrs);
+        metrics.http_requests_duration.record(
+            &opentelemetry::Context::current(),
+            now.elapsed().as_secs_f64(),
+            &metric_attrs,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1041,7 +1063,11 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_error_total.add(1, &metric_attrs);
+                metrics.http_requests_error_total.add(
+                    &opentelemetry::Context::current(),
+                    1,
+                    &metric_attrs,
+                );
 
                 Err(e)
             }

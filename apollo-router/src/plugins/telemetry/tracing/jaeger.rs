@@ -1,8 +1,8 @@
 //! Configuration for jaeger tracing.
 use std::time::Duration;
 
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::{BatchConfig, BatchSpanProcessor};
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
@@ -89,23 +89,34 @@ impl TracingConfigurator for Config {
                         Some(socket_addr)
                     }
                 };
-                opentelemetry_jaeger::new_pipeline()
+                opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
                     .with(&trace_config.service_name, |b, n| b.with_service_name(n))
-                    .with(&socket, |b, s| b.with_agent_endpoint(s))
-                    .init_async_exporter(opentelemetry::runtime::Tokio)?
+                    .with(&socket, |b, s| b.with_endpoint(s))
+                    .with(&self.scheduled_delay, |b, p| {
+                        b.with_batch_processor_config(
+                            BatchConfig::default().with_scheduled_delay(*p),
+                        )
+                    })
+                    .build_async_agent_exporter(opentelemetry::runtime::Tokio)?
             }
             Endpoint::Collector {
-                endpoint,
-                username,
-                password,
-            } => opentelemetry_jaeger::new_pipeline()
-                .with_trace_config(trace_config.into())
-                .with(&trace_config.service_name, |b, n| b.with_service_name(n))
-                .with(username, |b, u| b.with_collector_username(u))
-                .with(password, |b, p| b.with_collector_password(p))
-                .with_collector_endpoint(&endpoint.to_string())
-                .init_async_exporter(opentelemetry::runtime::Tokio)?,
+                // _endpoint,
+                // _username,
+                // _password,
+                ..
+            } =>
+                todo!("waiting for new release of OTel https://github.com/open-telemetry/opentelemetry-rust/issues/894")
+                // opentelemetry_jaeger::new_collector_pipeline()
+                // .with_trace_config(trace_config.into())
+                // .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                // .with(username, |b, u| b.with_username(u))
+                // .with(password, |b, p| b.with_password(p))
+                // .with_endpoint(&endpoint.to_string())
+                // .with(&self.scheduled_delay, |b, p| {
+                //     b.with_batch_processor_config(BatchConfig::default().with_scheduled_delay(*p))
+                // })
+                // .build_collector_exporter(opentelemetry::runtime::Tokio)?,
         };
 
         Ok(builder.with_span_processor(

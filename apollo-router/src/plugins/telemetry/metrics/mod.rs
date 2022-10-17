@@ -8,12 +8,8 @@ use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::Number;
-use opentelemetry::metrics::ValueRecorder;
-use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Counter, Histogram};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -28,10 +24,12 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
+mod aggregation;
 pub(crate) mod apollo;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
@@ -461,8 +459,10 @@ impl MetricsBuilder {
     pub(crate) fn exporters(&mut self) -> Vec<MetricsExporterHandle> {
         std::mem::take(&mut self.exporters)
     }
-    pub(crate) fn meter_provider(&mut self) -> AggregateMeterProvider {
-        AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
+    pub(crate) fn meter_provider(&mut self) -> Box<dyn MeterProvider> {
+        Box::new(AggregateMeterProvider::new(std::mem::take(
+            &mut self.meter_providers,
+        )))
     }
     pub(crate) fn custom_endpoints(&mut self) -> MultiMap<ListenAddr, Endpoint> {
         std::mem::take(&mut self.custom_endpoints)
@@ -508,97 +508,27 @@ pub(crate) trait MetricsConfigurator {
 
 #[derive(Clone)]
 pub(crate) struct BasicMetrics {
-    pub(crate) http_requests_total: AggregateCounter<u64>,
-    pub(crate) http_requests_error_total: AggregateCounter<u64>,
-    pub(crate) http_requests_duration: AggregateValueRecorder<f64>,
+    pub(crate) http_requests_total: Counter<u64>,
+    pub(crate) http_requests_error_total: Counter<u64>,
+    pub(crate) http_requests_duration: Histogram<f64>,
 }
 
 impl BasicMetrics {
-    pub(crate) fn new(meter_provider: &AggregateMeterProvider) -> BasicMetrics {
-        let meter = meter_provider.meter("apollo/router", None);
+    pub(crate) fn new(meter_provider: &dyn MeterProvider) -> BasicMetrics {
+        let meter = meter_provider.meter("apollo/router");
         BasicMetrics {
-            http_requests_total: meter.build_counter(|m| {
-                m.u64_counter("http_requests_total")
-                    .with_description("Total number of HTTP requests made.")
-                    .init()
-            }),
-            http_requests_error_total: meter.build_counter(|m| {
-                m.u64_counter("http_requests_error_total")
-                    .with_description("Total number of HTTP requests in error made.")
-                    .init()
-            }),
-            http_requests_duration: meter.build_value_recorder(|m| {
-                m.f64_value_recorder("http_request_duration_seconds")
-                    .with_description("Total number of HTTP requests made.")
-                    .init()
-            }),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct AggregateMeterProvider(Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>);
-impl AggregateMeterProvider {
-    pub(crate) fn new(
-        meters: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    ) -> AggregateMeterProvider {
-        AggregateMeterProvider(meters)
-    }
-
-    pub(crate) fn meter(
-        &self,
-        instrumentation_name: &'static str,
-        instrumentation_version: Option<&'static str>,
-    ) -> AggregateMeter {
-        AggregateMeter(
-            self.0
-                .iter()
-                .map(|p| Arc::new(p.meter(instrumentation_name, instrumentation_version)))
-                .collect(),
-        )
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateMeter(Vec<Arc<Meter>>);
-impl AggregateMeter {
-    pub(crate) fn build_counter<T: Into<Number> + Copy>(
-        &self,
-        build: fn(&Meter) -> Counter<T>,
-    ) -> AggregateCounter<T> {
-        AggregateCounter(self.0.iter().map(|m| build(m)).collect())
-    }
-
-    pub(crate) fn build_value_recorder<T: Into<Number> + Copy>(
-        &self,
-        build: fn(&Meter) -> ValueRecorder<T>,
-    ) -> AggregateValueRecorder<T> {
-        AggregateValueRecorder(self.0.iter().map(|m| build(m)).collect())
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateCounter<T: Into<Number> + Copy>(Vec<Counter<T>>);
-impl<T> AggregateCounter<T>
-where
-    T: Into<Number> + Copy,
-{
-    pub(crate) fn add(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.0 {
-            counter.add(value, attributes)
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateValueRecorder<T: Into<Number> + Copy>(Vec<ValueRecorder<T>>);
-impl<T> AggregateValueRecorder<T>
-where
-    T: Into<Number> + Copy,
-{
-    pub(crate) fn record(&self, value: T, attributes: &[KeyValue]) {
-        for value_recorder in &self.0 {
-            value_recorder.record(value, attributes)
+            http_requests_total: meter
+                .u64_counter("http_requests_total")
+                .with_description("Total number of HTTP requests made.")
+                .init(),
+            http_requests_error_total: meter
+                .u64_counter("http_requests_error_total")
+                .with_description("Total number of HTTP requests in error made.")
+                .init(),
+            http_requests_duration: meter
+                .f64_histogram("http_request_duration_seconds")
+                .with_description("Total number of HTTP requests made.")
+                .init(),
         }
     }
 }

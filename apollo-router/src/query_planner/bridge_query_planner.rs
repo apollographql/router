@@ -73,7 +73,7 @@ impl BridgeQueryPlanner {
         let configuration = self.configuration.clone();
         let query_parsing_future =
             tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
-                .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
+                .instrument(tracing::info_span!("parse_query", "otel.kind" = ?SpanKind::Internal));
         match query_parsing_future.await {
             Ok(res) => res.map_err(QueryPlannerError::from),
             Err(err) => {

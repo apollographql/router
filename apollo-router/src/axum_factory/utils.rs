@@ -246,7 +246,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
+                "otel.kind" = ?SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )
@@ -258,7 +258,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
+                "otel.kind" = ?SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty
             )

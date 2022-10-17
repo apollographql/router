@@ -1,10 +1,11 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
 use derivative::Derivative;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
@@ -76,7 +77,7 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 
     #[error("this trace should not be sampled")]
-    DoNotSample(Cow<'static, str>),
+    DoNotSample(String),
 }
 
 /// A [`SpanExporter`] that writes to [`Reporter`].
@@ -240,8 +241,8 @@ impl Exporter {
             return Err(Error::MultipleErrors(errors));
         }
         if let Some(Value::String(reason)) = span.attributes.get(&FTV1_DO_NOT_SAMPLE_REASON) {
-            if !reason.is_empty() {
-                return Err(Error::DoNotSample(reason.clone()));
+            if !reason.as_str().is_empty() {
+                return Err(Error::DoNotSample(reason.to_string()));
             }
         }
 
@@ -439,7 +440,7 @@ impl Exporter {
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -489,6 +490,6 @@ impl SpanExporter for Exporter {
         self.apollo_sender
             .send(SingleReport::Traces(TracesReport { traces }));
 
-        return ExportResult::Ok(());
+        async { ExportResult::Ok(()) }.boxed()
     }
 }

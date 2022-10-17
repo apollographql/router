@@ -249,7 +249,7 @@ async fn plan_query(
         .instrument(tracing::info_span!("query_planning",
             graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
             graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-            "otel.kind" = %SpanKind::Internal
+            "otel.kind" = ?SpanKind::Internal
         ))
         .await
 }
