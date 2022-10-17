@@ -45,14 +45,11 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v12-lean.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12-lean.{{ arch }}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
     default: "1.33.0"
-  target_dir:
-    type: string
-    default: target-{{ arch}}
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -240,7 +237,7 @@ commands:
       - persist_to_workspace:
           root: .
           paths:
-            - << pipeline.parameters.target_dir >>
+            - target-{{ arch }}
 
   windows_build_workspace:
     steps:
@@ -286,7 +283,7 @@ commands:
         type: string
     steps:
       - attach_workspace:
-          at: << pipeline.parameters.target_dir >>
+          at: target-{{ arch }}
       - run:
           name: Start jaeger
           background: true
@@ -352,7 +349,7 @@ jobs:
   build:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: << pipeline.parameters.target_dir >>
+      CARGO_TARGET_DIR: target-{{ arch }}
     parameters:
       platform:
         type: executor
@@ -390,7 +387,7 @@ jobs:
   test:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: << pipeline.parameters.target_dir >>
+      CARGO_TARGET_DIR: target-{{ arch }}
     parameters:
       platform:
         type: executor
