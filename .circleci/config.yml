@@ -45,7 +45,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v12-lean.{{ arch }}-{{ checksum "rust-toolchain.toml" }}
+    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -234,10 +234,6 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
-      - persist_to_workspace:
-          root: .
-          paths:
-            - target-{{ arch }}
 
   windows_build_workspace:
     steps:
@@ -252,15 +248,9 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
-      - persist_to_workspace:
-          root: .
-          paths:
-            - target
 
   windows_test_workspace:
     steps:
-      - attach_workspace:
-          at: project\target
       - run:
           name: Start jaeger
           background: true
@@ -282,8 +272,6 @@ commands:
       os:
         type: string
     steps:
-      - attach_workspace:
-          at: target-{{ arch }}
       - run:
           name: Start jaeger
           background: true
@@ -324,13 +312,13 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      # - when:
-        # condition:
-          # equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
-          # steps:
-            # - linux_amd_install_baseline
-            # - xtask_lint:
-              # os: linux_amd
+      - when:
+          condition:
+            equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
+          steps:
+            - linux_amd_install_baseline
+            - xtask_lint:
+                os: linux_amd
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -339,6 +327,7 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
+      - checkout
       - when:
           condition:
             equal: [*rust_amd_linux_build_executor, << parameters.platform >>]
@@ -349,7 +338,6 @@ jobs:
   build:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: target-{{ arch }}
     parameters:
       platform:
         type: executor
@@ -370,13 +358,13 @@ jobs:
             - linux_arm_install_baseline
             - build_workspace:
                 os: linux_arm
-                # - when:
-                  # condition:
-                    # equal: [*rust_windows_build_executor, << parameters.platform >>]
-                    # steps:
-                      # - windows_install_baseline
-                      # - windows_prepare_env
-                      # - windows_build_workspace
+      - when:
+          condition:
+            equal: [*rust_windows_build_executor, << parameters.platform >>]
+          steps:
+            - windows_install_baseline
+            - windows_prepare_env
+            - windows_build_workspace
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
@@ -387,7 +375,6 @@ jobs:
   test:
     environment:
       <<: *common_job_environment
-      CARGO_TARGET_DIR: target-{{ arch }}
     parameters:
       platform:
         type: executor
@@ -408,13 +395,13 @@ jobs:
             - linux_arm_install_baseline
             - test_workspace:
                 os: linux_arm
-                # - when:
-                  # condition:
-                    # equal: [*rust_windows_test_executor, << parameters.platform >>]
-                    # steps:
-                      # - windows_install_baseline
-                      # - windows_prepare_env
-                      # - windows_test_workspace
+      - when:
+          condition:
+            equal: [*rust_windows_test_executor, << parameters.platform >>]
+          steps:
+            - windows_install_baseline
+            - windows_prepare_env
+            - windows_test_workspace
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
@@ -436,6 +423,9 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
+      - run:
+          name: Initialize submodules
+          command: git submodule update --recursive --init
       - when:
           condition:
             equal: [*rust_macos_executor, << parameters.platform >>]
@@ -572,13 +562,12 @@ jobs:
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
 workflows:
-  version: 2
   ci_checks:
     jobs:
       - lint:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
+              platform: [rust_amd_linux_build]
 
       # check-compliance is disabled for now because it is flaky
       # `cargo about` seems to be non-deterministic and sometimes
@@ -586,21 +575,15 @@ workflows:
       # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
 
       # - check_compliance:
-      #     requires:
-      #       - lint
       #     matrix:
       #       parameters:
       #         platform: [rust_linux]
 
       - build:
-          requires:
-            - lint
           matrix:
             parameters:
               platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
       - test:
-          requires:
-            - build
           matrix:
             parameters:
               platform: [rust_macos, rust_windows_test, rust_amd_linux_test, rust_arm_linux_test]
