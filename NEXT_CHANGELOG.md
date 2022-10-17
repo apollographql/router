@@ -29,6 +29,18 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Fix a coercion rule that failed to validate 64 bit integers ([PR #1951](https://github.com/apollographql/router/pull/1951))
+
+Queries that passed 64 bit integers for Float values would (incorrectly) fail to validate.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1951
+
+### Set no_delay and keepalive on subgraph requests [Issue #1905](https://github.com/apollographql/router/issues/1905))
+
+It was incorrectly removed in a previous pull request.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+
 ### `@defer`: duplicated errors across incremental items ([Issue #1834](https://github.com/apollographql/router/issues/1834), [Issue #1818](https://github.com/apollographql/router/issues/1818))
 
 If a deferred response contains incremental responses, the errors should be dispatched in each increment according to the
@@ -38,4 +50,3 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 ## 📚 Documentation
-
