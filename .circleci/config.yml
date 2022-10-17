@@ -22,7 +22,14 @@ executors:
     machine:
       image: ubuntu-2004:2022.04.1
     resource_class: arm.large
-  rust_macos: &rust_macos_executor
+  rust_macos_build: &rust_macos_build_executor
+    macos:
+      # See https://circleci.com/docs/xcode-policy along with the support matrix
+      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
+      # We use the major.minor notation to bring in compatible patches.
+      xcode: 13.4
+    resource_class: macos.x86.medium.gen2
+  rust_macos_test: &rust_macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
@@ -367,7 +374,7 @@ jobs:
             - windows_build_workspace
       - when:
           condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
+            equal: [*rust_macos_build_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
             - build_workspace:
@@ -404,7 +411,7 @@ jobs:
             - windows_test_workspace
       - when:
           condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
+            equal: [*rust_macos_test_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
             - test_workspace:
@@ -428,7 +435,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
+            equal: [*rust_macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
             - run:
@@ -582,17 +589,17 @@ workflows:
       - build:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
+              platform: [rust_macos_build, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
       - test:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows_test, rust_amd_linux_test, rust_arm_linux_test]
+              platform: [rust_macos_test, rust_windows_test, rust_amd_linux_test, rust_arm_linux_test]
   release:
     jobs:
       - build_release:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
+              platform: [rust_macos_build, rust_windows_build, rust_amd_linux_build, rust_arm_linux_build]
           filters:
             branches:
               ignore: /.*/
