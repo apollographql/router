@@ -2,8 +2,6 @@
 //!
 //! To improve their usability.
 
-#![allow(missing_docs)] // FIXME
-
 use std::cmp::PartialEq;
 use std::hash::Hash;
 use std::ops::Deref;

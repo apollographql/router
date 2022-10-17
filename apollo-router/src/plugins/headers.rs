@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::task::Context;
 use std::task::Poll;
 
+use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::header::CONNECTION;
 use http::header::CONTENT_LENGTH;
@@ -18,6 +19,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -26,6 +28,7 @@ use tower_service::Service;
 
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
+use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
@@ -39,6 +42,15 @@ register_plugin!("apollo", "headers", Headers);
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct HeadersLocation {
+    /// Propagate/Insert/Remove headers from request
+    request: Vec<Operation>,
+    // Propagate/Insert/Remove headers from response
+    // response: Option<Operation>
+}
+
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
     Insert(Insert),
     Remove(Remove),
@@ -47,19 +59,36 @@ enum Operation {
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Remove header
 enum Remove {
     #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_header_name")]
+    /// Remove a header given a header name
     Named(HeaderName),
 
     #[schemars(schema_with = "string_schema")]
     #[serde(deserialize_with = "deserialize_regex")]
+    /// Remove a header given a regex matching header name
     Matching(Regex),
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Insert {
+#[serde(untagged)]
+/// Insert header
+enum Insert {
+    /// Insert static header
+    Static(InsertStatic),
+    /// Insert header with a value coming from context key (works only for a string in the context)
+    FromContext(InsertFromContext),
+    /// Insert header with a value coming from body
+    FromBody(InsertFromBody),
+}
+
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Insert static header
+struct InsertStatic {
     #[schemars(schema_with = "string_schema")]
     #[serde(deserialize_with = "deserialize_header_name")]
     name: HeaderName,
@@ -70,8 +99,37 @@ struct Insert {
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Insert header with a value coming from context key
+struct InsertFromContext {
+    #[schemars(schema_with = "string_schema")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    /// Specify header name
+    name: HeaderName,
+    /// Specify context key to fetch value
+    from_context: String,
+}
+
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Insert header with a value coming from body
+struct InsertFromBody {
+    #[schemars(schema_with = "string_schema")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    name: HeaderName,
+    #[schemars(schema_with = "string_schema")]
+    #[serde(deserialize_with = "deserialize_json_query")]
+    path: JSONQuery,
+    #[schemars(schema_with = "option_string_schema", default)]
+    #[serde(deserialize_with = "deserialize_option_header_value")]
+    default: Option<HeaderValue>,
+}
+
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
+/// Propagate header
 enum Propagate {
+    /// Propagate header given a header name
     Named {
         #[schemars(schema_with = "string_schema")]
         #[serde(deserialize_with = "deserialize_header_name")]
@@ -83,6 +141,7 @@ enum Propagate {
         #[serde(deserialize_with = "deserialize_option_header_value", default)]
         default: Option<HeaderValue>,
     },
+    /// Propagate header given a regex to match header name
     Matching {
         #[schemars(schema_with = "string_schema")]
         #[serde(deserialize_with = "deserialize_regex")]
@@ -94,9 +153,9 @@ enum Propagate {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     #[serde(default)]
-    all: Vec<Operation>,
+    all: Option<HeadersLocation>,
     #[serde(default)]
-    subgraphs: HashMap<String, Vec<Operation>>,
+    subgraphs: HashMap<String, HeadersLocation>,
 }
 
 struct Headers {
@@ -121,9 +180,16 @@ impl Plugin for Headers {
         })
     }
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let mut operations = self.config.all.clone();
-        if let Some(subgraph_operations) = self.config.subgraphs.get(name) {
-            operations.append(&mut subgraph_operations.clone())
+        let mut operations: Vec<Operation> = self
+            .config
+            .all
+            .as_ref()
+            .map(|a| a.request.clone())
+            .unwrap_or_default();
+        if let Some(mut subgraph_operations) =
+            self.config.subgraphs.get(name).map(|s| s.request.clone())
+        {
+            operations.append(&mut subgraph_operations);
         }
 
         ServiceBuilder::new()
@@ -195,11 +261,60 @@ where
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
         for operation in &self.operations {
             match operation {
-                Operation::Insert(config) => {
-                    req.subgraph_request
-                        .headers_mut()
-                        .insert(&config.name, config.value.clone());
-                }
+                Operation::Insert(insert_config) => match insert_config {
+                    Insert::Static(static_insert) => {
+                        req.subgraph_request
+                            .headers_mut()
+                            .insert(&static_insert.name, static_insert.value.clone());
+                    }
+                    Insert::FromContext(insert_from_context) => {
+                        if let Some(val) = req
+                            .context
+                            .get::<_, String>(&insert_from_context.from_context)
+                            .ok()
+                            .flatten()
+                        {
+                            match HeaderValue::from_str(&val) {
+                                Ok(header_value) => {
+                                    req.subgraph_request
+                                        .headers_mut()
+                                        .insert(&insert_from_context.name, header_value);
+                                }
+                                Err(err) => {
+                                    tracing::error!("cannot convert from the context into a header value for header name '{}': {:?}", insert_from_context.name, err);
+                                }
+                            }
+                        }
+                    }
+                    Insert::FromBody(from_body) => {
+                        let output = from_body
+                            .path
+                            .execute(req.supergraph_request.body())
+                            .ok()
+                            .flatten();
+                        if let Some(val) = output {
+                            let header_value = if let Value::String(val_str) = val {
+                                val_str
+                            } else {
+                                val.to_string()
+                            };
+                            match HeaderValue::from_str(&header_value) {
+                                Ok(header_value) => {
+                                    req.subgraph_request
+                                        .headers_mut()
+                                        .insert(&from_body.name, header_value);
+                                }
+                                Err(err) => {
+                                    tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                                }
+                            }
+                        } else if let Some(default_val) = &from_body.default {
+                            req.subgraph_request
+                                .headers_mut()
+                                .insert(&from_body.name, default_val.clone());
+                        }
+                    }
+                },
                 Operation::Remove(Remove::Named(name)) => {
                     req.subgraph_request.headers_mut().remove(name);
                 }
@@ -268,9 +383,10 @@ mod test {
             r#"
         subgraphs:
           products:
-            - insert:
-                name: "test"
-                value: "test"
+            request:
+                - insert:
+                    name: "test"
+                    value: "test"
         "#,
         )
         .unwrap();
@@ -281,6 +397,7 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
+            request:
             - insert:
                 name: "test"
                 value: "test"
@@ -294,8 +411,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                named: "test"
+            request:
+                - remove:
+                    named: "test"
         "#,
         )
         .unwrap();
@@ -303,8 +421,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                matching: "d.*"
+            request:
+                - remove:
+                    matching: "d.*"
         "#,
         )
         .unwrap();
@@ -312,8 +431,9 @@ mod test {
         assert!(serde_yaml::from_str::<Config>(
             r#"
         all:
-            - remove:
-                matching: "d.*["
+            request:
+                - remove:
+                    matching: "d.*["
         "#,
         )
         .is_err());
@@ -324,8 +444,9 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
+            request:
+                - propagate:
+                    named: "test"
         "#,
         )
         .unwrap();
@@ -333,9 +454,10 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
-                rename: "bif"
+            request:
+                - propagate:
+                    named: "test"
+                    rename: "bif"
         "#,
         )
         .unwrap();
@@ -343,10 +465,11 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                named: "test"
-                rename: "bif"
-                default: "bof"
+            request:
+                - propagate:
+                    named: "test"
+                    rename: "bif"
+                    default: "bof"
         "#,
         )
         .unwrap();
@@ -354,15 +477,16 @@ mod test {
         serde_yaml::from_str::<Config>(
             r#"
         all:
-            - propagate:
-                matching: "d.*"
+            request:
+                - propagate:
+                    matching: "d.*"
         "#,
         )
         .unwrap();
     }
 
     #[tokio::test]
-    async fn test_insert() -> Result<(), BoxError> {
+    async fn test_insert_static() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
         mock.expect_call()
             .times(1)
@@ -376,11 +500,66 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(vec![Operation::Insert(Insert {
-            name: "c".try_into()?,
-            value: "d".try_into()?,
-        })])
+        let mut service =
+            HeadersLayer::new(vec![Operation::Insert(Insert::Static(InsertStatic {
+                name: "c".try_into()?,
+                value: "d".try_into()?,
+            }))])
+            .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_insert_from_context() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_context", "my_value_from_context"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(vec![Operation::Insert(Insert::FromContext(
+            InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            },
+        ))])
         .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_insert_from_request_body() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "my_operation_name"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service =
+            HeadersLayer::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JSONQuery::parse(".operationName")?,
+                default: None,
+            }))])
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -529,6 +708,9 @@ mod test {
     }
 
     fn example_request() -> SubgraphRequest {
+        let ctx = Context::new();
+        ctx.insert("my_key", "my_value_from_context".to_string())
+            .unwrap();
         SubgraphRequest {
             supergraph_request: Arc::new(
                 http::Request::builder()
@@ -538,7 +720,12 @@ mod test {
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
-                    .body(Request::builder().query("query").build())
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
                     .expect("expecting valid request"),
             ),
             subgraph_request: http::Request::builder()
@@ -551,7 +738,7 @@ mod test {
                 .body(Request::builder().query("query").build())
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
-            context: Context::new(),
+            context: ctx,
         }
     }
 

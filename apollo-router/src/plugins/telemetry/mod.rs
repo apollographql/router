@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
+#[cfg(not(feature = "console"))]
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
@@ -46,6 +47,7 @@ use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+#[cfg(not(feature = "console"))]
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use url::Url;
@@ -56,6 +58,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+#[cfg(not(feature = "console"))]
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -94,10 +97,10 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+pub(crate) mod formatter;
 mod metrics;
 mod otlp;
 mod tracing;
-pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
@@ -120,7 +123,6 @@ pub struct Telemetry {
     _metrics_exporters: Vec<MetricsExporterHandle>,
     meter_provider: AggregateMeterProvider,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
-    spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
 }
@@ -160,11 +162,7 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        if let Some(sender) = self.spaceport_shutdown.take() {
-            ::tracing::debug!("notifying spaceport to shut down");
-            let _ = sender.send(());
-        }
-
+        ::tracing::debug!("dropping telemetry...");
         let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
         if count < 2 {
             std::thread::spawn(|| {
@@ -290,7 +288,7 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
 
                 info_span!(SUBGRAPH_SPAN_NAME,
-                    name = name.as_str(),
+                    "apollo.subgraph.name" = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
@@ -351,7 +349,7 @@ impl Telemetry {
     /// This method can be used instead of `Plugin::new` to override the subscriber
     async fn new_common<S>(
         mut config: <Self as Plugin>::Config,
-        subscriber: Option<S>,
+        #[cfg_attr(feature = "console", allow(unused_variables))] subscriber: Option<S>,
     ) -> Result<Self, BoxError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
@@ -363,7 +361,7 @@ impl Telemetry {
             .expect("telemetry apollo config must be present");
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
-        let (spaceport, shutdown_tx) = match apollo {
+        let spaceport = match apollo {
             apollo::Config {
                 apollo_key: Some(_),
                 apollo_graph_ref: Some(_),
@@ -371,20 +369,15 @@ impl Telemetry {
                 ..
             } => {
                 ::tracing::debug!("starting Spaceport");
-                let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
-                let report_spaceport = ReportSpaceport::new(
-                    "127.0.0.1:0".parse()?,
-                    Some(Box::pin(shutdown_rx.map(|_| ()))),
-                )
-                .await?;
+                let report_spaceport = ReportSpaceport::new("127.0.0.1:0".parse()?).await?;
                 // Now that the port is known update the config
                 apollo.endpoint = Some(Url::parse(&format!(
                     "https://{}",
                     report_spaceport.address()
                 ))?);
-                (Some(report_spaceport), Some(shutdown_tx))
+                Some(report_spaceport)
             }
-            _ => (None, None),
+            _ => None,
         };
 
         // Setup metrics
@@ -396,6 +389,7 @@ impl Telemetry {
 
         // the global tracer and subscriber initialization step must be performed only once
         TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
+            #[cfg(not(feature = "console"))]
             use anyhow::Context;
             let tracer_provider = Self::create_tracer_provider(&config)?;
 
@@ -410,11 +404,6 @@ impl Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
             global::set_text_map_propagator(Self::create_propagator(&config));
 
-            let log_level = GLOBAL_ENV_FILTER
-                .get()
-                .map(|s| s.as_str())
-                .unwrap_or("info");
-
             #[cfg(feature = "console")]
             {
                 use tracing_subscriber::util::SubscriberInitExt;
@@ -428,6 +417,11 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
+                let log_level = GLOBAL_ENV_FILTER
+                    .get()
+                    .map(|s| s.as_str())
+                    .unwrap_or("info");
+
                 let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
                     EnvFilter::try_new(log_level).context("could not parse log configuration")?,
                 );
@@ -441,14 +435,22 @@ impl Telemetry {
                 } else if atty::is(atty::Stream::Stdout) {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder.finish().with(telemetry);
+                    let subscriber = sub_builder
+                        .event_format(formatter::TextFormatter::new())
+                        .finish()
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
                 } else {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder.json().finish().with(telemetry);
+                    let subscriber = sub_builder
+                        .json()
+                        .with_current_span(false)
+                        .with_span_list(false)
+                        .finish()
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -462,7 +464,6 @@ impl Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
 
         let plugin = Ok(Telemetry {
-            spaceport_shutdown: shutdown_tx,
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
@@ -471,20 +472,25 @@ impl Telemetry {
             config,
         });
 
-        // We're safe now for shutdown.
+        // We're now safe for shutdown.
         // Start spaceport
         if let Some(spaceport) = spaceport {
             tokio::spawn(async move {
-                if let Err(e) = spaceport.serve().await {
-                    match e.source() {
+                ::tracing::debug!("serving spaceport");
+                match spaceport.serve().await {
+                    Ok(v) => {
+                        ::tracing::debug!("spaceport terminated normally: {:?}", v);
+                    }
+                    Err(e) => match e.source() {
                         Some(source) => {
                             ::tracing::warn!("spaceport did not terminate normally: {}", source);
                         }
                         None => {
                             ::tracing::warn!("spaceport did not terminate normally: {}", e);
                         }
-                    }
-                };
+                    },
+                }
+                ::tracing::debug!("stopped serving spaceport");
             });
         }
 
@@ -1183,6 +1189,7 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     }
 }
 
+#[inline]
 pub(crate) fn is_span_sampled(context: &Context) -> bool {
     Span::current().context().span().span_context().is_sampled()
         && !context

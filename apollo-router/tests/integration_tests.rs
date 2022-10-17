@@ -534,6 +534,18 @@ async fn query_just_at_recursion_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn normal_query_with_defer_accept_header() {
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
+
+    assert!(actual.errors.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {
@@ -682,6 +694,91 @@ async fn defer_query_without_accept() {
 
     let first = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(first);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_empty_primary_response() {
+    let config = serde_json::json!({
+        "plugins": {
+            "apollo.include_subgraph_errors": {
+                "all": true
+            }
+        }
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"{
+            me {
+                ...@defer(label: "name") {
+                    name
+                }
+            }
+        }"#,
+        )
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defer_default_variable() {
+    let config = serde_json::json!({
+        "include_subgraph_errors": {
+            "all": true
+        }
+    });
+
+    let query = r#"query X($if: Boolean! = true){
+        me {
+            id
+            ...@defer(label: "name", if: $if) {
+                name
+            }
+        }
+    }"#;
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config.clone()).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(second);
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .variable("if", false)
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router.oneshot(request).await.unwrap();
+
+    let first = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(first);
+
+    let second = stream.next_response().await;
+    assert!(second.is_none());
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {

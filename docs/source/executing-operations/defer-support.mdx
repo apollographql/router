@@ -1,0 +1,207 @@
+---
+title: Apollo Router support for @defer
+description: Improve performance by delivering entity fields incrementally
+---
+
+> This feature is currently in **preview**, available in Apollo Router v1.0 and later. [Learn about launch stages.](/resources/product-launch-stages)
+
+Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
+
+The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
+
+## What is `@defer`?
+
+The `@defer` directive enables a client query to specify sets of fields that it doesn't need to receive data for _immediately_. This is helpful whenever some fields in a query take much longer to resolve than others.
+
+Deferred fields are always contained within a GraphQL fragment, and the `@defer` directive is applied to that fragment (_not_ to the individual fields).
+
+Here's an example query that uses `@defer`:
+
+```graphql
+query GetUserAndFriends($userId: ID!) {
+  user(id: $userId) {
+    # Basic fields (fast)
+    id
+    name {
+      firstName
+      lastName
+    }
+
+    # highlight-start
+    # Friend fields (slower)
+    ... @defer {
+      friends {
+        id
+      }
+    }
+    # highlight-end
+  }
+}
+```
+
+When resolving the above query, a GraphQL server can respond **incrementally**: it first returns data for the "basic fields", then later completes its response by returning data for the "friend fields".
+
+To respond incrementally, the Apollo Router uses a multipart-encoded HTTP response. To use `@defer` successfully with the Apollo Router, a client's GraphQL library must _also_ support the directive by handling multipart HTTP responses correctly.
+
+## Using `@defer` with the router
+
+The Apollo Router supports deferring data for any of the following fields in your schema:
+
+- Fields of [entity types](#entity-fields)
+- Root fields of the [`Query` type](#fields-of-query)
+
+If a query defers one of the above fields, it can _also_ defer any _subfields_ of that field:
+
+```graphql
+query DeferExample {
+  users {
+    id
+  }
+
+  # highlight-start
+  ... @defer {
+    products {
+      name
+    }
+  }
+  # highlight-end
+}
+```
+
+In the example query above, `products` is a root field of the `Query` type, so it can be deferred. The `name` subfield can _also_ be deferred, because it appears within a deferrable field in the fragment.
+
+In supergraphs that use entities, a large percentage of all fields in your schema can be deferred. [See an example of a non-deferrable field.](#non-deferrable-fields)
+
+### Entity fields
+
+The Apollo Router supports using `@defer` with fields of all [entity types](/federation/entities/) in your supergraph. Entities are object types with at least one `@key`, which specifies the fields that can uniquely identify any given instance of that type.
+
+Here's an example subgraph schema that defines a `User` entity:
+
+```graphql title="Users subgraph"
+type User @key(fields: "id") {
+  id: ID!
+  name: Name!
+  friends: [User!]!
+}
+
+type Name {
+  firstName: String!
+  lastName: String!
+}
+
+type Query {
+  user(id: ID!): User
+}
+```
+
+Because the `User` type is an entity, the router supports deferring any of its fields.
+
+Here's an example query:
+
+```graphql
+query GetUser($userId: ID!) {
+  user(id: $userId) {
+    id
+    # highlight-start
+    ... @defer {
+      name {
+        firstName
+        lastName
+      }
+    }
+    # highlight-end
+  }
+}
+```
+
+Remember that this query can _also_ successfully defer `firstName` and `lastName` because they're _subfields_ of a deferrable field in the fragment.
+
+### Fields of `Query`
+
+The Apollo Router also supports using `@defer` with the root fields of your supergraph's `Query` type:
+
+```graphql
+query PartiallyDeferredQuery {
+  products {
+    id
+  }
+  # highlight-start
+  ... @defer {
+    users {
+      id
+    }
+  }
+  # highlight-end
+}
+```
+
+In this example, the router immediately begins resolving both `Query.products` _and_ `Query.users` (along with their subfields). However, the router responds with data for the `Query.products` part as soon as it's ready, instead of waiting for the `Query.users` part to finish. It later completes its response with data for `Query.users`.
+
+> It is invalid to use `@defer` with root fields of the `Mutation` type.
+
+### Non-deferrable fields
+
+A query's `@defer` fragment might include fields that the Apollo Router _can't_ defer. The router handles this case gracefully with the following logic:
+
+- The router defers every field in the fragment that it _can_ defer.
+- The router resolves any non-deferrable fields in the fragment _before_ sending its initial response to the client.
+- The router's response to the client still uses multipart encoding to separate `@defer` fragment fields from other fields, even if some fragment fields are non-deferrable.
+    - This preserves the response structure that the client expects based on its use of `@defer`.
+
+#### Example
+
+To illustrate a non-deferrable field, let's look at an example using this subgraph schema:
+
+```graphql
+type Book @key(fields: "id") {
+  id: ID!
+  title: String!
+  author: Author!
+}
+
+type Author {
+  name: String!
+  books: [Book!]!
+}
+
+type Query {
+  books: [Book!]!
+  authors: [Author!]!
+}
+```
+
+Note in this schema that the `Book` type is an entity and the `Author` type is _not_.
+
+Let's say a client executes the following query:
+
+```graphql
+query GetAuthors {
+  authors {
+    name
+    # highlight-start
+    ... @defer {
+      books { # Can't be deferred
+        title # CAN be deferred
+      }
+    }
+    # highlight-end
+  }
+}
+```
+
+This query _attempts_ to defer two fields: `Author.books` and `Book.title`.
+
+- `Author.books` is _not_ the field of an entity type (`Author` is not an entity), so the router _can't_ defer it.
+- `Book.title` _is_ the field of an entity type, so the router _can_ defer it.
+    - If `Book.title` had any subfields, the router could also defer _those_ fields.
+
+In this case, the router must internally resolve each author's list of associated `books` _before_ it can send its initial response to the client. Later, it can resolve each book's `title` and return those `Book` objects to the client in an incremental part of the response.
+
+## Specification status
+
+The `@defer` directive is currently part of a draft-stage RFC for the GraphQL specification ([learn about RFC contribution stages](https://github.com/graphql/graphql-spec/blob/main/CONTRIBUTING.md#rfc-contribution-stages)).
+
+The Apollo Router supports the `@defer` directive as it's documented in [these edits to the RFC](https://github.com/graphql/graphql-spec/pull/742), according to the state of those edits on 2022-08-24.
+
+Entity-based `@defer` support in the Apollo Router is currently [preview functionality](/resources/product-launch-stages/#preview). We'd love your feedback on this preview! Feedback will help inform improvements to the functionality prior to its general availability. It will _also_ help inform any changes to the `@defer` RFC as it proceeds through remaining contribution stages.

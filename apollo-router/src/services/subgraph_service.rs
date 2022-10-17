@@ -35,6 +35,8 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::Plugins;
+use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
+use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
 
@@ -68,12 +70,16 @@ pub(crate) struct SubgraphService {
 
 impl SubgraphService {
     pub(crate) fn new(service: impl Into<String>) -> Self {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
             .enable_http1()
             .enable_http2()
-            .build();
+            .wrap_connector(http_connector);
 
         Self {
             client: ServiceBuilder::new()
@@ -123,9 +129,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
 
             let mut request = http::request::Request::from_parts(parts, compressed_body.into());
-            let app_json: HeaderValue = HeaderValue::from_static("application/json");
+            let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON_HEADER_VALUE);
             let app_graphql_json: HeaderValue =
-                HeaderValue::from_static("application/graphql+json");
+                HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
             request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
             request.headers_mut().insert(ACCEPT, app_json);
             request.headers_mut().append(ACCEPT, app_graphql_json);
@@ -157,7 +163,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     "net.peer.name" = &display(host),
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),
-                    "net.transport" = "ip_tcp"
+                    "net.transport" = "ip_tcp",
+                    "apollo.subgraph.name" = %service_name
                 ))
                 .await
                 .map_err(|err| {
@@ -174,8 +181,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
-                    if !content_type_str.contains("application/json")
-                        && !content_type_str.contains("application/graphql+json")
+                    if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
+                        && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
                         return Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
@@ -352,7 +359,7 @@ mod tests {
     async fn emulate_subgraph_bad_request(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                 .status(StatusCode::BAD_REQUEST)
                 .body(
                     serde_json::to_string(&Response {
@@ -424,7 +431,7 @@ mod tests {
             let compressed_body = encoder.into_inner();
 
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                 .header(CONTENT_ENCODING, "gzip")
                 .status(StatusCode::OK)
                 .body(compressed_body.into())
@@ -450,13 +457,13 @@ mod tests {
                 supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query").build())
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
@@ -483,13 +490,13 @@ mod tests {
                 supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query").build())
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
@@ -516,13 +523,13 @@ mod tests {
                 supergraph_request: Arc::new(
                     http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query".to_string()).build())
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .header(CONTENT_ENCODING, "gzip")
                     .uri(url)
                     .body(Request::builder().query("query".to_string()).build())

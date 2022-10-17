@@ -53,6 +53,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::tracer::TraceId;
 use crate::utility::Output;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -1056,6 +1057,7 @@ impl Rhai {
             .register_type::<Value>()
             .register_type::<Error>()
             .register_type::<Uri>()
+            .register_type::<TraceId>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -1245,6 +1247,11 @@ impl Rhai {
                 x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
+            // TraceId support
+            .register_fn("traceid", || -> Result<TraceId, Box<EvalAltResult>> {
+                TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+            })
+            .register_fn("to_string", |id: &mut TraceId| -> String { id.to_string() })
             // Register a series of logging functions
             .register_fn("log_trace", |out: Dynamic| {
                 tracing::trace!(%out, "rhai_trace");

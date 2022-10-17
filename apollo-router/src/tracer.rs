@@ -1,16 +1,16 @@
 //! Trace Ids for the router.
 
 #![warn(unreachable_pub)]
-#![warn(missing_docs)]
 use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId as OtelTraceId;
+use serde::Serialize;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Trace ID
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
@@ -39,7 +39,7 @@ impl TraceId {
 
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_u128())
+        write!(f, "{:032x}", self.to_u128())
     }
 }
 
