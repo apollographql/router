@@ -25,6 +25,8 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## ❗ BREAKING ❗
+## 🚀 Features
 ## 🐛 Fixes
 
 ### Fix a coercion rule that failed to validate 64 bit integers ([PR #1951](https://github.com/apollographql/router/pull/1951))
@@ -43,3 +45,10 @@ What this means is that validation errors would not increment this counter.
 This PR makes sure we always increment `http_requests_total`, and we increment `http_requests_error_total` when the StatusCode is not 2XX.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1953
+
+### Set no_delay and keepalive on subgraph requests [Issue #1905](https://github.com/apollographql/router/issues/1905))
+
+It was incorrectly removed in a previous pull request.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+
