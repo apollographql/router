@@ -29,6 +29,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Fix --hot-reload in kubernetes and docker ([Issue #1476](https://github.com/apollographql/router/issues/1476))
+
+--hot-reload now chooses a file event notification mechanism at runtime. The exact mechanism is determined by the `notify` crate.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1964
+
 ### Fix a coercion rule that failed to validate 64 bit integers ([PR #1951](https://github.com/apollographql/router/pull/1951))
 
 Queries that passed 64 bit integers for Float values would (incorrectly) fail to validate.
