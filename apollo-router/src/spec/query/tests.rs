@@ -27,6 +27,7 @@ struct FormatTest {
     expected: Option<serde_json_bytes::Value>,
     expected_errors: Option<serde_json_bytes::Value>,
     federation_version: FederationVersion,
+    is_deferred: bool,
 }
 
 enum FederationVersion {
@@ -85,6 +86,12 @@ impl FormatTest {
         self
     }
 
+    #[allow(unused)]
+    fn deferred(mut self) -> Self {
+        self.is_deferred = true;
+        self
+    }
+
     #[track_caller]
     fn test(self) {
         let schema = self.schema.expect("missing schema");
@@ -106,6 +113,7 @@ impl FormatTest {
         query.format_response(
             &mut response,
             self.operation,
+            self.is_deferred,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -1014,6 +1022,8 @@ fn variable_validation() {
     // https://spec.graphql.org/June2018/#sec-Int
     assert_validation!(schema, "query($foo:Int){x}", json!({}));
     assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int=1){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int!=1){x}", json!({}));
     // When expected as an input type, only integer input values are accepted.
     assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
     assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
@@ -1043,6 +1053,17 @@ fn variable_validation() {
     // When expected as an input type, both integer and float input values are accepted.
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2}));
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+    // double precision floats are valid
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193i64})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193f64})
+    );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
     assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
@@ -1070,6 +1091,9 @@ fn variable_validation() {
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": 0}));
     assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": "no"}));
+
+    assert_validation!(schema, "query($foo:Boolean=true){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean!=true){x}", json!({}));
 
     // https://spec.graphql.org/June2018/#sec-ID
     assert_validation!(schema, "query($foo:ID){x}", json!({}));
@@ -1644,7 +1668,7 @@ fn filter_nested_object_errors() {
         }})
         .expected_errors(json! {[
             {
-                "message": "Cannot return null for non-nullable field Named type Review.text2",
+                "message": "Cannot return null for non-nullable field Review.text2",
                 "path": ["me", "reviews1", 0]
             }
         ]})
@@ -4404,7 +4428,7 @@ fn fragment_on_interface_on_query() {
         }})
         .build();
 
-    query.format_response(&mut response, None, Default::default(), api_schema);
+    query.format_response(&mut response, None, false, Default::default(), api_schema);
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
         &json! {{

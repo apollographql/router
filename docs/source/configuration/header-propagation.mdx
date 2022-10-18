@@ -68,13 +68,66 @@ Enables you to selectively remove headers that were included in the client's req
 
 ### `insert`
 
-Enables you to add custom headers to requests going to a specific subgraph. These headers are always static strings that originate in the router, instead of originating in the client.
+Enables you to add custom headers to requests going to a specific subgraph. These headers are strings (statics, coming from request body or from context) that originate in the router, instead of originating in the client.
+
+- Insert static header
 
 ```yaml
 - insert:
     name: "sent-from-our-apollo-router"
     value: "indeed"
 ```
+
+- Insert header from context
+
+```yaml
+- insert:
+    name: "sent-from-our-apollo-router-context"
+    from_context: "my_key_in_context"
+```
+
+- Insert header from request body
+
+```yaml
+- insert:
+    name: "sent-from-our-apollo-router-request-body"
+    path: ".operationName" # It's a JSON path query to fetch the operation name from request body
+    default: "UNKNOWN" # If no operationName has been specified
+```
+
+> Example JSON path queries
+>
+> Let's say you have a JSON request body with the following structure:
+>
+> ```json
+> {
+>   "query": "{ products { id name } }",
+>   "extensions": {
+>     "metadata": [
+>       {
+>         "app_name": "random_app_name"
+>       }
+>     ]
+>   }
+> }
+> ```
+>
+> To fetch the value of the field `app_name`, the corresponding path is `.extensions.metadata[0].app_name`.
+>
+> JSON path queries always begin with a period `.`
+>
+> With this configuration:
+>
+> ```yaml
+> headers:
+>   all:
+>     request:
+>       - insert:
+>           name: from_app_name
+>           path: .extensions.metadata[0].app_name
+> ```
+>
+> You will pass a header to all your subgraphs: `"from_app_name": "random_app_name"`
 
 ## Rule ordering
 

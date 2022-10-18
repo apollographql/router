@@ -135,20 +135,66 @@ expression: "&schema"
                     ],
                     "properties": {
                       "insert": {
-                        "type": "object",
-                        "required": [
-                          "name",
-                          "value"
-                        ],
-                        "properties": {
-                          "name": {
-                            "type": "string"
+                        "description": "Insert header",
+                        "anyOf": [
+                          {
+                            "description": "Insert static header",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "value"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           },
-                          "value": {
-                            "type": "string"
+                          {
+                            "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                            "type": "object",
+                            "required": [
+                              "from_context",
+                              "name"
+                            ],
+                            "properties": {
+                              "from_context": {
+                                "description": "Specify context key to fetch value",
+                                "type": "string"
+                              },
+                              "name": {
+                                "description": "Specify header name",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Insert header with a value coming from body",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "path"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
                           }
-                        },
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -160,8 +206,10 @@ expression: "&schema"
                     ],
                     "properties": {
                       "remove": {
+                        "description": "Remove header",
                         "oneOf": [
                           {
+                            "description": "Remove a header given a header name",
                             "type": "object",
                             "required": [
                               "named"
@@ -174,6 +222,7 @@ expression: "&schema"
                             "additionalProperties": false
                           },
                           {
+                            "description": "Remove a header given a regex matching header name",
                             "type": "object",
                             "required": [
                               "matching"
@@ -197,8 +246,10 @@ expression: "&schema"
                     ],
                     "properties": {
                       "propagate": {
+                        "description": "Propagate header",
                         "anyOf": [
                           {
+                            "description": "Propagate header given a header name",
                             "type": "object",
                             "required": [
                               "named"
@@ -219,6 +270,7 @@ expression: "&schema"
                             "additionalProperties": false
                           },
                           {
+                            "description": "Propagate header given a regex to match header name",
                             "type": "object",
                             "required": [
                               "matching"
@@ -262,20 +314,66 @@ expression: "&schema"
                       ],
                       "properties": {
                         "insert": {
-                          "type": "object",
-                          "required": [
-                            "name",
-                            "value"
-                          ],
-                          "properties": {
-                            "name": {
-                              "type": "string"
+                          "description": "Insert header",
+                          "anyOf": [
+                            {
+                              "description": "Insert static header",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "value"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             },
-                            "value": {
-                              "type": "string"
+                            {
+                              "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                              "type": "object",
+                              "required": [
+                                "from_context",
+                                "name"
+                              ],
+                              "properties": {
+                                "from_context": {
+                                  "description": "Specify context key to fetch value",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "description": "Specify header name",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Insert header with a value coming from body",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "path"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
                             }
-                          },
-                          "additionalProperties": false
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -287,8 +385,10 @@ expression: "&schema"
                       ],
                       "properties": {
                         "remove": {
+                          "description": "Remove header",
                           "oneOf": [
                             {
+                              "description": "Remove a header given a header name",
                               "type": "object",
                               "required": [
                                 "named"
@@ -301,6 +401,7 @@ expression: "&schema"
                               "additionalProperties": false
                             },
                             {
+                              "description": "Remove a header given a regex matching header name",
                               "type": "object",
                               "required": [
                                 "matching"
@@ -324,8 +425,10 @@ expression: "&schema"
                       ],
                       "properties": {
                         "propagate": {
+                          "description": "Propagate header",
                           "anyOf": [
                             {
+                              "description": "Propagate header given a header name",
                               "type": "object",
                               "required": [
                                 "named"
@@ -346,6 +449,7 @@ expression: "&schema"
                               "additionalProperties": false
                             },
                             {
+                              "description": "Propagate header given a regex to match header name",
                               "type": "object",
                               "required": [
                                 "matching"
@@ -368,6 +472,35 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:8088",
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:8088",
+          "default": "127.0.0.1:8088",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
         }
       },
       "additionalProperties": false

@@ -7,18 +7,23 @@ use multimap::MultiMap;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
+use tower::util::option_layer;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::graphql;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
+use crate::plugins::traffic_shaping::is_deduplicate_query_enabled;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::transport;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
@@ -66,15 +71,11 @@ impl Endpoint {
 /// Instances of this traits are used by the HTTP server to generate a new
 /// SupergraphService on each request
 pub(crate) trait SupergraphServiceFactory:
-    NewService<http::Request<graphql::Request>, Service = Self::SupergraphService>
-    + Clone
-    + Send
-    + Sync
-    + 'static
+    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
 {
     type SupergraphService: Service<
-            http::Request<graphql::Request>,
-            Response = http::Response<graphql::ResponseStream>,
+            SupergraphRequest,
+            Response = SupergraphResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -117,12 +118,17 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let deduplicate_queries = is_deduplicate_query_enabled(configuration.as_ref());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
-            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
+            builder = builder.with_subgraph_service(
+                name,
+                option_layer(deduplicate_queries.then(QueryDeduplicationLayer::default))
+                    .layer(SubgraphService::new(name)),
+            );
         }
 
         for (plugin_name, plugin) in plugins {
@@ -265,8 +271,8 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(
-        "enabled plugins: {:?}",
+    tracing::debug!(
+        "plugins list: {:?}",
         plugin_details
             .iter()
             .map(|(name, _)| name)

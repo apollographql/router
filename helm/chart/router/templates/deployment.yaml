@@ -8,11 +8,7 @@ metadata:
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
-    {{- if  .Values.router.configuration.telemetry.metrics.prometheus.listen }}
-    prometheus.io/port: {{ (split ":" .Values.router.configuration.telemetry.metrics.prometheus.listen)._1 | quote }}
-    {{- else }}
-    prometheus.io/port: "9090"
-    {{- end }}
+    prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
     prometheus.io/scrape: "true"
   {{- end }}
 spec:
@@ -54,9 +50,9 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef .Values.extraEnvVars }}
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
-            {{- if .Values.managedFederation.apiKey }}
+            {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
@@ -87,20 +83,23 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}
               protocol: TCP
+            - name: health
+              containerPort: {{ .Values.containerPorts.health }}
+              protocol: TCP
+            {{- if .Values.serviceMonitor.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.containerPorts.metrics }}
+              protocol: TCP
+            {{- end }}
+
           livenessProbe:
             httpGet:
-              httpHeaders:
-                - name: Content-Type
-                  value: application/json
-              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
-              port: {{ .Values.containerPorts.http }}
+              path: "/health"
+              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":8088") | last }}
           readinessProbe:
             httpGet:
-              httpHeaders:
-                - name: Content-Type
-                  value: application/json
-              path: {{ .Values.router.configuration.supergraph.path | default "/" }}?query={__typename}
-              port: {{ .Values.containerPorts.http }}
+              path: "/health"
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":8088")) | last }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
@@ -110,31 +109,20 @@ spec:
               mountPath: /app/configuration.yaml
               subPath: configuration.yaml
               readOnly: true
-            {{- if index .Values.router.configuration "rhai" }}
-            - name: router-rhai
-              mountPath: {{ .Values.router.configuration.rhai.scripts | default "/dist/rhai" }}/{{ .Values.router.configuration.rhai.main | default "main.rhai" }}
-              subPath: {{ .Values.router.configuration.rhai.main | default "main.rhai" }}
-              readOnly: true
             {{- end }}
+            {{- if .Values.extraVolumeMounts }}
+              {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
-      volumes:
-          {{- if .Values.extraVolumeMounts }}
-            {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
-          {{- end }}
           {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
+      volumes:
         {{- if .Values.router.configuration }}
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
-        {{- if index .Values.router.configuration "rhai" }}
-        - name: router-rhai
-          configMap:
-            name: {{ include "router.rhaiConfigMapName" . }}
-        {{- end }}
         {{- end }}
         {{- if .Values.extraVolumes }}
-        {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+          {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

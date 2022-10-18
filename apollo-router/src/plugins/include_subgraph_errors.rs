@@ -99,7 +99,10 @@ mod test {
     use crate::SupergraphResponse;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+        serde_json::from_str(r#"{"data": {"topProducts":null},
+        "errors":[{"message":
+        "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
+        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
@@ -193,9 +196,7 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let router = builder.build().await.expect("should build").test_service();
-
-        router
+        builder.build().await.expect("should build").test_service()
     }
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {

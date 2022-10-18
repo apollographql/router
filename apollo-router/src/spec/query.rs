@@ -33,7 +33,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
+    pub(crate) subselections: HashMap<(Path, String), Query>,
 }
 
 impl Query {
@@ -46,52 +46,51 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
+        is_deferred: bool,
         variables: Object,
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
-            let operation = match operation_name {
-                Some(name) => self
-                    .operations
-                    .iter()
-                    // we should have an error if the only operation is anonymous but the query specifies a name
-                    .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
-                None => self.operations.get(0),
-            };
-            if let Some(subselection) = &response.subselection {
-                // Get subselection from hashmap
-                match self.subselections.get(&(
-                    //FIXME: we should not have optional paths at all in the subselections map
-                    response.path.clone().or_else(|| Some(Path::default())),
-                    subselection.clone(),
-                )) {
-                    Some(subselection_query) => {
-                        let mut output = Object::default();
-                        let operation = &subselection_query.operations[0];
-                        let mut parameters = FormatParameters {
-                            variables: &variables,
-                            schema,
-                            errors: Vec::new(),
-                        };
-                        response.data = Some(
-                            match self.apply_root_selection_set(
-                                operation,
-                                &mut parameters,
-                                &mut input,
-                                &mut output,
-                                &mut Path::default(),
-                            ) {
-                                Ok(()) => output.into(),
-                                Err(InvalidValue) => Value::Null,
-                            },
-                        );
+            let operation = self.operation(operation_name);
+            if is_deferred {
+                if let Some(subselection) = &response.subselection {
+                    // Get subselection from hashmap
+                    match self.subselections.get(&(
+                        response.path.clone().unwrap_or_default(),
+                        subselection.clone(),
+                    )) {
+                        Some(subselection_query) => {
+                            let mut output = Object::default();
+                            let operation = &subselection_query.operations[0];
+                            let mut parameters = FormatParameters {
+                                variables: &variables,
+                                schema,
+                                errors: Vec::new(),
+                            };
+                            response.data = Some(
+                                match self.apply_root_selection_set(
+                                    operation,
+                                    &mut parameters,
+                                    &mut input,
+                                    &mut output,
+                                    &mut Path::default(),
+                                ) {
+                                    Ok(()) => output.into(),
+                                    Err(InvalidValue) => Value::Null,
+                                },
+                            );
 
-                        response.errors.extend(parameters.errors.into_iter());
+                            response.errors.extend(parameters.errors.into_iter());
 
-                        return;
+                            return;
+                        }
+                        None => failfast_debug!("can't find subselection for {:?}", subselection),
                     }
-                    None => failfast_debug!("can't find subselection for {:?}", subselection),
+                // the primary query was empty, we return an empty object
+                } else {
+                    response.data = Some(Value::Object(Object::default()));
+                    return;
                 }
             } else if let Some(operation) = operation {
                 let mut output = Object::default();
@@ -326,20 +325,21 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-                        match self.apply_selection_set(
-                            selection_set,
-                            parameters,
-                            input_object,
-                            output_object,
-                            path,
-                            &FieldType::Named(type_name.to_string()),
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(InvalidValue) => {
-                                *output = Value::Null;
-                                Ok(())
-                            }
+                        if self
+                            .apply_selection_set(
+                                selection_set,
+                                parameters,
+                                input_object,
+                                output_object,
+                                path,
+                                &FieldType::Named(type_name.to_string()),
+                            )
+                            .is_err()
+                        {
+                            *output = Value::Null;
                         }
+
+                        Ok(())
                     }
                     _ => {
                         *output = Value::Null;
@@ -776,8 +776,12 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, (ty, _))| {
-                let value = request.variables.get(*name).unwrap_or(&Value::Null);
+            .filter_map(|(name, (ty, default_value))| {
+                let value = request
+                    .variables
+                    .get(*name)
+                    .or(default_value.as_ref())
+                    .unwrap_or(&Value::Null);
                 ty.validate_input_value(value, schema).err().map(|_| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
@@ -800,6 +804,46 @@ impl Query {
 
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
+    }
+
+    pub(crate) fn variable_value<'a>(
+        &'a self,
+        operation_name: Option<&str>,
+        variable_name: &str,
+        variables: &'a Object,
+    ) -> Option<&'a Value> {
+        variables
+            .get(variable_name)
+            .or_else(|| self.default_variable_value(operation_name, variable_name))
+    }
+
+    pub(crate) fn default_variable_value(
+        &self,
+        operation_name: Option<&str>,
+        variable_name: &str,
+    ) -> Option<&Value> {
+        self.operation(operation_name).and_then(|op| {
+            op.variables
+                .get(variable_name)
+                .and_then(|(_, value)| value.as_ref())
+        })
+    }
+
+    fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+        match operation_name {
+            Some(name) => self
+                .operations
+                .iter()
+                // we should have an error if the only operation is anonymous but the query specifies a name
+                .find(|op| {
+                    if let Some(op_name) = op.name.as_deref() {
+                        op_name == name
+                    } else {
+                        false
+                    }
+                }),
+            None => self.operations.get(0),
+        }
     }
 }
 
@@ -844,7 +888,11 @@ impl Operation {
 
         let selection_set = operation
             .selection_set()
-            .expect("the node SelectionSet is not optional in the spec; qed")
+            .ok_or_else(|| {
+                SpecError::ParsingError(
+                    "the node SelectionSet is not optional in the spec".to_string(),
+                )
+            })?
             .selections()
             .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
             .collect::<Result<Vec<Option<_>>, _>>()?
@@ -859,23 +907,29 @@ impl Operation {
             .map(|definition| {
                 let name = definition
                     .variable()
-                    .expect("the node Variable is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Variable is not optional in the spec".to_string(),
+                        )
+                    })?
                     .name()
-                    .expect("the node Name is not optional in the spec; qed")
+                    .ok_or_else(|| {
+                        SpecError::ParsingError(
+                            "the node Name is not optional in the spec".to_string(),
+                        )
+                    })?
                     .text()
                     .to_string();
-                let ty = FieldType::from(
-                    definition
-                        .ty()
-                        .expect("the node Type is not optional in the spec; qed"),
-                );
+                let ty = FieldType::try_from(definition.ty().ok_or_else(|| {
+                    SpecError::ParsingError("the node Type is not optional in the spec".to_string())
+                })?)?;
 
-                (
+                Ok((
                     ByteString::from(name),
                     (ty, parse_default_value(&definition)),
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         Ok(Operation {
             selection_set,

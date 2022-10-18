@@ -1,4 +1,10 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
+
+// tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
+// current suggestion is to explicitly allow the lint in the module that imports the protos.
+// Read more: https://github.com/hyperium/tonic/issues/1056
+#![allow(clippy::derive_partial_eq_without_eq)]
+
 use std::time::Duration;
 
 use futures::Stream;
@@ -163,4 +169,40 @@ async fn http_request(
     let res = client.post(url).json(request_body).send().await?;
     let response_body: Response<supergraph_sdl::ResponseData> = res.json().await?;
     Ok(response_body)
+}
+
+#[test]
+#[cfg(not(windows))] // Don’t bother with line ending differences
+fn test_uplink_schema_is_up_to_date() {
+    use std::path::PathBuf;
+
+    use introspector_gadget::blocking::GraphQLClient;
+    use introspector_gadget::introspect;
+    use introspector_gadget::introspect::GraphIntrospectInput;
+
+    let client = GraphQLClient::new(
+        "https://uplink.api.apollographql.com/",
+        reqwest::blocking::Client::new(),
+    )
+    .unwrap();
+
+    let should_retry = true;
+    let introspection_response = introspect::run(
+        GraphIntrospectInput {
+            headers: Default::default(),
+        },
+        &client,
+        should_retry,
+    )
+    .unwrap();
+
+    if introspection_response.schema_sdl != include_str!("uplink.graphql") {
+        let path = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("uplink.graphql");
+        std::fs::write(&path, introspection_response.schema_sdl).unwrap();
+        panic!(
+            "\n\nUplink schema is out of date. Run this command to update it:\n\n    \
+                mv {} apollo-router/src/uplink/uplink.graphql\n\n",
+            path.to_str().unwrap()
+        );
+    }
 }

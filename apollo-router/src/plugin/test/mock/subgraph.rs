@@ -34,9 +34,45 @@ impl MockSubgraph {
         }
     }
 
+    pub fn builder() -> MockSubgraphBuilder {
+        MockSubgraphBuilder::default()
+    }
+
     pub fn with_extensions(mut self, extensions: Object) -> Self {
         self.extensions = Some(extensions);
         self
+    }
+}
+
+/// Builder for `MockSubgraph`
+#[derive(Clone, Default)]
+pub struct MockSubgraphBuilder {
+    mocks: MockResponses,
+    extensions: Option<Object>,
+}
+impl MockSubgraphBuilder {
+    pub fn with_extensions(mut self, extensions: Object) -> Self {
+        self.extensions = Some(extensions);
+        self
+    }
+
+    /// adds a mocked response for a request
+    ///
+    /// the arguments must deserialize to `crate::graphql::Request` and `crate::graphql::Response`
+    pub fn with_json(mut self, request: serde_json::Value, response: serde_json::Value) -> Self {
+        self.mocks.insert(
+            serde_json::from_value(request).unwrap(),
+            serde_json::from_value(response).unwrap(),
+        );
+
+        self
+    }
+
+    pub fn build(self) -> MockSubgraph {
+        MockSubgraph {
+            mocks: Arc::new(self.mocks),
+            extensions: self.extensions,
+        }
     }
 }
 
@@ -61,7 +97,10 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::new_from_response(http_response, req.context)
         } else {
             let error = crate::error::Error::builder()
-                .message("couldn't find mock for query".to_string())
+                .message(format!(
+                    "couldn't find mock for query {}",
+                    serde_json::to_string(&req.subgraph_request.body()).unwrap()
+                ))
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();
             SubgraphResponse::fake_builder()
