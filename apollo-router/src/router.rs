@@ -142,6 +142,7 @@ pub enum SchemaSource {
         watch: bool,
 
         /// When watching, the delay to wait before applying the new schema.
+        /// Note: This variable is no longer observed.
         delay: Option<Duration>,
     },
 
@@ -178,6 +179,7 @@ impl SchemaSource {
                 stream::once(future::ready(UpdateSchema(schema))).boxed()
             }
             SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            #[allow(unused_variables)]
             SchemaSource::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -191,7 +193,7 @@ impl SchemaSource {
                     match std::fs::read_to_string(&path) {
                         Ok(schema) => {
                             if watch {
-                                crate::files::watch(path.to_owned(), delay)
+                                crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         future::ready(std::fs::read_to_string(&path).ok())
                                     })
@@ -286,6 +288,7 @@ impl ConfigurationSource {
             ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
+            #[allow(unused_variables)]
             ConfigurationSource::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -295,7 +298,7 @@ impl ConfigurationSource {
                     );
                     stream::empty().boxed()
                 } else if watch {
-                    crate::files::watch(path.to_owned(), delay)
+                    crate::files::watch(&path)
                         .map(move |_| match ConfigurationSource::read_config(&path) {
                             Ok(config) => UpdateConfiguration(Box::new(config)),
                             Err(err) => {
@@ -666,7 +669,7 @@ mod tests {
         let mut stream = ConfigurationSource::File {
             path,
             watch: true,
-            delay: Some(Duration::from_millis(10)),
+            delay: Some(Duration::from_millis(50)),
         }
         .into_stream()
         .boxed();
