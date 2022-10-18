@@ -1695,7 +1695,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);
-        println!("{}", &prom_metrics);
         assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
         assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
