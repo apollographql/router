@@ -30,6 +30,16 @@ use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
 
+type RecursiveExecutionFuture<'a> = future::BoxFuture<
+    'a,
+    (
+        Option<HeaderMap<HeaderValue>>,
+        Value,
+        Option<String>,
+        Vec<Error>,
+    ),
+>;
+
 impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub(crate) async fn execute<'a, SF>(
@@ -98,12 +108,7 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(
-        Option<HeaderMap<HeaderValue>>,
-        Value,
-        Option<String>,
-        Vec<Error>,
-    )>
+    ) -> RecursiveExecutionFuture
     where
         SF: SubgraphServiceFactory,
     {
