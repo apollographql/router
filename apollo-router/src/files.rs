@@ -47,10 +47,10 @@ pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
             }
             Err(e) => eprintln!("event error: {:?}", e),
         })
-        .expect(format!("could not create watch on: {:?}", path).as_ref());
+        .unwrap_or_else(|_| panic!("could not create watch on: {:?}", path));
     watcher
         .watch(path, RecursiveMode::NonRecursive)
-        .expect(format!("could not watch: {:?}", path).as_ref());
+        .unwrap_or_else(|_| panic!("could not watch: {:?}", path));
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
