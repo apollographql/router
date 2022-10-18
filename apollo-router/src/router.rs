@@ -1,4 +1,5 @@
 #![allow(missing_docs)] // FIXME
+#![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
 use std::fs;
 use std::net::IpAddr;
@@ -142,7 +143,8 @@ pub enum SchemaSource {
         watch: bool,
 
         /// When watching, the delay to wait before applying the new schema.
-        /// Note: This variable is no longer observed.
+        /// Note: This variable is deprecated and has no effect.
+        #[deprecated]
         delay: Option<Duration>,
     },
 
@@ -179,8 +181,12 @@ impl SchemaSource {
                 stream::once(future::ready(UpdateSchema(schema))).boxed()
             }
             SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
-            #[allow(unused_variables)]
-            SchemaSource::File { path, watch, delay } => {
+            #[allow(deprecated)]
+            SchemaSource::File {
+                path,
+                watch,
+                delay: _,
+            } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -268,6 +274,8 @@ pub enum ConfigurationSource {
         watch: bool,
 
         /// When watching, the delay to wait before applying the new configuration.
+        /// Note: This variable is deprecated and has no effect.
+        #[deprecated]
         delay: Option<Duration>,
     },
 }
@@ -288,8 +296,12 @@ impl ConfigurationSource {
             ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
-            #[allow(unused_variables)]
-            ConfigurationSource::File { path, watch, delay } => {
+            #[allow(deprecated)]
+            ConfigurationSource::File {
+                path,
+                watch,
+                delay: _,
+            } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -669,7 +681,7 @@ mod tests {
         let mut stream = ConfigurationSource::File {
             path,
             watch: true,
-            delay: Some(Duration::from_millis(50)),
+            delay: None,
         }
         .into_stream()
         .boxed();
@@ -773,7 +785,7 @@ mod tests {
         let mut stream = SchemaSource::File {
             path,
             watch: true,
-            delay: Some(Duration::from_millis(10)),
+            delay: None,
         }
         .into_stream()
         .boxed();

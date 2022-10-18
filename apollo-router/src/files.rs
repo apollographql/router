@@ -22,10 +22,10 @@ pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
             Ok(event) => {
                 // We are only interested in  modify events.
                 // We don't want to lose events and a slow consumer could make us
-                // miss an event notification. If we can't send the event because
-                // the channel is full, then wait for a short while and try again.
-                // We'll loop forever trying to send the event...
-                // Otherwise, panic because it's a non-recoverable error.
+                // miss an event notification without a re-send strategy.
+                // If we can't send the event because the channel is full, wait
+                // for a short while and try again. Otherwise, we will panic
+                // because it's a non-recoverable error.
                 if let notify::event::EventKind::Modify(_) = event.kind {
                     loop {
                         match watch_sender.try_send(()) {
