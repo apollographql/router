@@ -61,5 +61,12 @@ This changes the logic so that:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1923
 
+### `@defer`: duplicated errors across incremental items ([Issue #1834](https://github.com/apollographql/router/issues/1834), [Issue #1818](https://github.com/apollographql/router/issues/1818))
+
+If a deferred response contains incremental responses, the errors should be dispatched in each increment according to the
+error's path.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1892
+
 ## 🛠 Maintenance
 ## 📚 Documentation
