@@ -47,7 +47,6 @@ executors:
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
-
 parameters:
   cache_version:
     type: string
@@ -210,52 +209,6 @@ commands:
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
 
-  build_common_permutations:
-    steps:
-      - run:
-          name: cargo check workspace
-          command: |
-            set -e -o pipefail
-            cargo check --locked
-  build_all_permutations:
-    steps:
-      - build_common_permutations
-      - run:
-          name: cargo check workspace and benchmarks
-          command: |
-            set -e -o pipefail
-            cargo check --locked --all --benches
-  build_workspace:
-    parameters:
-      os:
-        type: string
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - build_all_permutations
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-          paths:
-            - ~/.cargo
-
-  windows_build_workspace:
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows
-      - build_common_permutations
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
-          paths:
-            - C:\\Users\\circleci\.cargo
-
   windows_test_workspace:
     steps:
       - run:
@@ -342,43 +295,6 @@ jobs:
             - linux_amd_install_baseline
             - xtask_check_compliance:
                 os: linux_amd
-  build:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - build_workspace:
-                os: linux_amd
-      - when:
-          condition:
-            equal: [*arm_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_arm_install_baseline
-            - build_workspace:
-                os: linux_arm
-      - when:
-          condition:
-            equal: [*windows_build_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_build_workspace
-      - when:
-          condition:
-            equal: [*macos_build_executor, << parameters.platform >>]
-          steps:
-            - macos_install_baseline
-            - build_workspace:
-                os: macos
   test:
     environment:
       <<: *common_job_environment
@@ -586,20 +502,18 @@ workflows:
       #       parameters:
       #         platform: [linux]
 
-      - build:
-          matrix:
-            parameters:
-              platform: [macos_build, windows_build, amd_linux_build, arm_linux_build]
       - test:
           matrix:
             parameters:
-              platform: [macos_test, windows_test, amd_linux_test, arm_linux_test]
+              platform:
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
   release:
     jobs:
       - build_release:
           matrix:
             parameters:
-              platform: [macos_build, windows_build, amd_linux_build, arm_linux_build]
+              platform:
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
           filters:
             branches:
               ignore: /.*/
