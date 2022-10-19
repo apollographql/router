@@ -51,10 +51,9 @@ impl Config {
                     .with_env()
                     .with(&self.timeout, |b, t| b.with_timeout(*t))
                     .with(&endpoint, |b, e| b.with_endpoint(e.as_str()))
-                    .try_with(
-                        &grpc.tls_config,
-                        |b, t| Ok(b.with_tls_config(t.try_into()?)),
-                    )?
+                    .try_with(&grpc.tls_config.maybe(), |b, t| {
+                        Ok(b.with_tls_config(t.try_into()?))
+                    })?
                     .with(&grpc.metadata, |b, m| b.with_metadata(m.clone()))
                     .into();
                 Ok(exporter)
@@ -112,7 +111,7 @@ pub(crate) struct HttpExporter {
 #[serde(deny_unknown_fields)]
 pub(crate) struct GrpcExporter {
     #[serde(flatten)]
-    pub(crate) tls_config: Option<TlsConfig>,
+    pub(crate) tls_config: TlsConfig,
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
         serialize_with = "metadata_map_serde::serialize",
@@ -128,11 +127,26 @@ fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::sc
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TlsConfig {
+pub(crate) struct TlsConfig {
     domain_name: Option<String>,
     ca: Option<String>,
     cert: Option<String>,
     key: Option<String>,
+}
+
+impl TlsConfig {
+    // Return a TlsConfig if it has something actually set.
+    pub(crate) fn maybe(self) -> Option<TlsConfig> {
+        if self.ca.is_some()
+            || self.key.is_some()
+            || self.cert.is_some()
+            || self.domain_name.is_some()
+        {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
