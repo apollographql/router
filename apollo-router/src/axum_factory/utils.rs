@@ -140,8 +140,8 @@ pub(super) async fn check_accept_header(
             format!(
                 r#"'accept' header is mandatory and can't be different than {:?}, {:?} or {:?}"#,
                 APPLICATION_JSON_HEADER_VALUE,
-                MULTIPART_DEFER_CONTENT_TYPE,
-                APPLICATION_JSON_HEADER_VALUE
+                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                MULTIPART_DEFER_CONTENT_TYPE
             ),
         )
             .into_response())
@@ -149,7 +149,7 @@ pub(super) async fn check_accept_header(
 }
 
 /// Returns true if the headers contain header `accept: */*`
-fn accepts_wildcard(headers: &HeaderMap) -> bool {
+pub(crate) fn accepts_wildcard(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
             .to_str()
@@ -159,7 +159,7 @@ fn accepts_wildcard(headers: &HeaderMap) -> bool {
 }
 
 /// Returns true if the headers contain header `accept: application/json` or `accept: application/graphql-response+json`
-fn accepts_json(headers: &HeaderMap) -> bool {
+pub(crate) fn accepts_json(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
             .to_str()
