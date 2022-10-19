@@ -106,8 +106,7 @@ spec:
           volumeMounts:
             {{- if .Values.router.configuration }}
             - name: router-configuration
-              mountPath: /app/configuration.yaml
-              subPath: configuration.yaml
+              mountPath: /app/
               readOnly: true
             {{- end }}
             {{- if .Values.extraVolumeMounts }}
