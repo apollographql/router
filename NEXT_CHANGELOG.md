@@ -25,7 +25,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+
 ## ❗ BREAKING ❗
+
 ## 🚀 Features
 ## 🐛 Fixes
 
@@ -46,6 +48,16 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 It was incorrectly removed in a previous pull request.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+
+## 🛠 Maintenance
+
+### Update docker-compose and Dockerfiles now that the submodules have been removed ([PR #1950](https://github.com/apollographql/router/pull/1950))
+
+We recently removed git submodules dependency, but we didn't update the global and the fuzzer `docker-compose.yml`.
+
+This PR adds new Dockerfiles and updates `docker-compose.yml` so we can run integration tests and the fuzzer without needing to clone and set up the federation and fed2-demo repositories.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1950
 
 ### Fix logic around Accept headers and multipart ([PR #1923](https://github.com/apollographql/router/pull/1923))
 
