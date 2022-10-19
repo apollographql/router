@@ -518,17 +518,17 @@ impl BasicMetrics {
         let meter = meter_provider.meter("apollo/router", None);
         BasicMetrics {
             http_requests_total: meter.build_counter(|m| {
-                m.u64_counter("http_requests_total")
+                m.u64_counter("apollo_router_http_requests_total")
                     .with_description("Total number of HTTP requests made.")
                     .init()
             }),
             http_requests_error_total: meter.build_counter(|m| {
-                m.u64_counter("http_requests_error_total")
+                m.u64_counter("apollo_router_http_requests_error_total")
                     .with_description("Total number of HTTP requests in error made.")
                     .init()
             }),
             http_requests_duration: meter.build_value_recorder(|m| {
-                m.f64_value_recorder("http_request_duration_seconds")
+                m.f64_value_recorder("apollo_router_http_request_duration_seconds")
                     .with_description("Total number of HTTP requests made.")
                     .init()
             }),
