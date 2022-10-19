@@ -2,10 +2,7 @@
 //! Layers that are specific to one plugin should not be placed in this module.
 use std::future::Future;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
-use moka::sync::Cache;
-use tokio::sync::RwLock;
 use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::BoxError;
@@ -13,18 +10,21 @@ use tower::ServiceBuilder;
 use tower_service::Service;
 use tracing::Span;
 
+use self::map_first_graphql_response::MapFirstGraphqlResponseLayer;
+use self::map_first_graphql_response::MapFirstGraphqlResponseService;
+use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::layers::cache::CachingLayer;
 use crate::layers::instrument::InstrumentLayer;
-use crate::layers::map_future_with_context::MapFutureWithContextLayer;
-use crate::layers::map_future_with_context::MapFutureWithContextService;
+use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
+use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
-
-pub mod map_future_with_context;
+use crate::services::supergraph;
+use crate::Context;
 
 pub mod async_checkpoint;
-pub mod cache;
 pub mod instrument;
+pub mod map_first_graphql_response;
+pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
 
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -33,55 +33,6 @@ pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 /// (e.g.: checkpoints) to a [`Service`].
 #[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L>: Sized {
-    /// Add a caching layer to the service stack.
-    /// Given a request and response extract a cacheable key and value that may be used later to return a cached result.
-    ///
-    /// # Arguments
-    ///
-    /// * `cache`: The Moka cache that backs this layer.
-    /// * `key_fn`: The callback to extract a key from the request.
-    /// * `value_fn`: The callback to extract a value from the response.
-    /// * `response_fn`: The callback to construct a response given a request and a cached value.
-    ///
-    /// returns: ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use std::time::Duration;
-    /// # use moka::sync::Cache;
-    /// # use tower::ServiceBuilder;
-    /// # use tower_service::Service;
-    /// # use tracing::info_span;
-    /// # use apollo_router::graphql::Response;
-    /// # use apollo_router::stages::router;
-    /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
-    /// //TODO This doc has highlighted a couple of issues that need to be resolved
-    /// //let _ = ServiceBuilder::new()
-    /// //            .cache(Cache::builder().time_to_live(Duration::from_secs(1)).max_capacity(100).build(),
-    /// //                |req: &RouterRequest| req.originating_request.headers().get("cache_key"),
-    /// //                |resp: &RouterResponse| &resp.response.body(),
-    /// //                |req: RouterRequest, cached: &ResponseBody| RouterResponse::builder()
-    /// //                    .context(req.context)
-    /// //                    .data(cached.clone()) //TODO builder should take ResponseBody
-    /// //                    .build().unwrap()) //TODO make response function fallible
-    /// //            .service(service);
-    /// # }
-    /// ```
-    fn cache<Request, Response, Key, Value>(
-        self,
-        cache: Cache<Key, Arc<RwLock<Option<Result<Value, String>>>>>,
-        key_fn: fn(&Request) -> Option<&Key>,
-        value_fn: fn(&Response) -> &Value,
-        response_fn: fn(Request, Value) -> Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
-    where
-        Request: Send,
-    {
-        self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
-    }
-
     /// Decide if processing should continue or not, and if not allow returning of a response.
     ///
     /// This is useful for validation functionality where you want to abort processing but return a
@@ -101,13 +52,13 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///     .checkpoint(|req: router::Request|{
-    ///         if req.originating_request.method() == Method::GET {
-    ///             Ok(ControlFlow::Break(router::Response::builder()
+    ///     .checkpoint(|req: supergraph::Request|{
+    ///         if req.supergraph_request.method() == Method::GET {
+    ///             Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                 .data("Only get requests allowed")
     ///                 .context(req.context)
     ///                 .build()?))
@@ -161,14 +112,14 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///     .checkpoint_async(|req: router::Request|
+    ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
-    ///             if req.originating_request.method() == Method::GET {
-    ///                 Ok(ControlFlow::Break(router::Response::builder()
+    ///             if req.supergraph_request.method() == Method::GET {
+    ///                 Ok(ControlFlow::Break(supergraph::Response::builder()
     ///                     .data("Only get requests allowed")
     ///                     .context(req.context)
     ///                     .build()?))
@@ -206,9 +157,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
     ///             .service(service);
@@ -235,9 +186,9 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower::ServiceBuilder;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
+    /// # fn test(service: supergraph::BoxService) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
     ///             .service(service);
@@ -253,15 +204,79 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(InstrumentLayer::new(span_fn))
     }
 
+    /// Maps HTTP parts, as well as the first GraphQL response, to different values.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    ///
+    /// This method wraps a service and calls a `callback` when the first GraphQL response
+    /// in the stream returned by the inner service becomes available.
+    /// The callback can then access the HTTP parts (headers, status code, etc)
+    /// or the first GraphQL response before returning them.
+    ///
+    /// Note that any subsequent GraphQL responses after the first will be forwarded unmodified.
+    /// In order to inspect or modify all GraphQL responses,
+    /// consider using [`map_response`][tower::ServiceExt::map_response]
+    /// together with [`supergraph::Response::map_stream`] instead.
+    /// (See the example in `map_stream`’s documentation.)
+    /// In that case however HTTP parts cannot be modified because they may have already been sent.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceBuilderExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         tower::ServiceBuilder::new()
+    ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
+    ///                 // Something interesting here
+    ///                 (http_parts, graphql_response)
+    ///             })
+    ///             .service(inner)
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    fn map_first_graphql_response<Callback>(
+        self,
+        callback: Callback,
+    ) -> ServiceBuilder<Stack<MapFirstGraphqlResponseLayer<Callback>, L>>
+    where
+        Callback: FnOnce(
+                Context,
+                http::response::Parts,
+                graphql::Response,
+            ) -> (http::response::Parts, graphql::Response)
+            + Clone
+            + Send
+            + 'static,
+    {
+        self.layer(MapFirstGraphqlResponseLayer { callback })
+    }
+
     /// Similar to map_future but also providing an opportunity to extract information out of the
     /// request for use when constructing the response.
     ///
     /// # Arguments
     ///
-    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `req_fn`: The callback to extract data from the request.
     /// * `map_fn`: The callback to map the future.
     ///
-    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    /// returns: ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>>
     ///
     /// # Examples
     ///
@@ -272,23 +287,23 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: router::BoxService) {
-    /// let _ : router::BoxService = ServiceBuilder::new()
-    ///     .map_future_with_context(
-    ///         |req: &router::Request| req.context.clone(),
+    /// # fn test(service: supergraph::BoxService) {
+    /// let _ : supergraph::BoxService = ServiceBuilder::new()
+    ///     .map_future_with_request_data(
+    ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
     ///     .boxed();
     /// # }
     /// ```
-    fn map_future_with_context<C, F>(
+    fn map_future_with_request_data<RF, MF>(
         self,
-        ctx_fn: C,
-        map_fn: F,
-    ) -> ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>> {
-        self.layer(MapFutureWithContextLayer::new(ctx_fn, map_fn))
+        req_fn: RF,
+        map_fn: MF,
+    ) -> ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>> {
+        self.layer(MapFutureWithRequestDataLayer::new(req_fn, map_fn))
     }
 
     /// Utility function to allow us to specify default methods on this trait rather than duplicating in the impl.
@@ -314,16 +329,92 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 }
 
 /// Extension trait for [`Service`].
+///
+/// Importing both this trait and [`tower::ServiceExt`] could lead a name collision error.
+/// To work around that, use `as _` syntax to make a trait’s methods available in a module
+/// without assigning it a name in that module’s namespace.
+///
+/// ```
+/// use apollo_router::layers::ServiceExt as _;
+/// use tower::ServiceExt as _;
+/// ```
 pub trait ServiceExt<Request>: Service<Request> {
+    /// Maps HTTP parts, as well as the first GraphQL response, to different values.
+    ///
+    /// In supergraph and execution services, the service response contains
+    /// not just one GraphQL response but a stream of them,
+    /// in order to support features such as `@defer`.
+    ///
+    /// This method wraps a service and call `callback` when the first GraphQL response
+    /// in the stream returned by the inner service becomes available.
+    /// The callback can then modify the HTTP parts (headers, status code, etc)
+    /// or the first GraphQL response before returning them.
+    ///
+    /// Note that any subsequent GraphQL responses after the first will be forwarded unmodified.
+    /// In order to inspect or modify all GraphQL responses,
+    /// consider using [`map_response`][tower::ServiceExt::map_response]
+    /// together with [`supergraph::Response::map_stream`] instead.
+    /// (See the example in `map_stream`’s documentation.)
+    /// In that case however HTTP parts cannot be modified because they may have already been sent.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use apollo_router::services::supergraph;
+    /// use apollo_router::layers::ServiceExt as _;
+    /// use tower::ServiceExt as _;
+    ///
+    /// struct ExamplePlugin;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
+    ///     # type Config = ();
+    ///     # async fn new(
+    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
+    ///     # ) -> Result<Self, tower::BoxError> {
+    ///     #     Ok(Self)
+    ///     # }
+    ///     // …
+    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///         inner
+    ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
+    ///                 // Something interesting here
+    ///                 (http_parts, graphql_response)
+    ///             })
+    ///             .boxed()
+    ///     }
+    /// }
+    /// ```
+    fn map_first_graphql_response<Callback>(
+        self,
+        callback: Callback,
+    ) -> MapFirstGraphqlResponseService<Self, Callback>
+    where
+        Self: Sized + Service<Request, Response = supergraph::Response>,
+        <Self as Service<Request>>::Future: Send + 'static,
+        Callback: FnOnce(
+                Context,
+                http::response::Parts,
+                graphql::Response,
+            ) -> (http::response::Parts, graphql::Response)
+            + Clone
+            + Send
+            + 'static,
+    {
+        ServiceBuilder::new()
+            .map_first_graphql_response(callback)
+            .service(self)
+    }
+
     /// Similar to map_future but also providing an opportunity to extract information out of the
     /// request for use when constructing the response.
     ///
     /// # Arguments
     ///
-    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `req_fn`: The callback to extract data from the request.
     /// * `map_fn`: The callback to map the future.
     ///
-    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    /// returns: ServiceBuilder<Stack<MapFutureWithRequestDataLayer<RF, MF>, L>>
     ///
     /// # Examples
     ///
@@ -334,29 +425,29 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
-    /// # use apollo_router::stages::router;
+    /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test(service: router::BoxService) {
-    /// let _ : router::BoxService = service
-    ///     .map_future_with_context(
-    ///         |req: &router::Request| req.context.clone(),
+    /// # fn test(service: supergraph::BoxService) {
+    /// let _ : supergraph::BoxService = service
+    ///     .map_future_with_request_data(
+    ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
     ///     .boxed();
     /// # }
     /// ```
-    fn map_future_with_context<C, F>(
+    fn map_future_with_request_data<RF, MF>(
         self,
-        cxt_fn: C,
-        map_fn: F,
-    ) -> MapFutureWithContextService<Self, C, F>
+        req_fn: RF,
+        map_fn: MF,
+    ) -> MapFutureWithRequestDataService<Self, RF, MF>
     where
         Self: Sized,
-        C: Clone,
-        F: Clone,
+        RF: Clone,
+        MF: Clone,
     {
-        MapFutureWithContextService::new(self, cxt_fn, map_fn)
+        MapFutureWithRequestDataService::new(self, req_fn, map_fn)
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}

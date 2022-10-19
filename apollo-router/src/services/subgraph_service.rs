@@ -17,7 +17,6 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
@@ -36,6 +35,8 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::Plugins;
+use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
+use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
 
@@ -69,12 +70,16 @@ pub(crate) struct SubgraphService {
 
 impl SubgraphService {
     pub(crate) fn new(service: impl Into<String>) -> Self {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
             .enable_http1()
             .enable_http2()
-            .build();
+            .wrap_connector(http_connector);
 
         Self {
             client: ServiceBuilder::new()
@@ -107,7 +112,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, body) = http::Request::from(subgraph_request).into_parts();
+            let (parts, body) = subgraph_request.into_parts();
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
@@ -124,9 +129,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
 
             let mut request = http::request::Request::from_parts(parts, compressed_body.into());
-            let app_json: HeaderValue = HeaderValue::from_static("application/json");
+            let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON_HEADER_VALUE);
             let app_graphql_json: HeaderValue =
-                HeaderValue::from_static("application/graphql+json");
+                HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
             request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
             request.headers_mut().insert(ACCEPT, app_json);
             request.headers_mut().append(ACCEPT, app_graphql_json);
@@ -158,7 +163,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     "net.peer.name" = &display(host),
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),
-                    "net.transport" = "ip_tcp"
+                    "net.transport" = "ip_tcp",
+                    "apollo.subgraph.name" = %service_name
                 ))
                 .await
                 .map_err(|err| {
@@ -175,8 +181,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
-                    if !content_type_str.contains("application/json")
-                        && !content_type_str.contains("application/graphql+json")
+                    if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
+                        && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
                         return Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
@@ -197,16 +203,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-            if parts.status != StatusCode::OK {
-                return Err(BoxError::from(FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: format!(
-                        "subgraph HTTP status error '{}': {})",
-                        parts.status,
-                        String::from_utf8_lossy(&body)
-                    ),
-                }));
-            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
@@ -220,10 +216,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let resp = http::Response::from_parts(parts, graphql);
 
-            Ok(crate::SubgraphResponse::new_from_response(
-                resp.into(),
-                context,
-            ))
+            Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
     }
 }
@@ -345,6 +338,7 @@ mod tests {
 
     use axum::Server;
     use http::header::HOST;
+    use http::StatusCode;
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
@@ -354,9 +348,9 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::http_ext;
     use crate::query_planner::fetch::OperationKind;
     use crate::Context;
     use crate::SubgraphRequest;
@@ -365,9 +359,16 @@ mod tests {
     async fn emulate_subgraph_bad_request(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header("Content-Type", "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                 .status(StatusCode::BAD_REQUEST)
-                .body(r#"BAD REQUEST"#.into())
+                .body(
+                    serde_json::to_string(&Response {
+                        errors: vec![Error::builder().message("This went wrong").build()],
+                        ..Response::default()
+                    })
+                    .expect("always valid")
+                    .into(),
+                )
                 .unwrap())
         }
 
@@ -382,7 +383,7 @@ mod tests {
     async fn emulate_subgraph_bad_response_format(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header("Content-Type", "text/html")
+                .header(CONTENT_TYPE, "text/html")
                 .status(StatusCode::OK)
                 .body(r#"TEST"#.into())
                 .unwrap())
@@ -430,7 +431,7 @@ mod tests {
             let compressed_body = encoder.into_inner();
 
             Ok(http::Response::builder()
-                .header("Content-Type", "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                 .header(CONTENT_ENCODING, "gzip")
                 .status(StatusCode::OK)
                 .body(compressed_body.into())
@@ -445,37 +446,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_bad_status_code() {
+    async fn test_bad_status_code_should_not_fail() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
         let subgraph_service = SubgraphService::new("test");
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
-        let err = subgraph_service
+        let response = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
-                    http_ext::Request::fake_builder()
+                supergraph_request: Arc::new(
+                    http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query").build())
-                        .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_ext::Request::fake_builder()
+                subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .uri(url)
                     .body(Request::builder().query("query").build())
-                    .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
             })
             .await
-            .unwrap_err();
+            .unwrap();
         assert_eq!(
-            err.to_string(),
-            "HTTP fetch failed from 'test': subgraph HTTP status error '400 Bad Request': BAD REQUEST)"
+            response.response.body().errors[0].message,
+            "This went wrong"
         );
     }
 
@@ -488,20 +487,18 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
-                    http_ext::Request::fake_builder()
+                supergraph_request: Arc::new(
+                    http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query").build())
-                        .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_ext::Request::fake_builder()
+                subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .uri(url)
                     .body(Request::builder().query("query").build())
-                    .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -523,21 +520,19 @@ mod tests {
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
-                originating_request: Arc::new(
-                    http_ext::Request::fake_builder()
+                supergraph_request: Arc::new(
+                    http::Request::builder()
                         .header(HOST, "host")
-                        .header(CONTENT_TYPE, "application/json")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .body(Request::builder().query("query".to_string()).build())
-                        .build()
                         .expect("expecting valid request"),
                 ),
-                subgraph_request: http_ext::Request::fake_builder()
+                subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, "application/json")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                     .header(CONTENT_ENCODING, "gzip")
                     .uri(url)
                     .body(Request::builder().query("query".to_string()).build())
-                    .build()
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),

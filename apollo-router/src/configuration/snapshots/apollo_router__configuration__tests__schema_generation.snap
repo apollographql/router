@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 909
 expression: "&schema"
 ---
 {
@@ -9,6 +8,86 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "cors": {
+      "description": "Cross origin request headers.",
+      "default": {
+        "allow_any_origin": false,
+        "allow_credentials": false,
+        "allow_headers": [],
+        "expose_headers": null,
+        "origins": [
+          "https://studio.apollographql.com"
+        ],
+        "match_origins": null,
+        "methods": [
+          "GET",
+          "POST",
+          "OPTIONS"
+        ]
+      },
+      "type": "object",
+      "properties": {
+        "allow_any_origin": {
+          "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
+          "default": false,
+          "type": "boolean"
+        },
+        "allow_credentials": {
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
+          "default": false,
+          "type": "boolean"
+        },
+        "allow_headers": {
+          "description": "The headers to allow.\n\nIf this value is not set, the router will mirror client's `Access-Control-Request-Headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expose_headers": {
+          "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
+          "default": null,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
+        "match_origins": {
+          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
+          "default": null,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
+        "methods": {
+          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+          "default": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origins": {
+          "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "csrf": {
       "description": "CSRF Configuration.",
       "type": "object",
@@ -39,234 +118,419 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
-          "type": "array",
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": [
-                  "insert"
-                ],
-                "properties": {
-                  "insert": {
+          "type": "object",
+          "required": [
+            "request"
+          ],
+          "properties": {
+            "request": {
+              "description": "Propagate/Insert/Remove headers from request",
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "required": [
-                      "name",
-                      "value"
+                      "insert"
                     ],
                     "properties": {
-                      "name": {
-                        "type": "string"
-                      },
-                      "value": {
-                        "type": "string"
+                      "insert": {
+                        "description": "Insert header",
+                        "anyOf": [
+                          {
+                            "description": "Insert static header",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "value"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                            "type": "object",
+                            "required": [
+                              "from_context",
+                              "name"
+                            ],
+                            "properties": {
+                              "from_context": {
+                                "description": "Specify context key to fetch value",
+                                "type": "string"
+                              },
+                              "name": {
+                                "description": "Specify header name",
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Insert header with a value coming from body",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "path"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "remove"
+                    ],
+                    "properties": {
+                      "remove": {
+                        "description": "Remove header",
+                        "oneOf": [
+                          {
+                            "description": "Remove a header given a header name",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "named": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Remove a header given a regex matching header name",
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "propagate"
+                    ],
+                    "properties": {
+                      "propagate": {
+                        "description": "Propagate header",
+                        "anyOf": [
+                          {
+                            "description": "Propagate header given a header name",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "named": {
+                                "type": "string"
+                              },
+                              "rename": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Propagate header given a regex to match header name",
+                            "type": "object",
+                            "required": [
+                              "matching"
+                            ],
+                            "properties": {
+                              "matching": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
                   }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "remove"
-                ],
-                "properties": {
-                  "remove": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "named": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "required": [
-                  "propagate"
-                ],
-                "properties": {
-                  "propagate": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "named"
-                        ],
-                        "properties": {
-                          "default": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "named": {
-                            "type": "string"
-                          },
-                          "rename": {
-                            "type": "string",
-                            "nullable": true
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
+                ]
               }
-            ]
-          }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         },
         "subgraphs": {
           "type": "object",
           "additionalProperties": {
-            "type": "array",
-            "items": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "required": [
-                    "insert"
-                  ],
-                  "properties": {
-                    "insert": {
+            "type": "object",
+            "required": [
+              "request"
+            ],
+            "properties": {
+              "request": {
+                "description": "Propagate/Insert/Remove headers from request",
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
                       "type": "object",
                       "required": [
-                        "name",
-                        "value"
+                        "insert"
                       ],
                       "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "value": {
-                          "type": "string"
+                        "insert": {
+                          "description": "Insert header",
+                          "anyOf": [
+                            {
+                              "description": "Insert static header",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "value"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Insert header with a value coming from context key (works only for a string in the context)",
+                              "type": "object",
+                              "required": [
+                                "from_context",
+                                "name"
+                              ],
+                              "properties": {
+                                "from_context": {
+                                  "description": "Specify context key to fetch value",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "description": "Specify header name",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Insert header with a value coming from body",
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "path"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "remove"
+                      ],
+                      "properties": {
+                        "remove": {
+                          "description": "Remove header",
+                          "oneOf": [
+                            {
+                              "description": "Remove a header given a header name",
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "named": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Remove a header given a regex matching header name",
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "propagate"
+                      ],
+                      "properties": {
+                        "propagate": {
+                          "description": "Propagate header",
+                          "anyOf": [
+                            {
+                              "description": "Propagate header given a header name",
+                              "type": "object",
+                              "required": [
+                                "named"
+                              ],
+                              "properties": {
+                                "default": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "named": {
+                                  "type": "string"
+                                },
+                                "rename": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "description": "Propagate header given a regex to match header name",
+                              "type": "object",
+                              "required": [
+                                "matching"
+                              ],
+                              "properties": {
+                                "matching": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
                         }
                       },
                       "additionalProperties": false
                     }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "remove"
-                  ],
-                  "properties": {
-                    "remove": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "named": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "propagate"
-                  ],
-                  "properties": {
-                    "propagate": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "named"
-                          ],
-                          "properties": {
-                            "default": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "named": {
-                              "type": "string"
-                            },
-                            "rename": {
-                              "type": "string",
-                              "nullable": true
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
+                  ]
                 }
-              ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "health-check": {
+      "description": "Configuration options pertaining to the http server component.",
+      "default": {
+        "listen": "127.0.0.1:8088",
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:8088",
+          "default": "127.0.0.1:8088",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
             }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "homepage": {
+      "description": "Configuration options pertaining to the home page.",
+      "default": {
+        "enabled": true
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "include_subgraph_errors": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "default": false,
+          "type": "boolean"
+        },
+        "subgraphs": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
           }
         }
       },
@@ -285,23 +549,6 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
-        },
-        "experimental.include_subgraph_errors": {
-          "type": "object",
-          "properties": {
-            "all": {
-              "default": false,
-              "type": "boolean"
-            },
-            "subgraphs": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -321,144 +568,50 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "sandbox": {
+      "description": "Configuration options pertaining to the sandbox page.",
+      "default": {
+        "enabled": false
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "server": {
       "description": "Configuration options pertaining to the http server component.",
       "default": {
-        "listen": "127.0.0.1:4000",
-        "cors": {
-          "allow_any_origin": false,
-          "allow_credentials": false,
-          "allow_headers": [],
-          "expose_headers": null,
-          "origins": [
-            "https://studio.apollographql.com"
-          ],
-          "match_origins": null,
-          "methods": [
-            "GET",
-            "POST",
-            "OPTIONS"
-          ]
-        },
-        "introspection": true,
-        "landing_page": true,
-        "endpoint": "/",
-        "health_check_path": "/.well-known/apollo/server-health",
-        "experimental_defer_support": false,
         "experimental_parser_recursion_limit": 4096
       },
       "type": "object",
       "properties": {
-        "cors": {
-          "description": "Cross origin request headers.",
-          "default": {
-            "allow_any_origin": false,
-            "allow_credentials": false,
-            "allow_headers": [],
-            "expose_headers": null,
-            "origins": [
-              "https://studio.apollographql.com"
-            ],
-            "match_origins": null,
-            "methods": [
-              "GET",
-              "POST",
-              "OPTIONS"
-            ]
-          },
-          "type": "object",
-          "properties": {
-            "allow_any_origin": {
-              "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
-              "default": false,
-              "type": "boolean"
-            },
-            "allow_credentials": {
-              "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
-              "default": false,
-              "type": "boolean"
-            },
-            "allow_headers": {
-              "description": "The headers to allow.\n\nIf this value is not set, the router will mirror client's `Access-Control-Request-Headers`.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` required headers in your yml configuration, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
-              "default": [],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "expose_headers": {
-              "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
-              "default": null,
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "nullable": true
-            },
-            "match_origins": {
-              "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
-              "default": null,
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "nullable": true
-            },
-            "methods": {
-              "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
-              "default": [
-                "GET",
-                "POST",
-                "OPTIONS"
-              ],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "origins": {
-              "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
-              "default": [
-                "https://studio.apollographql.com"
-              ],
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "endpoint": {
-          "description": "GraphQL endpoint default: \"/\"",
-          "default": "/",
-          "type": "string"
-        },
-        "experimental_defer_support": {
-          "description": "Experimental @defer directive support default: false",
-          "default": false,
-          "type": "boolean"
-        },
         "experimental_parser_recursion_limit": {
           "description": "Experimental limitation of query depth default: 4096",
           "default": 4096,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
-        },
-        "health_check_path": {
-          "description": "healthCheck path default: \"/.well-known/apollo/server-health\"",
-          "default": "/.well-known/apollo/server-health",
-          "type": "string"
-        },
+        }
+      },
+      "additionalProperties": false
+    },
+    "supergraph": {
+      "description": "Configuration options pertaining to the supergraph server component.",
+      "default": {
+        "listen": "127.0.0.1:4000",
+        "path": "/",
+        "introspection": false,
+        "preview_defer_support": true
+      },
+      "type": "object",
+      "properties": {
         "introspection": {
-          "description": "introspection queries enabled by default",
-          "default": true,
-          "type": "boolean"
-        },
-        "landing_page": {
-          "description": "display landing page enabled by default",
-          "default": true,
+          "description": "Enable introspection Default: false",
+          "default": false,
           "type": "boolean"
         },
         "listen": {
@@ -474,6 +627,15 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
+        "preview_defer_support": {
+          "default": true,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -484,19 +646,131 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
+            "buffer_size": {
+              "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
+              "default": 10000,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
             "client_name_header": {
+              "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-name",
               "type": "string",
               "nullable": true
             },
             "client_version_header": {
+              "description": "The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.",
               "default": "apollographql-client-version",
               "type": "string",
               "nullable": true
             },
             "endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
               "type": "string",
               "nullable": true
+            },
+            "field_level_instrumentation_sampler": {
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
+              "anyOf": [
+                {
+                  "description": "Sample a given fraction. Fractions >= 1 will always sample.",
+                  "type": "number",
+                  "format": "double"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "always_on",
+                    "always_off"
+                  ]
+                }
+              ],
+              "nullable": true
+            },
+            "send_headers": {
+              "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "send_variable_values": {
+              "description": "To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "all"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "only"
+                  ],
+                  "properties": {
+                    "only": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "except"
+                  ],
+                  "properties": {
+                    "except": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -1285,6 +1559,16 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "string"
                   }
+                },
+                "service_name": {
+                  "description": "Set a service.name resource in your metrics",
+                  "type": "string",
+                  "nullable": true
+                },
+                "service_namespace": {
+                  "description": "Set a service.namespace attribute in your metrics",
+                  "type": "string",
+                  "nullable": true
                 }
               },
               "additionalProperties": false,
@@ -1303,61 +1587,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1365,32 +1599,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {
@@ -1441,6 +1650,24 @@ expression: "&schema"
               "properties": {
                 "enabled": {
                   "type": "boolean"
+                },
+                "listen": {
+                  "description": "Listening address.",
+                  "default": "127.0.0.1:9090",
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "path": {
+                  "default": "/metrics",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
@@ -1543,61 +1770,11 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "cert": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
@@ -1605,32 +1782,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "env"
-                          ],
-                          "properties": {
-                            "env": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "file"
-                          ],
-                          "properties": {
-                            "file": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      ],
+                      "type": "string",
                       "nullable": true
                     },
                     "metadata": {
@@ -1801,7 +1953,7 @@ expression: "&schema"
                 "sampler": {
                   "anyOf": [
                     {
-                      "description": "Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                      "description": "Sample a given fraction. Fractions >= 1 will always sample.",
                       "type": "number",
                       "format": "double"
                     },
@@ -1884,6 +2036,11 @@ expression: "&schema"
               ],
               "nullable": true
             },
+            "deduplicate_query": {
+              "description": "Enable query deduplication",
+              "type": "boolean",
+              "nullable": true
+            },
             "global_rate_limit": {
               "description": "Enable global rate limiting",
               "type": "object",
@@ -1906,11 +2063,6 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
-            "query_deduplication": {
-              "description": "Enable query deduplication",
-              "type": "boolean",
-              "nullable": true
-            },
             "timeout": {
               "description": "Enable timeout for incoming requests",
               "default": null,
@@ -1918,6 +2070,11 @@ expression: "&schema"
             }
           },
           "additionalProperties": false,
+          "nullable": true
+        },
+        "deduplicate_variables": {
+          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "type": "boolean",
           "nullable": true
         },
         "router": {
@@ -1971,6 +2128,11 @@ expression: "&schema"
                 ],
                 "nullable": true
               },
+              "deduplicate_query": {
+                "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              },
               "global_rate_limit": {
                 "description": "Enable global rate limiting",
                 "type": "object",
@@ -1993,11 +2155,6 @@ expression: "&schema"
                 "additionalProperties": false,
                 "nullable": true
               },
-              "query_deduplication": {
-                "description": "Enable query deduplication",
-                "type": "boolean",
-                "nullable": true
-              },
               "timeout": {
                 "description": "Enable timeout for incoming requests",
                 "default": null,
@@ -2006,11 +2163,6 @@ expression: "&schema"
             },
             "additionalProperties": false
           }
-        },
-        "variables_deduplication": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": "boolean",
-          "nullable": true
         }
       },
       "additionalProperties": false

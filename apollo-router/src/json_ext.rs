@@ -1,4 +1,7 @@
 //! Performance oriented JSON manipulation.
+
+#![allow(missing_docs)] // FIXME
+
 use std::cmp::min;
 use std::fmt;
 
@@ -349,11 +352,8 @@ impl ValueExt for Value {
         match self {
             // When expected as an input type, both integer and float input values are accepted.
             Value::Number(n) if n.is_f64() => true,
-            // The Int scalar type represents a signed 32-bit numeric non-fractional value.
-            Value::Number(n) => n
-                .as_i64()
-                .map(|as_number| i32::try_from(as_number).is_ok())
-                .unwrap_or_default(),
+            // Integer input values are coerced to Float by adding an empty fractional part, for example 1.0 for the integer input value 1.
+            Value::Number(n) => n.is_i64(),
             // All other input values, including strings with numeric content, must raise a request error indicating an incorrect type.
             _ => false,
         }
@@ -527,6 +527,17 @@ impl Path {
 
     pub fn pop(&mut self) -> Option<PathElement> {
         self.0.pop()
+    }
+
+    pub fn last(&mut self) -> Option<&PathElement> {
+        self.0.last()
+    }
+
+    pub fn last_key(&mut self) -> Option<String> {
+        self.0.last().and_then(|elem| match elem {
+            PathElement::Key(k) => Some(k.clone()),
+            _ => None,
+        })
     }
 }
 

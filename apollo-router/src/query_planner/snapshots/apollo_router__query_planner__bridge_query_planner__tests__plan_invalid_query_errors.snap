@@ -7,6 +7,11 @@ expression: plan_errors.errors
         message: Some(
             "Fragment \"UnusedTestFragment\" is never used.",
         ),
-        extensions: None,
+        extensions: Some(
+            PlanErrorExtensions {
+                code: "GRAPHQL_VALIDATION_FAILED",
+                exception: None,
+            },
+        ),
     },
 ]

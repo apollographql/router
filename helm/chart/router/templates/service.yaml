@@ -4,6 +4,10 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -11,5 +15,16 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: {{ (splitList ":" (index .Values.router.configuration "health-check").listen | last ) | default "8088" }}
+      targetPort: health
+      protocol: TCP
+      name: health
+    {{- if .Values.serviceMonitor.enabled }}
+    - port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
+

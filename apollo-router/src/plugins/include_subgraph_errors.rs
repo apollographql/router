@@ -10,7 +10,7 @@ use crate::error::Error as SubgraphError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::stages::subgraph;
+use crate::services::subgraph;
 use crate::SubgraphResponse;
 
 #[allow(clippy::field_reassign_with_default)]
@@ -22,11 +22,7 @@ static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
     vec![error]
 });
 
-register_plugin!(
-    "experimental",
-    "include_subgraph_errors",
-    IncludeSubgraphErrors
-);
+register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -97,13 +93,16 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::PluggableRouterServiceBuilder;
-    use crate::RouterRequest;
-    use crate::RouterResponse;
+    use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
+    use crate::SupergraphRequest;
+    use crate::SupergraphResponse;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+        serde_json::from_str(r#"{"data": {"topProducts":null},
+        "errors":[{"message":
+        "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
+        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
@@ -130,9 +129,9 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
     ) {
-        let request = RouterRequest::fake_builder()
+        let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
@@ -153,7 +152,7 @@ mod test {
 
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -190,22 +189,20 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         let builder = builder
-            .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
+            .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let router = builder.build().await.expect("should build").test_service();
-
-        router
+        builder.build().await.expect("should build").test_service()
     }
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
-            .get("experimental.include_subgraph_errors")
+            .get("apollo.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await

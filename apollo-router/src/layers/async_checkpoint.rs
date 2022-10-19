@@ -1,11 +1,13 @@
-//! Asynchronous Checkpoint [`Layer`].
+//! Asynchronous Checkpoint
 //!
 //! Provides a general mechanism for controlling the flow of a request. Useful in any situation
 //! where the caller wishes to provide control flow for a request.
 //!
 //! If the evaluated closure succeeds then the request is passed onto the next service in the
-//! chain of responsibilities. If it fails, then the control flow is broken a response is passed
+//! chain of responsibilities. If it fails, then the control flow is broken and a response is passed
 //! back to the invoking service.
+//!
+//! See [`Layer`] and [`Service`] for more details.
 
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
@@ -19,7 +21,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceExt;
 
-/// [`Layer`] for Asynchronous Checkpoints.
+/// [`Layer`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Fut, Request>
 where
@@ -65,7 +67,7 @@ where
     }
 }
 
-/// [`Service`] for Asynchronous Checkpoints.
+/// [`Service`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointService<S, Fut, Request>
 where
@@ -159,7 +161,8 @@ mod async_checkpoint_tests {
                 move |_req: crate::ExecutionRequest| {
                     Ok(ExecutionResponse::fake_builder()
                         .label(expected_label.to_string())
-                        .build())
+                        .build()
+                        .unwrap())
                 },
             );
 
@@ -200,7 +203,8 @@ mod async_checkpoint_tests {
                 .returning(move |_req| {
                     Ok(ExecutionResponse::fake_builder()
                         .label(expected_label.to_string())
-                        .build())
+                        .build()
+                        .unwrap())
                 });
             router_service
         });
@@ -236,7 +240,8 @@ mod async_checkpoint_tests {
             Ok(ControlFlow::Break(
                 ExecutionResponse::fake_builder()
                     .label("returned_before_mock_service".to_string())
-                    .build(),
+                    .build()
+                    .unwrap(),
             ))
         })
         .layer(router_service);

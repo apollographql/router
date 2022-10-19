@@ -12,7 +12,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::stages::router;
+    use apollo_router::services::supergraph;
     use apollo_router::Context;
     use http::StatusCode;
     use tower::util::ServiceExt;
@@ -32,7 +32,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The expected reply is going to be JSON returned in the RouterResponse { error } section.
+        // The expected reply is going to be JSON returned in the SupergraphResponse { error } section.
         let _expected_mock_response_error = "error created within the mock";
 
         // ... Call our test harness
@@ -41,14 +41,14 @@ mod tests {
         let context: Option<Context> = None;
         let mut service_response = test_harness
             .oneshot(
-                router::Request::fake_builder()
+                supergraph::Request::fake_builder()
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")
                     .query(query)
                     .and_operation_name(operation_name)
                     .and_context(context)
                     .build()
-                    .expect("a valid RouterRequest"),
+                    .expect("a valid SupergraphRequest"),
             )
             .await
             .expect("a router response");

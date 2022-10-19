@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use http::header::HeaderName;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use tower::BoxError;
@@ -22,16 +23,15 @@ pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
+    S: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
-    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
     type Service = CheckpointService<S, ExecutionRequest>;
 
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
             |req: ExecutionRequest| {
-                if req.originating_request.method() != Method::POST
+                if req.supergraph_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
                     let errors = vec![Error {
@@ -45,10 +45,10 @@ where
                         .extensions(Object::default())
                         .status_code(StatusCode::METHOD_NOT_ALLOWED)
                         .context(req.context)
-                        .build();
-                    res.response.inner.headers_mut().insert(
-                        "Allow".parse::<HeaderName>().unwrap(),
-                        "POST".parse().unwrap(),
+                        .build()?;
+                    res.response.headers_mut().insert(
+                        HeaderName::from_static("allow"),
+                        HeaderValue::from_static("POST"),
                     );
                     Ok(ControlFlow::Break(res))
                 } else {
@@ -82,7 +82,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -105,7 +105,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -128,7 +128,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -227,7 +227,7 @@ mod forbid_http_get_mutations_tests {
             .expect("expecting valid request");
 
         ExecutionRequest::fake_builder()
-            .originating_request(request)
+            .supergraph_request(request)
             .query_plan(QueryPlan::fake_builder().root(root).build())
             .build()
     }

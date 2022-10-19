@@ -1,10 +1,10 @@
 // This example illustrates how to interact with responses to
 // modify the data returned.
 
-// At the router_service stage, register callbacks for processing 
+// At the supergraph_service stage, register callbacks for processing 
 // responses. We are using a closure here, but it could be a
 // function if we chose (see execution_service).
-fn router_service(service) {
+fn supergraph_service(service) {
     let map_callback = |response| {
         try {
             // Extract our surrogate key from context
@@ -24,7 +24,7 @@ fn router_service(service) {
         catch(err)
         {
             // log any errors
-            error_log(`surrogate-cache-key not created: ${err}`);
+            log_error(`surrogate-cache-key not created: ${err}`);
         }
     };
     // Map our response using our closure

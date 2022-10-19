@@ -1,100 +1,141 @@
-use std::collections::HashMap;
-// This entire file is license key functionality
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
+use axum::response::IntoResponse;
+use http::StatusCode;
+use multimap::MultiMap;
 use serde_json::Map;
 use serde_json::Value;
+use tower::service_fn;
+use tower::util::option_layer;
 use tower::BoxError;
+use tower::Layer;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::graphql;
-use crate::http_ext::Request;
-use crate::http_ext::Response;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
+use crate::plugins::traffic_shaping::is_deduplicate_query_enabled;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
-use crate::PluggableRouterServiceBuilder;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
+use crate::transport;
+use crate::ListenAddr;
+use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
-/// Factory for creating a RouterService
+#[derive(Clone)]
+pub struct Endpoint {
+    pub(crate) path: String,
+    // Plugins need to be Send + Sync
+    // BoxCloneService isn't enough
+    handler: Handler,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
+impl Endpoint {
+    pub fn new(path: String, handler: transport::BoxService) -> Self {
+        Self {
+            path,
+            handler: Handler::new(handler),
+        }
+    }
+    pub(crate) fn into_router(self) -> axum::Router {
+        let handler = move |req: http::Request<hyper::Body>| {
+            let endpoint = self.handler.clone();
+            async move {
+                Ok(endpoint
+                    .oneshot(req)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                    .into_response())
+            }
+        };
+        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+    }
+}
+/// Factory for creating a SupergraphService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait RouterServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+/// SupergraphService on each request
+pub(crate) trait SupergraphServiceFactory:
+    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
 {
-    type RouterService: Service<
-            Request<graphql::Request>,
-            Response = Response<BoxStream<'static, graphql::Response>>,
+    type SupergraphService: Service<
+            SupergraphRequest,
+            Response = SupergraphResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
     type Future: Send;
 
-    fn custom_endpoints(&self) -> HashMap<String, Handler>;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
-/// Factory for creating a RouterServiceFactory
+/// Factory for creating a SupergraphServiceFactory
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
-/// RouterServiceFactory from configuration when it changes
+/// SupergraphServiceFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
-    type RouterServiceFactory: RouterServiceFactory;
+pub(crate) trait SupergraphServiceConfigurator: Send + Sync + 'static {
+    type SupergraphServiceFactory: SupergraphServiceFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::RouterServiceFactory>,
+        previous_router: Option<&'a Self::SupergraphServiceFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::RouterServiceFactory, BoxError>;
+    ) -> Result<Self::SupergraphServiceFactory, BoxError>;
 }
 
-/// Main implementation of the RouterService factory, supporting the extensions system
+/// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlRouterServiceFactory;
+pub(crate) struct YamlSupergraphServiceFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceConfigurator for YamlRouterServiceFactory {
-    type RouterServiceFactory = RouterCreator;
+impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
+    type SupergraphServiceFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterServiceFactory>,
+        _previous_router: Option<&'a Self::SupergraphServiceFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::RouterServiceFactory, BoxError> {
+    ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let deduplicate_queries = is_deduplicate_query_enabled(configuration.as_ref());
 
-        let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
-            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
+            builder = builder.with_subgraph_service(
+                name,
+                option_layer(deduplicate_queries.then(QueryDeduplicationLayer::default))
+                    .layer(SubgraphService::new(name)),
+            );
         }
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service. Let the plugins know that this is about to happen.
-        // This is needed so that the Telemetry plugin can swap in the new propagator.
-        // The alternative is that we introduce another service on Plugin that wraps the request
-        // at a much earlier stage.
-        for (_, plugin) in builder.plugins_mut() {
-            tracing::debug!("activating plugin {}", plugin.name());
-            plugin.activate();
-            tracing::debug!("activated plugin {}", plugin.name());
-        }
-
+        // We're good to go with the new service.
         let pluggable_router_service = builder.build().await?;
 
         Ok(pluggable_router_service)
@@ -109,7 +150,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
 
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
-    let service = YamlRouterServiceFactory::default()
+    let service = YamlSupergraphServiceFactory::default()
         .create(Arc::new(config), Arc::new(schema), None, None)
         .await;
     assert_eq!(
@@ -131,7 +172,7 @@ async fn create_plugins(
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
     // List of mandatory plugins. Ordering is important!!
     let mandatory_plugins = vec![
-        "experimental.include_subgraph_errors",
+        "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
     ];
@@ -230,7 +271,13 @@ async fn create_plugins(
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(?plugin_details, "list of plugins");
+    tracing::debug!(
+        "plugins list: {:?}",
+        plugin_details
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&&String>>()
+    );
 
     if !errors.is_empty() {
         for error in &errors {
@@ -285,8 +332,8 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::RouterServiceConfigurator;
-    use crate::router_factory::YamlRouterServiceFactory;
+    use crate::router_factory::SupergraphServiceConfigurator;
+    use crate::router_factory::YamlSupergraphServiceFactory;
     use crate::Schema;
 
     #[derive(Debug)]
@@ -349,7 +396,7 @@ mod test {
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
-        let config = Configuration::builder().build();
+        let config = Configuration::builder().build().unwrap();
         let service = create_service(config).await;
         assert!(service.is_ok())
     }
@@ -402,7 +449,7 @@ mod test {
         let schema = include_str!("testdata/supergraph.graphql");
         let schema = Schema::parse(schema, &config).unwrap();
 
-        let service = YamlRouterServiceFactory::default()
+        let service = YamlSupergraphServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None, None)
             .await;
         service.map(|_| ())

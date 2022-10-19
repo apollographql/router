@@ -1,8 +1,8 @@
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-use apollo_router::stages::router;
-use apollo_router::stages::subgraph;
+use apollo_router::services::subgraph;
+use apollo_router::services::supergraph;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -61,7 +61,7 @@ impl Plugin for PropagateStatusCode {
     }
 
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -91,8 +91,8 @@ mod tests {
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
-    use apollo_router::stages::router;
-    use apollo_router::stages::subgraph;
+    use apollo_router::services::subgraph;
+    use apollo_router::services::supergraph;
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -124,7 +124,7 @@ mod tests {
     // Unit testing this plugin will be a tad more complicated than testing the other ones.
     // We will first ensure the SubgraphService pushes the right status codes.
     //
-    // We will then make sure the RouterService is able to turn the relevant ordered status codes
+    // We will then make sure the SupergraphService is able to turn the relevant ordered status codes
     // into the relevant http response status.
 
     #[tokio::test]
@@ -201,27 +201,26 @@ mod tests {
     }
 
     // Now that our status codes mechanism has been tested,
-    // we can unit test the RouterService part of our plugin
+    // we can unit test the SupergraphService part of our plugin
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = test::MockRouterService::new();
+        let mut mock_service = test::MockSupergraphService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |router_request: router::Request| {
+        mock_service.expect_call().times(1).returning(
+            move |router_request: supergraph::Request| {
                 let context = router_request.context;
                 // Insert several status codes which shall override the router response status
                 context
                     .insert(&"status_code".to_string(), json!(500u16))
                     .expect("couldn't insert status_code");
 
-                Ok(router::Response::fake_builder()
+                Ok(supergraph::Response::fake_builder()
                     .context(context)
                     .build()
                     .unwrap())
-            });
+            },
+        );
 
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
         let init = PluginInit::new(
@@ -233,9 +232,9 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .router_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed());
 
-        let router_request = router::Request::fake_builder()
+        let router_request = supergraph::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 
@@ -251,19 +250,18 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = test::MockRouterService::new();
+        let mut mock_service = test::MockSupergraphService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |router_request: router::Request| {
+        mock_service.expect_call().times(1).returning(
+            move |router_request: supergraph::Request| {
                 let context = router_request.context;
                 // Don't insert any StatusCode
-                Ok(router::Response::fake_builder()
+                Ok(supergraph::Response::fake_builder()
                     .context(context)
                     .build()
                     .unwrap())
-            });
+            },
+        );
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::new(
@@ -275,9 +273,9 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .router_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed());
 
-        let router_request = router::Request::fake_builder()
+        let router_request = supergraph::Request::fake_builder()
             .build()
             .expect("expecting valid request");
 

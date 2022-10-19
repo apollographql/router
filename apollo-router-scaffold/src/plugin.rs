@@ -98,7 +98,6 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         Value::Boolean(true),
     );
 
-    dbg!(&params);
     desc.scaffold_with_parameters(params)?;
 
     let mod_path = mod_path();
@@ -130,7 +129,7 @@ fn get_router_version(cargo_toml: Value) -> String {
         .unwrap_or_else(|| Value::Table(toml::value::Table::default()))
         .get("apollo-router")
     {
-        Some(Value::String(version)) => version.clone(),
+        Some(Value::String(version)) => format!("v{version}"),
         Some(Value::Table(table)) => {
             if let Some(Value::String(branch)) = table.get("branch") {
                 format!("origin/{}", branch.clone())

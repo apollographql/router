@@ -1,7 +1,5 @@
 //! Instrumentation layer that allows services to be wrapped in a span.
 //!
-//! See [`Layer`] and [`Service`] for more details.
-//!
 //! Using ServiceBuilderExt:
 //! ```rust
 //! # use tower::ServiceBuilder;
@@ -16,6 +14,7 @@
 //! ```
 //! Now calls to the wrapped service will be wrapped in a span. You can attach attributes to the span from the request.
 //!
+//! See [`Layer`] and [`Service`] for more details.
 
 use std::marker::PhantomData;
 use std::task::Context;
@@ -25,7 +24,7 @@ use tower::Layer;
 use tower_service::Service;
 use tracing::Instrument;
 
-/// [`Layer`] for instrumentation.
+/// [`Layer`] for instrumentation. See [`ServiceBuilderExt::instrument()`](crate::layers::ServiceBuilderExt::instrument()).
 pub struct InstrumentLayer<F, Request>
 where
     F: Fn(&Request) -> tracing::Span,
@@ -38,6 +37,7 @@ impl<F, Request> InstrumentLayer<F, Request>
 where
     F: Fn(&Request) -> tracing::Span,
 {
+    #[allow(missing_docs)] // FIXME
     pub fn new(span_fn: F) -> InstrumentLayer<F, Request> {
         Self {
             span_fn,
@@ -62,7 +62,7 @@ where
     }
 }
 
-/// [`Service`] for instrumentation.
+/// [`Service`] for instrumentation. See [`ServiceBuilderExt::instrument()`](crate::layers::ServiceBuilderExt::instrument()).
 pub struct InstrumentService<F, S, Request>
 where
     S: Service<Request>,

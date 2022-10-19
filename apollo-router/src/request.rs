@@ -1,26 +1,39 @@
-use bytes::Bytes;
 use derivative::Derivative;
 use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 
 use crate::json_ext::Object;
-use crate::json_ext::Value;
 
-/// A graphql request.
-/// Used for federated and subgraph queries.
+/// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Request {
-    /// The graphql query.
+    /// The GraphQL operation (e.g., query, mutation) string.
+    ///
+    /// For historical purposes, the term "query" is commonly used to refer to
+    /// *any* GraphQL operation which might be, e.g., a `mutation`.
     pub query: Option<String>,
 
-    /// The optional graphql operation.
+    /// The (optional) GraphQL operation name.
+    ///
+    /// When specified, this name must match the name of an operation in the
+    /// GraphQL document.  When excluded, there must exist only a single
+    /// operation in the GraphQL document.  Typically, this value is provided as
+    /// the `operationName` on an HTTP-sourced GraphQL request.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub operation_name: Option<String>,
 
-    /// The optional variables in the form of a json object.
+    /// The (optional) GraphQL variables in the form of a JSON object.
+    ///
+    /// When specified, these variables can be referred to in the `query` by
+    /// using `$variableName` syntax, where `{"variableName": "value"}` has been
+    /// specified as this `variables` value.
     #[serde(
         skip_serializing_if = "Object::is_empty",
         default,
@@ -28,7 +41,28 @@ pub struct Request {
     )]
     pub variables: Object,
 
-    ///  extensions.
+    /// The (optional) GraphQL `extensions` of a GraphQL request.
+    ///
+    /// The implementations of extensions are server specific and not specified by
+    /// the GraphQL specification.
+    /// For example, Apollo projects support [Automated Persisted Queries][APQ]
+    /// which are specified in the `extensions` of a request by populating the
+    /// `persistedQuery` key within the `extensions` object:
+    ///
+    /// ```json
+    /// {
+    ///   "query": "...",
+    ///   "variables": { /* ... */ },
+    ///   "extensions": {
+    ///     "persistedQuery": {
+    ///       "version": 1,
+    ///       "sha256Hash": "sha256HashOfQuery"
+    /// .   }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Object,
 }
@@ -46,35 +80,59 @@ where
 #[buildstructor::buildstructor]
 impl Request {
     #[builder(visibility = "pub")]
+    /// This is the constructor (or builder) to use when constructing a GraphQL
+    /// `Request`.
+    ///
+    /// The optionality of parameters on this constructor match the runtime
+    /// requirements which are necessary to create a valid GraphQL `Request`.
+    /// (This contrasts against the `fake_new` constructor which may be more
+    /// tolerant to missing properties which are only necessary for testing
+    /// purposes.  If you are writing tests, you may want to use `Self::fake_new()`.)
     fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Object>,
-        extensions: Option<Object>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
     ) -> Self {
         Self {
             query,
             operation_name,
-            variables: variables.unwrap_or_default(),
-            extensions: extensions.unwrap_or_default(),
+            variables,
+            extensions,
         }
     }
 
     #[builder(visibility = "pub")]
+    /// This is the constructor (or builder) to use when constructing a **fake**
+    /// GraphQL `Request`.  Use `Self::new()` to construct a _real_ request.
+    ///
+    /// This is offered for testing purposes and it relaxes the requirements
+    /// of some parameters to be specified that would be otherwise required
+    /// for a real request.  It's usually enough for most testing purposes,
+    /// especially when a fully constructed `Request` is difficult to construct.
+    /// While today, its paramters have the same optionality as its `new`
+    /// counterpart, that may change in future versions.
     fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Object>,
-        extensions: Option<Object>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        variables: JsonMap<ByteString, Value>,
+        extensions: JsonMap<ByteString, Value>,
     ) -> Self {
         Self {
             query,
             operation_name,
-            variables: variables.unwrap_or_default(),
-            extensions: extensions.unwrap_or_default(),
+            variables,
+            extensions,
         }
     }
 
+    /// Convert encoded URL query string parameters (also known as "search
+    /// params") into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
         // As explained in the form content types specification https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
         // `Forms submitted with this content type must be encoded as follows:`
@@ -120,33 +178,6 @@ impl Request {
         };
 
         Ok(request)
-    }
-
-    pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {
-        let value = Value::from_bytes(b)?;
-        let mut object = ensure_object!(value).map_err(serde::de::Error::custom)?;
-
-        let variables = extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
-            .map_err(serde::de::Error::custom)?
-            .unwrap_or_default();
-        let extensions =
-            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(serde::de::Error::custom)?
-                .unwrap_or_default();
-        let query = extract_key_value_from_object!(object, "query", Value::String(s) => s)
-            .map_err(serde::de::Error::custom)?
-            .map(|s| s.as_str().to_string());
-        let operation_name =
-            extract_key_value_from_object!(object, "operation_name", Value::String(s) => s)
-                .map_err(serde::de::Error::custom)?
-                .map(|s| s.as_str().to_string());
-
-        Ok(Request {
-            query,
-            operation_name,
-            variables,
-            extensions,
-        })
     }
 }
 

@@ -1,4 +1,7 @@
+#![allow(missing_docs)] // FIXME
+
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -14,27 +17,79 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
+use http_body::Body as _;
+use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
-use tracing::subscriber::SetGlobalDefaultError;
+use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
-use Event::NoMoreConfiguration;
-use Event::NoMoreSchema;
-use Event::Shutdown;
-use Event::UpdateConfiguration;
-use Event::UpdateSchema;
 
-use crate::axum_http_server_factory::AxumHttpServerFactory;
-use crate::configuration::validate_configuration;
+use self::Event::NoMoreConfiguration;
+use self::Event::NoMoreSchema;
+use self::Event::Shutdown;
+use self::Event::UpdateConfiguration;
+use self::Event::UpdateSchema;
+use crate::axum_factory::make_axum_router;
+use crate::axum_factory::AxumHttpServerFactory;
+use crate::axum_factory::ListenAddrAndRouter;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::YamlRouterServiceFactory;
+use crate::plugin::DynPlugin;
+use crate::router_factory::SupergraphServiceConfigurator;
+use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::services::layers::apq::APQLayer;
+use crate::services::transport;
+use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
+
+// For now this is unused:
+#[allow(unused)]
+// Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
+// see https://github.com/apollographql/router/issues/1496.
+// In the meantime keeping this function helps make sure it still compiles.
+async fn make_transport_service<RF>(
+    schema: &str,
+    configuration: Arc<Configuration>,
+    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
+) -> Result<transport::BoxCloneService, BoxError> {
+    let schema = Arc::new(Schema::parse(schema, &configuration)?);
+    let service_factory = YamlSupergraphServiceFactory
+        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .await?;
+
+    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+    let web_endpoints = service_factory.web_endpoints();
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
+    // FIXME: how should
+    let ListenAddrAndRouter(_listener, router) = routers.main;
+    Ok(router
+        .map_response(|response| {
+            response.map(|body| {
+                // Axum makes this `body` have type:
+                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                let mut body = Box::pin(body);
+                // We make a stream based on its `poll_data` method
+                // in order to create a `hyper::Body`.
+                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                // … but we ignore the `poll_trailers` method:
+                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                // Apparently HTTP/2 trailers are like headers, except after the response body.
+                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                // so ignoring `poll_trailers` is fine.
+                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+            })
+        })
+        .map_err(|error| match error {})
+        .boxed_clone())
+}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -51,37 +106,23 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not deserialize configuration: {0}
-    DeserializeConfigError(serde_yaml::Error),
-
-    /// could not read configuration: {0}
-    ReadConfigError(std::io::Error),
-
-    /// {0}
-    ConfigError(crate::configuration::ConfigurationError),
-
-    /// could not read schema: {0}
-    ReadSchemaError(crate::error::SchemaError),
-
     /// could not create the HTTP pipeline: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
 
-    /// could not configure spaceport
-    ServerSpaceportError,
+    /// tried to bind {0} and {1} on port {2}
+    DifferentListenAddrsOnSamePort(IpAddr, IpAddr, u16),
 
-    /// no reload handle available
-    NoReloadTracingHandleError,
-
-    /// could not set global subscriber: {0}
-    SetGlobalSubscriberError(SetGlobalDefaultError),
+    /// tried to register two endpoints on `{0}:{1}{2}`
+    SameRouteUsedTwice(IpAddr, u16, String),
 }
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum SchemaSource {
     /// A static schema.
     #[display(fmt = "String")]
@@ -173,7 +214,9 @@ impl SchemaSource {
                 urls,
                 poll_interval,
             } => {
-                apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
+                // With regards to ELv2 licensing, the code inside this block
+                // is license key functionality
+                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
                     .filter_map(|res| {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
@@ -198,6 +241,7 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 /// The user supplied config. Either a static instance or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ConfigurationSource {
     /// A static configuration.
     ///
@@ -250,31 +294,22 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
+                } else if watch {
+                    crate::files::watch(path.to_owned(), delay)
+                        .map(move |_| match ConfigurationSource::read_config(&path) {
+                            Ok(config) => UpdateConfiguration(Box::new(config)),
+                            Err(err) => {
+                                tracing::error!("{}", err);
+                                NoMoreConfiguration
+                            }
+                        })
+                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => {
-                            if watch {
-                                crate::files::watch(path.to_owned(), delay)
-                                    .filter_map(move |_| {
-                                        future::ready(
-                                            match ConfigurationSource::read_config(&path) {
-                                                Ok(config) => Some(config),
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
-                                                }
-                                            },
-                                        )
-                                    })
-                                    .map(|x| UpdateConfiguration(Box::new(x)))
-                                    .boxed()
-                            } else {
-                                stream::once(future::ready(UpdateConfiguration(Box::new(
-                                    configuration,
-                                ))))
-                                .boxed()
-                            }
-                        }
+                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
+                            Box::new(configuration),
+                        )))
+                        .boxed(),
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
@@ -287,12 +322,18 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ApolloRouterError> {
-        let config = fs::read_to_string(path).map_err(ApolloRouterError::ReadConfigError)?;
-        let config = validate_configuration(&config).map_err(ApolloRouterError::ConfigError)?;
-
-        Ok(config)
+    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = fs::read_to_string(path)?;
+        config.parse().map_err(ReadConfigError::Validation)
     }
+}
+
+#[derive(From, Display)]
+enum ReadConfigError {
+    /// could not read configuration: {0}
+    Io(std::io::Error),
+    /// {0}
+    Validation(crate::configuration::ConfigurationError),
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -300,6 +341,7 @@ type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// Specifies when the Router’s HTTP server should gracefully shutdown
 #[derive(Display, Derivative)]
 #[derivative(Debug)]
+#[non_exhaustive]
 pub enum ShutdownSource {
     /// No graceful shutdown
     #[display(fmt = "None")]
@@ -320,14 +362,34 @@ impl ShutdownSource {
         match self {
             ShutdownSource::None => stream::pending::<Event>().boxed(),
             ShutdownSource::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
-            ShutdownSource::CtrlC => async {
-                tokio::signal::ctrl_c()
-                    .await
-                    .expect("Failed to install CTRL+C signal handler");
+            ShutdownSource::CtrlC => {
+                #[cfg(not(unix))]
+                {
+                    async {
+                        tokio::signal::ctrl_c()
+                            .await
+                            .expect("Failed to install CTRL+C signal handler");
+                    }
+                    .map(|_| Shutdown)
+                    .into_stream()
+                    .boxed()
+                }
+
+                #[cfg(unix)]
+                future::select(
+                    tokio::signal::ctrl_c().map(|s| s.ok()).boxed(),
+                    async {
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("Failed to install SIGTERM signal handler")
+                            .recv()
+                            .await
+                    }
+                    .boxed(),
+                )
+                .map(|_| Shutdown)
+                .into_stream()
+                .boxed()
             }
-            .map(|_| Shutdown)
-            .into_stream()
-            .boxed(),
         }
     }
 }
@@ -370,7 +432,8 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
+    extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -423,9 +486,10 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlRouterServiceFactory::default();
+        let router_factory = YamlSupergraphServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let listen_address = state_machine.listen_address.clone();
+        let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
+        let graphql_listen_address = state_machine.graphql_listen_address.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -444,22 +508,28 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            listen_address,
+            graphql_listen_address,
+            extra_listen_adresses,
         }
     }
 
-    /// Returns the listen address when the router is ready to receive requests.
+    /// Returns the listen address when the router is ready to receive GraphQL requests.
     ///
     /// This can be useful when the `server.listen` configuration specifies TCP port 0,
     /// which instructs the operating system to pick an available port number.
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
-    pub async fn listen_address(&self) -> Result<ListenAddr, ApolloRouterError> {
-        self.listen_address
-            .read()
-            .await
-            .clone()
-            .ok_or(ApolloRouterError::StartupError)
+    pub async fn listen_address(&self) -> Option<ListenAddr> {
+        self.graphql_listen_address.read().await.clone()
+    }
+
+    /// Returns the extra listen addresses the router can receive requests to.
+    ///
+    /// Combine it with `listen_address` to have an exhaustive list
+    /// of all addresses used by the router.
+    /// Note: if configuration is dynamic, the listen address can change over time.
+    pub async fn extra_listen_adresses(&self) -> Vec<ListenAddr> {
+        self.extra_listen_adresses.read().await.clone()
     }
 
     /// Trigger and wait for graceful shutdown
@@ -516,7 +586,7 @@ fn generate_event_stream(
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     // Chain is required so that the final shutdown message is sent.
-    let messages = stream::select_all(vec![
+    stream::select_all(vec![
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
@@ -524,15 +594,16 @@ fn generate_event_stream(
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
     .chain(stream::iter(vec![Shutdown]))
-    .boxed();
-    messages
+    .boxed()
 }
 
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
 
+    use serde_json::json;
     use serde_json::to_string_pretty;
+    use serde_json::Value;
     use test_log::test;
 
     use super::*;
@@ -559,6 +630,7 @@ mod tests {
             .listen_address()
             .await
             .expect("router failed to start");
+
         assert_federated_response(&listen_address, r#"{ topProducts { name } }"#).await;
         router_handle.shutdown().await.unwrap();
     }
@@ -614,7 +686,33 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        assert!(stream.into_future().now_or_never().is_none());
+        let event = stream.into_future().now_or_never();
+        assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn config_dev_mode_without_file() {
+        let mut stream =
+            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
+                .into_stream()
+                .boxed();
+
+        let cfg = match stream.next().await.unwrap() {
+            UpdateConfiguration(configuration) => configuration,
+            _ => panic!("the event from the stream must be UpdateConfiguration"),
+        };
+        assert!(cfg.supergraph.introspection);
+        assert!(cfg.sandbox.enabled);
+        assert!(!cfg.homepage.enabled);
+        assert!(cfg.plugins().iter().any(
+            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
+        ));
+        assert!(cfg
+            .plugins()
+            .iter()
+            .any(|(name, val)| name == "apollo.include_subgraph_errors"
+                && val == &json!({"all": true})));
+        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

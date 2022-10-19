@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/infrastructure_tests.rs
-assertion_line: 13
 expression: "include_str!(\"../../examples/graphql/supergraph.graphql\")"
 ---
 

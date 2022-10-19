@@ -1,13 +1,12 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 737
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /server
+1. /supergraph
 
 
-server:
+supergraph:
 ┌   # The socket address and port to listen on
 |   # Defaults to 127.0.0.1:4000
 |   listen: 127.0.0.1:4000

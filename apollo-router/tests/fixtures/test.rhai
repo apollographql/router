@@ -1,11 +1,11 @@
 // This is a test used for rhai plugin
 
-fn router_service(service) {
-    let response = Fn("router_response");
+fn supergraph_service(service) {
+    let response = Fn("supergraph_response");
     service.map_response(response);
 }
 
-fn router_response(response) {
+fn supergraph_response(response) {
     if response.headers["x-custom-header"] == "CUSTOM_VALUE" {
         response.headers["coucou"] = "hello";
     }
@@ -28,4 +28,12 @@ fn execution_request(request) {
     request.context["addition"] = `Here is a new element in the context with value ${request.context["test"]}`;
     request.context["test"] = 25;
     throw "An error occured";
+}
+
+fn get_start() {
+    return apollo_start;
+}
+
+fn get_sdl() {
+    return apollo_sdl;
 }

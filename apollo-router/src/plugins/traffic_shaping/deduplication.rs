@@ -36,9 +36,21 @@ where
 }
 
 type WaitMap =
-    Arc<Mutex<HashMap<http_ext::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
+    Arc<Mutex<HashMap<http_ext::Request<Request>, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
-pub(crate) struct QueryDeduplicationService<S> {
+struct CloneSubgraphResponse(SubgraphResponse);
+
+impl Clone for CloneSubgraphResponse {
+    fn clone(&self) -> Self {
+        Self(SubgraphResponse {
+            response: http_ext::Response::from(&self.0.response).inner,
+            context: self.0.context.clone(),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct QueryDeduplicationService<S: Clone> {
     service: S,
     wait_map: WaitMap,
 }
@@ -61,7 +73,7 @@ where
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            match locked_wait_map.get_mut(&request.subgraph_request) {
+            match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
                 Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
@@ -72,7 +84,7 @@ where
                             return value
                                 .map(|response| {
                                     SubgraphResponse::new_from_response(
-                                        response.response,
+                                        response.0.response,
                                         request.context,
                                     )
                                 })
@@ -85,11 +97,11 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert(request.subgraph_request.clone(), tx.clone());
+                    locked_wait_map.insert((&request.subgraph_request).into(), tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let http_request = request.subgraph_request.clone();
+                    let http_request = (&request.subgraph_request).into();
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -101,7 +113,12 @@ where
                             locked_wait_map.remove(&http_request);
                         });
 
-                        service.ready_oneshot().await?.call(request).await
+                        service
+                            .ready_oneshot()
+                            .await?
+                            .call(request)
+                            .await
+                            .map(CloneSubgraphResponse)
                     };
 
                     // Let our waiters know
@@ -118,7 +135,7 @@ where
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
                     return res.map(|response| {
-                        SubgraphResponse::new_from_response(response.response, context)
+                        SubgraphResponse::new_from_response(response.0.response, context)
                     });
                 }
             }

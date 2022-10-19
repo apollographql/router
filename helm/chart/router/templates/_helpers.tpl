@@ -24,6 +24,13 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Create a name for our rhai config map.
+*/}}
+{{- define "router.rhaiConfigMapName" -}}
+{{- printf "%s-rhai" (include "router.fullname" .) }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "router.chart" -}}
@@ -83,4 +90,12 @@ Usage:
     {{- else }}
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
+{{- end -}}
+
+{{- define "router.prometheusMetricsPath" -}}
+{{- if ((((.Values.router).configuration).telemetry).metrics).prometheus }}
+{{- .Values.router.configuration.telemetry.metrics.prometheus.path | quote }}
+{{- else -}}
+"/metrics"
+{{- end }}
 {{- end -}}

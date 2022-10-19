@@ -7,8 +7,17 @@ replicaCount: 1
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
 router:
   configuration:
-    server:
+    supergraph:
       listen: 0.0.0.0:80
+    health-check:
+      listen: 0.0.0.0:8088
+    telemetry:
+      metrics:
+        prometheus:
+          enabled: false
+          listen: 0.0.0.0:9090
+          path: "/metrics"
+
   args:
   - --hot-reload
 
@@ -33,8 +42,22 @@ extraEnvVars: []
 extraEnvVarsCM: ''
 extraEnvVarsSecret: ''
 
-extraVolumes: []
+# An array of extra VolumeMounts
+# Example:
+# extraVolumeMounts:
+#   - name: rhai-volume
+#     mountPath: /dist/rhai
+#     readonly: true
 extraVolumeMounts: []
+
+# An array of extra Volumes
+# Example:
+# extraVolumes:
+#   - name: rhai-volume
+#     configMap:
+#       name: rhai-config
+#
+extraVolumes: []
 
 image:
   repository: ghcr.io/apollographql/router
@@ -45,6 +68,10 @@ image:
 containerPorts:
   # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
   http: 80
+  # -- For exposing the metrics port when running a serviceMonitor for example
+  metrics: 9090
+  # -- For exposing the healthcheck endpoint
+  health: 8088
 
 imagePullSecrets: []
 nameOverride: ""
@@ -75,6 +102,10 @@ securityContext: {}
 service:
   type: ClusterIP
   port: 80
+  annotations: {}
+
+serviceMonitor:
+  enabled: false
 
 ingress:
   enabled: false
@@ -91,6 +122,38 @@ ingress:
   #  - secretName: chart-example-tls
   #    hosts:
   #      - chart-example.local
+
+# set to true to enable istio's virtualservice
+virtualservice:
+  enabled: false
+  # namespace: ""
+  # gatewayName: ""
+  # http:
+  #   main:
+  #     # set enabled to true to add
+  #     # the default matcher of `exact: "/" or prefix: "/graphql"`
+  #     # with the <$fullName>.<.Release.Namespace>.svc.cluster.local destination
+  #     enabled: true
+  #   # use additionals to provide your custom virtualservice rules
+  #   additionals: []
+  #   - name: "default-nginx-routes"
+  #       match:
+  #         - uri:
+  #             prefix: "/foo"
+  #       rewrite:
+  #         uri: /
+  #       route:
+  #         - destination:
+  #             host: my.custom.backend.svc.cluster.local
+  #             port:
+  #               number: 80
+
+# set to true and provide configuration details if you want to make external https calls through istio's virtualservice
+serviceentry:
+  enabled: false
+  # hosts:
+  # a list of external hosts you want to be able to make https calls to
+  #   - api.example.com
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
