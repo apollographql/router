@@ -56,6 +56,11 @@ impl MetricsConfigurator for Config {
         _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
+            tracing::info!(
+                "prometheus endpoint exposed at {}{}",
+                self.listen,
+                self.path
+            );
             let controller = controllers::basic(
                 processors::factory(
                     selectors::simple::histogram([
