@@ -40,3 +40,20 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 It was incorrectly removed in a previous pull request.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+
+### Fix logic around Accept headers and multipart ([PR #1923](https://github.com/apollographql/router/pull/1923))
+
+If the Accept header contained `multipart/mixed`, even with other alternatives like `application/json`,
+a query with a single response was still sent as multipart, which made Explorer fail on the initial
+introspection query.
+
+This changes the logic so that:
+
+* if we accept application/json or wildcard and there's a single response, it comes as json
+* if there are multiple responses or we only accept multipart, send a multipart responses
+* otherwise return a HTTP 406 Not Acceptable
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1923
+
+## 🛠 Maintenance
+## 📚 Documentation
