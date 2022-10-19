@@ -5,6 +5,8 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::{controllers, processors, selectors};
+use opentelemetry::sdk::Resource;
+use opentelemetry::KeyValue;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -53,7 +55,7 @@ impl MetricsConfigurator for Config {
     fn apply(
         &self,
         mut builder: MetricsBuilder,
-        _metrics_config: &MetricsCommon,
+        metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
             tracing::info!(
@@ -70,6 +72,13 @@ impl MetricsConfigurator for Config {
                 )
                 .with_memory(true),
             )
+            .with_resource(Resource::new(
+                metrics_config
+                    .resources
+                    .clone()
+                    .into_iter()
+                    .map(|(k, v)| KeyValue::new(k, v)),
+            ))
             .build();
             let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
