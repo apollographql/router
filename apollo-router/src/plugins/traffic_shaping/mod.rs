@@ -372,7 +372,7 @@ mod test {
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
@@ -389,7 +389,7 @@ mod test {
         "#,
         )
         .unwrap();
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
@@ -498,7 +498,9 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: 300ms should be long enough for this test to succeed, but it seems to be flaky in
+        // ci, so bump it to 301ms to see if that makes it less flaky.
+        tokio::time::sleep(Duration::from_millis(301)).await;
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
@@ -547,7 +549,11 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: 300ms should be long enough for this test to succeed, but its sibling (subgraph)
+        // seems to be flaky at that figure in ci. So, let's bump this one as well to be
+        // consistent.
+        // ci, so bump it to 301ms to see if that makes it less flaky.
+        tokio::time::sleep(Duration::from_millis(301)).await;
         let _response = plugin
             .supergraph_service(mock_service.clone().boxed())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
