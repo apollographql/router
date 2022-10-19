@@ -43,13 +43,17 @@ impl fmt::Display for TraceId {
     }
 }
 
+// Note: These tests all end up writing what look like dbg!() spans to stdout when the tests are
+// run as part of the full suite.
+// Why? It's probably related to the way that the rust test framework tries to capture test
+// output. I spent a little time investigating it and concluded it will be harder to fix than to
+// live with...
 #[cfg(test)]
 mod test {
     use std::sync::Mutex;
 
     use once_cell::sync::Lazy;
     use opentelemetry::sdk::export::trace::stdout;
-    use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
 
@@ -60,6 +64,9 @@ mod test {
     // If we set test-threads=1, then this avoids the problem but means all our tests will run slowly.
     // So: to avoid this problem, we have a mutex lock which just exists to serialize access to the
     // global resources.
+    // Note: If a test fails, then it will poison the lock, so when locking we attempt to recover
+    // from poisoned mutex and continue anyway. This is safe to do, since the lock is effectively
+    // "read-only" and not protecting shared state but synchronising code access to global state.
     static TRACING_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
@@ -79,10 +86,11 @@ mod test {
 
     #[test]
     fn it_returns_valid_trace_id() {
-        let _guard = TRACING_LOCK.lock().unwrap();
-        // Create a new OpenTelemetry pipeline
-        let tracer = stdout::new_pipeline().install_simple();
+        let _guard = TRACING_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Create a tracing layer with the configured tracer
+        let tracer = stdout::new_pipeline().install_simple();
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -90,20 +98,20 @@ mod test {
         // Trace executed code
         tracing::subscriber::with_default(subscriber, || {
             // Spans will be sent to the configured OpenTelemetry exporter
-            let root = span!(tracing::Level::TRACE, "trace test");
-            let _enter = root.enter();
+            let _span = tracing::trace_span!("trace test").entered();
             assert!(TraceId::maybe_new().is_some());
         });
     }
 
     #[test]
     fn it_correctly_compares_valid_and_invalid_trace_id() {
-        let _guard = TRACING_LOCK.lock().unwrap();
+        let _guard = TRACING_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let my_id = TraceId::maybe_new();
         assert!(my_id.is_none());
-        // Create a new OpenTelemetry pipeline
-        let tracer = stdout::new_pipeline().install_simple();
         // Create a tracing layer with the configured tracer
+        let tracer = stdout::new_pipeline().install_simple();
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -111,8 +119,7 @@ mod test {
         // Trace executed code
         tracing::subscriber::with_default(subscriber, || {
             // Spans will be sent to the configured OpenTelemetry exporter
-            let root = span!(tracing::Level::TRACE, "trace test");
-            let _enter = root.enter();
+            let _span = tracing::trace_span!("trace test").entered();
 
             let other_id = TraceId::maybe_new();
             assert!(other_id.is_some());
@@ -122,10 +129,11 @@ mod test {
 
     #[test]
     fn it_correctly_compares_valid_and_valid_trace_id() {
-        let _guard = TRACING_LOCK.lock().unwrap();
-        // Create a new OpenTelemetry pipeline
-        let tracer = stdout::new_pipeline().install_simple();
+        let _guard = TRACING_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Create a tracing layer with the configured tracer
+        let tracer = stdout::new_pipeline().install_simple();
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -133,8 +141,7 @@ mod test {
         // Trace executed code
         tracing::subscriber::with_default(subscriber, || {
             // Spans will be sent to the configured OpenTelemetry exporter
-            let root = span!(tracing::Level::TRACE, "trace test");
-            let _enter = root.enter();
+            let _span = tracing::trace_span!("trace test").entered();
 
             let my_id = TraceId::maybe_new();
             assert!(my_id.is_some());
