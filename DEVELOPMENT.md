@@ -27,6 +27,8 @@ goodies that are not always included by default in other rust distribution chann
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
+
 Set up your git hooks:
 
 ```shell
