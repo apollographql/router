@@ -1,8 +1,9 @@
 //! Configuration for jaeger tracing.
 use std::time::Duration;
 
+use opentelemetry::sdk::trace::BatchConfig;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::trace::{BatchConfig, BatchSpanProcessor};
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;

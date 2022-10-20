@@ -1,11 +1,25 @@
-use itertools::Itertools;
-use opentelemetry::metrics::{
-    AsyncCounter, AsyncGauge, AsyncUpDownCounter, Counter, Histogram, InstrumentProvider, Meter,
-    MeterProvider, ObservableCounter, ObservableGauge, ObservableUpDownCounter, SyncCounter,
-    SyncHistogram, SyncUpDownCounter, Unit, UpDownCounter,
-};
-use opentelemetry::{Context, InstrumentationLibrary, KeyValue};
 use std::sync::Arc;
+
+use itertools::Itertools;
+use opentelemetry::metrics::AsyncCounter;
+use opentelemetry::metrics::AsyncGauge;
+use opentelemetry::metrics::AsyncUpDownCounter;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::InstrumentProvider;
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableCounter;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::SyncCounter;
+use opentelemetry::metrics::SyncHistogram;
+use opentelemetry::metrics::SyncUpDownCounter;
+use opentelemetry::metrics::Unit;
+use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::Context;
+use opentelemetry::InstrumentationLibrary;
+use opentelemetry::KeyValue;
 
 #[derive(Clone, Default)]
 pub(crate) struct AggregateMeterProvider {
