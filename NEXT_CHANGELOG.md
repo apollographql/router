@@ -31,6 +31,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Prefix the prometheus metrics with `router_` ([Issue #1915](https://github.com/apollographql/router/issues/1915))
+
+Adopt the prefix naming convention for prometheus metrics.
+
+```diff
+- http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
++ router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1971
+
 ### Fix --hot-reload in kubernetes and docker ([Issue #1476](https://github.com/apollographql/router/issues/1476))
 
 --hot-reload now chooses a file event notification mechanism at runtime. The exact mechanism is determined by the `notify` crate.
