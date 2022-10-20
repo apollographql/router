@@ -51,7 +51,7 @@ impl Config {
                     .with_env()
                     .with(&self.timeout, |b, t| b.with_timeout(*t))
                     .with(&endpoint, |b, e| b.with_endpoint(e.as_str()))
-                    .try_with(&grpc.tls_config.maybe(), |b, t| {
+                    .try_with(&grpc.tls_config.maybe(endpoint), |b, t| {
                         Ok(b.with_tls_config(t.try_into()?))
                     })?
                     .with(&grpc.metadata, |b, m| b.with_metadata(m.clone()))
@@ -136,7 +136,13 @@ pub(crate) struct TlsConfig {
 
 impl TlsConfig {
     // Return a TlsConfig if it has something actually set.
-    pub(crate) fn maybe(self) -> Option<TlsConfig> {
+    pub(crate) fn maybe(mut self, endpoint: Option<&Url>) -> Option<TlsConfig> {
+        if let Some(endpoint) = endpoint {
+            if self.domain_name.is_none() {
+                self.domain_name = endpoint.host_str().map(|s| s.to_string())
+            }
+        }
+
         if self.ca.is_some()
             || self.key.is_some()
             || self.cert.is_some()
@@ -153,7 +159,7 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
     type Error = BoxError;
 
     fn try_from(config: &TlsConfig) -> Result<ClientTlsConfig, Self::Error> {
-        ClientTlsConfig::new()
+        let tls = ClientTlsConfig::new()
             .with(&config.domain_name, |b, d| b.domain_name(d))
             .try_with(&config.ca, |b, c| {
                 Ok(b.ca_certificate(tonic::transport::Certificate::from_pem(c)))
@@ -161,7 +167,10 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
             .try_with(
                 &config.cert.clone().zip(config.key.clone()),
                 |b, (cert, key)| Ok(b.identity(tonic::transport::Identity::from_pem(cert, key))),
-            )
+            );
+
+        tracing::info!("{:?}", tls);
+        tls
     }
 }
 
