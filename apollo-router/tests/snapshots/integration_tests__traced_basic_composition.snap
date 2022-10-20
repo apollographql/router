@@ -39,7 +39,7 @@ expression: get_spans()
           ],
           [
             "otel.kind",
-            "internal"
+            "Internal"
           ],
           [
             "apollo_private.field_level_instrumentation_ratio",
@@ -93,7 +93,7 @@ expression: get_spans()
               ],
               [
                 "otel.kind",
-                "internal"
+                "Internal"
               ]
             ],
             "metadata": {
@@ -117,7 +117,7 @@ expression: get_spans()
                 "entries": [
                   [
                     "otel.kind",
-                    "internal"
+                    "Internal"
                   ]
                 ],
                 "metadata": {
@@ -150,7 +150,7 @@ expression: get_spans()
               ],
               [
                 "otel.kind",
-                "internal"
+                "Internal"
               ],
               [
                 "ftv1.do_not_sample_reason",
@@ -198,7 +198,7 @@ expression: get_spans()
                     "entries": [
                       [
                         "otel.kind",
-                        "internal"
+                        "Internal"
                       ],
                       [
                         "apollo.subgraph.name",
@@ -258,7 +258,7 @@ expression: get_spans()
                           ],
                           [
                             "otel.kind",
-                            "internal"
+                            "Internal"
                           ]
                         ],
                         "metadata": {
@@ -300,7 +300,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "client"
+                                "Client"
                               ],
                               [
                                 "net.peer.name",
@@ -422,7 +422,7 @@ expression: get_spans()
                         "entries": [
                           [
                             "otel.kind",
-                            "internal"
+                            "Internal"
                           ],
                           [
                             "apollo.subgraph.name",
@@ -482,7 +482,7 @@ expression: get_spans()
                               ],
                               [
                                 "otel.kind",
-                                "internal"
+                                "Internal"
                               ]
                             ],
                             "metadata": {
@@ -524,7 +524,7 @@ expression: get_spans()
                                 "entries": [
                                   [
                                     "otel.kind",
-                                    "client"
+                                    "Client"
                                   ],
                                   [
                                     "net.peer.name",
@@ -663,7 +663,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "internal"
+                                "Internal"
                               ],
                               [
                                 "apollo.subgraph.name",
@@ -723,7 +723,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "otel.kind",
-                                    "internal"
+                                    "Internal"
                                   ]
                                 ],
                                 "metadata": {
@@ -765,7 +765,7 @@ expression: get_spans()
                                     "entries": [
                                       [
                                         "otel.kind",
-                                        "client"
+                                        "Client"
                                       ],
                                       [
                                         "net.peer.name",
@@ -889,7 +889,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "internal"
+                                "Internal"
                               ],
                               [
                                 "apollo.subgraph.name",
@@ -949,7 +949,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "otel.kind",
-                                    "internal"
+                                    "Internal"
                                   ]
                                 ],
                                 "metadata": {
@@ -991,7 +991,7 @@ expression: get_spans()
                                     "entries": [
                                       [
                                         "otel.kind",
-                                        "client"
+                                        "Client"
                                       ],
                                       [
                                         "net.peer.name",
