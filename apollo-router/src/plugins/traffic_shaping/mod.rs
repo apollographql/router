@@ -473,7 +473,7 @@ mod test {
             test:
                 global_rate_limit:
                     capacity: 1
-                    interval: 300ms
+                    interval: 100ms
                 timeout: 500ms
         "#,
         )
