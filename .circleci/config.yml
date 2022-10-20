@@ -136,6 +136,7 @@ commands:
             mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
       - run:
           name: Install protoc
+          shell: bash.exe
           command: |
             curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
             unzip protoc.zip -d $HOME/.local
@@ -173,6 +174,12 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
+      - run:
+          name: Add protoc to env
+          command: |
+            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
+            $newpath = “$oldpath;$HOME/.local/bin”
+            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   install_minimal_rust:
     steps:
@@ -248,7 +255,8 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --workspace --locked
+      - run:
+          command: cargo test --workspace --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
