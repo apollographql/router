@@ -529,7 +529,7 @@ impl Path {
         self.0.pop()
     }
 
-    pub fn last(&mut self) -> Option<&PathElement> {
+    pub fn last(&self) -> Option<&PathElement> {
         self.0.last()
     }
 
@@ -538,6 +538,16 @@ impl Path {
             PathElement::Key(k) => Some(k.clone()),
             _ => None,
         })
+    }
+
+    pub fn starts_with(&self, other: &Path) -> bool {
+        self.0.starts_with(&other.0[..])
+    }
+}
+
+impl FromIterator<PathElement> for Path {
+    fn from_iter<T: IntoIterator<Item = PathElement>>(iter: T) -> Self {
+        Path(iter.into_iter().collect())
     }
 }
 
