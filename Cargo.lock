@@ -2193,7 +2193,7 @@ dependencies = [
  "hyper",
  "log",
  "rustls 0.20.4",
- "rustls-native-certs",
+ "rustls-native-certs 0.6.2",
  "tokio",
  "tokio-rustls 0.23.3",
 ]
@@ -3828,7 +3828,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.20.4",
- "rustls-native-certs",
+ "rustls-native-certs 0.6.2",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -4099,6 +4099,18 @@ dependencies = [
  "ring",
  "sct 0.7.0",
  "webpki 0.22.0",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a07b7c1885bd8ed3831c289b7870b13ef46fe0e856d288c30d9cc17d75a2092"
+dependencies = [
+ "openssl-probe",
+ "rustls 0.19.1",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -5123,6 +5135,7 @@ dependencies = [
  "pin-project",
  "prost 0.9.0",
  "prost-derive 0.9.0",
+ "rustls-native-certs 0.5.0",
  "tokio",
  "tokio-rustls 0.22.0",
  "tokio-stream",

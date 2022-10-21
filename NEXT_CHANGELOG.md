@@ -31,6 +31,15 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Fix OTLP GRPC ([Issue #1976](https://github.com/apollographql/router/issues/1976))
+
+OTLP GRPC has been fixed and confirmed to work against external APMs.
+
+* TLS root certificates needed to be enabled in tonic.
+* TLS domain needs to be set for GRPC over HTTP(S). THis is now defaulted.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#1977
+
 ### Prefix the prometheus metrics with `router_` ([Issue #1915](https://github.com/apollographql/router/issues/1915))
 
 Adopt the prefix naming convention for prometheus metrics.
