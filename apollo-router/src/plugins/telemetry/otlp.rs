@@ -159,7 +159,7 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
     type Error = BoxError;
 
     fn try_from(config: &TlsConfig) -> Result<ClientTlsConfig, Self::Error> {
-        let tls = ClientTlsConfig::new()
+        ClientTlsConfig::new()
             .with(&config.domain_name, |b, d| b.domain_name(d))
             .try_with(&config.ca, |b, c| {
                 Ok(b.ca_certificate(tonic::transport::Certificate::from_pem(c)))
@@ -167,10 +167,7 @@ impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
             .try_with(
                 &config.cert.clone().zip(config.key.clone()),
                 |b, (cert, key)| Ok(b.identity(tonic::transport::Identity::from_pem(cert, key))),
-            );
-
-        tracing::info!("{:?}", tls);
-        tls
+            )
     }
 }
 
