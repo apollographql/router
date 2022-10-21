@@ -498,9 +498,11 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        // Note: 300ms should be long enough for this test to succeed, but it seems to be flaky in
-        // ci, so bump it to 301ms to see if that makes it less flaky.
-        tokio::time::sleep(Duration::from_millis(301)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
@@ -549,11 +551,11 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        // Note: 300ms should be long enough for this test to succeed, but its sibling (subgraph)
-        // seems to be flaky at that figure in ci. So, let's bump this one as well to be
-        // consistent.
-        // ci, so bump it to 301ms to see if that makes it less flaky.
-        tokio::time::sleep(Duration::from_millis(301)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
             .supergraph_service(mock_service.clone().boxed())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
