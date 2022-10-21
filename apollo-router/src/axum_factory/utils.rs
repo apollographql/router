@@ -248,7 +248,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty
+                "apollo_private.duration_ns" = tracing::field::Empty,
+                "request_id" = tracing::field::Empty
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -260,7 +261,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty
+                "apollo_private.duration_ns" = tracing::field::Empty,
+                "request_id" = tracing::field::Empty
             )
         }
     }

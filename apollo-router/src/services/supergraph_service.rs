@@ -45,6 +45,7 @@ use crate::QueryPlannerResponse;
 use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
+use crate::tracer::TraceId;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -108,12 +109,14 @@ where
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
                         "code": "INTERNAL_SERVER_ERROR",
+                        "error_id": TraceId::maybe_new(),
                     })
                     .as_object()
                     .unwrap()
                     .to_owned(),
                     ..Default::default()
                 }];
+
 
                 Ok(SupergraphResponse::builder()
                     .errors(errors)
