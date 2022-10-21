@@ -372,7 +372,7 @@ mod test {
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         crate::plugin::plugins()
             .get("apollo.traffic_shaping")
             .expect("Plugin not found")
@@ -389,7 +389,7 @@ mod test {
         "#,
         )
         .unwrap();
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
@@ -498,7 +498,11 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
             .oneshot(SubgraphRequest::fake_builder().build())
@@ -547,7 +551,11 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
             .supergraph_service(mock_service.clone().boxed())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())

@@ -73,6 +73,15 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Improve the stability of some flaky tests ([PR #1972](https://github.com/apollographql/router/pull/1972))
+
+The trace and rate limiting tests have been failing in our ci environment. The root cause is racyness in the tests, so the tests have been made more resilient to reduce the number of failures.
+
+Two PRs are represented by this single changelog.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1972
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1974
+
 ### Update docker-compose and Dockerfiles now that the submodules have been removed ([PR #1950](https://github.com/apollographql/router/pull/1950))
 
 We recently removed git submodules dependency, but we didn't update the global and the fuzzer `docker-compose.yml`.
