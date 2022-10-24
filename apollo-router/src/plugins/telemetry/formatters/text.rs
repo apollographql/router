@@ -87,6 +87,23 @@ impl TextFormatter {
     }
 
     #[inline]
+    fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
+        if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
+            if writer.has_ansi_escapes() {
+                let style = Style::new().dimmed();
+                write!(writer, "{}", style.prefix())?;
+                write!(writer, "{filename}:{line}")?;
+                write!(writer, "{}", style.suffix())?;
+            } else {
+                write!(writer, "{filename}:{line}")?;
+            }
+            writer.write_char(' ')?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     fn format_target(&self, target: &str, writer: &mut Writer<'_>) -> fmt::Result {
         if writer.has_ansi_escapes() {
             let style = Style::new().dimmed();
@@ -151,6 +168,7 @@ where
     ) -> fmt::Result {
         let meta = event.metadata();
         self.format_timestamp(&mut writer)?;
+        self.format_location(event, &mut writer)?;
 
         self.format_level(meta.level(), &mut writer)?;
         self.format_request_id(ctx, &mut writer, event)?;

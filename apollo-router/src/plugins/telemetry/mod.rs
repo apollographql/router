@@ -423,9 +423,13 @@ impl Telemetry {
                     .map(|s| s.as_str())
                     .unwrap_or("info");
 
-                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-                );
+                let sub_builder = tracing_subscriber::fmt::fmt()
+                    .with_env_filter(
+                        EnvFilter::try_new(log_level)
+                            .context("could not parse log configuration")?,
+                    )
+                    .with_file(true)
+                    .with_line_number(true);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
