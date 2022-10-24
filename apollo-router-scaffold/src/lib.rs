@@ -46,10 +46,19 @@ mod test {
     // let users know they should not worry and wait a bit.
     // Hang in there!
     fn test_scaffold() {
+        let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let repo_root = manifest_dir.parent().unwrap();
+        let target_dir = repo_root.join("target");
+        assert!(target_dir.exists());
         let temp_dir = tempfile::Builder::new()
             .prefix("router_scaffold")
             .tempdir()
             .unwrap();
+        std::fs::copy(
+            repo_root.join("rust-toolchain.toml"),
+            temp_dir.path().join("rust-toolchain.toml"),
+        )
+        .unwrap();
 
         let current_dir = env::current_dir().unwrap();
         // Scaffold the main project
@@ -79,7 +88,21 @@ mod test {
                 ),
             )]))
             .unwrap();
-        let _ = test_build_with_backup_folder(&temp_dir);
+        std::fs::copy(
+            repo_root.join("Cargo.lock"),
+            temp_dir.path().join("Cargo.lock"),
+        )
+        .unwrap();
+        let main = temp_dir.path().join("src").join("main.rs");
+        std::fs::write(
+            &main,
+            format!(
+                "#![deny(warnings)]\n{}",
+                std::fs::read_to_string(&main).unwrap()
+            ),
+        )
+        .unwrap();
+        let _ = test_build_with_backup_folder(&temp_dir, &target_dir);
 
         // Scaffold one of each type of plugin
         scaffold_plugin(&current_dir, &temp_dir, "basic").unwrap();
@@ -91,7 +114,7 @@ mod test {
         )
         .unwrap();
 
-        test_build_with_backup_folder(&temp_dir).unwrap()
+        test_build_with_backup_folder(&temp_dir, &target_dir).unwrap()
     }
 
     fn scaffold_plugin(current_dir: &Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
@@ -139,8 +162,8 @@ mod test {
         Ok(())
     }
 
-    fn test_build_with_backup_folder(temp_dir: &TempDir) -> Result<()> {
-        test_build(temp_dir).map_err(|e| {
+    fn test_build_with_backup_folder(temp_dir: &TempDir, target_dir: &Path) -> Result<()> {
+        test_build(temp_dir, target_dir).map_err(|e| {
             let mut output_dir = std::env::temp_dir();
             output_dir.push("test_scaffold_output");
 
@@ -155,10 +178,10 @@ mod test {
         })
     }
 
-    fn test_build(dir: &TempDir) -> Result<()> {
+    fn test_build(dir: &TempDir, target_dir: &Path) -> Result<()> {
         let output = Command::new("cargo")
             .args(["test"])
-            .env("RUSTFLAGS", "-Dwarnings")
+            .env("CARGO_TARGET_DIR", target_dir)
             .current_dir(dir)
             .output()?;
         if !output.status.success() {
