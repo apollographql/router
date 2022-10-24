@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use deduplicate::Retriever;
 use futures::future::BoxFuture;
 use opentelemetry::trace::SpanKind;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -14,6 +15,7 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use tower::Service;
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::PlanNode;
@@ -38,6 +40,19 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     deduplicate_variables: bool,
+}
+
+// TODO: Might need to do some stuff here to return a different value to match existing behaviour.
+#[async_trait::async_trait]
+impl Retriever for BridgeQueryPlanner {
+    type Key = QueryPlannerRequest;
+    type Value = Result<QueryPlannerResponse, QueryPlannerError>;
+
+    async fn get(&self, key: &Self::Key) -> Option<Self::Value> {
+        let mut qp = self.clone();
+        let res = qp.ready().await.ok()?.call(key.clone()).await;
+        Some(res)
+    }
 }
 
 impl BridgeQueryPlanner {

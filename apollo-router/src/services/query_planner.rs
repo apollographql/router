@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::hash::Hash;
 use std::sync::Arc;
 
 use static_assertions::assert_impl_all;
@@ -32,8 +33,24 @@ impl Request {
     }
 }
 
+impl Eq for Request {}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        self.query == other.query && self.operation_name == other.operation_name
+    }
+}
+
+impl Hash for Request {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.query.hash(state);
+        self.operation_name.hash(state);
+    }
+}
+
 assert_impl_all!(Response: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
+#[derive(Clone, Debug)]
 pub(crate) struct Response {
     /// Optional in case of error
     pub(crate) content: Option<QueryPlannerContent>,

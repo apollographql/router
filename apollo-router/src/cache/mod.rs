@@ -133,6 +133,7 @@ where
     K: Clone + Send + Eq + Hash + 'static,
     V: Clone + Send + 'static,
 {
+    #[cfg(test)]
     pub(crate) fn is_first(&self) -> bool {
         matches!(self.inner, EntryInner::First { .. })
     }
@@ -148,6 +149,7 @@ where
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn insert(self, value: V) {
         if let EntryInner::First {
             key,

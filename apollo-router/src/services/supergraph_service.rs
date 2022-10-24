@@ -53,8 +53,8 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 #[derive(Clone)]
 pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
+    query_planner_service: CachingQueryPlanner,
+    ready_query_planner_service: Option<CachingQueryPlanner>,
     schema: Arc<Schema>,
 }
 
@@ -62,7 +62,7 @@ pub(crate) struct SupergraphService<ExecutionFactory> {
 impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+        query_planner_service: CachingQueryPlanner,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
     ) -> Self {
@@ -128,7 +128,7 @@ where
 }
 
 async fn service_call<ExecutionService>(
-    planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    planning: CachingQueryPlanner,
     execution: ExecutionService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
@@ -230,7 +230,7 @@ where
 }
 
 async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
+    mut planning: CachingQueryPlanner,
     body: &graphql::Request,
     context: Context,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
@@ -334,7 +334,7 @@ impl PluggableSupergraphServiceBuilder {
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service =
-            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
+            CachingQueryPlanner::new(Arc::new(bridge_query_planner), plan_cache_limit).await;
 
         let plugins = Arc::new(self.plugins);
 
@@ -355,7 +355,7 @@ impl PluggableSupergraphServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+    query_planner_service: CachingQueryPlanner,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
