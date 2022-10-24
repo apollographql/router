@@ -120,5 +120,10 @@ error's path.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1892
 
-## 🛠 Maintenance
+### Adding `image.source` label to docker image
+
+Adding docker source label, published images will be linked to github repo's packages section
+
+By [@ndthanhdev](https://github.com/ndthanhdev) in https://github.com/apollographql/router/pull/1958
+
 ## 📚 Documentation
