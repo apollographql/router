@@ -36,14 +36,14 @@ In this case we are mounting a file from the host system (`/home/user/router.yam
 
 ## Passing command-line arguments to the Router binary
 
-By default, the `router` command invoked inside the published container does run not set any of the [available command-line arguments](../configuration/overview#command-arguments).  If you want to set any of the available options, pass the desired options at end of the `docker run` command.  For example, to start the Router using the `--dev` argument, you can use the following `docker run` command:
+By default, the `router` command invoked inside the published container does run not set any of the [available command-line arguments](../configuration/overview#command-arguments).  If you want to set any of the available options, pass the desired options at end of the `docker run` command.  For example, to start the Router using the `--log debug` argument, you can use the following `docker run` command:
 
 ```bash {5}
 docker run -p 4000:4000 \
   --env APOLLO_GRAPH_REF="<your graph>" \
   --env APOLLO_KEY="<your key>" \
   --rm \
-  ghcr.io/apollographql/router:<image version> --dev
+  ghcr.io/apollographql/router:<image version> --log debug
 ```
 
 ## Debugging your container
