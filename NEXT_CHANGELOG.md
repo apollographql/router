@@ -40,16 +40,16 @@ OTLP GRPC has been fixed and confirmed to work against external APMs.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#1977
 
-### Prefix the prometheus metrics with `router_` ([Issue #1915](https://github.com/apollographql/router/issues/1915))
+### Prefix the prometheus metrics with `apollo_router_` ([Issue #1915](https://github.com/apollographql/router/issues/1915))
 
 Adopt the prefix naming convention for prometheus metrics.
 
 ```diff
 - http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
-+ router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
++ apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1971
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1971 & https://github.com/apollographql/router/pull/1987
 
 ### Fix --hot-reload in kubernetes and docker ([Issue #1476](https://github.com/apollographql/router/issues/1476))
 
