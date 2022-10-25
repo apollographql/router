@@ -80,6 +80,12 @@ It was incorrectly removed in a previous pull request.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
 
+### Assume `Accept: application/json` when no `Accept` header is present [Issue #1995](https://github.com/apollographql/router/pull/1995))
+
+the `Accept` header means `*/*` when it is absent.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1995
+
 ## 🛠 Maintenance
 
 ### Update to Federation v2.1.4 ([PR #1994](https://github.com/apollographql/router/pull/1994))
