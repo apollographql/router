@@ -131,7 +131,7 @@ where
                     if let Ok(header_value) = header_value {
                         res.response
                             .headers_mut()
-                            .insert(HeaderName::from_static("apollo_request_id"), header_value);
+                            .insert(HeaderName::from_static("apollo_trace_id"), header_value);
                     }
                 }
 

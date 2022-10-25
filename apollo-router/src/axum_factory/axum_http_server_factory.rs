@@ -56,7 +56,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::telemetry::formatters::REQUEST_ID_FIELD_NAME;
+use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
@@ -308,7 +308,7 @@ where
                         .map(|t| t.to_string())
                         .unwrap_or_default();
 
-                    span.record(REQUEST_ID_FIELD_NAME, &trace_id.as_str());
+                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
                 })
                 .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
                     // Duration here is instant based

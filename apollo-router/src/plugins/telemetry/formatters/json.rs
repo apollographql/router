@@ -14,7 +14,7 @@ use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::FormattedFields;
 
-use super::REQUEST_ID_FIELD_NAME;
+use super::TRACE_ID_FIELD_NAME;
 
 /// The JSON [`FormatFields`] implementation.
 ///
@@ -138,7 +138,7 @@ impl<'a> tracing_subscriber::field::VisitOutput<fmt::Result> for JsonVisitor<'a>
 impl<'a> field::Visit for JsonVisitor<'a> {
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == REQUEST_ID_FIELD_NAME {
+        if field.name() == TRACE_ID_FIELD_NAME {
             self.values
                 .insert(field.name(), serde_json::Value::from(value));
         }

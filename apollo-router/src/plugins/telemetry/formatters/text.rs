@@ -135,15 +135,15 @@ impl TextFormatter {
             let ext = span.extensions();
             match &ext.get::<tracing_opentelemetry::OtelData>() {
                 Some(otel_data) => {
-                    let request_id = otel_data.parent_cx.span().span_context().trace_id();
+                    let trace_id = otel_data.parent_cx.span().span_context().trace_id();
 
                     if writer.has_ansi_escapes() {
                         let style = Style::new().dimmed();
                         write!(writer, "{}", style.prefix())?;
-                        write!(writer, "[request_id={request_id}]")?;
+                        write!(writer, "[trace_id={trace_id}]")?;
                         write!(writer, "{}", style.suffix())?;
                     } else {
-                        write!(writer, "{request_id}")?;
+                        write!(writer, "[trace_id={trace_id}]")?;
                     }
                     writer.write_char(' ')?;
                 }
