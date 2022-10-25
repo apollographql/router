@@ -17,6 +17,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
+use self::supergraph_sdl::SupergraphSdlRouterConfigOnFetchError;
+
 const GCP_URL: &str = "https://uplink.api.apollographql.com/graphql";
 const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
@@ -35,13 +37,6 @@ pub(crate) struct SupergraphSdl;
 pub(crate) enum Error {
     Reqwest(reqwest::Error),
     EmptyResponse,
-    UpLink {
-        // The lint ignores uses in the `Debug` impl, but this is where these fields are useful.
-        #[allow(dead_code)]
-        code: FetchErrorCode,
-        #[allow(dead_code)]
-        message: String,
-    },
 }
 
 impl From<reqwest::Error> for Error {
@@ -61,7 +56,7 @@ pub(crate) fn stream_supergraph(
     graph_ref: String,
     urls: Option<Vec<Url>>,
     interval: Duration,
-) -> impl Stream<Item = Result<Schema, Error>> {
+) -> impl Stream<Item = Result<Schema, String>> {
     let (sender, receiver) = channel(2);
     let _ = tokio::task::spawn(async move {
         let mut composition_id = None;
@@ -95,18 +90,29 @@ pub(crate) fn stream_supergraph(
                     supergraph_sdl::SupergraphSdlRouterConfig::Unchanged => {
                         tracing::trace!("schema did not change");
                     }
-                    supergraph_sdl::SupergraphSdlRouterConfig::FetchError(e) => {
-                        if let Some(urls) = &urls {
-                            current_url_idx = (current_url_idx + 1) % urls.len();
-                        }
-                        if sender
-                            .send(Err(Error::UpLink {
-                                code: e.code,
-                                message: e.message,
-                            }))
+                    supergraph_sdl::SupergraphSdlRouterConfig::FetchError(
+                        SupergraphSdlRouterConfigOnFetchError { code, message },
+                    ) => {
+                        if code == FetchErrorCode::RETRY_LATER {
+                            if let Some(urls) = &urls {
+                                current_url_idx = (current_url_idx + 1) % urls.len();
+                            }
+
+                            if sender
+                            .send(Err(format!("error downloading the schema from Uplink: {}", message)))
                             .await
                             .is_err()
                         {
+                            break;
+                        }
+                        } else {
+                            if sender
+                            .send(Err(format!("{:?} error downloading the schema from Uplink, the router will not try again: {}", code, message)))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                             break;
                         }
                     }
@@ -116,9 +122,7 @@ pub(crate) fn stream_supergraph(
                     if let Some(urls) = &urls {
                         current_url_idx = (current_url_idx + 1) % urls.len();
                     }
-                    if sender.send(Err(err)).await.is_err() {
-                        break;
-                    }
+                    tracing::error!("error downloading the schema from Uplink: {:?}", err);
                 }
             }
 
