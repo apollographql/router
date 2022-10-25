@@ -6,14 +6,8 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::header::ACCEPT;
-use http::HeaderMap;
 use http::StatusCode;
 use indexmap::IndexMap;
-use mediatype::names::MIXED;
-use mediatype::names::MULTIPART;
-use mediatype::MediaTypeList;
-use mediatype::ReadParams;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
@@ -29,8 +23,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use super::MULTIPART_DEFER_SPEC_PARAMETER;
-use super::MULTIPART_DEFER_SPEC_VALUE;
+use crate::axum_factory::utils::accepts_multipart;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -194,9 +187,7 @@ where
 
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
-
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-
             if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
@@ -261,33 +252,6 @@ async fn plan_query(
             "otel.kind" = %SpanKind::Internal
         ))
         .await
-}
-
-fn accepts_multipart(headers: &HeaderMap) -> bool {
-    headers.get_all(ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
-
-                list.any(|mime| {
-                    mime.as_ref()
-                        .map(|mime| {
-                            mime.ty == MULTIPART
-                                && mime.subty == MIXED
-                                && mime.get_param(
-                                    mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER)
-                                        .expect("valid name"),
-                                ) == Some(
-                                    mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE)
-                                        .expect("valid value"),
-                                )
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false)
-    })
 }
 
 /// Builder which generates a plugin pipeline.
@@ -468,9 +432,7 @@ mod tests {
     use crate::test_harness::MockedSubgraphs;
     use crate::TestHarness;
 
-    #[tokio::test]
-    async fn nullability_formatting() {
-        let schema = r#"schema
+    const SCHEMA: &str = r#"schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
         @core(feature: "https://specs.apollo.dev/join/v0.1")
         @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
@@ -509,8 +471,12 @@ mod tests {
    @join__type(graph: USER, key: "id") {
        id: ID
        creatorUser: User
+       name: String
+       suborga: [Organization]
    }"#;
 
+    #[tokio::test]
+    async fn nullability_formatting() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
@@ -522,7 +488,7 @@ mod tests {
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
-            .schema(schema)
+            .schema(SCHEMA)
             .extra_plugin(subgraphs)
             .build()
             .await
@@ -542,5 +508,140 @@ mod tests {
             .unwrap();
 
         insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test]
+    async fn errors_on_deferred_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {
+                        "representations":[{"__typename": "User", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "User", "name": "AAA"},
+                        ] }]
+                    },
+                    "errors": [
+                        {
+                            "message": "error user 0",
+                            "path": ["_entities", 0],
+                        }
+                    ]
+                    }}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query("query { currentUser { id  ...@defer { name } } }")
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn errors_on_incremental_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"0"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [{ "suborga": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "3"},
+                    ] }]
+                },
+                }}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Organization", "id":"1"},
+                        {"__typename": "Organization", "id":"2"},
+                        {"__typename": "Organization", "id":"3"}
+
+                        ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
+                    { "__typename": "Organization", "id": "3"},
+                    ]
+                },
+                "errors": [
+                    {
+                        "message": "error orga 1",
+                        "path": ["_entities", 0],
+                    },
+                    {
+                        "message": "error orga 3",
+                        "path": ["_entities", 2],
+                    }
+                ]
+                }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 }
