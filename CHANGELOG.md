@@ -125,12 +125,12 @@ data:
         const request_callback = Fn("process_request");
         service.map_request(request_callback);
     }
-  
+
     // This will convert all cookie pairs into headers.
     // If you only wish to convert certain cookies, you
     // can add logic to modify the processing.
     fn process_request(request) {
-  
+
         // Find our cookies
         if "cookie" in request.headers {
             print("adding cookies as headers");
@@ -187,8 +187,8 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ## 🚀 Features
 
 ### Expose the TraceId functionality to rhai ([Issue #1935](https://github.com/apollographql/router/issues/1935))
-    
-A new function, traceid(), is exposed to rhai scripts which may be used to retrieve a unique trace id for a request. The trace id is an opentelemetry span id.  
+
+A new function, traceid(), is exposed to rhai scripts which may be used to retrieve a unique trace id for a request. The trace id is an opentelemetry span id.
 
 ```
 fn supergraph_service(service) {
@@ -214,7 +214,7 @@ The root cause of the issue was letting the server component of spaceport close 
 
 Additionally, recycled spaceport connections are now re-connected to spaceport to further ensure connection validity.
 
-Also make deadpool sizing constant across environments (#1893) 
+Also make deadpool sizing constant across environments (#1893)
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1928
 
