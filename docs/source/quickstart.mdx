@@ -195,9 +195,12 @@ That's it! Running the Router with the `--dev` flag enables a development mode t
 
 Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
 
-**Do not use development mode in production!**
+<blockquote>
 
-Add the `--dev` flag is the equivalent runnning `./router --hot-reload` with this configuration:
+
+**⚠️ Do not use the `--dev` flag in production!** If you want to replicate any development mode functionality in production, modify your YAML configuration file instead.
+
+Using `--dev` is equivalent to running `./router --hot-reload` with the following configuration:
 
 ```yaml
 sandbox:
@@ -210,7 +213,8 @@ plugins:
   experimental.expose_query_plan: true
 ```
 
-If you need some of these features enabled in production, specify them directly in your configuration instead of using `--dev`.
+
+</blockquote>
 
 ## Next steps
 
