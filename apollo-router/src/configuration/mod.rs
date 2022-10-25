@@ -14,9 +14,12 @@ use std::str::FromStr;
 
 use askama::Template;
 use bytes::Bytes;
+use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
+use expansion::*;
 use itertools::Itertools;
+pub(crate) use schema::generate_config_schema;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -31,9 +34,6 @@ use thiserror::Error;
 
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
-use cors::*;
-use expansion::*;
-pub(crate) use schema::generate_config_schema;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
