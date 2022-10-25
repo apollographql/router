@@ -17,18 +17,18 @@ More information on usage reporting is available in the [Studio documentation](/
 
 ## Enabling field-level instrumentation
 
-Field-level instrumentation (also know as FTV1 tracing) is off by default. To enable it, add this to your router configuration:
+Field-level instrumentation (also known as FTV1 tracing) is disabled by default. To enable it, add the following to your router configuration:
 
 ```yaml
 telemetry:
   apollo:
-    # This example will trace half of requests. This number cannot
+    # This example will trace half of requests. This number can't
     # be higher than tracing.trace_config.sampler.
     field_level_instrumentation_sampler: 0.5 
   tracing:
     trace_config:
       # FTV1 uses the same trace sampling as other tracing options,
-      # so this must be enabled as well. 
+      # so this value must be set as well. 
       sampler: 0.5 
 ```
 
