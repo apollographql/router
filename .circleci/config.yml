@@ -231,6 +231,9 @@ commands:
     parameters:
       os:
         type: string
+      cargo_test_args:
+        type: string
+        default: "--"
     steps:
       - run:
           name: Start jaeger
@@ -249,7 +252,7 @@ commands:
               - equal: [linux_amd, << parameters.os >>]
               - equal: [linux_arm, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked -- --test-threads=4
+            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=4
       - when:
           condition:
             equal: [macos, << parameters.os >>]
@@ -332,6 +335,26 @@ jobs:
             - macos_install_baseline
             - test_workspace:
                 os: macos
+
+  test_updated:
+    environment:
+      <<: *common_job_environment
+    executor: amd_linux_test
+    steps:
+      - checkout
+      - linux_amd_install_baseline
+      - run:
+          name: Use latest Rust Nightly and update all Rust dependencies
+          command: |
+            sed -i '/channel/d' rust-toolchain.toml
+            echo 'channel = "nightly"' >> rust-toolchain.toml
+            rm Cargo.lock
+            cargo fetch
+      - test_workspace:
+          os: linux_amd
+          # schema_generation test skipped because schemars changed its representation of enums:
+          # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
+          cargo_test_args: --no-fail-fast -- --skip schema_generation
 
   build_release:
     parameters:
@@ -502,6 +525,7 @@ workflows:
       #       parameters:
       #         platform: [linux]
 
+      - test_updated
       - test:
           matrix:
             parameters:
