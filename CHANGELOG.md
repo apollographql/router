@@ -16,7 +16,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Prefix the Prometheus metrics with `apollo_router_` ([Issue #1915](https://github.com/apollographql/router/issues/1915))
 
-Correctly prefix Prometheus metrics with the `apollo_router` prefix, per convention.
+Correctly prefix Prometheus metrics with `apollo_router`, per convention.
 
 ```diff
 - http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1
