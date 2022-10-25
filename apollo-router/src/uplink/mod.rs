@@ -55,14 +55,13 @@ pub(crate) fn stream_supergraph(
     api_key: String,
     graph_ref: String,
     urls: Option<Vec<Url>>,
-    interval: Duration,
+    mut interval: Duration,
 ) -> impl Stream<Item = Result<Schema, String>> {
     let (sender, receiver) = channel(2);
     let _ = tokio::task::spawn(async move {
         let mut composition_id = None;
-
-        let mut interval = tokio::time::interval(interval);
         let mut current_url_idx = 0;
+
         loop {
             match fetch_supergraph(
                 api_key.to_string(),
@@ -86,6 +85,9 @@ pub(crate) fn stream_supergraph(
                         {
                             break;
                         }
+                        // this will truncate the number of seconds to under u64::MAX, which should be
+                        // a large enough delay anyway
+                        interval = Duration::from_secs(schema_config.min_delay_seconds.round() as u64);
                     }
                     supergraph_sdl::SupergraphSdlRouterConfig::Unchanged => {
                         tracing::trace!("schema did not change");
@@ -126,7 +128,7 @@ pub(crate) fn stream_supergraph(
                 }
             }
 
-            interval.tick().await;
+            tokio::time::sleep(interval).await;
         }
     })
     .with_current_subscriber();
