@@ -138,4 +138,9 @@ Adding docker source label, published images will be linked to github repo's pac
 
 By [@ndthanhdev](https://github.com/ndthanhdev) in https://github.com/apollographql/router/pull/1958
 
+### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
+
+The file is becoming large and hard to modify.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
 ## 📚 Documentation
