@@ -158,27 +158,29 @@ pub(crate) fn accepts_wildcard(headers: &HeaderMap) -> bool {
     })
 }
 
-/// Returns true if the headers contain header `accept: application/json` or `accept: application/graphql-response+json`
+/// Returns true if the headers contain `accept: application/json` or `accept: application/graphql-response+json`,
+/// or if there is no `accept` header
 pub(crate) fn accepts_json(headers: &HeaderMap) -> bool {
-    headers.get_all(ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
+    !headers.contains_key(ACCEPT)
+        || headers.get_all(ACCEPT).iter().any(|value| {
+            value
+                .to_str()
+                .map(|accept_str| {
+                    let mut list = MediaTypeList::new(accept_str);
 
-                list.any(|mime| {
-                    mime.as_ref()
-                        .map(|mime| {
-                            (mime.ty == APPLICATION && mime.subty == JSON)
-                                || (mime.ty == APPLICATION
-                                    && mime.subty.as_str() == "graphql-response"
-                                    && mime.suffix == Some(JSON))
-                        })
-                        .unwrap_or(false)
+                    list.any(|mime| {
+                        mime.as_ref()
+                            .map(|mime| {
+                                (mime.ty == APPLICATION && mime.subty == JSON)
+                                    || (mime.ty == APPLICATION
+                                        && mime.subty.as_str() == "graphql-response"
+                                        && mime.suffix == Some(JSON))
+                            })
+                            .unwrap_or(false)
+                    })
                 })
-            })
-            .unwrap_or(false)
-    })
+                .unwrap_or(false)
+        })
 }
 
 /// Returns true if the headers contain accept header to enable defer
