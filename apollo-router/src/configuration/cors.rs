@@ -1,7 +1,8 @@
-//! Cross Origin Resource Sharing (CORS° configuration)
+//! Cross Origin Resource Sharing (CORS configuration)
+// This entire file is license key functionality
+
 use std::str::FromStr;
 
-// This entire file is license key functionality
 use http::request::Parts;
 use http::HeaderValue;
 use regex::Regex;

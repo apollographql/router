@@ -11,6 +11,7 @@ use schemars::gen::SchemaSettings;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+use super::schema::validate_yaml_configuration;
 use super::*;
 use crate::error::SchemaError;
 
