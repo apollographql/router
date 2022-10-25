@@ -102,6 +102,24 @@ fn supergraph_service(service) {
 }
 ```
 
+## Accessing a TraceId
+
+Your Rhai customization can use the function `traceid()` to retrieve an opentelemetry span id. This will throw an exception if a span is not available, so always handle exceptions when using this function.
+
+```rhai
+fn supergraph_service(service) {
+    try {
+        let id = traceid();
+        print(`id: ${id}`);
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`span id error: ${err}`);
+    }
+}
+```
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place:

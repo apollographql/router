@@ -2,14 +2,15 @@ version: "3.9"
 services:
 
   subgraphs:
-    build: ../dockerfiles/federation-demo
+    build:
+      dockerfile: ../dockerfiles/Dockerfile.federation-demo
     ports:
       - 4100:4100
       - 4001:4001
       - 4002:4002
       - 4003:4003
       - 4004:4004
-    command: npm run start
+    command: npm run start-services
     environment:
       - JAEGER_HOST=jaeger
     depends_on:
@@ -17,7 +18,7 @@ services:
 
   gateway:
     container_name: apollo-gateway-fed-2
-    build: ../dockerfiles/federation2-demo/gateway
+    build: ../dockerfiles/fed2-demo-gateway
     environment:
       - APOLLO_OTEL_EXPORTER_TYPE=collector
       - APOLLO_OTEL_EXPORTER_HOST=collector

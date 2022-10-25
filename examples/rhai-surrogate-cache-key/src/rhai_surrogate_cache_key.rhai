@@ -24,7 +24,7 @@ fn supergraph_service(service) {
         catch(err)
         {
             // log any errors
-            error_log(`surrogate-cache-key not created: ${err}`);
+            log_error(`surrogate-cache-key not created: ${err}`);
         }
     };
     // Map our response using our closure

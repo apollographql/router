@@ -352,11 +352,8 @@ impl ValueExt for Value {
         match self {
             // When expected as an input type, both integer and float input values are accepted.
             Value::Number(n) if n.is_f64() => true,
-            // The Int scalar type represents a signed 32-bit numeric non-fractional value.
-            Value::Number(n) => n
-                .as_i64()
-                .map(|as_number| i32::try_from(as_number).is_ok())
-                .unwrap_or_default(),
+            // Integer input values are coerced to Float by adding an empty fractional part, for example 1.0 for the integer input value 1.
+            Value::Number(n) => n.is_i64(),
             // All other input values, including strings with numeric content, must raise a request error indicating an incorrect type.
             _ => false,
         }
@@ -532,7 +529,7 @@ impl Path {
         self.0.pop()
     }
 
-    pub fn last(&mut self) -> Option<&PathElement> {
+    pub fn last(&self) -> Option<&PathElement> {
         self.0.last()
     }
 
@@ -541,6 +538,16 @@ impl Path {
             PathElement::Key(k) => Some(k.clone()),
             _ => None,
         })
+    }
+
+    pub fn starts_with(&self, other: &Path) -> bool {
+        self.0.starts_with(&other.0[..])
+    }
+}
+
+impl FromIterator<PathElement> for Path {
+    fn from_iter<T: IntoIterator<Item = PathElement>>(iter: T) -> Self {
+        Path(iter.into_iter().collect())
     }
 }
 
