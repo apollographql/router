@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "access-json",
  "ansi_term",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -5863,7 +5863,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "ansi_term",
  "anyhow",
