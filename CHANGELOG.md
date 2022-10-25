@@ -33,7 +33,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Fix a coercion rule that failed to validate 64-bit integers ([PR #1951](https://github.com/apollographql/router/pull/1951))
 
-Queries that passed 64-bit integers for `Float` input variables would were failing to validate despite being valid.
+Queries that passed 64-bit integers for `Float` input variables were failing to validate despite being valid.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1951
 
