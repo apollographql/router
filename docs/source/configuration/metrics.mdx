@@ -30,10 +30,10 @@ Assuming you're running locally:
 2. Navigate to [http://localhost:4000/plugins/apollo.telemetry/prometheus](http://localhost:4000/plugins/apollo.telemetry/prometheus) to see something like:
 
 ```
-# HELP http_request_duration_seconds Total number of HTTP requests made.
-# TYPE http_request_duration_seconds histogram
-http_request_duration_seconds_bucket{le="0.5"} 1
-http_request_duration_seconds_bucket{le="0.9"} 1
+# HELP apollo_router_http_request_duration_seconds Total number of HTTP requests made.
+# TYPE apollo_router_http_request_duration_seconds histogram
+apollo_router_http_request_duration_seconds_bucket{le="0.5"} 1
+apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 ---SNIP---
 ```
 
@@ -41,10 +41,10 @@ http_request_duration_seconds_bucket{le="0.9"} 1
 
 The following metrics are available using Prometheus:
 
-- HTTP router request duration (`http_request_duration_seconds_bucket`)
-- HTTP request duration by subgraph (`http_request_duration_seconds_bucket` with attribute `subgraph`)
-- Total number of HTTP requests by HTTP Status (`http_requests_total`)
-- Total number of HTTP requests in error (`http_requests_error_total`)
+- HTTP router request duration (`apollo_router_http_request_duration_seconds_bucket`)
+- HTTP request duration by subgraph (`apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`)
+- Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
+- Total number of HTTP requests in error (`apollo_router_http_requests_error_total`)
 
 ## Using OpenTelemetry Collector
 
@@ -123,7 +123,7 @@ telemetry:
                   path: .type # JSON query path to fetch data from extensions
                 - name: message
                   path: .reason
-            # Will create this kind of metric for example http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
+            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
           subgraphs:
             my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
               request:

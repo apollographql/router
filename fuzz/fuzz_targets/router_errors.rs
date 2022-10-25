@@ -1,11 +1,12 @@
+//! Fuzz target to generate random invalid query and detect if the gateway and the router are both throwing errors
 #![no_main]
 
+use std::char::REPLACEMENT_CHARACTER;
 use std::fs::OpenOptions;
 use std::io::Write;
 
 use libfuzzer_sys::fuzz_target;
 use log::debug;
-use router_fuzz::generate_valid_operation;
 use serde_json::json;
 use serde_json::Value;
 
@@ -13,29 +14,23 @@ const GATEWAY_URL: &str = "http://localhost:4100/graphql";
 const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
-    let generated_operation = match generate_valid_operation(data, "fuzz/supergraph-fed2.graphql") {
-        Ok(d) => d,
-        Err(_err) => {
-            return;
-        }
-    };
-
+    let query = String::from_utf8_lossy(data).replace(REPLACEMENT_CHARACTER, "");
     let http_client = reqwest::blocking::Client::new();
     let router_response = http_client
         .post(ROUTER_URL)
-        .json(&json!({ "query": generated_operation }))
+        .json(&json!({ "query": query }))
         .send()
         .unwrap()
         .json::<Value>();
     let gateway_response = http_client
         .post(GATEWAY_URL)
-        .json(&json!({ "query": generated_operation }))
+        .json(&json!({ "query": query }))
         .send()
         .unwrap()
         .json::<Value>();
 
     debug!("======= DOCUMENT =======");
-    debug!("{}", generated_operation);
+    debug!("{}", query);
     debug!("========================");
     debug!("======= RESPONSE =======");
     if router_response.is_ok() != gateway_response.is_ok() {
@@ -45,6 +40,9 @@ fuzz_target!(|data: &[u8]| {
             None
         };
         let gateway_error = if let Err(err) = &gateway_response {
+            if err.is_decode() {
+                return;
+            }
             Some(err)
         } else {
             None
@@ -66,12 +64,12 @@ fuzz_target!(|data: &[u8]| {
 
 
 ====DOCUMENT===
-{generated_operation}
+{query}
 
-====GATEWAY====
+====GATEWAY ERROR====
 {gateway_error:?}
 
-====ROUTER====
+====ROUTER ERROR====
 {router_error:?}
 
 
@@ -119,7 +117,7 @@ fuzz_target!(|data: &[u8]| {
 
 
 ====DOCUMENT===
-{generated_operation}
+{query}
 
 ====GATEWAY====
 {gateway_response}

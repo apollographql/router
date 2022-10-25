@@ -13,7 +13,7 @@ import { Link } from 'gatsby';
 
 [Helm](https://helm.sh) is the package manager for kubernetes.
 
-There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.2.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
+There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.2.1/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
 
 In both the following examples, we are using helm to install the router:
  - into namespace "router-deploy" (create namespace if it doesn't exist)
@@ -67,7 +67,7 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -79,7 +79,7 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "UkVEQUNURUQ="
@@ -93,7 +93,7 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
@@ -120,7 +120,7 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -146,9 +146,9 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
-  
+
   annotations:
     prometheus.io/path: /metrics
     prometheus.io/port: "9090"
@@ -172,7 +172,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v1.2.0"
+          image: "ghcr.io/apollographql/router:v1.2.1"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
@@ -207,8 +207,7 @@ spec:
             {}
           volumeMounts:
             - name: router-configuration
-              mountPath: /app/configuration.yaml
-              subPath: configuration.yaml
+              mountPath: /app/
               readOnly: true
       volumes:
         - name: router-configuration
@@ -224,7 +223,7 @@ metadata:
     helm.sh/chart: router-1.0.0-rc.5
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.2.0"
+    app.kubernetes.io/version: "v1.2.1"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test
