@@ -28,5 +28,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
+
+The Uplink API returns actionable info in its responses:
+- some error codes indicate an unrecoverable issue, for which the router should not retry the query (example: non-existing graph)
+- it can tell the router when it should retry the query
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
+
 ## 🛠 Maintenance
 ## 📚 Documentation
