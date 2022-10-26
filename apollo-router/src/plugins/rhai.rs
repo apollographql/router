@@ -390,7 +390,7 @@ impl Plugin for Rhai {
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
-        scope.push_constant("apollo_sdl", sdl);
+        scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
 
         // Run the AST with our scope to put any global variables
