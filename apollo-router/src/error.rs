@@ -24,7 +24,6 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::SpecError;
-use crate::tracer::TraceId;
 
 /// Error types for execution.
 ///
@@ -115,7 +114,7 @@ pub(crate) enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
-        let mut value: Value = serde_json::to_value(self).unwrap().into();
+        let value: Value = serde_json::to_value(self).unwrap().into();
 
         Error {
             message: self.to_string(),
