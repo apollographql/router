@@ -29,4 +29,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
+
+The file is becoming large and hard to modify.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
+
 ## 📚 Documentation
