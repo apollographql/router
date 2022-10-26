@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
+
+A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
+
+By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
 ## 🛠 Maintenance
 
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
