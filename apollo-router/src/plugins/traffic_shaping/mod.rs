@@ -9,6 +9,7 @@
 
 pub(crate) mod deduplication;
 mod rate;
+mod retry;
 mod timeout;
 
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ use tower::ServiceExt;
 
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
+use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::error::ConfigurationError;
@@ -57,6 +59,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
+    //  retri
 }
 
 impl Merge for Shaping {
@@ -136,6 +139,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    retry_policy: Option<RetryPolicy>,
 }
 
 #[async_trait::async_trait]
@@ -170,6 +174,7 @@ impl Plugin for TrafficShaping {
             config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
+            retry_policy: Some(RetryPolicy::default()),
         })
     }
 
@@ -204,13 +209,20 @@ impl Plugin for TrafficShaping {
                     })
                     .clone()
             });
+            /*let retry = self
+            .retry_policy
+            .as_ref()
+            .map(|policy| tower::retry::RetryLayer::new(policy.clone()));*/
+            let retry = tower::retry::RetryLayer::new(self.policy.clone().unwrap());
             ServiceBuilder::new()
-                .layer(TimeoutLayer::new(
+                /*.layer(TimeoutLayer::new(
                     config
                     .timeout
                     .unwrap_or(DEFAULT_TIMEOUT),
                 ))
-                .option_layer(rate_limit)
+                .option_layer(rate_limit)*/
+                //.option_layer(retry)
+                .layer(retry)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
