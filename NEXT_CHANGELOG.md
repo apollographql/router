@@ -38,4 +38,11 @@ The Uplink API returns actionable info in its responses:
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
 
 ## 🛠 Maintenance
+
+### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
+
+The file is becoming large and hard to modify.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
+
 ## 📚 Documentation
