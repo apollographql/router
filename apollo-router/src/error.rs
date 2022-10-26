@@ -116,14 +116,6 @@ impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
         let mut value: Value = serde_json::to_value(self).unwrap().into();
-        if let Some(obj) = value.as_object_mut() {
-            obj.insert(
-                "error_id",
-                TraceId::maybe_new()
-                    .map(|t| Value::String(t.to_string().into()))
-                    .unwrap_or_default(),
-            );
-        }
 
         Error {
             message: self.to_string(),
