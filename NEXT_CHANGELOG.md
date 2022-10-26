@@ -28,5 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+
+When validating variables, we should use default values for object fields if applicable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
+
 ## 🛠 Maintenance
 ## 📚 Documentation
