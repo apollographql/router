@@ -170,6 +170,10 @@ where
         event: &Event<'_>,
     ) -> fmt::Result {
         let meta = event.metadata();
+        // Filtering here
+        // if !self.log_subgraph_request && meta.fields().field(LOG_SUBGRAPH_REQUEST).is_some() {
+        //     return Ok(());
+        // }
         self.format_timestamp(&mut writer)?;
         self.format_location(event, &mut writer)?;
 

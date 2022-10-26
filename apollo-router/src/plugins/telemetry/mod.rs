@@ -56,6 +56,7 @@ use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::LoggingReqRes;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 #[cfg(not(feature = "console"))]
@@ -102,6 +103,10 @@ pub(crate) mod formatters;
 mod metrics;
 mod otlp;
 mod tracing;
+// Logging consts
+pub(crate) const LOG_SUBGRAPH_REQUEST: &str = "apollo_telemetry::log_subgraph_request";
+pub(crate) const LOG_SUBGRAPH_RESPONSE: &str = "apollo_telemetry::log_subgraph_response";
+// Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
@@ -271,7 +276,10 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
+        let subgraph_logging_conf_req = self.create_subgraph_logging_conf(name);
+        let subgraph_logging_conf_resp = subgraph_logging_conf_req.clone();
         let name = name.to_owned();
+        let name_cloned = name.clone();
         let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
@@ -296,7 +304,32 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(move |req| apollo_handler.request_ftv1(req))
+            .map_request(move |mut req| {
+                req = apollo_handler.request_ftv1(req);
+                // Add keys for logging configuration
+                if (*subgraph_logging_conf_req)
+                    .as_ref()
+                    .and_then(|l| l.request.as_ref())
+                    .map(|lr| lr.enabled)
+                    .unwrap_or_default()
+                {
+                    req.context.insert_json_value(
+                        format!("{LOG_SUBGRAPH_REQUEST}_{name_cloned}"),
+                        Value::Bool(true),
+                    );
+                }
+                let logging_resp_mode = (*subgraph_logging_conf_resp)
+                    .as_ref()
+                    .and_then(|l| l.response.as_ref())
+                    .map(|lr| lr.mode)
+                    .unwrap_or_default();
+                let _ = req.context.insert(
+                    format!("{LOG_SUBGRAPH_RESPONSE}_{name_cloned}"),
+                    logging_resp_mode,
+                );
+
+                req
+            })
             .map_response(move |resp| apollo_handler.store_ftv1(resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
@@ -437,33 +470,43 @@ impl Telemetry {
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
-                } else if atty::is(atty::Stream::Stdout) {
-                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                    let subscriber = sub_builder
-                        .event_format(formatters::TextFormatter::new())
-                        .finish()
-                        .with(telemetry);
-                    if let Err(e) = set_global_default(subscriber) {
-                        ::tracing::error!("cannot set global subscriber: {:?}", e);
-                    }
                 } else {
-                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                    match config
+                        .logging
+                        .as_ref()
+                        .map(|l| l.format)
+                        .unwrap_or_default()
+                    {
+                        config::LoggingFormat::Pretty => {
+                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder
-                        .map_event_format(|e| {
-                            e.json()
-                                .with_current_span(true)
-                                .with_span_list(true)
-                                .flatten_event(true)
-                        })
-                        .map_fmt_fields(|_f| JsonFields::new())
-                        .finish()
-                        .with(telemetry);
-                    if let Err(e) = set_global_default(subscriber) {
-                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            let subscriber = sub_builder
+                                .event_format(formatters::TextFormatter::new())
+                                .finish()
+                                .with(telemetry);
+                            if let Err(e) = set_global_default(subscriber) {
+                                ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            }
+                        }
+                        config::LoggingFormat::Json => {
+                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                            let subscriber = sub_builder
+                                .map_event_format(|e| {
+                                    e.json()
+                                        .with_current_span(true)
+                                        .with_span_list(true)
+                                        .flatten_event(true)
+                                })
+                                .map_fmt_fields(|_f| JsonFields::new())
+                                .finish()
+                                .with(telemetry);
+                            if let Err(e) = set_global_default(subscriber) {
+                                ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            }
+                        }
                     }
-                };
+                }
             }
 
             Ok(true)
@@ -925,6 +968,40 @@ impl Telemetry {
                         errors: (errors.extensions.is_some() || errors.include_messages)
                             .then_some(errors),
                         context: (!context.is_empty()).then_some(context),
+                    }
+                }),
+        )
+    }
+
+    fn create_subgraph_logging_conf(&self, name: &str) -> Arc<Option<LoggingReqRes>> {
+        Arc::new(
+            self.config
+                .logging
+                .as_ref()
+                .and_then(|l| l.subgraph.as_ref())
+                .map(|subgraph_cfg| {
+                    let mut request_cfg = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.request.clone())
+                        .unwrap_or_default();
+                    let mut response_cfg = subgraph_cfg
+                        .all
+                        .as_ref()
+                        .and_then(|a| a.response.clone())
+                        .unwrap_or_default();
+                    let subgraph_cfg = subgraph_cfg.subgraphs.as_ref().and_then(|s| s.get(name));
+                    if let Some(subgraph_req_conf) = subgraph_cfg.and_then(|s| s.request.as_ref()) {
+                        request_cfg.enabled = subgraph_req_conf.enabled;
+                    }
+                    if let Some(subgraph_res_conf) = subgraph_cfg.and_then(|s| s.response.as_ref())
+                    {
+                        response_cfg.mode = subgraph_res_conf.mode;
+                    }
+
+                    LoggingReqRes {
+                        request: Some(request_cfg),
+                        response: Some(response_cfg),
                     }
                 }),
         )

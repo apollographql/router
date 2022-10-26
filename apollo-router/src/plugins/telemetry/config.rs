@@ -2,15 +2,18 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use http::response::Parts;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::graphql;
 use crate::plugins::telemetry::metrics;
 
 #[derive(thiserror::Error, Debug)]
@@ -47,6 +50,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
     #[allow(dead_code)]
+    pub(crate) logging: Option<Logging>,
     pub(crate) metrics: Option<Metrics>,
     pub(crate) tracing: Option<Tracing>,
     pub(crate) apollo: Option<apollo::Config>,
@@ -84,6 +88,98 @@ pub(crate) struct Tracing {
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     pub(crate) datadog: Option<tracing::datadog::Config>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Logging {
+    /// Log format
+    #[serde(default)]
+    pub(crate) format: LoggingFormat,
+    /// Log configuration at router level
+    pub(crate) router: Option<LoggingReqRes>,
+    /// Log configuration for subgraphs
+    pub(crate) subgraph: Option<SubgraphLogging>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphLogging {
+    // Apply to all subgraphs
+    pub(crate) all: Option<LoggingReqRes>,
+    // Apply to specific subgraph
+    pub(crate) subgraphs: Option<HashMap<String, LoggingReqRes>>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum LoggingFormat {
+    /// Pretty text format (default if you're running from a tty)
+    Pretty,
+    /// Json log format
+    Json,
+}
+
+impl Default for LoggingFormat {
+    fn default() -> Self {
+        if atty::is(atty::Stream::Stdout) {
+            Self::Pretty
+        } else {
+            Self::Json
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LoggingReqRes {
+    /// Request logging
+    pub(crate) request: Option<LoggingReq>,
+    /// Response logging
+    pub(crate) response: Option<LoggingRes>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LoggingReq {
+    /// Enable log
+    pub(crate) enabled: bool,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LoggingRes {
+    /// Logging mode
+    pub(crate) mode: LoggingMode,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default, Copy)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum LoggingMode {
+    #[default]
+    /// Never log
+    AlwaysOff,
+    /// Always log
+    AlwaysOn,
+    /// Log only on error
+    OnError,
+}
+
+impl LoggingMode {
+    pub(crate) fn is_enabled_from_parts(&self, parts: &Parts) -> bool {
+        match self {
+            config::LoggingMode::AlwaysOff => false,
+            config::LoggingMode::AlwaysOn => true,
+            config::LoggingMode::OnError => !parts.status.is_success(),
+        }
+    }
+    pub(crate) fn is_enabled_from_body(&self, resp: &graphql::Response) -> bool {
+        match self {
+            config::LoggingMode::AlwaysOff => false,
+            config::LoggingMode::AlwaysOn => true,
+            config::LoggingMode::OnError => !resp.errors.is_empty(),
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

@@ -22,6 +22,7 @@ use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
+use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -39,6 +40,9 @@ use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
 use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::plugins::telemetry::config::LoggingMode;
+use crate::plugins::telemetry::LOG_SUBGRAPH_REQUEST;
+use crate::plugins::telemetry::LOG_SUBGRAPH_RESPONSE;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -155,6 +159,12 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     0
                 }
             });
+            // Value set in the context in telemetry plugin to know if I should log it
+            if context.get_json_value(format!("{LOG_SUBGRAPH_REQUEST}_{service_name}"))
+                == Some(Value::Bool(true))
+            {
+                tracing::info!("Request to subgraph {service_name:?}: {request:#?}");
+            }
             let path = schema_uri.path().to_string();
             let response = client
                 .call(request)
@@ -175,9 +185,22 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
+            let logging_mode = context
+                .get::<_, LoggingMode>(format!("{LOG_SUBGRAPH_RESPONSE}_{service_name}"))
+                .ok()
+                .flatten();
+            let should_log_response = logging_mode
+                .map(|l| l.is_enabled_from_parts(&parts))
+                .unwrap_or_default();
+            // Value set in the context in telemetry plugin to know if I should log it
+            if should_log_response {
+                tracing::info!(
+                    "Response headers from subgraph {service_name:?}: {:#?}",
+                    parts.headers
+                );
+            }
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
@@ -204,6 +227,12 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     }
                 })?;
 
+            if should_log_response {
+                tracing::info!(
+                    "Response body from subgraph {service_name:?}: {}",
+                    String::from_utf8_lossy(&body)
+                );
+            }
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
                     graphql::Response::from_bytes(&service_name, body).map_err(|error| {
@@ -213,6 +242,13 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         }
                     })
                 })?;
+            let should_log_response = !should_log_response
+                && logging_mode
+                    .map(|l| l.is_enabled_from_body(&graphql))
+                    .unwrap_or_default();
+            if should_log_response {
+                tracing::info!("Response body from subgraph {service_name:?}: {graphql:#?}");
+            }
 
             let resp = http::Response::from_parts(parts, graphql);
 
