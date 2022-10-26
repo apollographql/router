@@ -191,6 +191,8 @@ urlencoding = "2.1.2"
 uuid = { version = "1.2.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 askama = "0.11.1"
+rustls-pemfile = "1.0.1"
+rustls = "0.20.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

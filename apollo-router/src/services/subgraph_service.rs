@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs;
+use std::io;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -18,9 +20,11 @@ use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
+use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
+use rustls::RootCertStore;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
@@ -74,8 +78,26 @@ impl SubgraphService {
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
+        let tls_config = match std::env::var("SSL_CERT_FILE") {
+            Err(_) => rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Ok(path) => {
+                let mut store = RootCertStore::empty();
+                let certificates = load_certs(&path).unwrap();
+                for certificate in certificates {
+                    store.add(&certificate).unwrap();
+                }
+
+                rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_root_certificates(store)
+                    .with_no_client_auth()
+            }
+        };
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_native_roots()
+            .with_tls_config(tls_config)
             .https_or_http()
             .enable_http1()
             .enable_http2()
@@ -328,6 +350,28 @@ impl SubgraphServiceFactory for SubgraphCreator {
                 .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
+}
+
+fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>> {
+    println!("loading certificate from {}", filename);
+
+    // Open certificate file.
+    let certfile = fs::File::open(filename).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to open {}: {}", filename, e),
+        )
+    })?;
+    let mut reader = io::BufReader::new(certfile);
+
+    // Load and return certificate.
+    let certs = rustls_pemfile::certs(&mut reader).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "failed to load certificate".to_string(),
+        )
+    })?;
+    Ok(certs.into_iter().map(rustls::Certificate).collect())
 }
 
 #[cfg(test)]
