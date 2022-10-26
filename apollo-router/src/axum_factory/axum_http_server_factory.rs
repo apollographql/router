@@ -47,7 +47,6 @@ use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
@@ -161,7 +160,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+            let apq = APQLayer::new().await;
 
             let all_routers =
                 make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;

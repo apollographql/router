@@ -4,7 +4,10 @@
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
+use deduplicate::Deduplicate;
+use deduplicate::Retriever;
 use futures::future::BoxFuture;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -16,7 +19,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-use crate::cache::DeduplicatingCache;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::SupergraphRequest;
@@ -34,19 +36,33 @@ struct PersistedQuery {
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
-    cache: DeduplicatingCache<Vec<u8>, String>,
+    cache: Deduplicate<Vec<u8>, String>,
+}
+
+struct APQRetriever;
+
+#[async_trait::async_trait]
+impl Retriever for APQRetriever {
+    type Key = Vec<u8>;
+    type Value = String;
+
+    async fn get(&self, _key: &Self::Key) -> Option<Self::Value> {
+        None
+    }
 }
 
 impl APQLayer {
     pub(crate) async fn new() -> Self {
         Self {
-            cache: DeduplicatingCache::new().await,
+            cache: Deduplicate::new(Arc::new(APQRetriever {})).await,
         }
     }
 
-    pub(crate) fn with_cache(cache: DeduplicatingCache<Vec<u8>, String>) -> Self {
+    /*
+    pub(crate) fn with_cache(cache: Deduplicate<Vec<u8>, String>) -> Self {
         Self { cache }
     }
+    */
 
     pub(crate) async fn apq_request(
         &self,
@@ -67,14 +83,14 @@ impl APQLayer {
                 if query_matches_hash(query.as_str(), query_hash.as_slice()) {
                     tracing::trace!("apq: cache insert");
                     let _ = request.context.insert("persisted_query_hit", false);
-                    self.cache.insert(query_hash, query).await;
+                    let _ = self.cache.insert(query_hash, query);
                 } else {
                     tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                 }
                 Ok(request)
             }
             (Some(apq_hash), _) => {
-                if let Ok(cached_query) = self.cache.get(&apq_hash).await.get().await {
+                if let Ok(cached_query) = self.cache.get(&apq_hash).await {
                     let _ = request.context.insert("persisted_query_hit", true);
                     tracing::trace!("apq: cache hit");
                     request.supergraph_request.body_mut().query = Some(cached_query);
@@ -152,7 +168,7 @@ where
                             if query_matches_hash(query.as_str(), query_hash.as_slice()) {
                                 tracing::trace!("apq: cache insert");
                                 let _ = req.context.insert("persisted_query_hit", false);
-                                cache.insert(query_hash, query).await;
+                                let _ = cache.insert(query_hash, query);
                             } else {
                                 tracing::warn!(
                                     "apq: graphql request doesn't match provided sha256Hash"
@@ -161,7 +177,7 @@ where
                             Ok(ControlFlow::Continue(req))
                         }
                         (Some(apq_hash), _) => {
-                            if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
+                            if let Ok(cached_query) = cache.get(&apq_hash).await {
                                 let _ = req.context.insert("persisted_query_hit", true);
                                 tracing::trace!("apq: cache hit");
                                 req.supergraph_request.body_mut().query = Some(cached_query);
@@ -301,7 +317,7 @@ mod apq_tests {
                     .expect("expecting valid request"))
             });
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+        let apq = APQLayer::new().await;
         let mut service_stack = apq.layer(mock_service);
 
         let persisted = json!({
@@ -388,7 +404,7 @@ mod apq_tests {
         // the last call should be an APQ error.
         // the provided hash was wrong, so the query wasn't inserted into the cache.
 
-        let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+        let apq = APQLayer::new().await;
         let mut service_stack = apq.layer(mock_service);
 
         let persisted = json!({

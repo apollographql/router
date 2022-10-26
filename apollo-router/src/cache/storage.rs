@@ -1,8 +1,8 @@
 use std::hash::Hash;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use lru::LruCache;
-use tokio::sync::Mutex;
 
 // placeholder storage module
 //
@@ -25,15 +25,10 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        self.inner.lock().await.get(key).cloned()
+        self.inner.lock().unwrap().get(key).cloned()
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.inner.lock().await.put(key, value);
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn len(&self) -> usize {
-        self.inner.lock().await.len()
+        self.inner.lock().unwrap().put(key, value);
     }
 }

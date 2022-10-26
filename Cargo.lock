@@ -1289,9 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "deduplicate"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acb4073488fa6d36510962309ef46a5a6b17d5224c3248e75083f1ba0997f0c3"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "lru",
