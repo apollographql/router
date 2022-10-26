@@ -430,7 +430,9 @@ impl Exporter {
         let mut response_headers = HashMap::with_capacity(1);
         response_headers.insert(
             String::from("apollo_trace_id"),
-            Values { value: vec![span.span_context.trace_id().to_string()] },
+            Values {
+                value: vec![span.span_context.trace_id().to_string()],
+            },
         );
         Http {
             method: method.into(),
