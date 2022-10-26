@@ -1589,7 +1589,7 @@ mod tests {
         let mut guard = scope.lock().unwrap();
 
         // Call our function to make sure we can access the sdl
-        let sdl: Arc<String> = rhai_instance
+        let sdl: String = rhai_instance
             .engine
             .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
             .expect("can get sdl");
