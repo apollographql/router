@@ -105,7 +105,6 @@ where
     async fn send(&self, sender: broadcast::Sender<V>, key: K, value: V) {
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
-        // let _locked_wait_map = self.wait_map.lock().await;
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(&key);
         let _ = sender.send(value);
