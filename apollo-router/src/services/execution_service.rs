@@ -131,11 +131,20 @@ where
                                     sub_responses
                                         .into_iter()
                                         .map(move |(path, data)| {
+                                            let errors = response
+                                                .errors
+                                                .iter()
+                                                .filter(|error| match &error.path {
+                                                    None => false,
+                                                    Some(err_path) => err_path.starts_with(&path),
+                                                })
+                                                .cloned()
+                                                .collect::<Vec<_>>();
                                             IncrementalResponse::builder()
                                                 .and_label(response.label.clone())
                                                 .data(data)
                                                 .path(path)
-                                                .errors(response.errors.clone())
+                                                .errors(errors)
                                                 .extensions(response.extensions.clone())
                                                 .build()
                                         })

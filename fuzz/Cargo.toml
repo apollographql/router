@@ -26,6 +26,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "router_errors"
+path = "fuzz_targets/router_errors.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "federation"
 path = "fuzz_targets/federation.rs"
 test = false

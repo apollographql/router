@@ -43,7 +43,7 @@ in lieu of an official changelog.
   - go to the `helm/chart/router` folder
   - run 
   ```helm template --set router.configuration.telemetry.metrics.prometheus.enabled=true  --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --debug .```
-  - Paste the output in the `Kubernetes Configuration` example of the `docs/sources/containerization/kubernetes.mdx` file
+  - Paste the output in the `Kubernetes Configuration` example of the `docs/source/containerization/kubernetes.mdx` file
 9. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
 10. Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
 11. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
