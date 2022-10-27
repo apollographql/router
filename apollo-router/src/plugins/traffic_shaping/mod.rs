@@ -498,9 +498,9 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        // Note: use `timeout` to guarantee 300ms has elapsed
+        // Note: use `timeout` to guarantee 400ms has elapsed
         let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+        assert!(tokio::time::timeout(Duration::from_millis(400), big_sleep)
             .await
             .is_err());
         let _response = plugin
@@ -551,9 +551,9 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        // Note: use `timeout` to guarantee 300ms has elapsed
+        // Note: use `timeout` to guarantee 400ms has elapsed
         let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+        assert!(tokio::time::timeout(Duration::from_millis(400), big_sleep)
             .await
             .is_err());
         let _response = plugin
