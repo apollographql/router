@@ -48,6 +48,13 @@ Example of logs in JSON:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
 
+### Reload the configuration when receiving the SIGHUP signal [Issue #35](https://github.com/apollographql/router/issues/35))
+
+This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
+and only with the configuration file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
+
 ## 🐛 Fixes
 
 ### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
