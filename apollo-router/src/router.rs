@@ -321,10 +321,52 @@ impl ConfigurationSource {
                         .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
-                            Box::new(configuration),
-                        )))
-                        .boxed(),
+                        Ok(configuration) => {
+                            #[cfg(not(unix))]
+                            {
+                                stream::once(future::ready(UpdateConfiguration(Box::new(
+                                    configuration,
+                                ))))
+                                .boxed()
+                            }
+
+                            #[cfg(unix)]
+                            {
+                                let mut sighup_stream = tokio::signal::unix::signal(
+                                    tokio::signal::unix::SignalKind::hangup(),
+                                )
+                                .expect("Failed to install SIGTERM signal handler");
+
+                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
+                                tokio::task::spawn(async move {
+                                    loop {
+                                        match sighup_stream.recv().await {
+                                            Some(()) => tx.send(()).await.unwrap(),
+                                            None => break,
+                                        }
+                                    }
+                                });
+                                futures::stream::select(
+                                    stream::once(future::ready(UpdateConfiguration(Box::new(
+                                        configuration,
+                                    ))))
+                                    .boxed(),
+                                    rx.filter_map(
+                                        move |()| match ConfigurationSource::read_config(&path) {
+                                            Ok(configuration) => future::ready(Some(
+                                                UpdateConfiguration(Box::new(configuration)),
+                                            )),
+                                            Err(err) => {
+                                                tracing::error!("{}", err);
+                                                future::ready(None)
+                                            }
+                                        },
+                                    )
+                                    .boxed(),
+                                )
+                                .boxed()
+                            }
+                        }
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
