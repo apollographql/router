@@ -335,7 +335,7 @@ impl ConfigurationSource {
                                 let mut sighup_stream = tokio::signal::unix::signal(
                                     tokio::signal::unix::SignalKind::hangup(),
                                 )
-                                .expect("Failed to install SIGTERM signal handler");
+                                .expect("Failed to install SIGHUP signal handler");
 
                                 let (mut tx, rx) = futures::channel::mpsc::channel(1);
                                 tokio::task::spawn(async move {
