@@ -61,7 +61,6 @@ fn create_profiler() {
 #[cfg(feature = "dhat-heap")]
 #[no_mangle]
 extern "C" fn drop_profiler() {
-    eprintln!("HAS THIS EXECUTED?");
     unsafe {
         if let Some(p) = GLOBAL_PROFILER.take() {
             drop(p);
@@ -86,7 +85,6 @@ fn create_profiler() {
 #[cfg(feature = "dhat-ad-hoc")]
 #[no_mangle]
 extern "C" fn drop_profiler() {
-    eprintln!("HAS THIS EXECUTED?");
     unsafe {
         if let Some(p) = GLOBAL_AD_HOC_PROFILER.take() {
             drop(p);

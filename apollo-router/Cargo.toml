@@ -68,7 +68,7 @@ derive_more = { version = "0.99.17", default-features = false, features = [
     "display",
 ] }
 # dhat = { version = "0.3.1", optional = true }
-dhat = { path = "../../dhat-rs", optional = true }
+dhat = { path = "../../../home_dev/dhat-rs", optional = true }
 directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.24"
