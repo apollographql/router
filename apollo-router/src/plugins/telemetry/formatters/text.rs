@@ -2,9 +2,13 @@ use std::fmt;
 
 use ansi_term::Color;
 use ansi_term::Style;
+use opentelemetry::trace::TraceContextExt;
 use tracing_core::Event;
 use tracing_core::Level;
 use tracing_core::Subscriber;
+use tracing_subscriber::field;
+use tracing_subscriber::field::Visit;
+use tracing_subscriber::fmt::format::DefaultVisitor;
 use tracing_subscriber::fmt::format::FormatEvent;
 use tracing_subscriber::fmt::format::FormatFields;
 use tracing_subscriber::fmt::format::Writer;
@@ -83,6 +87,23 @@ impl TextFormatter {
     }
 
     #[inline]
+    fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
+        if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
+            if writer.has_ansi_escapes() {
+                let style = Style::new().dimmed();
+                write!(writer, "{}", style.prefix())?;
+                write!(writer, "{filename}:{line}")?;
+                write!(writer, "{}", style.suffix())?;
+            } else {
+                write!(writer, "{filename}:{line}")?;
+            }
+            writer.write_char(' ')?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     fn format_target(&self, target: &str, writer: &mut Writer<'_>) -> fmt::Result {
         if writer.has_ansi_escapes() {
             let style = Style::new().dimmed();
@@ -93,6 +114,44 @@ impl TextFormatter {
             write!(writer, "{}:", target)?;
         }
         writer.write_char(' ')
+    }
+
+    #[inline]
+    fn format_request_id<S, N>(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        writer: &mut Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result
+    where
+        S: Subscriber + for<'a> LookupSpan<'a>,
+        N: for<'a> FormatFields<'a> + 'static,
+    {
+        let span = event
+            .parent()
+            .and_then(|id| ctx.span(id))
+            .or_else(|| ctx.lookup_current());
+        if let Some(span) = span {
+            let ext = span.extensions();
+            match &ext.get::<tracing_opentelemetry::OtelData>() {
+                Some(otel_data) => {
+                    let trace_id = otel_data.parent_cx.span().span_context().trace_id();
+
+                    if writer.has_ansi_escapes() {
+                        let style = Style::new().dimmed();
+                        write!(writer, "{}", style.prefix())?;
+                        write!(writer, "[trace_id={trace_id}]")?;
+                        write!(writer, "{}", style.suffix())?;
+                    } else {
+                        write!(writer, "[trace_id={trace_id}]")?;
+                    }
+                    writer.write_char(' ')?;
+                }
+                None => eprintln!("Unable to find OtelData in extensions; this is a bug"),
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -108,15 +167,65 @@ where
         event: &Event<'_>,
     ) -> fmt::Result {
         let meta = event.metadata();
-
         self.format_timestamp(&mut writer)?;
+        self.format_location(event, &mut writer)?;
 
         self.format_level(meta.level(), &mut writer)?;
-
+        self.format_request_id(ctx, &mut writer, event)?;
         self.format_target(meta.target(), &mut writer)?;
-
-        ctx.format_fields(writer.by_ref(), event)?;
+        let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
+        event.record(&mut visitor);
 
         writeln!(writer)
+    }
+}
+
+struct CustomVisitor<N>(N);
+
+impl<N> CustomVisitor<N>
+where
+    N: field::Visit,
+{
+    #[allow(dead_code)]
+    fn new(inner: N) -> Self {
+        Self(inner)
+    }
+}
+
+// TODO we are now able to filter fields here, for now it's just a passthrough
+impl<N> Visit for CustomVisitor<N>
+where
+    N: Visit,
+{
+    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn fmt::Debug) {
+        self.0.record_debug(field, value)
+    }
+
+    fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
+        self.0.record_str(field, value)
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing_core::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.0.record_error(field, value)
+    }
+
+    fn record_f64(&mut self, field: &tracing_core::Field, value: f64) {
+        self.0.record_f64(field, value)
+    }
+
+    fn record_i64(&mut self, field: &tracing_core::Field, value: i64) {
+        self.0.record_i64(field, value)
+    }
+
+    fn record_u64(&mut self, field: &tracing_core::Field, value: u64) {
+        self.0.record_u64(field, value)
+    }
+
+    fn record_bool(&mut self, field: &tracing_core::Field, value: bool) {
+        self.0.record_bool(field, value)
     }
 }
