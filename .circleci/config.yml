@@ -292,6 +292,9 @@ commands:
                 key: sccache-{{ .Environment.CIRCLE_JOB }}-linux-amd
                 paths:
                   - ~/.cache/sccache
+            - run:
+                name: sccache timings
+                command: sccache --show-stats
 jobs:
   lint:
     environment:
