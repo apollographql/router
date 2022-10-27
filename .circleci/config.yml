@@ -285,12 +285,11 @@ commands:
             - ~/.cargo
       - when:
           condition:
-            or:
-              - equal: [linux_amd, << parameters.os >>]
+            equal: [linux_amd, << parameters.os >>]
           steps:
             - save_cache:
-              name: Save sccache
-              key: sccache-<< parameters.manifest-directory >>-{{ .Environment.CIRCLE_JOB }}-linux-amd
+                name: Save sccache
+                key: sccache-<< parameters.manifest-directory >>-{{ .Environment.CIRCLE_JOB }}-linux-amd
 jobs:
   lint:
     environment:
