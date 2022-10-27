@@ -192,7 +192,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 .ok()
                 .flatten();
             let should_log_response = logging_mode
-                .map(|l| l.is_enabled_from_parts(&parts))
+                .map(|l| l.is_enabled_from_status(&parts.status))
                 .unwrap_or_default();
             // Value set in the context in telemetry plugin to know if I should log it
             if should_log_response {

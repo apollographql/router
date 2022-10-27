@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use http::response::Parts;
+use http::StatusCode;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
@@ -166,11 +166,11 @@ pub(crate) enum LoggingMode {
 }
 
 impl LoggingMode {
-    pub(crate) fn is_enabled_from_parts(&self, parts: &Parts) -> bool {
+    pub(crate) fn is_enabled_from_status(&self, status: &StatusCode) -> bool {
         match self {
             config::LoggingMode::AlwaysOff => false,
             config::LoggingMode::AlwaysOn => true,
-            config::LoggingMode::OnError => !parts.status.is_success(),
+            config::LoggingMode::OnError => !status.is_success(),
         }
     }
     pub(crate) fn is_enabled_from_body(&self, resp: &graphql::Response) -> bool {

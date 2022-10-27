@@ -56,6 +56,7 @@ use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::LoggingMode;
 use self::config::LoggingReqRes;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
@@ -190,27 +191,75 @@ impl Plugin for Telemetry {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
+        let log_config = self.config.logging.clone();
+        let log_config_map_res = self.config.logging.clone();
+        let log_config_map_err = self.config.logging.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_response(|resp: SupergraphResponse| {
+            .map_response(move |resp: SupergraphResponse| {
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        "apollo_private.operation_signature",
+                        "apolog_configllo_private.operation_signature",
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
-                resp
+                let response_log_conf = log_config_map_res
+                    .as_ref()
+                    .and_then(|l| l.router.as_ref())
+                    .and_then(|l| l.response.as_ref())
+                    .map(|l| l.mode);
+                let log_response = response_log_conf
+                    .map(|resp_conf| resp_conf.is_enabled_from_status(&resp.response.status()))
+                    .unwrap_or_default();
+                if log_response {
+                    // TODO switch to debug
+                    ::tracing::info!("Router response headers: {:#?}", resp.response.headers());
+                }
+
+                resp.map_stream(move |gql_response| {
+                    let log_response = log_response
+                        && response_log_conf
+                            .map(|resp_conf| resp_conf.is_enabled_from_body(&gql_response))
+                            .unwrap_or_default();
+                    if log_response {
+                        // TODO switch to debug
+                        ::tracing::info!("Router GraphQL response: {:#?}", gql_response)
+                    }
+                    gql_response
+                })
+            })
+            .map_err(move |err| {
+                let response_log_enabled = log_config_map_err
+                    .as_ref()
+                    .and_then(|l| l.router.as_ref())
+                    .and_then(|l| l.response.as_ref())
+                    .map(|l| matches!(l.mode, LoggingMode::AlwaysOn | LoggingMode::OnError))
+                    .unwrap_or_default();
+                if response_log_enabled {
+                    ::tracing::error!("Router GraphQL error: {}", err);
+                }
+                err
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
+                    let log_request = log_config
+                        .as_ref()
+                        .and_then(|l| l.router.as_ref())
+                        .and_then(|l| l.request.as_ref())
+                        .map(|req_conf| req_conf.enabled)
+                        .unwrap_or_default();
+                    if log_request {
+                        // TODO switch to debug
+                        ::tracing::info!("Router request: {:#?}", req.supergraph_request);
+                    }
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
