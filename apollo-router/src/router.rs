@@ -339,11 +339,8 @@ impl ConfigurationSource {
 
                                 let (mut tx, rx) = futures::channel::mpsc::channel(1);
                                 tokio::task::spawn(async move {
-                                    loop {
-                                        match sighup_stream.recv().await {
-                                            Some(()) => tx.send(()).await.unwrap(),
-                                            None => break,
-                                        }
+                                    while let Some(()) = sighup_stream.recv().await {
+                                        tx.send(()).await.unwrap();
                                     }
                                 });
                                 futures::stream::select(
