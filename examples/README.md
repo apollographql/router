@@ -23,6 +23,7 @@ Scripting support.
 
 - [Time request and add to header](./add-timestamp-header/rhai)
 - [Cookies to headers](./cookies-to-headers/rhai)
+- [Forbid anonymous operations](./forbid-anonymous-operations/rhai)
 - [Operation Name to headers](./op-name-to-header/rhai)
 - [Logging](./logging/rhai)
 - [Response data modification](./data-response-mutate/rhai)
@@ -40,6 +41,7 @@ Writing your own plugins in rust!
 - [Jwt auth](./jwt-auth/rust)
 - [Forbid mutations](./forbid-mutations/rust)
 - [Status code propagation](./status-code-propagation/rust)
+- [Forbid anonymous operations](./forbid-anonymous-operations/rust)
 
 ### Advanced usage
 
