@@ -5,7 +5,7 @@ Demonstrate use of supergraph sdl (schema definition language) applied in variou
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphqlsupergraph.graphql -c ./router.yaml
+cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```
 
 ## Implementation

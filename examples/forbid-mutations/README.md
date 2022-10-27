@@ -7,5 +7,5 @@ This is particularly useful for when you are testing the router against an exist
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphqlsupergraph.graphql -c ./router.yaml
+cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```

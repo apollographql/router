@@ -5,7 +5,7 @@ Demonstrates using `checkpoint` to prevent requests with anonymous operations.
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphqlsupergraph.graphql -c ./router.yaml
+cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```
 
 ## Implementation

@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-// `cargo run -- -s ../../graphqlsupergraph.graphql -c ./router.yaml`
+// `cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }

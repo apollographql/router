@@ -6,7 +6,7 @@ For instance, if a subgraph service fails and returns non 200 status code then i
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphqlsupergraph.graphql -c ./router.yaml
+cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```
 
 ## Implementation
