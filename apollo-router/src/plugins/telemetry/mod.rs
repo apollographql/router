@@ -66,6 +66,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
@@ -97,7 +98,7 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
-pub(crate) mod formatter;
+pub(crate) mod formatters;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -422,9 +423,13 @@ impl Telemetry {
                     .map(|s| s.as_str())
                     .unwrap_or("info");
 
-                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-                );
+                let sub_builder = tracing_subscriber::fmt::fmt()
+                    .with_env_filter(
+                        EnvFilter::try_new(log_level)
+                            .context("could not parse log configuration")?,
+                    )
+                    .with_file(true)
+                    .with_line_number(true);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -436,7 +441,7 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        .event_format(formatter::TextFormatter::new())
+                        .event_format(formatters::TextFormatter::new())
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
@@ -446,9 +451,13 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        .json()
-                        .with_current_span(false)
-                        .with_span_list(false)
+                        .map_event_format(|e| {
+                            e.json()
+                                .with_current_span(true)
+                                .with_span_list(true)
+                                .flatten_event(true)
+                        })
+                        .map_fmt_fields(|_f| JsonFields::new())
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
@@ -765,11 +774,12 @@ impl Telemetry {
                     );
 
                     metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
-                    metrics.http_requests_total.add(1, &metric_attrs);
-                } else {
-                    metrics.http_requests_total.add(1, &metric_attrs);
                 }
 
+                if !parts.status.is_success() {
+                    metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
+                    metrics.http_requests_error_total.add(1, &metric_attrs);
+                }
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -779,12 +789,12 @@ impl Telemetry {
 
                 Ok(SupergraphResponse { context, response })
             }
-            Err(err) => {
-                metrics.http_requests_error_total.add(1, &metric_attrs);
-
-                Err(err)
-            }
+            Err(err) => Err(err),
         };
+
+        // http_requests_total - the total number of HTTP requests received
+        metrics.http_requests_total.add(1, &metric_attrs);
+
         metrics
             .http_requests_duration
             .record(request_duration.as_secs_f64(), &metric_attrs);
@@ -907,14 +917,14 @@ impl Telemetry {
                     let errors = merge_config!(errors);
 
                     AttributesForwardConf {
-                        insert: (!insert.is_empty()).then(|| insert),
+                        insert: (!insert.is_empty()).then_some(insert),
                         request: (request.header.is_some() || request.body.is_some())
-                            .then(|| request),
+                            .then_some(request),
                         response: (response.header.is_some() || response.body.is_some())
-                            .then(|| response),
+                            .then_some(response),
                         errors: (errors.extensions.is_some() || errors.include_messages)
-                            .then(|| errors),
-                        context: (!context.is_empty()).then(|| context),
+                            .then_some(errors),
+                        context: (!context.is_empty()).then_some(context),
                     }
                 }),
         )
@@ -1439,6 +1449,19 @@ mod tests {
                     .unwrap())
             });
 
+        let mut mock_bad_request_service = MockSupergraphService::new();
+        mock_bad_request_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+
         let mut mock_subgraph_service = MockSubgraphService::new();
         mock_subgraph_service
             .expect_call()
@@ -1589,6 +1612,21 @@ mod tests {
             .await
             .unwrap();
 
+        let mut bad_request_supergraph_service =
+            dyn_plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+
+        let _router_response = bad_request_supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
         let mut subgraph_service =
             dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
         let subgraph_req = SubgraphRequest::fake_builder()
@@ -1666,22 +1704,25 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);
-        assert!(prom_metrics.contains(r#"http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
-        assert!(prom_metrics.contains(r#"http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.001"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.005"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.015"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.05"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.3"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.4"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.5"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="1"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="5"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="10"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="+Inf"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_sum{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
-        assert!(prom_metrics.contains(r#"http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",service_name="apollo-router",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.001"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.005"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.015"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.05"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.3"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.4"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.5"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="1"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="5"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="10"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="+Inf"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_sum{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",service_name="apollo-router",status="200",subgraph="my_subgraph_name",unknown_data="default_value",le="1"}"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",service_name="apollo-router",status="200",subgraph="my_subgraph_name",unknown_data="default_value"} 1"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#))
     }
 }

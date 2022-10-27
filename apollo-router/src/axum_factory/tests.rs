@@ -45,7 +45,7 @@ use tower::Service;
 use tower::ServiceExt;
 
 use super::*;
-use crate::configuration::Cors;
+use crate::configuration::cors::Cors;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -1560,6 +1560,10 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
+        .header(
+            ACCEPT,
+            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+        )
         .send()
         .await
         .unwrap();
