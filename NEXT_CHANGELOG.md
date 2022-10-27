@@ -50,11 +50,18 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
+
+Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
+
 ### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
 
 A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
 By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+
 ## 🛠 Maintenance
 
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
