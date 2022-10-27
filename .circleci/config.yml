@@ -101,7 +101,7 @@ commands:
             sccache --version
       - restore_cache:
           keys:
-            - sccache-<< parameters.manifest-directory >>-{{ .Environment.CIRCLE_JOB }}-linux-amd
+            - sccache-{{ .Environment.CIRCLE_JOB }}-linux-amd
           paths:
             - ~/.cache/sccache
   linux_arm_install_baseline:
@@ -289,7 +289,9 @@ commands:
           steps:
             - save_cache:
                 name: Save sccache
-                key: sccache-<< parameters.manifest-directory >>-{{ .Environment.CIRCLE_JOB }}-linux-amd
+                key: sccache-{{ .Environment.CIRCLE_JOB }}-linux-amd
+                paths:
+                  - ~/.cache/sccache
 jobs:
   lint:
     environment:
