@@ -1659,6 +1659,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "forbid_anonymous_oeprations_rhai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4674,7 +4687,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
-name = "supergraph_sdl"
+name = "supergraph-sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
