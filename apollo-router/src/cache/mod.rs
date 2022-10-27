@@ -75,11 +75,7 @@ where
                 drop(locked_wait_map);
 
                 if let Some(value) = self.storage.get(key).await {
-                    // Lock the wait map to prevent more subscribers racing with our send
-                    // notification
-                    let mut locked_wait_map = self.wait_map.lock().await;
-                    let _ = locked_wait_map.remove(key);
-                    let _ = sender.send(value.clone());
+                    self.send(sender, key, value.clone()).await;
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -102,11 +98,11 @@ where
         self.storage.insert(key, value.clone()).await;
     }
 
-    async fn send(&self, sender: broadcast::Sender<V>, key: K, value: V) {
+    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
         let mut locked_wait_map = self.wait_map.lock().await;
-        let _ = locked_wait_map.remove(&key);
+        let _ = locked_wait_map.remove(key);
         let _ = sender.send(value);
     }
 }
@@ -162,7 +158,7 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.send(sender, key, value).await;
+            cache.send(sender, &key, value).await;
         }
     }
 
@@ -173,7 +169,7 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            cache.send(sender, key, value).await;
+            cache.send(sender, &key, value).await;
         }
     }
 }
