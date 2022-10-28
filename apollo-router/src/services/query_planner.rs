@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 
 use crate::graphql;
@@ -42,7 +43,7 @@ pub(crate) struct Response {
 }
 
 /// Query, QueryPlan and Introspection data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerContent {
     Plan { plan: Arc<QueryPlan> },
     Introspection { response: Box<graphql::Response> },

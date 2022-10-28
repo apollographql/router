@@ -8,6 +8,8 @@ use std::collections::HashSet;
 use apollo_parser::ast;
 use derivative::Derivative;
 use graphql::Error;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
@@ -24,7 +26,7 @@ use crate::*;
 pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative, Default)]
+#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct Query {
     string: String,
@@ -101,7 +103,9 @@ impl Query {
                     operation
                         .variables
                         .iter()
-                        .filter_map(|(k, (_, opt))| opt.as_ref().map(|v| (k, v)))
+                        .filter_map(|(k, Variable { default_value, .. })| {
+                            default_value.as_ref().map(|v| (k, v))
+                        })
                         .chain(variables.iter())
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect()
@@ -776,19 +780,27 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, (ty, default_value))| {
-                let value = request
-                    .variables
-                    .get(*name)
-                    .or(default_value.as_ref())
-                    .unwrap_or(&Value::Null);
-                ty.validate_input_value(value, schema).err().map(|_| {
-                    FetchError::ValidationInvalidTypeVariable {
-                        name: name.to_string(),
-                    }
-                    .to_graphql_error(None)
-                })
-            })
+            .filter_map(
+                |(
+                    name,
+                    Variable {
+                        field_type: ty,
+                        default_value,
+                    },
+                )| {
+                    let value = request
+                        .variables
+                        .get(*name)
+                        .or(default_value.as_ref())
+                        .unwrap_or(&Value::Null);
+                    ty.validate_input_value(value, schema).err().map(|_| {
+                        FetchError::ValidationInvalidTypeVariable {
+                            name: name.to_string(),
+                        }
+                        .to_graphql_error(None)
+                    })
+                },
+            )
             .collect::<Vec<_>>();
 
         if errors.is_empty() {
@@ -825,7 +837,7 @@ impl Query {
         self.operation(operation_name).and_then(|op| {
             op.variables
                 .get(variable_name)
-                .and_then(|(_, value)| value.as_ref())
+                .and_then(|Variable { default_value, .. }| default_value.as_ref())
         })
     }
 
@@ -854,12 +866,18 @@ struct FormatParameters<'a> {
     schema: &'a Schema,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
-    variables: HashMap<ByteString, (FieldType, Option<Value>)>,
+    variables: HashMap<ByteString, Variable>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Variable {
+    field_type: FieldType,
+    default_value: Option<Value>,
 }
 
 impl Operation {
@@ -926,7 +944,10 @@ impl Operation {
 
                 Ok((
                     ByteString::from(name),
-                    (ty, parse_default_value(&definition)),
+                    Variable {
+                        field_type: ty,
+                        default_value: parse_default_value(&definition),
+                    },
                 ))
             })
             .collect::<Result<_, _>>()?;

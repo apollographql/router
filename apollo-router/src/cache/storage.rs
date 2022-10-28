@@ -1,6 +1,5 @@
 use std::fmt;
 use std::hash::Hash;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use lru::LruCache;
@@ -11,10 +10,15 @@ use redis::RedisWrite;
 use redis::ToRedisArgs;
 use redis_cluster_async::Client;
 use redis_cluster_async::Connection;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::Mutex;
 
 pub(crate) trait KeyType: Clone + fmt::Debug + Hash + Eq + Send + Sync {}
-pub(crate) trait ValueType: Clone + fmt::Debug + Send + Sync + FromStr {}
+pub(crate) trait ValueType:
+    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned
+{
+}
 
 // Blanket implementation which satisfies the compiler
 impl<K> KeyType for K
@@ -28,7 +32,7 @@ where
 // Blanket implementation which satisfies the compiler
 impl<V> ValueType for V
 where
-    V: Clone + fmt::Debug + Send + Sync + FromStr,
+    V: Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned,
 {
     // Nothing to implement, since V already supports the other traits.
     // It has the functions it needs already
@@ -207,7 +211,7 @@ impl RedisCacheStorage {
     async fn get<K: KeyType, V: ValueType>(&self, key: RedisKey<K>) -> Option<RedisValue<V>> {
         tracing::info!("GETTING FROM REDIS: {:?}", key);
         let mut guard = self.inner.lock().await;
-        guard.get(key.0).await.ok()
+        guard.get(key).await.ok()
         // guard.get(key).await.ok()
     }
 

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use apollo_parser::ast;
+use serde::{Deserialize, Serialize};
 
 use crate::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Fragments {
     map: HashMap<String, Fragment>,
 }
@@ -127,7 +128,7 @@ impl Fragments {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct Fragment {
     pub(crate) type_condition: String,
     pub(crate) selection_set: Vec<Selection>,

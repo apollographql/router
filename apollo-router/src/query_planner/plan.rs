@@ -15,7 +15,7 @@ use crate::json_ext::Value;
 use crate::*;
 
 /// Query planning options.
-#[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
+#[derive(Clone, Eq, Hash, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
     pub(crate) enable_deduplicate_variables: bool,
@@ -27,7 +27,7 @@ pub(crate) struct QueryPlanOptions {
 pub(crate) type QueryKey = (String, Option<String>);
 
 /// A plan for a given GraphQL query
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub(crate) usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,

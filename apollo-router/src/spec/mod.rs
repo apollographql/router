@@ -15,10 +15,12 @@ pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
 pub(crate) use schema::Schema;
 pub(crate) use selection::*;
+use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 
 /// GraphQL parsing errors.
-#[derive(Error, Debug, Display, Clone)]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) enum SpecError {
     /// selection processing recursion limit exceeded

@@ -167,12 +167,12 @@ mod tests {
     use mockall::mock;
     use mockall::predicate::*;
     use query_planner::QueryPlan;
-    use router_bridge::planner::PlanErrors;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
+    use crate::error::PlanErrors;
     use crate::query_planner::QueryPlanOptions;
 
     mock! {
