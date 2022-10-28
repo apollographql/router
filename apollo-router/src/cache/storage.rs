@@ -155,7 +155,8 @@ where
     where
         W: ?Sized + RedisWrite,
     {
-        out.write_arg_fmt(self);
+        let v = serde_json::to_vec(&self.0).unwrap();
+        out.write_arg(&v);
     }
 }
 
@@ -179,7 +180,14 @@ where
                     "the data is the wrong type",
                 )))
             }
-            _ => Err(redis::RedisError::from((
+            redis::Value::Data(v) => serde_json::from_slice(v).map(RedisValue).map_err(|e| {
+                redis::RedisError::from((
+                    redis::ErrorKind::TypeError,
+                    "can't deserialize from JSON",
+                    e.to_string(),
+                ))
+            }),
+            res => Err(redis::RedisError::from((
                 redis::ErrorKind::TypeError,
                 "the data is the wrong type",
             ))),
@@ -218,10 +226,10 @@ impl RedisCacheStorage {
     async fn insert<K: KeyType, V: ValueType>(&self, key: RedisKey<K>, value: RedisValue<V>) {
         tracing::info!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
         let mut guard = self.inner.lock().await;
-        guard
-            .set::<RedisKey<K>, RedisValue<V>, RedisValue<V>>(key, value)
-            .await
-            .ok();
+        let r = guard
+            .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+            .await; // .ok();
+        println!("insert result {:?}", r);
     }
 
     #[cfg(test)]
