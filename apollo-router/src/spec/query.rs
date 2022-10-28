@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use apollo_parser::ast;
 use derivative::Derivative;
 use graphql::Error;
+use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -35,7 +36,56 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<(Path, String), Query>,
+    pub(crate) subselections: HashMap<SubSelection, Query>,
+}
+
+#[derive(Debug, Derivative, Default)]
+#[derivative(PartialEq, Hash, Eq)]
+pub(crate) struct SubSelection {
+    pub(crate) path: Path,
+    pub(crate) subselection: String,
+}
+
+impl Serialize for SubSelection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = format!("{}|{}", self.path, self.subselection);
+        serializer.serialize_str(&s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SubSelectionVisitor)
+    }
+}
+
+struct SubSelectionVisitor;
+impl<'de> Visitor<'de> for SubSelectionVisitor {
+    type Value = SubSelection;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a string containing the path and the subselection separated by |")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if let Some((path, subselection)) = s.split_once("|") {
+            Ok(SubSelection {
+                path: Path::from(path),
+                subselection: subselection.to_string(),
+            })
+        } else {
+            Err(E::custom("invalid subselection"))
+        }
+    }
 }
 
 impl Query {
@@ -58,10 +108,10 @@ impl Query {
             if is_deferred {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
-                    match self.subselections.get(&(
-                        response.path.clone().unwrap_or_default(),
-                        subselection.clone(),
-                    )) {
+                    match self.subselections.get(&SubSelection {
+                        path: response.path.clone().unwrap_or_default(),
+                        subselection: subselection.clone(),
+                    }) {
                         Some(subselection_query) => {
                             let mut output = Object::default();
                             let operation = &subselection_query.operations[0];

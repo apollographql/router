@@ -12,6 +12,7 @@ use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::spec::query::SubSelection;
 use crate::*;
 
 /// Query planning options.
@@ -190,7 +191,7 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> Result<HashMap<(Path, String), Query>, QueryPlannerError> {
+    ) -> Result<HashMap<SubSelection, Query>, QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -203,7 +204,7 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
-        subselections: &mut HashMap<(Path, String), Query>,
+        subselections: &mut HashMap<SubSelection, Query>,
     ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
@@ -228,8 +229,13 @@ impl PlanNode {
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
-                    subselections
-                        .insert((primary_path, primary_subselection.clone()), sub_selection);
+                    subselections.insert(
+                        SubSelection {
+                            path: primary_path,
+                            subselection: primary_subselection.clone(),
+                        },
+                        sub_selection,
+                    );
                 }
 
                 deferred.iter().try_fold(subselections, |subs, current| {
@@ -239,7 +245,13 @@ impl PlanNode {
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
-                        subs.insert((current.path.clone(), subselection.clone()), sub_selection);
+                        subs.insert(
+                            SubSelection {
+                                path: current.path.clone(),
+                                subselection: subselection.clone(),
+                            },
+                            sub_selection,
+                        );
                     }
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(
