@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains many examples on how to use and extend the Apollo Router. Each folder may contain `rhai` or `rust`, which dictates the kind of plugin it is. For example, [the forbid anonymous operations example](./forbid-anonymous-operations/) has both a Rhai and Rust version available, whereas [the logging example](./logging) is only demonstrated in Rhai. For those without a subfolder, it is intended to be a config-only example, such as the [telemetry samples](./telemetry).
+This directory contains many examples on how to use and extend the Apollo Router. Each folder may contain `rhai` and/or `rust`, which dictates the kind of plugin it is. For example, [the forbid anonymous operations example](./forbid-anonymous-operations/) has both a Rhai and Rust version available, whereas [the logging example](./logging) is only demonstrated in Rhai. For those without a subfolder, it is intended to be a config-only example, such as the [telemetry samples](./telemetry).
 
 Make sure to look at the docs for:
 
