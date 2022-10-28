@@ -55,23 +55,6 @@ where
             None => {
                 let (sender, _receiver) = broadcast::channel(1);
 
-                locked_wait_map.insert(key.clone(), sender.clone());
-
-                // we must not hold a lock over the wait map while we are waiting for a value from the
-                // cache. This way, other tasks can come and register interest in the same key, or
-                // request other keys independently
-                drop(locked_wait_map);
-
-                if let Some(value) = self.storage.get(key).await {
-                    let mut locked_wait_map = self.wait_map.lock().await;
-                    let _ = locked_wait_map.remove(key);
-                    let _ = sender.send(value.clone());
-
-                    return Entry {
-                        inner: EntryInner::Value(value),
-                    };
-                }
-
                 let k = key.clone();
                 // when _drop_signal is dropped, either by getting out of the block, returning
                 // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -83,6 +66,21 @@ where
                     let mut locked_wait_map = wait_map.lock().await;
                     let _ = locked_wait_map.remove(&k);
                 });
+
+                locked_wait_map.insert(key.clone(), sender.clone());
+
+                // we must not hold a lock over the wait map while we are waiting for a value from the
+                // cache. This way, other tasks can come and register interest in the same key, or
+                // request other keys independently
+                drop(locked_wait_map);
+
+                if let Some(value) = self.storage.get(key).await {
+                    self.send(sender, key, value.clone()).await;
+
+                    return Entry {
+                        inner: EntryInner::Value(value),
+                    };
+                }
 
                 Entry {
                     inner: EntryInner::First {
@@ -100,9 +98,12 @@ where
         self.storage.insert(key, value.clone()).await;
     }
 
-    pub(crate) async fn remove_wait(&self, key: &K) {
+    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
+        // Lock the wait map to prevent more subscribers racing with our send
+        // notification
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
+        let _ = sender.send(value);
     }
 }
 
@@ -157,8 +158,7 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.remove_wait(&key).await;
-            let _ = sender.send(value);
+            cache.send(sender, &key, value).await;
         }
     }
 
@@ -169,8 +169,7 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            let _ = sender.send(value);
-            cache.remove_wait(&key).await;
+            cache.send(sender, &key, value).await;
         }
     }
 }
