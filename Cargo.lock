@@ -182,7 +182,7 @@ dependencies = [
  "maplit",
  "mediatype",
  "memchr",
- "miette 5.3.0",
+ "miette 5.4.1",
  "mime",
  "mockall",
  "multimap",
@@ -933,6 +933,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "terminal_size",
+ "unicode-width",
  "winapi 0.3.9",
 ]
 
@@ -2255,7 +2256,7 @@ version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7baab56125e25686df467fe470785512329883aab42696d661247aca2a2896e4"
 dependencies = [
- "console 0.12.0",
+ "console 0.15.2",
  "lazy_static",
  "number_prefix",
  "regex",
@@ -2694,13 +2695,13 @@ dependencies = [
 
 [[package]]
 name = "miette"
-version = "5.3.0"
+version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a28d6092d7e94a90bb9ea8e6c26c99d5d112d49dda2afdb4f7ea8cf09e1a5a6d"
+checksum = "7a24c4b4063c21e037dffb4de388ee85e400bff299803aba9513d9c52de8116b"
 dependencies = [
  "atty",
  "backtrace",
- "miette-derive 5.3.0",
+ "miette-derive 5.4.1",
  "once_cell",
  "owo-colors",
  "supports-color",
@@ -2725,9 +2726,9 @@ dependencies = [
 
 [[package]]
 name = "miette-derive"
-version = "5.3.0"
+version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f2485ed7d1fe80704928e3eb86387439609bd0c6bb96db8208daa364cfd1e09"
+checksum = "827d18edee5d43dc309eb0ac565f2b8e2fdc89b986b2d929e924a0f6e7f23835"
 dependencies = [
  "proc-macro2",
  "quote",
