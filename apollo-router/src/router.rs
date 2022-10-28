@@ -228,10 +228,7 @@ impl SchemaSource {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
                             Err(e) => {
-                                tracing::error!(
-                                    "error downloading the schema from Uplink: {:?}",
-                                    e
-                                );
+                                tracing::error!("{}", e);
                                 None
                             }
                         })
