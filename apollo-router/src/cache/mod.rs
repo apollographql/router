@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
@@ -49,18 +50,22 @@ where
                 // Register interest in key
                 let receiver = waiter.subscribe();
                 Entry {
-                    inner: EntryInner::Receiver { receiver },
+                    inner: EntryInner::Receiver {
+                        key: key.clone(),
+                        receiver,
+                        cache: self.clone(),
+                    },
                 }
             }
             None => {
                 let (sender, _receiver) = broadcast::channel(1);
 
-                let k = key.clone();
                 // when _drop_signal is dropped, either by getting out of the block, returning
                 // the error from ready_oneshot or by cancellation, the drop_sentinel future will
                 // return with Err(), then we remove the entry from the wait map
                 let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                 let wait_map = self.wait_map.clone();
+                let k = key.clone();
                 tokio::task::spawn(async move {
                     let _ = drop_sentinel.await;
                     let mut locked_wait_map = wait_map.lock().await;
@@ -118,7 +123,9 @@ enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
+        key: K,
         receiver: broadcast::Receiver<V>,
+        cache: DeduplicatingCache<K, V>,
     },
     Value(V),
 }
@@ -142,8 +149,26 @@ where
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => {
-                receiver.recv().await.map_err(|_| EntryError::Closed)
+            EntryInner::Receiver {
+                key,
+                mut receiver,
+                cache,
+            } => {
+                // Very Important Note:
+                // It is possible to get here and find the sender has gone away. If that happens,
+                // you'll get a Close error when you call recv().
+                // However, it's fairly safe to assume that if the sender has closed, then the
+                // value we are looking for is in the cache. Let's try and grab it from there
+                // before we return failure.
+                let res = receiver.recv().await;
+                if let Err(e) = &res {
+                    if matches!(e, RecvError::Closed) {
+                        if let Some(value) = cache.storage.get(&key).await {
+                            return Ok(value);
+                        }
+                    }
+                }
+                res.map_err(|_| EntryError::Closed)
             }
             _ => Err(EntryError::IsFirst),
         }
