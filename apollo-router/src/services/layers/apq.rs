@@ -65,7 +65,7 @@ impl APQLayer {
     */
 
     pub(crate) async fn apq_request(
-        &self,
+        &mut self,
         mut request: SupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         let maybe_query_hash: Option<Vec<u8>> = request
@@ -147,7 +147,7 @@ where
         let cache = self.cache.clone();
         AsyncCheckpointService::new(
             move |mut req| {
-                let cache = cache.clone();
+                let mut cache = cache.clone();
                 Box::pin(async move {
                     let maybe_query_hash: Option<Vec<u8>> = req
                         .supergraph_request

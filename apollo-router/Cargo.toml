@@ -59,7 +59,7 @@ console-subscriber = { version = "0.1.8", optional = true }
 ctor = "0.1.23"
 dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
-deduplicate = "0.1.2"
+deduplicate = "0.1.3"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",

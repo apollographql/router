@@ -109,7 +109,7 @@ pub(super) async fn handle_post(
 
 async fn run_graphql_request<RS>(
     service: RS,
-    apq: APQLayer,
+    mut apq: APQLayer,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse
 where
