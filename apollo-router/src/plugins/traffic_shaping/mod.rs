@@ -23,6 +23,7 @@ use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::util::Either;
+use tower::util::Oneshot;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -179,13 +180,13 @@ impl Plugin for TrafficShaping {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
-            .layer(TimeoutLayer::new(
+            /*.layer(TimeoutLayer::new(
                 self.config
                     .router
                     .as_ref()
                     .and_then(|r| r.timeout)
                     .unwrap_or(DEFAULT_TIMEOUT),
-            ))
+            ))*/
             .option_layer(self.rate_limit_router.clone())
             .service(service)
             .boxed()
@@ -231,9 +232,8 @@ impl TrafficShaping {
                              + 'static),
                     >,
                 >,
-                tower::util::Either<
-                    rate::future::ResponseFuture<<S as Service<subgraph::Request>>::Future>,
-                    <S as Service<subgraph::Request>>::Future,
+                timeout::future::ResponseFuture<
+                    Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, subgraph::Request>,
                 >,
             >,
             <S as Service<subgraph::Request>>::Future,
@@ -270,11 +270,11 @@ impl TrafficShaping {
             .option_layer(config.deduplicate_query.unwrap_or_default().then(
               QueryDeduplicationLayer::default
             ))
-                /*.layer(TimeoutLayer::new(
+                .layer(TimeoutLayer::new(
                     config
                     .timeout
                     .unwrap_or(DEFAULT_TIMEOUT),
-                ))*/
+                ))
                 .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
@@ -609,20 +609,5 @@ mod test {
             .next_response()
             .await
             .unwrap();
-    }
-
-    // This test is useful for supergraph service
-    #[tokio::test]
-    async fn test_is_deduplicated_query_enabled() {
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            plugins:
-                apollo.traffic_shaping:
-                    all:
-                        deduplicate_query: true
-        "#,
-        )
-        .unwrap();
-        assert!(is_deduplicate_query_enabled(&config));
     }
 }
