@@ -177,24 +177,6 @@ impl Plugin for TrafficShaping {
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
         })
     }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
-            /*.layer(TimeoutLayer::new(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.timeout)
-                    .unwrap_or(DEFAULT_TIMEOUT),
-            ))*/
-            .option_layer(self.rate_limit_router.clone())
-            .service(service)
-            .boxed()
-    }
-
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        service
-    }
 }
 
 impl TrafficShaping {
@@ -204,6 +186,40 @@ impl TrafficShaping {
     ) -> Option<T> {
         let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
         merged_subgraph_config.or_else(|| all_config.cloned())
+    }
+
+    pub(crate) fn supergraph_service_internal<S>(
+        &self,
+        service: S,
+    ) -> impl Service<
+        supergraph::Request,
+        Response = supergraph::Response,
+        Error = BoxError,
+        Future = timeout::future::ResponseFuture<
+            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, supergraph::Request>,
+        >,
+    > + Clone
+           + Send
+           + Sync
+           + 'static
+    where
+        S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <S as Service<supergraph::Request>>::Future: std::marker::Send,
+    {
+        ServiceBuilder::new()
+            .layer(TimeoutLayer::new(
+                self.config
+                    .router
+                    .as_ref()
+                    .and_then(|r| r.timeout)
+                    .unwrap_or(DEFAULT_TIMEOUT),
+            ))
+            .option_layer(self.rate_limit_router.clone())
+            .service(service)
     }
 
     pub(crate) fn subgraph_service_internal<S>(
