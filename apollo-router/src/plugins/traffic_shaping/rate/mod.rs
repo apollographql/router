@@ -1,7 +1,7 @@
 //! Limit the rate at which requests are processed.
 
 mod error;
-mod future;
+pub(crate) mod future;
 mod layer;
 #[allow(clippy::module_inception)]
 mod rate;

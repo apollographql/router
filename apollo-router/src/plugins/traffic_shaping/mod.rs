@@ -7,12 +7,13 @@
 //! * Rate limiting
 //!
 
-pub(crate) mod deduplication;
+mod deduplication;
 mod rate;
 mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -21,10 +22,13 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::Either;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
@@ -187,7 +191,65 @@ impl Plugin for TrafficShaping {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        service
+    }
+}
+
+impl TrafficShaping {
+    fn merge_config<T: Merge + Clone>(
+        all_config: Option<&T>,
+        subgraph_config: Option<&T>,
+    ) -> Option<T> {
+        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
+        merged_subgraph_config.or_else(|| all_config.cloned())
+    }
+
+    pub(crate) fn subgraph_service_internal<S>(
+        &self,
+        name: &str,
+        service: S,
+    ) -> impl Service<
+        subgraph::Request,
+        Response = subgraph::Response,
+        Error = BoxError,
+        Future = tower::util::Either<
+            tower::util::Either<
+                Pin<
+                    Box<
+                        (dyn futures::Future<
+                            Output = std::result::Result<
+                                subgraph::Response,
+                                Box<
+                                    (dyn std::error::Error
+                                         + std::marker::Send
+                                         + std::marker::Sync
+                                         + 'static),
+                                >,
+                            >,
+                        > + std::marker::Send
+                             + 'static),
+                    >,
+                >,
+                tower::util::Either<
+                    rate::future::ResponseFuture<<S as Service<subgraph::Request>>::Future>,
+                    <S as Service<subgraph::Request>>::Future,
+                >,
+            >,
+            <S as Service<subgraph::Request>>::Future,
+        >,
+    > + Clone
+           + Send
+           + Sync
+           + 'static
+    where
+        S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <S as Service<subgraph::Request>>::Future: std::marker::Send,
+    {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -204,12 +266,15 @@ impl Plugin for TrafficShaping {
                     })
                     .clone()
             });
-            ServiceBuilder::new()
-                .layer(TimeoutLayer::new(
+            Either::A(ServiceBuilder::new()
+            .option_layer(config.deduplicate_query.unwrap_or_default().then(
+              QueryDeduplicationLayer::default
+            ))
+                /*.layer(TimeoutLayer::new(
                     config
                     .timeout
                     .unwrap_or(DEFAULT_TIMEOUT),
-                ))
+                ))*/
                 .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
@@ -220,21 +285,10 @@ impl Plugin for TrafficShaping {
                     }
 
                     req
-                })
-                .boxed()
+                }))
         } else {
-            service
+            Either::B(service)
         }
-    }
-}
-
-impl TrafficShaping {
-    fn merge_config<T: Merge + Clone>(
-        all_config: Option<&T>,
-        subgraph_config: Option<&T>,
-    ) -> Option<T> {
-        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
-        merged_subgraph_config.or_else(|| all_config.cloned())
     }
 }
 
@@ -245,15 +299,6 @@ impl TrafficShaping {
             .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
             .unwrap_or_default()
     }
-}
-
-pub(crate) fn is_deduplicate_query_enabled(conf: &Configuration) -> bool {
-    conf.plugins()
-        .iter()
-        .find(|(name, _)| name == "apollo.traffic_shaping")
-        .and_then(|(_, shaping)| shaping.get("all"))
-        .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
-        == Some(&serde_json::Value::Bool(true))
 }
 
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
