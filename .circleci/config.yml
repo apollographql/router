@@ -248,11 +248,14 @@ commands:
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
           condition:
-            or:
-              - equal: [linux_amd, << parameters.os >>]
-              - equal: [linux_arm, << parameters.os >>]
+            equal: [linux_amd, << parameters.os >>]
           steps:
             - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=4
+      - when:
+          condition:
+            equal: [linux_arm, << parameters.os >>]
+          steps:
+            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=4
       - when:
           condition:
             equal: [macos, << parameters.os >>]
