@@ -250,7 +250,7 @@ commands:
           condition:
             equal: [linux_amd, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
+            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
       - when:
           condition:
             equal: [linux_arm, << parameters.os >>]
