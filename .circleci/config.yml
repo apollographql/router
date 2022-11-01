@@ -527,8 +527,8 @@ workflows:
 
       - test_updated
       - test:
-        requires:
-          - lint
+          requires:
+            - lint
           matrix:
             parameters:
               platform:
