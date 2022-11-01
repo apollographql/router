@@ -525,7 +525,9 @@ workflows:
       #       parameters:
       #         platform: [linux]
 
-      - test_updated
+      - test_updated:
+          requires:
+            - lint
       - test:
           requires:
             - lint
