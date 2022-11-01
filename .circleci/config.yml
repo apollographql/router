@@ -17,11 +17,11 @@ executors:
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.medium
+    resource_class: arm.large
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.large
+    resource_class: arm.xlarge
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -527,6 +527,8 @@ workflows:
 
       - test_updated
       - test:
+        requires:
+          - lint
           matrix:
             parameters:
               platform:
