@@ -45,7 +45,7 @@ where
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     inner: Arc<Mutex<LruCache<K, V>>>,
-    redis: RedisCacheStorage,
+    redis: Option<RedisCacheStorage>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -56,40 +56,37 @@ where
     pub(crate) async fn new(max_capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: RedisCacheStorage::new().await,
+            redis: None, //Some(RedisCacheStorage::new().await),
         }
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        // FORCE TO GET FROM REDIS
-        let inner_key = RedisKey(key.clone());
-        match self.redis.get::<K, V>(inner_key).await {
-            Some(v) => Some(v.0),
-            None => None,
-        }
-        /*
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
             Some(v) => Some(v.clone()),
             None => {
-                let inner_key = RedisKey(key.clone());
-                match self.redis.get::<K, V>(inner_key).await {
-                    Some(v) => {
-                        guard.put(key.clone(), v.0.clone());
-                        Some(v.0)
+                if let Some(redis) = self.redis.as_ref() {
+                    let inner_key = RedisKey(key.clone());
+                    match redis.get::<K, V>(inner_key).await {
+                        Some(v) => {
+                            guard.put(key.clone(), v.0.clone());
+                            Some(v.0)
+                        }
+                        None => None,
                     }
-                    None => None,
+                } else {
+                    None
                 }
             }
         }
-        */
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.redis
-            .insert(RedisKey(key.clone()), RedisValue(value.clone()))
-            .await;
-        self.inner.lock().await.put(key, value);
+        self.inner.lock().await.put(key.clone(), value.clone());
+
+        if let Some(redis) = self.redis.as_ref() {
+            redis.insert(RedisKey(key), RedisValue(value)).await;
+        }
     }
 
     #[cfg(test)]

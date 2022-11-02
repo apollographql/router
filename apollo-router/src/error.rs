@@ -259,6 +259,12 @@ impl From<router_bridge::planner::PlanErrors> for QueryPlannerError {
     }
 }
 
+impl From<PlanErrors> for QueryPlannerError {
+    fn from(errors: PlanErrors) -> Self {
+        QueryPlannerError::PlanningErrors(errors.into())
+    }
+}
+
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
         QueryPlannerError::JoinError(err.to_string())
