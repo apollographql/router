@@ -490,7 +490,10 @@ mod test {
         });
 
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service)
             .oneshot(request)
             .await
             .unwrap();
@@ -545,17 +548,26 @@ mod test {
         let test_service = MockSubgraph::new(HashMap::new());
 
         let _response = plugin
-            .subgraph_service("test", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
         let _response = plugin
-            .subgraph_service("test", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .expect_err("should be in error due to a timeout and rate limit");
         let _response = plugin
-            .subgraph_service("another", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("another", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
@@ -565,7 +577,10 @@ mod test {
             .await
             .is_err());
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
@@ -589,17 +604,25 @@ mod test {
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockSupergraphService::new();
 
-            mock_service.expect_call().times(0..2).returning(move |_| {
-                Ok(SupergraphResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .build()
-                    .unwrap())
+            println!("cloning the supergraph");
+            mock_service.expect_clone().returning(|| {
+                let mut mock_service = MockSupergraphService::new();
+                mock_service.expect_call().times(0..2).returning(move |_| {
+                    Ok(SupergraphResponse::fake_builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .build()
+                        .unwrap())
+                });
+                mock_service
             });
             mock_service
         });
 
         let _response = plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
@@ -608,7 +631,10 @@ mod test {
             .unwrap();
 
         assert!(plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
@@ -618,7 +644,10 @@ mod test {
             .await
             .is_err());
         let _response = plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
