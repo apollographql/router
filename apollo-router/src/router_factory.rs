@@ -30,6 +30,7 @@ use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
 #[derive(Clone)]
+/// A path and a handler to be exposed as a web_endpoint for plugins
 pub struct Endpoint {
     pub(crate) path: String,
     // Plugins need to be Send + Sync
@@ -46,6 +47,7 @@ impl std::fmt::Debug for Endpoint {
 }
 
 impl Endpoint {
+    /// Creates an Endpoint given a path and a Boxed Service
     pub fn new(path: String, handler: transport::BoxService) -> Self {
         Self {
             path,
