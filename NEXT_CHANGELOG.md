@@ -78,6 +78,12 @@ By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/
 
 ## 🛠 Maintenance
 
+### Apply tower best practice to inner service cloning [PR #2030](https://github.com/apollographql/router/pull/2030))
+
+Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
+
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
 
 The file is becoming large and hard to modify.
