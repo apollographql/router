@@ -54,6 +54,13 @@ Example of logs in JSON:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
 
+### Reload the configuration when receiving the SIGHUP signal [Issue #35](https://github.com/apollographql/router/issues/35))
+
+This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
+and only with the configuration file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
+
 ## 🐛 Fixes
 
 ### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
@@ -75,6 +82,16 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
 By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+
+### Exports a missing strut (`router_factory::Endpoint`) that was preventing the `web_endpoints` trait from being implemented by Plugins
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
+
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+
+When validating variables, we should use default values for object fields if applicable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
 ## 🛠 Maintenance
 
