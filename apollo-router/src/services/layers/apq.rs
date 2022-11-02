@@ -71,14 +71,16 @@ impl APQLayer {
                 if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                     tracing::trace!("apq: cache insert");
                     let _ = request.context.insert("persisted_query_hit", false);
-                    self.cache.insert(query_hash, query).await;
+                    self.cache.insert(format!("apq|{query_hash}"), query).await;
                 } else {
                     tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                 }
                 Ok(request)
             }
             (Some((apq_hash, _)), _) => {
-                if let Ok(cached_query) = self.cache.get(&apq_hash).await.get().await {
+                if let Ok(cached_query) =
+                    self.cache.get(&format!("apq|{apq_hash}")).await.get().await
+                {
                     let _ = request.context.insert("persisted_query_hit", true);
                     tracing::trace!("apq: cache hit");
                     request.supergraph_request.body_mut().query = Some(cached_query);
