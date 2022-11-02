@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use static_assertions::assert_impl_all;
 
 use crate::graphql;

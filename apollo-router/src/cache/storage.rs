@@ -194,6 +194,7 @@ where
             res => Err(redis::RedisError::from((
                 redis::ErrorKind::TypeError,
                 "the data is the wrong type",
+                format!("{:?}", res),
             ))),
         }
     }
@@ -234,12 +235,12 @@ impl RedisCacheStorage {
         println!("insert result {:?}", r);
     }
 
-    #[cfg(test)]
+    /*#[cfg(test)]
     async fn len(&self) -> usize {
         let mut guard = self.inner.lock().await;
         redis::cmd("DBSIZE")
             .query_async(&mut *guard)
             .await
             .expect("DBSIZE should work")
-    }
+    }*/
 }

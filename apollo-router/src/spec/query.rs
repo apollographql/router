@@ -1,6 +1,7 @@
 //! Query processing.
 //!
 //! Parsing, formatting and manipulation of queries.
+#![allow(clippy::mutable_key_type)]
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -77,7 +78,7 @@ impl<'de> Visitor<'de> for SubSelectionVisitor {
     where
         E: serde::de::Error,
     {
-        if let Some((path, subselection)) = s.split_once("|") {
+        if let Some((path, subselection)) = s.split_once('|') {
             Ok(SubSelection {
                 path: Path::from(path),
                 subselection: subselection.to_string(),

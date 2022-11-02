@@ -1,6 +1,7 @@
+use apollo_parser::ast;
 use apollo_parser::ast::Value;
-use apollo_parser::ast::{self};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 
 use crate::json_ext::Object;

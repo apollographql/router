@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use apollo_parser::ast;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::*;
 
