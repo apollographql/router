@@ -2,7 +2,7 @@
 title: Logging in the Apollo Router
 ---
 
-import { Link } from 'gatsby';
+import { Link } from "gatsby";
 
 The Apollo Router accepts a command-line argument to set its log level:
 
@@ -40,10 +40,10 @@ The router also accepts an `APOLLO_ROUTER_LOG` environment variable with the sam
 
 The Apollo Router supports two logging formats:
 
-* [Basic logging](#basic-logging-via-shell), primarily for local development
-* [JSON-formatted logging](#json-formatted-logging), for compatibility with searchable logging tools like Google Cloud Logging
+- [Basic logging](#basic-logging-via-shell), primarily for local development
+- [JSON-formatted logging](#json-formatted-logging), for compatibility with searchable logging tools like Google Cloud Logging
 
-The router uses basic logging whenever an interactive shell session is attached, and it uses JSON-formatted logging otherwise (e.g., in CI and deployed environments).
+The router uses basic logging whenever an interactive shell session is attached, and it uses JSON-formatted logging otherwise (e.g., in CI and deployed environments). You can also enforce a specific format in configuration.
 
 ### Basic logging via shell
 
@@ -64,6 +64,33 @@ JSON-formatted logging provides compatibility with common searchable logging too
 {"timestamp":"2022-03-18T11:46:41.985121Z","level":"INFO","fields":{"message":"Starting Apollo Router"},"target":"apollo_router"}
 {"timestamp":"2022-03-18T11:46:42.171173Z","level":"INFO","fields":{"message":"Listening on http://127.0.0.1:4000 🚀"},"target":"apollo_router"}
 {"timestamp":"2022-03-18T11:46:43.453993Z","level":"INFO","fields":{"message":"Stopped"},"target":"apollo_router"}
+```
+
+## Basic configuration
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    format: json # By default it's "pretty" if you are in an interactive shell session
+    display_filename: true # Display filename where the log is coming from. Default: true
+    display_line_number: false # Display line number in the file where the log is coming from. Default: true
+    router:
+      request:
+        enabled: false # Display router's request payload with a debug log (default: false)
+      response:
+        mode: on_error # Display router's response payload on the router with a debug log only when there is an error (default: always_off). Could be always_on|always_off|on_error.
+    subgraph:
+      all: # For all subgraphs
+        request:
+          enabled: true # Display subgraph's request payload with a debug log (default: false)
+        response:
+          mode: always_off # Display subgraph's response payload on the router with a debug log only when there is an error (default: always_off). Could be always_on|always_off|on_error.
+      subgraphs:
+        accounts: # Only for subgraph named "accounts"
+          request:
+            enabled: false # Display "accounts" subgraph's request payload with a debug log (default: false)
+          response:
+            mode: always_on
 ```
 
 ## Advanced configuration

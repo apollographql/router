@@ -221,8 +221,7 @@ impl Plugin for Telemetry {
                     .map(|resp_conf| resp_conf.is_enabled_from_status(&resp.response.status()))
                     .unwrap_or_default();
                 if log_response {
-                    // TODO switch to debug
-                    ::tracing::info!("Router response headers: {:?}", resp.response.headers());
+                    ::tracing::debug!("Router response headers: {:?}", resp.response.headers());
                 }
 
                 resp.map_stream(move |gql_response| {
@@ -231,8 +230,7 @@ impl Plugin for Telemetry {
                             .map(|resp_conf| resp_conf.is_enabled_from_body(&gql_response))
                             .unwrap_or_default();
                     if log_response {
-                        // TODO switch to debug
-                        ::tracing::info!("Router GraphQL response: {:?}", gql_response)
+                        ::tracing::debug!("Router GraphQL response: {:?}", gql_response)
                     }
                     gql_response
                 })
@@ -259,8 +257,7 @@ impl Plugin for Telemetry {
                         .map(|req_conf| req_conf.enabled)
                         .unwrap_or_default();
                     if log_request {
-                        // TODO switch to debug
-                        ::tracing::info!("Router request: {:?}", req.supergraph_request);
+                        ::tracing::debug!("Router request: {:?}", req.supergraph_request);
                     }
                     req.context.clone()
                 },

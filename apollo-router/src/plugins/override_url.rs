@@ -40,7 +40,6 @@ impl Plugin for OverrideSubgraphUrl {
         let new_url = self.urls.get(subgraph_name).cloned();
         service
             .map_request(move |mut req: SubgraphRequest| {
-                tracing::info!("here is a test");
                 if let Some(new_url) = new_url.clone() {
                     *req.subgraph_request.uri_mut() = new_url;
                 }

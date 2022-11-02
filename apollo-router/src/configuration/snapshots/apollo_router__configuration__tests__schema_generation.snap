@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
 ---
 {
@@ -771,6 +771,167 @@ expression: "&schema"
                   "additionalProperties": false
                 }
               ]
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "logging": {
+          "type": "object",
+          "properties": {
+            "display_filename": {
+              "default": true,
+              "type": "boolean"
+            },
+            "display_line_number": {
+              "default": true,
+              "type": "boolean"
+            },
+            "format": {
+              "description": "Log format",
+              "type": "string",
+              "enum": [
+                "pretty",
+                "json"
+              ]
+            },
+            "router": {
+              "description": "Log configuration at router level",
+              "type": "object",
+              "properties": {
+                "request": {
+                  "description": "Request logging",
+                  "type": "object",
+                  "required": [
+                    "enabled"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "description": "Enable log",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "response": {
+                  "description": "Response logging",
+                  "type": "object",
+                  "required": [
+                    "mode"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "description": "Logging mode",
+                      "type": "string",
+                      "enum": [
+                        "always_off",
+                        "always_on",
+                        "on_error"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "subgraph": {
+              "description": "Log configuration for subgraphs",
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "description": "Request logging",
+                      "type": "object",
+                      "required": [
+                        "enabled"
+                      ],
+                      "properties": {
+                        "enabled": {
+                          "description": "Enable log",
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "response": {
+                      "description": "Response logging",
+                      "type": "object",
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "description": "Logging mode",
+                          "type": "string",
+                          "enum": [
+                            "always_off",
+                            "always_on",
+                            "on_error"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "subgraphs": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "request": {
+                        "description": "Request logging",
+                        "type": "object",
+                        "required": [
+                          "enabled"
+                        ],
+                        "properties": {
+                          "enabled": {
+                            "description": "Enable log",
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "nullable": true
+                      },
+                      "response": {
+                        "description": "Response logging",
+                        "type": "object",
+                        "required": [
+                          "mode"
+                        ],
+                        "properties": {
+                          "mode": {
+                            "description": "Logging mode",
+                            "type": "string",
+                            "enum": [
+                              "always_off",
+                              "always_on",
+                              "on_error"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false,
+                        "nullable": true
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
             }
           },
           "additionalProperties": false,
