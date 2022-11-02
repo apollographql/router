@@ -47,7 +47,7 @@ where
     type Future = ResponseFuture<Oneshot<S, Request>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        return Poll::Ready(Ok(()));
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
