@@ -14,7 +14,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-pub(crate) trait KeyType: Clone + fmt::Debug + Hash + Eq + Send + Sync {}
+pub(crate) trait KeyType:
+    Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
+{
+}
 pub(crate) trait ValueType:
     Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned
 {
@@ -23,7 +26,7 @@ pub(crate) trait ValueType:
 // Blanket implementation which satisfies the compiler
 impl<K> KeyType for K
 where
-    K: Clone + fmt::Debug + Hash + Eq + Send + Sync,
+    K: Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync,
 {
     // Nothing to implement, since K already supports the other traits.
     // It has the functions it needs already
@@ -123,7 +126,7 @@ where
     K: KeyType,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
+        write!(f, "{}", self.0)
     }
 }
 
