@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for dhat based heap profiling [PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+
+[dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Add `trace_id` in logs to identify all logs related to a specific request [Issue #1981](https://github.com/apollographql/router/issues/1981))
 
 It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
@@ -57,11 +63,26 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
+
+Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
+
+### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
+
+The Uplink API returns actionable info in its responses:
+- some error codes indicate an unrecoverable issue, for which the router should not retry the query (example: non-existing graph)
+- it can tell the router when it should retry the query
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
+
 ### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
 
 A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
 By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+
 ## 🛠 Maintenance
 
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
