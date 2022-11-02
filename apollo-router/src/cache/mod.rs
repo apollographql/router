@@ -27,13 +27,13 @@ where
     V: ValueType + 'static,
 {
     pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_CACHE_CAPACITY).await
+        Self::with_capacity(DEFAULT_CACHE_CAPACITY, None).await
     }
 
-    pub(crate) async fn with_capacity(capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity).await,
+            storage: CacheStorage::new(capacity, redis_urls).await,
         }
     }
 
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(1).await;
+        let cache = DeduplicatingCache::with_capacity(1, None).await;
 
         let entry = cache.get(&k).await;
 
@@ -203,7 +203,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(13).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(13, None).await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -225,7 +226,8 @@ mod tests {
 
         mock.expect_retrieve().times(1).return_const(1usize);
 
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(10).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(10, None).await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

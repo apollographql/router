@@ -31,8 +31,12 @@ where
     T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
+    pub(crate) async fn new(
+        delegate: T,
+        plan_cache_limit: usize,
+        redis_urls: Option<Vec<String>>,
+    ) -> CachingQueryPlanner<T> {
+        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit, redis_urls).await);
         Self { cache, delegate }
     }
 }
@@ -226,7 +230,7 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
+        let mut planner = CachingQueryPlanner::new(delegate, 10, None).await;
 
         for _ in 0..5 {
             assert!(planner
@@ -282,7 +286,7 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
+        let mut planner = CachingQueryPlanner::new(delegate, 10, None).await;
 
         for _ in 0..5 {
             assert!(planner

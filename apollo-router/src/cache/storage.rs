@@ -53,10 +53,14 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(max_capacity: usize) -> Self {
+    pub(crate) async fn new(max_capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: None, //Some(RedisCacheStorage::new().await),
+            redis: if let Some(urls) = redis_urls {
+                Some(RedisCacheStorage::new(urls).await)
+            } else {
+                None
+            },
         }
     }
 
@@ -193,10 +197,8 @@ where
 }
 
 impl RedisCacheStorage {
-    async fn new() -> Self {
-        let nodes =
-            vec!["redis://:CzcBquHIjm@redis-redis-cluster-headless.redis.svc.cluster.local:6379"];
-        let client = Client::open(nodes).expect("opening ClusterClient");
+    async fn new(urls: Vec<String>) -> Self {
+        let client = Client::open(urls).expect("opening ClusterClient");
         let connection = client.get_connection().await.expect("got redis connection");
         /*
         let _: () = connection
