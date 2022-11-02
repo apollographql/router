@@ -28,11 +28,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Add support for dhat based heap profiling [PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Add support for dhat based heap profiling [PR #1829](https://github.com/apollographql/router/pull/1829))
 
 [dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
 
 ### Add `trace_id` in logs to identify all logs related to a specific request [Issue #1981](https://github.com/apollographql/router/issues/1981))
 
@@ -94,6 +94,12 @@ When validating variables, we should use default values for object fields if app
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
 ## 🛠 Maintenance
+
+### Apply tower best practice to inner service cloning [PR #2030](https://github.com/apollographql/router/pull/2030))
+
+Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
 
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
 
