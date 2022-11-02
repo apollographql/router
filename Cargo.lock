@@ -158,6 +158,7 @@ dependencies = [
  "deadpool",
  "derivative",
  "derive_more",
+ "dhat",
  "directories",
  "displaydoc",
  "flate2",
@@ -182,7 +183,7 @@ dependencies = [
  "maplit",
  "mediatype",
  "memchr",
- "miette 5.3.0",
+ "miette 5.4.1",
  "mime",
  "mockall",
  "multimap",
@@ -933,6 +934,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "terminal_size",
+ "unicode-width",
  "winapi 0.3.9",
 ]
 
@@ -1375,6 +1377,22 @@ dependencies = [
  "quote",
  "rustc_version 0.4.0",
  "syn",
+]
+
+[[package]]
+name = "dhat"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2aaf837aaf456f6706cb46386ba8dffd4013a757e36f4ea05c20dd46b209a3"
+dependencies = [
+ "backtrace",
+ "lazy_static",
+ "mintex",
+ "parking_lot 0.12.0",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "thousands",
 ]
 
 [[package]]
@@ -2255,7 +2273,7 @@ version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7baab56125e25686df467fe470785512329883aab42696d661247aca2a2896e4"
 dependencies = [
- "console 0.12.0",
+ "console 0.15.2",
  "lazy_static",
  "number_prefix",
  "regex",
@@ -2694,13 +2712,13 @@ dependencies = [
 
 [[package]]
 name = "miette"
-version = "5.3.0"
+version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a28d6092d7e94a90bb9ea8e6c26c99d5d112d49dda2afdb4f7ea8cf09e1a5a6d"
+checksum = "7a24c4b4063c21e037dffb4de388ee85e400bff299803aba9513d9c52de8116b"
 dependencies = [
  "atty",
  "backtrace",
- "miette-derive 5.3.0",
+ "miette-derive 5.4.1",
  "once_cell",
  "owo-colors",
  "supports-color",
@@ -2725,9 +2743,9 @@ dependencies = [
 
 [[package]]
 name = "miette-derive"
-version = "5.3.0"
+version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f2485ed7d1fe80704928e3eb86387439609bd0c6bb96db8208daa364cfd1e09"
+checksum = "827d18edee5d43dc309eb0ac565f2b8e2fdc89b986b2d929e924a0f6e7f23835"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2763,6 +2781,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2b29bd4bc3f33391105ebee3589c19197c4271e3e5a9ec9bfe8127eeff8f082"
 dependencies = [
  "adler",
+]
+
+[[package]]
+name = "mintex"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd7c5ba1c3b5a23418d7bbf98c71c3d4946a0125002129231da8d6b723d559cb"
+dependencies = [
+ "once_cell",
+ "sys-info",
 ]
 
 [[package]]
@@ -3001,9 +3029,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e82dad04139b71a90c080c8463fe0dc7902db5192d939bd0950f074d014339e1"
+checksum = "86f0b0d4bf799edbc74508c1e8bf170ff5f41238e5f8225603ca7caaae2b7860"
 
 [[package]]
 name = "oorandom"
@@ -4908,6 +4936,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "thousands"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
 
 [[package]]
 name = "thread_local"

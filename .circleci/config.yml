@@ -17,11 +17,11 @@ executors:
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.medium
+    resource_class: arm.large
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.large
+    resource_class: arm.xlarge
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -248,11 +248,14 @@ commands:
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
           condition:
-            or:
-              - equal: [linux_amd, << parameters.os >>]
-              - equal: [linux_arm, << parameters.os >>]
+            equal: [linux_amd, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=4
+            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
+      - when:
+          condition:
+            equal: [linux_arm, << parameters.os >>]
+          steps:
+            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
       - when:
           condition:
             equal: [macos, << parameters.os >>]
@@ -525,8 +528,12 @@ workflows:
       #       parameters:
       #         platform: [linux]
 
-      - test_updated
+      - test_updated:
+          requires:
+            - lint
       - test:
+          requires:
+            - lint
           matrix:
             parameters:
               platform:

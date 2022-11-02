@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for dhat based heap profiling [PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+
+[dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Add `trace_id` in logs to identify all logs related to a specific request [Issue #1981](https://github.com/apollographql/router/issues/1981))
 
 It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
@@ -49,6 +55,12 @@ Example of logs in JSON:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
 
 ## 🐛 Fixes
+
+### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
+
+Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
 
 ### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
 
