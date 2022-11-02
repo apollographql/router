@@ -319,7 +319,7 @@ impl ConfigurationSource {
                 } else {
                     match ConfigurationSource::read_config(&path) {
                         Ok(configuration) => {
-                            #[cfg(not(unix))]
+                            #[cfg(any(test, not(unix)))]
                             {
                                 stream::once(future::ready(UpdateConfiguration(Box::new(
                                     configuration,
@@ -327,7 +327,7 @@ impl ConfigurationSource {
                                 .boxed()
                             }
 
-                            #[cfg(unix)]
+                            #[cfg(all(not(test), unix))]
                             {
                                 let mut sighup_stream = tokio::signal::unix::signal(
                                     tokio::signal::unix::SignalKind::hangup(),
