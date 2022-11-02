@@ -1235,6 +1235,32 @@ fn variable_validation() {
             "author": "Me"
         }})
     );
+
+    assert_validation!(
+        "type Mutation{
+            foo(input: FooInput!): FooResponse!
+        }
+        type Query{
+            data: String
+        }
+
+        input FooInput {
+          enumWithDefault: EnumWithDefault! = WEB
+        }
+        type FooResponse {
+            id: ID!
+        }
+
+        enum EnumWithDefault {
+          WEB
+          MOBILE
+        }",
+        "mutation foo($input: FooInput!) {
+            foo (input: $input) {
+            __typename
+        }}",
+        json!({"input":{}})
+    );
 }
 
 #[test]

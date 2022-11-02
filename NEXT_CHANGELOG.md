@@ -76,6 +76,16 @@ A recent change to the way we provide the SDL to plugins broke the rhai SDL prin
 
 By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
 
+### Exports a missing strut (`router_factory::Endpoint`) that was preventing the `web_endpoints` trait from being implemented by Plugins
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
+
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+
+When validating variables, we should use default values for object fields if applicable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
+
 ## 🛠 Maintenance
 
 ### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))

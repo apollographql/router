@@ -995,7 +995,7 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
-fn parse_value(value: &ast::Value) -> Option<Value> {
+pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => Some(s.to_string().into()),
