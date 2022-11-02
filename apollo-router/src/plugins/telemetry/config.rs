@@ -96,10 +96,22 @@ pub(crate) struct Logging {
     /// Log format
     #[serde(default)]
     pub(crate) format: LoggingFormat,
+    #[serde(default = "default_display_filename")]
+    pub(crate) display_filename: bool,
+    #[serde(default = "default_display_line_number")]
+    pub(crate) display_line_number: bool,
     /// Log configuration at router level
     pub(crate) router: Option<LoggingReqRes>,
     /// Log configuration for subgraphs
     pub(crate) subgraph: Option<SubgraphLogging>,
+}
+
+pub(crate) const fn default_display_filename() -> bool {
+    true
+}
+
+pub(crate) const fn default_display_line_number() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

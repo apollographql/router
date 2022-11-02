@@ -66,6 +66,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::config::default_display_filename;
+use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::JsonFields;
@@ -220,7 +222,7 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
                 if log_response {
                     // TODO switch to debug
-                    ::tracing::info!("Router response headers: {:#?}", resp.response.headers());
+                    ::tracing::info!("Router response headers: {:?}", resp.response.headers());
                 }
 
                 resp.map_stream(move |gql_response| {
@@ -230,7 +232,7 @@ impl Plugin for Telemetry {
                             .unwrap_or_default();
                     if log_response {
                         // TODO switch to debug
-                        ::tracing::info!("Router GraphQL response: {:#?}", gql_response)
+                        ::tracing::info!("Router GraphQL response: {:?}", gql_response)
                     }
                     gql_response
                 })
@@ -258,7 +260,7 @@ impl Plugin for Telemetry {
                         .unwrap_or_default();
                     if log_request {
                         // TODO switch to debug
-                        ::tracing::info!("Router request: {:#?}", req.supergraph_request);
+                        ::tracing::info!("Router request: {:?}", req.supergraph_request);
                     }
                     req.context.clone()
                 },
@@ -510,8 +512,20 @@ impl Telemetry {
                         EnvFilter::try_new(log_level)
                             .context("could not parse log configuration")?,
                     )
-                    .with_file(true)
-                    .with_line_number(true);
+                    .with_file(
+                        config
+                            .logging
+                            .as_ref()
+                            .map(|l| l.display_filename)
+                            .unwrap_or(default_display_filename()),
+                    )
+                    .with_line_number(
+                        config
+                            .logging
+                            .as_ref()
+                            .map(|l| l.display_line_number)
+                            .unwrap_or(default_display_line_number()),
+                    );
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
