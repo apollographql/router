@@ -113,5 +113,5 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 We don't need instructions about submodules since #1856. Let's remove them.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2045
 
