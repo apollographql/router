@@ -51,10 +51,9 @@ impl Config {
                     .with_env()
                     .with(&self.timeout, |b, t| b.with_timeout(*t))
                     .with(&endpoint, |b, e| b.with_endpoint(e.as_str()))
-                    .try_with(
-                        &grpc.tls_config,
-                        |b, t| Ok(b.with_tls_config(t.try_into()?)),
-                    )?
+                    .try_with(&grpc.tls_config.defaulted(endpoint), |b, t| {
+                        Ok(b.with_tls_config(t.try_into()?))
+                    })?
                     .with(&grpc.metadata, |b, m| b.with_metadata(m.clone()))
                     .into();
                 Ok(exporter)
@@ -112,7 +111,7 @@ pub(crate) struct HttpExporter {
 #[serde(deny_unknown_fields)]
 pub(crate) struct GrpcExporter {
     #[serde(flatten)]
-    pub(crate) tls_config: Option<TlsConfig>,
+    pub(crate) tls_config: TlsConfig,
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
         serialize_with = "metadata_map_serde::serialize",
@@ -126,13 +125,34 @@ fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::sc
     Option::<HashMap<String, Value>>::json_schema(gen)
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct TlsConfig {
+pub(crate) struct TlsConfig {
     domain_name: Option<String>,
     ca: Option<String>,
     cert: Option<String>,
     key: Option<String>,
+}
+
+impl TlsConfig {
+    // Return a TlsConfig if it has something actually set.
+    pub(crate) fn defaulted(mut self, endpoint: Option<&Url>) -> Option<TlsConfig> {
+        if let Some(endpoint) = endpoint {
+            if self.domain_name.is_none() {
+                self.domain_name = endpoint.host_str().map(|s| s.to_string())
+            }
+        }
+
+        if self.ca.is_some()
+            || self.key.is_some()
+            || self.cert.is_some()
+            || self.domain_name.is_some()
+        {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 impl TryFrom<&TlsConfig> for tonic::transport::channel::ClientTlsConfig {
@@ -249,24 +269,71 @@ mod tests {
     #[test]
     fn endpoint_configuration() {
         let config: Config = serde_yaml::from_str("endpoint: default").unwrap();
-        assert_eq!(Endpoint::Default(EndpointDefault::Default), config.endpoint);
+        assert_eq!(config.endpoint, Endpoint::Default(EndpointDefault::Default));
 
         let config: Config = serde_yaml::from_str("endpoint: collector:1234").unwrap();
         assert_eq!(
-            Endpoint::Url(Url::parse("http://collector:1234").unwrap()),
-            config.endpoint
+            config.endpoint,
+            Endpoint::Url(Url::parse("http://collector:1234").unwrap())
         );
 
         let config: Config = serde_yaml::from_str("endpoint: https://collector:1234").unwrap();
         assert_eq!(
-            Endpoint::Url(Url::parse("https://collector:1234").unwrap()),
-            config.endpoint
+            config.endpoint,
+            Endpoint::Url(Url::parse("https://collector:1234").unwrap())
         );
 
         let config: Config = serde_yaml::from_str("endpoint: 127.0.0.1:1234").unwrap();
         assert_eq!(
-            Endpoint::Url(Url::parse("http://127.0.0.1:1234").unwrap()),
-            config.endpoint
+            config.endpoint,
+            Endpoint::Url(Url::parse("http://127.0.0.1:1234").unwrap())
+        );
+    }
+
+    #[test]
+    fn endpoint_grpc_defaulting_no_scheme() {
+        let url = Url::parse("api.apm.com:433").unwrap();
+        let tls = TlsConfig::default().defaulted(Some(&url));
+        assert_eq!(tls, None);
+    }
+
+    #[test]
+    fn endpoint_grpc_defaulting_scheme() {
+        let url = Url::parse("https://api.apm.com:433").unwrap();
+        let tls = TlsConfig::default().defaulted(Some(&url));
+        assert_eq!(
+            tls,
+            Some(TlsConfig {
+                domain_name: url.domain().map(|d| d.to_string()),
+                ca: None,
+                cert: None,
+                key: None
+            })
+        );
+    }
+
+    #[test]
+    fn endpoint_grpc_defaulting_no_endpoint() {
+        let tls = TlsConfig::default().defaulted(None);
+        assert_eq!(tls, None);
+    }
+
+    #[test]
+    fn endpoint_grpc_explicit_domain() {
+        let url = Url::parse("https://api.apm.com:433").unwrap();
+        let tls = TlsConfig {
+            domain_name: Some("foo.bar".to_string()),
+            ..Default::default()
+        }
+        .defaulted(Some(&url));
+        assert_eq!(
+            tls,
+            Some(TlsConfig {
+                domain_name: Some("foo.bar".to_string()),
+                ca: None,
+                cert: None,
+                key: None
+            })
         );
     }
 }

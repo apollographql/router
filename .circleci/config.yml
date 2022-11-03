@@ -3,21 +3,45 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.1.0
+  gh: circleci/github-cli@2.1.1
 
 executors:
-  rust_linux: &rust_linux_executor
+  amd_linux_build: &amd_linux_build_executor
+    docker:
+      - image: cimg/base:stable
+    resource_class: medium
+  amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
     resource_class: xlarge
-  rust_macos: &rust_macos_executor
+  arm_linux_build: &arm_linux_build_executor
+    machine:
+      image: ubuntu-2004:2022.04.1
+    resource_class: arm.large
+  arm_linux_test: &arm_linux_test_executor
+    machine:
+      image: ubuntu-2004:2022.04.1
+    resource_class: arm.xlarge
+  macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: 13.4
     resource_class: macos.x86.medium.gen2
-  rust_windows: &rust_windows_executor
+  macos_test: &macos_test_executor
+    macos:
+      # See https://circleci.com/docs/xcode-policy along with the support matrix
+      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
+      # We use the major.minor notation to bring in compatible patches.
+      xcode: 13.4
+    resource_class: macos.x86.medium.gen2
+  windows_build: &windows_build_executor
+    machine:
+      image: "windows-server-2019-vs2019:stable"
+    resource_class: windows.medium
+    shell: powershell.exe -ExecutionPolicy Bypass
+  windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
@@ -26,8 +50,12 @@ executors:
 parameters:
   cache_version:
     type: string
-    # increment that one to invalidate all the caches
-    default: v9.{{ checksum "rust-toolchain.toml" }}
+    # increment this to invalidate all the caches
+    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+  jaeger_version:
+    type: string
+    # update this as new versions of jaeger become available
+    default: "1.33.0"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -46,33 +74,44 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
+            sudo apt-get install -y libssl-dev cmake
+      - install_minimal_rust
+  linux_amd_install_baseline:
+    steps:
+      - linux_install_baseline
       - run:
           name: Download jaeger
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-linux-amd64 jaeger
-      - install_minimal_rust
-
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
+  linux_arm_install_baseline:
+    steps:
+      - linux_install_baseline
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
   macos_install_baseline:
     steps:
       - run:
           name: Download jaeger
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-darwin-amd64 jaeger
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
-
   windows_install_baseline:
     steps:
       - run:
           name: Download jaeger
           shell: bash.exe
           command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-windows-amd64.tar.gz --output jaeger.tar.gz
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
-            mv jaeger-1.33.0-windows-amd64 jaeger
+            mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -170,52 +209,6 @@ commands:
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
 
-  build_common_permutations:
-    steps:
-      - run:
-          name: cargo check workspace
-          command: |
-            set -e -o pipefail
-            cargo check --locked
-  build_all_permutations:
-    steps:
-      - build_common_permutations
-      - run:
-          name: cargo check workspace and benchmarks
-          command: |
-            set -e -o pipefail
-            cargo check --locked --all --benches
-  build_workspace:
-    parameters:
-      os:
-        type: string
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - build_all_permutations
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-          paths:
-            - ~/.cargo
-
-  windows_build_workspace:
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows
-      - build_common_permutations
-      - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
-          paths:
-            - C:\\Users\\circleci\.cargo
-
   windows_test_workspace:
     steps:
       - run:
@@ -238,6 +231,9 @@ commands:
     parameters:
       os:
         type: string
+      cargo_test_args:
+        type: string
+        default: "--"
     steps:
       - run:
           name: Start jaeger
@@ -252,9 +248,14 @@ commands:
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
           condition:
-            equal: [linux, << parameters.os >>]
+            equal: [linux_amd, << parameters.os >>]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked -- --test-threads=4
+            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
+      - when:
+          condition:
+            equal: [linux_arm, << parameters.os >>]
+          steps:
+            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
       - when:
           condition:
             equal: [macos, << parameters.os >>]
@@ -279,11 +280,11 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*amd_linux_build_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - xtask_lint:
-                os: linux
+                os: linux_amd
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -295,41 +296,11 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*amd_linux_build_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - xtask_check_compliance:
-                os: linux
-  build:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - when:
-          condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
-          steps:
-            - linux_install_baseline
-            - build_workspace:
-                os: linux
-      - when:
-          condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_build_workspace
-      - when:
-          condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
-          steps:
-            - macos_install_baseline
-            - build_workspace:
-                os: macos
+                os: linux_amd
   test:
     environment:
       <<: *common_job_environment
@@ -341,25 +312,52 @@ jobs:
       - checkout
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            equal: [*amd_linux_test_executor, << parameters.platform >>]
           steps:
-            - linux_install_baseline
+            - linux_amd_install_baseline
             - test_workspace:
-                os: linux
+                os: linux_amd
       - when:
           condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
+            equal: [*arm_linux_test_executor, << parameters.platform >>]
+          steps:
+            - linux_arm_install_baseline
+            - test_workspace:
+                os: linux_arm
+      - when:
+          condition:
+            equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - windows_install_baseline
             - windows_prepare_env
             - windows_test_workspace
       - when:
           condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
+            equal: [*macos_test_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
             - test_workspace:
                 os: macos
+
+  test_updated:
+    environment:
+      <<: *common_job_environment
+    executor: amd_linux_test
+    steps:
+      - checkout
+      - linux_amd_install_baseline
+      - run:
+          name: Use latest Rust Nightly and update all Rust dependencies
+          command: |
+            sed -i '/channel/d' rust-toolchain.toml
+            echo 'channel = "nightly"' >> rust-toolchain.toml
+            rm Cargo.lock
+            cargo fetch
+      - test_workspace:
+          os: linux_amd
+          # schema_generation test skipped because schemars changed its representation of enums:
+          # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
+          cargo_test_args: --no-fail-fast -- --skip schema_generation
 
   build_release:
     parameters:
@@ -379,8 +377,9 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [*rust_macos_executor, << parameters.platform >>]
+            equal: [*macos_build_executor, << parameters.platform >>]
           steps:
+            - install_minimal_rust
             - run:
                 command: >
                   cargo xtask dist
@@ -400,12 +399,15 @@ jobs:
                   --output artifacts/
       - when:
           condition:
-            equal: [*rust_linux_executor, << parameters.platform >>]
+            or:
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
+            - install_minimal_rust
             - run:
                 command: >
                   cargo xtask dist
@@ -417,7 +419,7 @@ jobs:
                   cargo xtask package --output artifacts/
       - when:
           condition:
-            equal: [*rust_windows_executor, << parameters.platform >>]
+            equal: [*windows_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install rustup
@@ -514,7 +516,7 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [rust_linux]
+              platform: [amd_linux_build]
 
       # check-compliance is disabled for now because it is flaky
       # `cargo about` seems to be non-deterministic and sometimes
@@ -524,22 +526,25 @@ workflows:
       # - check_compliance:
       #     matrix:
       #       parameters:
-      #         platform: [rust_linux]
+      #         platform: [linux]
 
-      - build:
-          matrix:
-            parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+      - test_updated:
+          requires:
+            - lint
       - test:
+          requires:
+            - lint
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+              platform:
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
   release:
     jobs:
       - build_release:
           matrix:
             parameters:
-              platform: [rust_macos, rust_windows, rust_linux]
+              platform:
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
           filters:
             branches:
               ignore: /.*/

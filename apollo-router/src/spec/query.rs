@@ -33,7 +33,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<(Option<Path>, String), Query>,
+    pub(crate) subselections: HashMap<(Path, String), Query>,
 }
 
 impl Query {
@@ -57,8 +57,7 @@ impl Query {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
                     match self.subselections.get(&(
-                        //FIXME: we should not have optional paths at all in the subselections map
-                        response.path.clone().or_else(|| Some(Path::default())),
+                        response.path.clone().unwrap_or_default(),
                         subselection.clone(),
                     )) {
                         Some(subselection_query) => {
@@ -326,20 +325,21 @@ impl Query {
                         }
                         let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
-                        match self.apply_selection_set(
-                            selection_set,
-                            parameters,
-                            input_object,
-                            output_object,
-                            path,
-                            &FieldType::Named(type_name.to_string()),
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(InvalidValue) => {
-                                *output = Value::Null;
-                                Ok(())
-                            }
+                        if self
+                            .apply_selection_set(
+                                selection_set,
+                                parameters,
+                                input_object,
+                                output_object,
+                                path,
+                                &FieldType::Named(type_name.to_string()),
+                            )
+                            .is_err()
+                        {
+                            *output = Value::Null;
                         }
+
+                        Ok(())
                     }
                     _ => {
                         *output = Value::Null;
@@ -995,7 +995,7 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
-fn parse_value(value: &ast::Value) -> Option<Value> {
+pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => Some(s.to_string().into()),

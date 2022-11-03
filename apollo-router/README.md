@@ -25,3 +25,6 @@ See [the documentation](https://www.apollographql.com/docs/router) for more deta
 Most Apollo Router features can be defined using our [YAML configuration](https://www.apollographql.com/docs/router/configuration/overview) and many customizations can be written with [Rhai scripts](https://www.apollographql.com/docs/router/customizations/rhai) which work on published binaries of the Router and do not require compilation.
 
 If you prefer to write customizations in Rust or need more advanced customizations, see our section on [native customizations](https://www.apollographql.com/docs/router/customizations/native) for information on how to use `apollo-router` as a Rust library.  We also publish Rust-specific documentation on our [`apollo-router` crate docs](https://docs.rs/crate/apollo-router).
+
+<!-- renovate-automation: rustc version -->
+The minimum supported Rust version (MSRV) for this version of `apollo-router` is **1.63.0**.

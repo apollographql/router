@@ -1,4 +1,5 @@
 #![allow(missing_docs)] // FIXME
+#![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
 use std::fs;
 use std::net::IpAddr;
@@ -142,6 +143,8 @@ pub enum SchemaSource {
         watch: bool,
 
         /// When watching, the delay to wait before applying the new schema.
+        /// Note: This variable is deprecated and has no effect.
+        #[deprecated]
         delay: Option<Duration>,
     },
 
@@ -178,7 +181,12 @@ impl SchemaSource {
                 stream::once(future::ready(UpdateSchema(schema))).boxed()
             }
             SchemaSource::Stream(stream) => stream.map(UpdateSchema).boxed(),
-            SchemaSource::File { path, watch, delay } => {
+            #[allow(deprecated)]
+            SchemaSource::File {
+                path,
+                watch,
+                delay: _,
+            } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -191,7 +199,7 @@ impl SchemaSource {
                     match std::fs::read_to_string(&path) {
                         Ok(schema) => {
                             if watch {
-                                crate::files::watch(path.to_owned(), delay)
+                                crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         future::ready(std::fs::read_to_string(&path).ok())
                                     })
@@ -221,10 +229,7 @@ impl SchemaSource {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
                             Err(e) => {
-                                tracing::error!(
-                                    "error downloading the schema from Uplink: {:?}",
-                                    e
-                                );
+                                tracing::error!("{}", e);
                                 None
                             }
                         })
@@ -266,6 +271,8 @@ pub enum ConfigurationSource {
         watch: bool,
 
         /// When watching, the delay to wait before applying the new configuration.
+        /// Note: This variable is deprecated and has no effect.
+        #[deprecated]
         delay: Option<Duration>,
     },
 }
@@ -286,7 +293,12 @@ impl ConfigurationSource {
             ConfigurationSource::Stream(stream) => {
                 stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
             }
-            ConfigurationSource::File { path, watch, delay } => {
+            #[allow(deprecated)]
+            ConfigurationSource::File {
+                path,
+                watch,
+                delay: _,
+            } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -295,7 +307,7 @@ impl ConfigurationSource {
                     );
                     stream::empty().boxed()
                 } else if watch {
-                    crate::files::watch(path.to_owned(), delay)
+                    crate::files::watch(&path)
                         .map(move |_| match ConfigurationSource::read_config(&path) {
                             Ok(config) => UpdateConfiguration(Box::new(config)),
                             Err(err) => {
@@ -306,10 +318,49 @@ impl ConfigurationSource {
                         .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
-                            Box::new(configuration),
-                        )))
-                        .boxed(),
+                        Ok(configuration) => {
+                            #[cfg(any(test, not(unix)))]
+                            {
+                                stream::once(future::ready(UpdateConfiguration(Box::new(
+                                    configuration,
+                                ))))
+                                .boxed()
+                            }
+
+                            #[cfg(all(not(test), unix))]
+                            {
+                                let mut sighup_stream = tokio::signal::unix::signal(
+                                    tokio::signal::unix::SignalKind::hangup(),
+                                )
+                                .expect("Failed to install SIGHUP signal handler");
+
+                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
+                                tokio::task::spawn(async move {
+                                    while let Some(()) = sighup_stream.recv().await {
+                                        tx.send(()).await.unwrap();
+                                    }
+                                });
+                                futures::stream::select(
+                                    stream::once(future::ready(UpdateConfiguration(Box::new(
+                                        configuration,
+                                    ))))
+                                    .boxed(),
+                                    rx.filter_map(
+                                        move |()| match ConfigurationSource::read_config(&path) {
+                                            Ok(configuration) => future::ready(Some(
+                                                UpdateConfiguration(Box::new(configuration)),
+                                            )),
+                                            Err(err) => {
+                                                tracing::error!("{}", err);
+                                                future::ready(None)
+                                            }
+                                        },
+                                    )
+                                    .boxed(),
+                                )
+                                .boxed()
+                            }
+                        }
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
@@ -666,7 +717,7 @@ mod tests {
         let mut stream = ConfigurationSource::File {
             path,
             watch: true,
-            delay: Some(Duration::from_millis(10)),
+            delay: None,
         }
         .into_stream()
         .boxed();
@@ -770,7 +821,7 @@ mod tests {
         let mut stream = SchemaSource::File {
             path,
             watch: true,
-            delay: Some(Duration::from_millis(10)),
+            delay: None,
         }
         .into_stream()
         .boxed();

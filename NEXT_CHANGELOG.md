@@ -28,116 +28,83 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Support serviceMonitor in helm chart
+### Add support for dhat based heap profiling [PR #1829](https://github.com/apollographql/router/pull/1829))
 
-`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+[dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
 
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
 
-### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
+### Add `trace_id` in logs to identify all logs related to a specific request [Issue #1981](https://github.com/apollographql/router/issues/1981))
 
-+ Insert static header
+It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router"
-        value: "indeed"
+Example of logs in text:
+
+```logs
+2022-10-21T15:17:45.562553Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::services::subgraph_service: fetch_error="hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))"
+2022-10-21T15:17:45.565768Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::query_planner::execution: Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)
 ```
 
-+ Insert header from context
+Example of logs in JSON:
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router-context"
-        from_context: "my_key_in_context"
+```logs
+{"timestamp":"2022-10-26T15:39:01.078260Z","level":"ERROR","fetch_error":"hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))","target":"apollo_router::services::subgraph_service","filename":"apollo-router/src/services/subgraph_service.rs","line_number":182,"span":{"name":"subgraph"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"},{"name":"fetch"},{"name":"subgraph"}]}
+{"timestamp":"2022-10-26T15:39:01.080259Z","level":"ERROR","message":"Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)","target":"apollo_router::query_planner::execution","filename":"apollo-router/src/query_planner/execution.rs","line_number":188,"span":{"name":"parallel"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"}]}
 ```
 
-+ Insert header from request body
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    + insert:
-        name: "sent-from-our-apollo-router-request-body"
-        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
-        default: "UNKNOWN" # If no operationName has been specified
-```
+### Reload the configuration when receiving the SIGHUP signal [Issue #35](https://github.com/apollographql/router/issues/35))
 
+This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
+and only with the configuration file.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
 
 ## 🐛 Fixes
 
-### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
+### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
 
-in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
-was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
-This will now aggregate the subgraph error and the missing `_entities` error.
+Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
 
-### Fix prometheus annotation and healthcheck default
+### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
 
-The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
-defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
+The Uplink API returns actionable info in its responses:
+- some error codes indicate an unrecoverable issue, for which the router should not retry the query (example: non-existing graph)
+- it can tell the router when it should retry the query
 
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
 
-### Move response formatting to the execution service ([PR #1771](https://github.com/apollographql/router/pull/1771))
+### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
 
-The response formatting process, where response data is filtered according to deferred responses subselections
-and the API schema, was executed in the supergraph service. This is a bit late, because it results in the
-execution service returning a stream of invalid responses, so the execution plugins work on invalid data.
+A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1771
+By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+
+### Exports a missing strut (`router_factory::Endpoint`) that was preventing the `web_endpoints` trait from being implemented by Plugins
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
+
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+
+When validating variables, we should use default values for object fields if applicable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
 ## 🛠 Maintenance
 
-### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
+### Apply tower best practice to inner service cloning [PR #2030](https://github.com/apollographql/router/pull/2030))
 
-Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
+Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
 
-### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
+### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
 
-Avoids redundant work in CI and makes the YAML configuration less mis-leading.
+The file is becoming large and hard to modify.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
-
-### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
-
-This splits the query plan execution in multiple modules to make the code more manageable.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
-
-### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
-
-This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
-
-### Remove `Buffer` from query deduplication ([PR #1889](https://github.com/apollographql/router/pull/1889))
-
-This removes `tower::Buffer` usage from the query deduplication implementation to improve reliability.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1889
-
-### Set MSRV to 1.63.0 ([PR #1886](https://github.com/apollographql/router/issues/1886))
-
-We compile and test with 1.63.0 on CI at the moment,
-so it is our de-facto minimum supported rust version.
-Setting [`rust-version`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field)
-in `Cargo.toml` provides a more helpful error message when using an older version
-that random compilation errors.
-
-By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/1886
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
 
 ## 📚 Documentation

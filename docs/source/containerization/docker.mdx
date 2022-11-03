@@ -11,35 +11,40 @@ The default behaviour of the router images is suitable for a quickstart or devel
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
-Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.0.0`
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.2.1`
 
 ## Override the configuration
 
-If you wish to override the default configuration, then you need to provide the new configuration:
+Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml).  Inside the container, this file is located at `/dist/config/router.yaml`.
 
-```bash
+If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network inferface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
+
+You can provide your own configuration from the host environment to the Router by mounting your configuration to `/dist/config/router.yaml`, as follows:
+
+```bash {4}
 docker run -p 4000:4000 \
   --env APOLLO_GRAPH_REF="<your graph>" \
   --env APOLLO_KEY="<your key>" \
-  --mount "type=bind,source=/router.yaml,target=/dist/config/router.yaml" \
+  --mount "type=bind,source=/home/user/router.yaml,target=/dist/config/router.yaml" \
   --rm \
   ghcr.io/apollographql/router:<image version>
 ```
 
-In this case we are mounting a file from our local system's root directory (Note: that path must be absolute) over the top of the default configuration in the image.
+> Note: Both local and container paths must be specified as absolute paths.
 
-If, for whatever reason, we wish to specify a different location for our configuration, we can:
+In this case we are mounting a file from the host system (`/home/user/router.yaml`) in place of the default configuration provided in the image at `/dist/config/router.yaml`.
 
-```bash
+## Passing command-line arguments to the Router binary
+
+By default, the `router` command invoked inside the published container does run not set any of the [available command-line arguments](../configuration/overview#command-arguments).  If you want to set any of the available options, pass the desired options at end of the `docker run` command.  For example, to start the Router using the `--log debug` argument, you can use the following `docker run` command:
+
+```bash {5}
 docker run -p 4000:4000 \
   --env APOLLO_GRAPH_REF="<your graph>" \
   --env APOLLO_KEY="<your key>" \
-  --mount "type=bind,source=/router.yaml,target=/tmp/router.yaml" \
   --rm \
-  ghcr.io/apollographql/router:<image version> -c /tmp/router.yaml
+  ghcr.io/apollographql/router:<image version> --log debug
 ```
-
-Here, we are mounting our configuration into the /tmp directory and changing the router startup to let it know that it can find configuration in /tmp/router.yaml.
 
 ## Debugging your container
 
@@ -92,10 +97,10 @@ Usage: build_docker_image.sh [-b] [<release>]
 	Example 1: Building HEAD from the repo
 		build_docker_image.sh -b
 	Example 2: Building tag from the repo
-		build_docker_image.sh -b v1.0.0
+		build_docker_image.sh -b v1.2.1
 	Example 3: Building commit hash from the repo
 		build_docker_image.sh -b 1c220d35acf9ad2537b8edc58c498390b6701d3d
-	Example 4: Building tag v1.0.0 from the released tarball
-		build_docker_image.sh v1.0.0
+	Example 4: Building tag v1.2.1 from the released tarball
+		build_docker_image.sh v1.2.1
 ```
 Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [distroless images](https://github.com/GoogleContainerTools/distroless) for the final image build. Feel free to modify the script to use images which better suit your own needs.
