@@ -34,7 +34,7 @@ impl Introspection {
         Self::with_capacity(
             configuration,
             DEFAULT_INTROSPECTION_CACHE_CAPACITY,
-            configuration.supergraph.cache_redis_urls.clone(),
+            configuration.supergraph.cache(),
         )
         .await
     }
@@ -44,12 +44,8 @@ impl Introspection {
         configuration: &Configuration,
         cache: HashMap<String, Response>,
     ) -> Self {
-        let this = Self::with_capacity(
-            configuration,
-            cache.len(),
-            configuration.supergraph.cache_redis_urls.clone(),
-        )
-        .await;
+        let this =
+            Self::with_capacity(configuration, cache.len(), configuration.supergraph.cache()).await;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;

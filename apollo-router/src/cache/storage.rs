@@ -3,13 +3,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use lru::LruCache;
-use redis::AsyncCommands;
-use redis::FromRedisValue;
-use redis::RedisResult;
-use redis::RedisWrite;
-use redis::ToRedisArgs;
-use redis_cluster_async::Client;
-use redis_cluster_async::Connection;
+
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -41,6 +35,9 @@ where
     // It has the functions it needs already
 }
 
+#[cfg(feature = "experimental_cache")]
+use redis_storage::*;
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -48,6 +45,7 @@ where
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     inner: Arc<Mutex<LruCache<K, V>>>,
+    #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
 }
 
@@ -56,10 +54,11 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(max_capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
+    pub(crate) async fn new(max_capacity: usize, _redis_urls: Option<Vec<String>>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = redis_urls {
+            #[cfg(feature = "experimental_cache")]
+            redis: if let Some(urls) = _redis_urls {
                 Some(RedisCacheStorage::new(urls).await)
             } else {
                 None
@@ -71,6 +70,7 @@ where
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
             Some(v) => Some(v.clone()),
+            #[cfg(feature = "experimental_cache")]
             None => {
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
@@ -85,12 +85,15 @@ where
                     None
                 }
             }
+            #[cfg(not(feature = "experimental_cache"))]
+            None => None,
         }
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key.clone(), value.clone());
 
+        #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
             redis.insert(RedisKey(key), RedisValue(value)).await;
         }
@@ -102,145 +105,171 @@ where
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct RedisKey<K>(K)
-where
-    K: KeyType;
+#[cfg(feature = "experimental_cache")]
+mod redis_storage {
+    use super::KeyType;
+    use super::ValueType;
 
-#[derive(Clone, Debug)]
-struct RedisValue<V>(V)
-where
-    V: ValueType;
+    use redis::AsyncCommands;
+    use redis::FromRedisValue;
+    use redis::RedisResult;
+    use redis::RedisWrite;
+    use redis::ToRedisArgs;
+    use redis_cluster_async::Client;
+    use redis_cluster_async::Connection;
 
-#[derive(Clone)]
-struct RedisCacheStorage {
-    inner: Arc<Mutex<Connection>>,
-}
+    use tokio::sync::Mutex;
 
-fn get_type_of<T>(_: &T) -> &'static str {
-    std::any::type_name::<T>()
-}
+    use std::fmt;
+    use std::sync::Arc;
 
-impl<K> fmt::Display for RedisKey<K>
-where
-    K: KeyType,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<K> ToRedisArgs for RedisKey<K>
-where
-    K: KeyType,
-{
-    fn write_redis_args<W>(&self, out: &mut W)
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    pub(crate) struct RedisKey<K>(pub(crate) K)
     where
-        W: ?Sized + RedisWrite,
-    {
-        out.write_arg_fmt(self);
-    }
-}
+        K: KeyType;
 
-impl<V> fmt::Display for RedisValue<V>
-where
-    V: ValueType,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
-    }
-}
-
-impl<V> ToRedisArgs for RedisValue<V>
-where
-    V: ValueType,
-{
-    fn write_redis_args<W>(&self, out: &mut W)
+    #[derive(Clone, Debug)]
+    pub(crate) struct RedisValue<V>(pub(crate) V)
     where
-        W: ?Sized + RedisWrite,
-    {
-        let v = serde_json::to_vec(&self.0).unwrap();
-        out.write_arg(&v);
-    }
-}
+        V: ValueType;
 
-impl<V> FromRedisValue for RedisValue<V>
-where
-    V: ValueType,
-{
-    fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
-        tracing::info!("TRYING TO WORK WITH: {:?}", v);
-        // let this: RedisValue<V> = RedisValue(V::from_str(v));
-        // RedisResult
-        // Ok(RedisValue(v.into()))
-        match v {
-            redis::Value::Bulk(bulk_data) => {
-                for entry in bulk_data {
-                    tracing::info!("entry: {:?}", entry);
-                    // entry.parse::<V>().unwrap()
+    #[derive(Clone)]
+    pub(crate) struct RedisCacheStorage {
+        inner: Arc<Mutex<Connection>>,
+    }
+
+    fn get_type_of<T>(_: &T) -> &'static str {
+        std::any::type_name::<T>()
+    }
+
+    impl<K> fmt::Display for RedisKey<K>
+    where
+        K: KeyType,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl<K> ToRedisArgs for RedisKey<K>
+    where
+        K: KeyType,
+    {
+        fn write_redis_args<W>(&self, out: &mut W)
+        where
+            W: ?Sized + RedisWrite,
+        {
+            out.write_arg_fmt(self);
+        }
+    }
+
+    impl<V> fmt::Display for RedisValue<V>
+    where
+        V: ValueType,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
+        }
+    }
+
+    impl<V> ToRedisArgs for RedisValue<V>
+    where
+        V: ValueType,
+    {
+        fn write_redis_args<W>(&self, out: &mut W)
+        where
+            W: ?Sized + RedisWrite,
+        {
+            let v = serde_json::to_vec(&self.0).unwrap();
+            out.write_arg(&v);
+        }
+    }
+
+    impl<V> FromRedisValue for RedisValue<V>
+    where
+        V: ValueType,
+    {
+        fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
+            tracing::info!("TRYING TO WORK WITH: {:?}", v);
+            // let this: RedisValue<V> = RedisValue(V::from_str(v));
+            // RedisResult
+            // Ok(RedisValue(v.into()))
+            match v {
+                redis::Value::Bulk(bulk_data) => {
+                    for entry in bulk_data {
+                        tracing::info!("entry: {:?}", entry);
+                        // entry.parse::<V>().unwrap()
+                    }
+                    Err(redis::RedisError::from((
+                        redis::ErrorKind::TypeError,
+                        "the data is the wrong type",
+                    )))
                 }
-                Err(redis::RedisError::from((
+                redis::Value::Data(v) => serde_json::from_slice(v).map(RedisValue).map_err(|e| {
+                    redis::RedisError::from((
+                        redis::ErrorKind::TypeError,
+                        "can't deserialize from JSON",
+                        e.to_string(),
+                    ))
+                }),
+                res => Err(redis::RedisError::from((
                     redis::ErrorKind::TypeError,
                     "the data is the wrong type",
-                )))
+                    format!("{:?}", res),
+                ))),
             }
-            redis::Value::Data(v) => serde_json::from_slice(v).map(RedisValue).map_err(|e| {
-                redis::RedisError::from((
-                    redis::ErrorKind::TypeError,
-                    "can't deserialize from JSON",
-                    e.to_string(),
-                ))
-            }),
-            res => Err(redis::RedisError::from((
-                redis::ErrorKind::TypeError,
-                "the data is the wrong type",
-                format!("{:?}", res),
-            ))),
-        }
-    }
-}
-
-impl RedisCacheStorage {
-    async fn new(urls: Vec<String>) -> Self {
-        let client = Client::open(urls).expect("opening ClusterClient");
-        let connection = client.get_connection().await.expect("got redis connection");
-        /*
-        let _: () = connection
-            .set("test", "test_data")
-            .await
-            .expect("setting data");
-        let rv: String = connection.get("test").await.expect("getting data");
-        tracing::info!("rv: {:?}", rv);
-        */
-
-        tracing::info!("redis connection established");
-        Self {
-            inner: Arc::new(Mutex::new(connection)),
         }
     }
 
-    async fn get<K: KeyType, V: ValueType>(&self, key: RedisKey<K>) -> Option<RedisValue<V>> {
-        tracing::info!("GETTING FROM REDIS: {:?}", key);
-        let mut guard = self.inner.lock().await;
-        guard.get(key).await.ok()
-        // guard.get(key).await.ok()
-    }
+    impl RedisCacheStorage {
+        pub(crate) async fn new(urls: Vec<String>) -> Self {
+            let client = Client::open(urls).expect("opening ClusterClient");
+            let connection = client.get_connection().await.expect("got redis connection");
+            /*
+            let _: () = connection
+                .set("test", "test_data")
+                .await
+                .expect("setting data");
+            let rv: String = connection.get("test").await.expect("getting data");
+            tracing::info!("rv: {:?}", rv);
+            */
 
-    async fn insert<K: KeyType, V: ValueType>(&self, key: RedisKey<K>, value: RedisValue<V>) {
-        tracing::info!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
-        let mut guard = self.inner.lock().await;
-        let r = guard
-            .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
-            .await; // .ok();
-        println!("insert result {:?}", r);
-    }
+            tracing::info!("redis connection established");
+            Self {
+                inner: Arc::new(Mutex::new(connection)),
+            }
+        }
 
-    /*#[cfg(test)]
-    async fn len(&self) -> usize {
-        let mut guard = self.inner.lock().await;
-        redis::cmd("DBSIZE")
-            .query_async(&mut *guard)
-            .await
-            .expect("DBSIZE should work")
-    }*/
+        pub(crate) async fn get<K: KeyType, V: ValueType>(
+            &self,
+            key: RedisKey<K>,
+        ) -> Option<RedisValue<V>> {
+            tracing::info!("GETTING FROM REDIS: {:?}", key);
+            let mut guard = self.inner.lock().await;
+            guard.get(key).await.ok()
+            // guard.get(key).await.ok()
+        }
+
+        pub(crate) async fn insert<K: KeyType, V: ValueType>(
+            &self,
+            key: RedisKey<K>,
+            value: RedisValue<V>,
+        ) {
+            tracing::info!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
+            let mut guard = self.inner.lock().await;
+            let r = guard
+                .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+                .await; // .ok();
+            println!("insert result {:?}", r);
+        }
+
+        /*#[cfg(test)]
+        async fn len(&self) -> usize {
+            let mut guard = self.inner.lock().await;
+            redis::cmd("DBSIZE")
+                .query_async(&mut *guard)
+                .await
+                .expect("DBSIZE should work")
+        }*/
+    }
 }

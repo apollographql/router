@@ -28,6 +28,8 @@ console = ["tokio/tracing", "console-subscriber"]
 # "fake" feature to disable V8 usage when building on docs.rs
 # See https://github.com/apollographql/federation-rs/pull/185
 docs_rs = ["router-bridge/docs_rs"]
+experimental_cache = ["redis", "redis_cluster_async"]
+default = ["experimental_cache"]
 
 [package.metadata.docs.rs]
 features = ["docs_rs"]
@@ -136,8 +138,8 @@ prost = "0.9.0"
 prost-types = "0.9.0"
 rand = "0.8.5"
 rhai = { version = "1.10.1", features = ["sync", "serde", "internals"] }
-redis = { version = "0.21.6", features = ["cluster", "tokio-comp"] }
-redis_cluster_async = "0.7.0"
+redis = { version = "0.21.6", optional = true, features = ["cluster", "tokio-comp"] }
+redis_cluster_async =  { version = "0.7.0", optional = true }
 regex = "1.6.0"
 reqwest = { version = "0.11.12", default-features = false, features = [
     "rustls-tls",

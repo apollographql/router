@@ -336,7 +336,7 @@ impl PluggableSupergraphServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
-        let redis_urls = configuration.supergraph.cache_redis_urls.clone();
+        let redis_urls = configuration.supergraph.cache();
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
