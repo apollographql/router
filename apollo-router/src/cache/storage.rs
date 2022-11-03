@@ -3,7 +3,6 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use lru::LruCache;
-
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -107,8 +106,8 @@ where
 
 #[cfg(feature = "experimental_cache")]
 mod redis_storage {
-    use super::KeyType;
-    use super::ValueType;
+    use std::fmt;
+    use std::sync::Arc;
 
     use redis::AsyncCommands;
     use redis::FromRedisValue;
@@ -117,11 +116,10 @@ mod redis_storage {
     use redis::ToRedisArgs;
     use redis_cluster_async::Client;
     use redis_cluster_async::Connection;
-
     use tokio::sync::Mutex;
 
-    use std::fmt;
-    use std::sync::Arc;
+    use super::KeyType;
+    use super::ValueType;
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub(crate) struct RedisKey<K>(pub(crate) K)
