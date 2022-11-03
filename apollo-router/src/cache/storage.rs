@@ -190,14 +190,14 @@ mod redis_storage {
         V: ValueType,
     {
         fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
-            tracing::info!("TRYING TO WORK WITH: {:?}", v);
+            tracing::trace!("TRYING TO WORK WITH: {:?}", v);
             // let this: RedisValue<V> = RedisValue(V::from_str(v));
             // RedisResult
             // Ok(RedisValue(v.into()))
             match v {
                 redis::Value::Bulk(bulk_data) => {
                     for entry in bulk_data {
-                        tracing::info!("entry: {:?}", entry);
+                        tracing::trace!("entry: {:?}", entry);
                         // entry.parse::<V>().unwrap()
                     }
                     Err(redis::RedisError::from((
@@ -234,7 +234,7 @@ mod redis_storage {
             tracing::info!("rv: {:?}", rv);
             */
 
-            tracing::info!("redis connection established");
+            tracing::trace!("redis connection established");
             Self {
                 inner: Arc::new(Mutex::new(connection)),
             }
@@ -244,7 +244,7 @@ mod redis_storage {
             &self,
             key: RedisKey<K>,
         ) -> Option<RedisValue<V>> {
-            tracing::info!("GETTING FROM REDIS: {:?}", key);
+            tracing::trace!("GETTING FROM REDIS: {:?}", key);
             let mut guard = self.inner.lock().await;
             guard.get(key).await.ok()
             // guard.get(key).await.ok()
@@ -255,12 +255,12 @@ mod redis_storage {
             key: RedisKey<K>,
             value: RedisValue<V>,
         ) {
-            tracing::info!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
+            tracing::trace!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
             let mut guard = self.inner.lock().await;
             let r = guard
                 .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
                 .await; // .ok();
-            println!("insert result {:?}", r);
+            tracing::trace!("insert result {:?}", r);
         }
 
         /*#[cfg(test)]
