@@ -7,6 +7,7 @@
 //! * Rate limiting
 //!
 
+pub(crate) mod cache;
 pub(crate) mod deduplication;
 mod rate;
 mod timeout;
@@ -25,6 +26,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::cache::SubgraphCacheLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;

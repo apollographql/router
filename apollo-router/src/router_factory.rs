@@ -17,6 +17,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugins::traffic_shaping::cache::SubgraphCacheLayer;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::plugins::traffic_shaping::is_deduplicate_query_enabled;
 use crate::services::new_service::NewService;
@@ -128,7 +129,11 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         for (name, _) in schema.subgraphs() {
             builder = builder.with_subgraph_service(
                 name,
-                option_layer(deduplicate_queries.then(QueryDeduplicationLayer::default))
+                /*Stack::new(
+                    SubgraphCacheLayer::new(name.to_string()),
+                    option_layer(deduplicate_queries.then(QueryDeduplicationLayer::default)),
+                )*/
+                option_layer(Some(SubgraphCacheLayer::new(name.to_string()).await))
                     .layer(SubgraphService::new(name)),
             );
         }
