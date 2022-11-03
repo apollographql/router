@@ -29,7 +29,7 @@ console = ["tokio/tracing", "console-subscriber"]
 # See https://github.com/apollographql/federation-rs/pull/185
 docs_rs = ["router-bridge/docs_rs"]
 experimental_cache = ["redis", "redis_cluster_async"]
-default = ["experimental_cache"]
+default = []
 
 [package.metadata.docs.rs]
 features = ["docs_rs"]
