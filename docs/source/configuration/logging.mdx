@@ -79,11 +79,11 @@ telemetry:
         - request # Display the request at the supergraph level
     subgraph:
       all:
-        include_attributes: # Available attributes are request|response_body|response_headers
+        include_attributes: # Available attributes are request|response_body|response_headers|operation_name
           - response_body # Display the response_body for all the subgraph calls
       subgraphs:
         accounts:
-          include_attributes: # Available attributes are request|response_body|response_headers
+          include_attributes: # Available attributes are request|response_body|response_headers|operation_name
             - response_headers # Display the response_headers for the subgraph "accounts"
 ```
 
