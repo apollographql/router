@@ -93,91 +93,99 @@ where
 
         let cache = self.storage.clone();
         let name = self.name.clone();
-        Box::pin(async move {
-            let body = request.subgraph_request.body_mut();
-            let reps = body
-                .variables
-                .get_mut("representations")
-                .and_then(|value| value.as_array_mut());
-
-            let mut reps = reps.unwrap();
-
-            let mut new_reps: Vec<Value> = Vec::new();
-            let mut result: Vec<(String, Option<Value>)> = Vec::new();
-            for mut representation in reps.drain(..) {
-                let opt_type: Option<Value> = representation
-                    .as_object_mut()
-                    .and_then(|o| o.remove("__typename"));
-                //and_then(|v| serde_json::from_value(v).ok());
-
-                //FIXME: add the query
-                let key = format!(
-                    "subgraph.{}|{}|{}|{}",
-                    name,
-                    opt_type.as_ref().and_then(|v| v.as_str()).unwrap_or("-"),
-                    serde_json::to_string(&representation).unwrap(),
-                    body.query.as_deref().unwrap_or("-")
-                );
-
-                let res = cache.get(&key).await;
-                if res.is_none() {
-                    println!("cache miss for {key}");
-                    representation
-                        .as_object_mut()
-                        .map(|o| o.insert("__typename", opt_type.unwrap()));
-                    new_reps.push(representation);
-                } else {
-                    println!("cache hit for {key}");
-                }
-                result.push((key, res));
-            }
-
-            body.variables.insert("representations", new_reps.into());
-
-            /*FIXME: cache results
-            match service.oneshot(request).await {
-
-            }*/
-            let mut response = service.oneshot(request).await.unwrap();
-
-            let mut data = response.response.body_mut().data.take();
-
-            if let Some(mut entities) = data
-                .as_mut()
-                .and_then(|v| v.as_object_mut())
-                .and_then(|o| o.remove("_entities"))
-            {
-                let mut new_entities = Vec::new();
-                let mut entities_it = entities.as_array_mut().unwrap().drain(..);
-
-                // insert requested entities and cached entities in the same order as
-                // they were requested
-                for (key, entity) in result.drain(..) {
-                    match entity {
-                        Some(v) => new_entities.push(v),
-                        None => {
-                            let value = entities_it.next().unwrap();
-                            println!(
-                                "cache insert for {key}: {}",
-                                serde_json::to_string(&value).unwrap()
-                            );
-                            cache.insert(key, value.clone()).await;
-
-                            new_entities.push(value);
-                        }
-                    }
-                }
-
-                //FIXME: check that entities_it is now empty
-                data.as_mut()
-                    .and_then(|v| v.as_object_mut())
-                    .map(|o| o.insert("_entities", new_entities.into()));
-            }
-
-            response.response.body_mut().data = data;
-            Ok(response)
-        })
+        Box::pin(cache_call(service, name, cache, request))
     }
+}
+
+async fn cache_call<S>(
+    service: S,
+    name: String,
+    cache: CacheStorage<String, Value>,
+    mut request: subgraph::Request,
+) -> Result<<S as Service<subgraph::Request>>::Response, <S as Service<subgraph::Request>>::Error>
+where
+    S: Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
+    S::Error: Into<tower::BoxError> + std::fmt::Debug,
+    <S as Service<subgraph::Request>>::Future: std::marker::Send,
+{
+    let body = request.subgraph_request.body_mut();
+    let reps = body
+        .variables
+        .get_mut("representations")
+        .and_then(|value| value.as_array_mut());
+
+    let reps = reps.unwrap();
+
+    let mut new_reps: Vec<Value> = Vec::new();
+    let mut result: Vec<(String, Option<Value>)> = Vec::new();
+    for mut representation in reps.drain(..) {
+        let opt_type: Option<Value> = representation
+            .as_object_mut()
+            .and_then(|o| o.remove("__typename"));
+        //and_then(|v| serde_json::from_value(v).ok());
+
+        //FIXME: add the query
+        let key = format!(
+            "subgraph.{}|{}|{}|{}",
+            name,
+            opt_type.as_ref().and_then(|v| v.as_str()).unwrap_or("-"),
+            serde_json::to_string(&representation).unwrap(),
+            body.query.as_deref().unwrap_or("-")
+        );
+
+        let res = cache.get(&key).await;
+        if res.is_none() {
+            println!("cache miss for {key}");
+            representation
+                .as_object_mut()
+                .map(|o| o.insert("__typename", opt_type.unwrap()));
+            new_reps.push(representation);
+        } else {
+            println!("cache hit for {key}");
+        }
+        result.push((key, res));
+    }
+
+    body.variables.insert("representations", new_reps.into());
+
+    let mut response = service.oneshot(request).await.unwrap();
+
+    let mut data = response.response.body_mut().data.take();
+
+    if let Some(mut entities) = data
+        .as_mut()
+        .and_then(|v| v.as_object_mut())
+        .and_then(|o| o.remove("_entities"))
+    {
+        let mut new_entities = Vec::new();
+        let mut entities_it = entities.as_array_mut().unwrap().drain(..);
+
+        // insert requested entities and cached entities in the same order as
+        // they were requested
+        for (key, entity) in result.drain(..) {
+            match entity {
+                Some(v) => new_entities.push(v),
+                None => {
+                    let value = entities_it.next().unwrap();
+                    println!(
+                        "cache insert for {key}: {}",
+                        serde_json::to_string(&value).unwrap()
+                    );
+                    cache.insert(key, value.clone()).await;
+
+                    new_entities.push(value);
+                }
+            }
+        }
+
+        //FIXME: check that entities_it is now empty
+        data.as_mut()
+            .and_then(|v| v.as_object_mut())
+            .map(|o| o.insert("_entities", new_entities.into()));
+    }
+
+    response.response.body_mut().data = data;
+    Ok(response)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
